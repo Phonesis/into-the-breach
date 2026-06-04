@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:pages": "GITHUB_PAGES=true vite build",
+    "generate-vehicle-svgs": "node scripts/generate-vehicle-svgs.mjs",
     "preview": "vite preview",
     "preview:pages": "npm run build:pages && vite preview --base /into-the-breach/",
     "bake-sounds": "node scripts/bake-gun-sounds.mjs",

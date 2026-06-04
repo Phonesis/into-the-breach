@@ -327,6 +327,10 @@ The manual includes a section nav, control reference table, illustrated **unit c
 - Spatial pan and distance attenuation from the camera.
 - Run `npm run bake-sounds` to regenerate WAVs via `scripts/bake-gun-sounds.mjs`.
 
+### Vehicle art pipeline
+
+Side-view **Imagine** references live in `public/vehicles/refs/` (e.g. `medium-tank.jpg`, `medium-tank-usa.jpg`). Faction SVG silhouettes are emitted to `public/vehicles/svg/` via `npm run generate-vehicle-svgs` (proportions in `src/units/vehicleDesigns.js`). In-game meshes are built from those designs in `VehicleMeshKit.js` / `FactionMeshes.js`.
+
 ---
 
 ## Project structure
@@ -364,7 +368,9 @@ src/
   units/
     Unit.js               # Movement, orders, death visuals
     UnitMeshes.js         # Meshes, wreck/corpse looks
-    FactionMeshes.js      # Per-faction vehicle & AT gun meshes
+    FactionMeshes.js      # Per-faction vehicle builders (delegates to kit)
+    VehicleMeshKit.js     # Shared tank/car/arty/AT mesh parts
+    vehicleDesigns.js     # Proportions aligned to SVG silhouettes
     VehicleTypes.js       # Tank types, move tuning
   ui/
     UIManager.js          # Menu, HUD, Field Manual, overlays

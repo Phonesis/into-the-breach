@@ -241,6 +241,9 @@ export function applyVehicleCorpseLook(mesh, { heavy = false } = {}) {
   addGroundStain(mesh, heavy ? 3.2 : 2.4);
 }
 
+/** How long destroyed vehicles stay on the battlefield (seconds). */
+export const VEHICLE_WRECK_LINGER_SEC = 120;
+
 /** Apply corpse / wreck visuals and linger timers when a unit dies. */
 export function applyUnitDeathVisual(unit) {
   const mesh = unit?.mesh;
@@ -251,7 +254,7 @@ export function applyUnitDeathVisual(unit) {
   hideUnitChrome(mesh);
 
   if (isTankType(type)) {
-    unit.wreckTimeLeft = 10;
+    unit.wreckTimeLeft = VEHICLE_WRECK_LINGER_SEC;
     applyTankWreckLook(mesh);
     return;
   }
@@ -263,14 +266,14 @@ export function applyUnitDeathVisual(unit) {
   }
 
   if (type === 'armoredCar') {
-    unit.corpseTimeLeft = 9;
+    unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
     unit.wreckTimeLeft = 0;
     applyVehicleCorpseLook(mesh, { heavy: false });
     return;
   }
 
   if (type === 'artillery' || type === 'antiTankGun') {
-    unit.corpseTimeLeft = 10;
+    unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
     applyVehicleCorpseLook(mesh, { heavy: type === 'artillery' });
   }
 }

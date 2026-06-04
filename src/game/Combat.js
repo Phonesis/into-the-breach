@@ -8,7 +8,9 @@ import {
   isInRange,
   isInCoaxRange,
   isPointInRange,
+  isCoaxSoftTarget,
   getStandoffPosition,
+  tankCanEngageTarget,
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
 } from './Targeting.js';
@@ -107,6 +109,8 @@ export function updateCombat(
       : isInRange(attacker, target);
     const canFireCoax =
       !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
+    const coaxHandlesSoft =
+      canFireCoax && isCoaxSoftTarget(target) && attacker.def.coaxMG;
 
     if (!canFireMain && !canFireCoax) continue;
 
@@ -144,7 +148,12 @@ export function updateCombat(
       attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
     }
 
-    if (attacker.attackCooldown > 0 || !canFireMain) continue;
+    const fireMainGun =
+      canFireMain &&
+      attacker.attackCooldown <= 0 &&
+      !coaxHandlesSoft;
+
+    if (!fireMainGun) continue;
 
     fire(attacker, target, targets, scene, mapDef, onFire, lx, lz, coverSystem, enemyDamageMult, scenery, hqs, options);
     attacker.attackCooldown = 1 / attacker.def.attackSpeed;
@@ -374,7 +383,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit._chasingAttack &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
-      isInRange(unit, unit.attackOrder)
+      tankCanEngageTarget(unit, unit.attackOrder)
     ) {
       unit.moveTarget = null;
       unit._chasingAttack = false;
@@ -391,9 +400,12 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       const dist = distanceBetween(unit, unit.attackOrder);
       const rangeSlack =
         unit.attackOrder.isScenery || isDefenseTarget(unit.attackOrder) ? 1.05 : 0.88;
-      if (dist > unit.def.range * rangeSlack) {
+      const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
+        ? unit.def.coaxMG.range * rangeSlack
+        : unit.def.range * rangeSlack;
+      if (dist > chaseRange) {
         unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
-      } else if (isInRange(unit, unit.attackOrder)) {
+      } else if (tankCanEngageTarget(unit, unit.attackOrder)) {
         unit.moveTarget = null;
       }
     }
@@ -402,7 +414,15 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
 
     const dest = unit.moveTarget;
 
-    const holdWhenFiring = ['tank', 'artillery', 'antiTankGun', 'machineGun', 'mortar', 'sniper'];
+    const holdWhenFiring = [
+      'tank',
+      'superHeavyTank',
+      'artillery',
+      'antiTankGun',
+      'machineGun',
+      'mortar',
+      'sniper',
+    ];
     if (
       !unit._userMoveOrder &&
       !unit.retreating &&
@@ -410,7 +430,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit.attackOrder &&
       !unit.attackOrder.isGround &&
       !unit.attackOrder.dead &&
-      isInRange(unit, unit.attackOrder) &&
+      tankCanEngageTarget(unit, unit.attackOrder) &&
       holdWhenFiring.includes(unit.def.type)
     ) {
       unit.moveTarget = null;

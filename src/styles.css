@@ -99,35 +99,35 @@ body,
 }
 
 #screen-title {
-  background-image: url('menu/menu-title.jpg');
+  background-image: url('/menu/menu-title.jpg');
 }
 
 #screen-mode {
-  background-image: url('menu/menu-mode.jpg');
+  background-image: url('/menu/menu-mode.jpg');
 }
 
 #screen-assault-role {
-  background-image: url('menu/menu-assault.jpg');
+  background-image: url('/menu/menu-assault.jpg');
 }
 
 #screen-faction {
-  background-image: url('menu/menu-faction.jpg');
+  background-image: url('/menu/menu-faction.jpg');
 }
 
 #screen-faction.faction-bg-germany {
-  background-image: url('menu/menu-faction-germany.jpg');
+  background-image: url('/menu/menu-faction-germany.jpg');
 }
 
 #screen-faction.faction-bg-usa {
-  background-image: url('menu/menu-faction-usa.jpg');
+  background-image: url('/menu/menu-faction-usa.jpg');
 }
 
 #screen-faction.faction-bg-uk {
-  background-image: url('menu/menu-faction-uk.jpg');
+  background-image: url('/menu/menu-faction-uk.jpg');
 }
 
 #screen-map {
-  background-image: url('menu/menu-map.jpg');
+  background-image: url('/menu/menu-map.jpg');
 }
 
 .screen.hidden,

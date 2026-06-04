@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="6-pounder">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><circle cx="37" cy="52" r="7"/><circle cx="89" cy="52" r="7"/><path d="M19 54 L9 42 L15 40 L25 52 Z M107 54 L117 42 L111 40 L101 52 Z"/></g>
+  <g fill="#4a5568"><rect x="43" y="23" width="10" height="21" rx="1"/></g>
+  <g fill="#384552"><rect x="53" y="18" width="56" height="4"/></g>
+  <g fill="#5a6578" opacity="0.85"></g>
+</svg>

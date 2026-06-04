@@ -1,5 +1,20 @@
 /** Combat targeting helpers — ranges in game meters (~10 m per unit). */
 
+import { isTankType } from '../units/VehicleTypes.js';
+
+/** Soft targets tanks engage with coax MG (main gun reserved for armor / structures). */
+export const COAX_SOFT_TARGET_TYPES = new Set([
+  'infantry',
+  'machineGun',
+  'sniper',
+  'mortar',
+  'armoredCar',
+]);
+
+export function isCoaxSoftTarget(target) {
+  return !!(target?.def && COAX_SOFT_TARGET_TYPES.has(target.def.type));
+}
+
 export function distanceBetween(a, b) {
   const ax = a.position?.x ?? a.mesh?.position.x;
   const az = a.position?.z ?? a.mesh?.position.z;
@@ -31,13 +46,28 @@ export function isInCoaxRange(attacker, target, slack = 1.02) {
   return distanceBetween(attacker, target) <= mg.range * slack;
 }
 
-export function getStandoffPosition(attacker, target, fraction = 0.82) {
+/** Standoff distance when closing on a target (game meters). */
+export function getStandoffRange(attacker, target) {
+  if (isTankType(attacker.def?.type) && attacker.def?.coaxMG && isCoaxSoftTarget(target)) {
+    return attacker.def.coaxMG.range * 0.9;
+  }
+  return attacker.def.range * 0.82;
+}
+
+export function tankCanEngageTarget(attacker, target) {
+  if (!target || target.dead || target.isGround) return false;
+  if (isInRange(attacker, target)) return true;
+  if (!isTankType(attacker.def?.type) || !attacker.def?.coaxMG) return false;
+  return isInCoaxRange(attacker, target);
+}
+
+export function getStandoffPosition(attacker, target, fraction = null) {
   const tx = target.position?.x ?? target.mesh?.position.x;
   const tz = target.position?.z ?? target.mesh?.position.z;
   const dx = tx - attacker.position.x;
   const dz = tz - attacker.position.z;
   const dist = Math.sqrt(dx * dx + dz * dz) || 1;
-  const desired = attacker.def.range * fraction;
+  const desired = fraction ?? getStandoffRange(attacker, target);
   const inset = target.isScenery ? (target.hitRadius ?? 2) : 0;
   const stopDist = Math.max(desired, 3 + inset);
   const ratio = dist > stopDist ? (dist - stopDist) / dist : 0;
@@ -70,7 +100,10 @@ export function findNearestEnemyInRange(unit, targets, maxRangeMultiplier = 1) {
   let bestUnitDist = Infinity;
   let bestStructure = null;
   let bestStructureDist = Infinity;
-  const maxR = unit.def.range * maxRangeMultiplier;
+  let maxR = unit.def.range * maxRangeMultiplier;
+  if (isTankType(unit.def?.type) && unit.def?.coaxMG) {
+    maxR = Math.max(maxR, unit.def.coaxMG.range * maxRangeMultiplier);
+  }
   for (const other of targets) {
     if (other.dead || other.team === unit.team) continue;
     const d = distanceBetween(unit, other);

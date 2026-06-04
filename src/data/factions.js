@@ -2,18 +2,18 @@ import { publicUrl } from '../lib/publicUrl.js';
 
 /** Historically grounded unit rosters — ranges in game meters (~10 m per unit). */
 
-/** Bow / coax machine gun on medium and super-heavy tanks (~300 m). */
+/** Bow / coax machine gun on medium and super-heavy tanks (~520 m). */
 export const TANK_COAX_MG = {
   damage: 9,
-  range: 32,
-  rangeMeters: 320,
+  range: 52,
+  rangeMeters: 520,
   attackSpeed: 3.4,
 };
 
 export const SUPER_HEAVY_COAX_MG = {
   damage: 11,
-  range: 32,
-  rangeMeters: 320,
+  range: 52,
+  rangeMeters: 520,
   attackSpeed: 3.0,
 };
 

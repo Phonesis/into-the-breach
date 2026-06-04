@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Churchill">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><rect x="10" y="44" width="9" height="12"/><rect x="109" y="44" width="9" height="12"/><rect x="14" y="48" width="100" height="6"/></g>
+  <g fill="#4a5568"><path d="M22 44 L22 28 L30 24 L108 24 L112 44 Z"/><rect x="30" y="24" width="78" height="8"/></g>
+  <g fill="#384552"><rect x="72" y="18" width="28" height="4"/><rect x="68" y="14" width="14" height="10"/></g>
+  <g fill="#5a6578" opacity="0.85"></g>
+</svg>

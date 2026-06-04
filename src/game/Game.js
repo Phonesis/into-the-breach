@@ -105,7 +105,11 @@ import { ProductionManager } from './Production.js';
 import { BattleStats } from './BattleStats.js';
 import { sounds, weaponProfileForDef, isInfantryUnitType } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
-import { applyUnitDeathVisual, unitHasCorpseLinger } from '../units/UnitMeshes.js';
+import {
+  applyUnitDeathVisual,
+  unitHasCorpseLinger,
+  VEHICLE_WRECK_LINGER_SEC,
+} from '../units/UnitMeshes.js';
 import { FireSupportManager } from './FireSupport.js';
 import {
   updateFireSupportEffects,
@@ -1703,7 +1707,9 @@ export class Game {
 
     let deadMeshes = 0;
     let cachesDirty = false;
-    const maxDeadMeshes = this.campaign ? 20 : 28;
+    const maxDeadMeshes = this.campaign
+      ? Math.max(48, 20 + Math.ceil(VEHICLE_WRECK_LINGER_SEC / 15))
+      : Math.max(72, 28 + Math.ceil(VEHICLE_WRECK_LINGER_SEC / 10));
     const unitsBefore = this.units.length;
 
     for (const u of this.units) {

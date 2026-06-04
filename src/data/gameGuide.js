@@ -70,7 +70,7 @@ export const GAME_GUIDE_SECTIONS = [
       'LMB on an enemy (with units selected) issues an attack. Hover highlights valid targets; use <strong>Engage target</strong> or LMB on the highlighted enemy.',
       '<strong>Shift + LMB</strong> on open ground orders a <strong>fire mission</strong> for eligible units in range (see unit cards). A red reticle appears on the cursor while Shift is held. <strong>RMB move</strong> cancels fire missions.',
       'Idle units auto-fire on enemies in range. Damage falls off with distance.',
-      'Tanks and <strong>super heavy tanks</strong> carry a <strong>coax machine gun</strong> (~320 m) alongside the main gun — effective vs infantry and soft targets while the cannon reloads. They resist rifles/MGs (~20% damage). Super heavies are slower, tougher, and hit harder. <strong>Anti-tank guns</strong> (~700 m) excel vs tanks and armored cars but are weak vs infantry. Mortars, tank guns, and artillery are strong anti-armor.',
+      'Tanks and <strong>super heavy tanks</strong> carry a <strong>coax machine gun</strong> (~520 m) alongside the main gun — effective vs infantry and soft targets; tanks close on soft targets and use the coax instead of wasting main-gun rounds. They resist rifles/MGs (~20% damage). Super heavies are slower, tougher, and hit harder. <strong>Anti-tank guns</strong> (~700 m) excel vs tanks and armored cars but are weak vs infantry. Mortars, tank guns, and artillery are strong anti-armor.',
       'Armored cars take partial small-arms damage (~32%) but die quickly to snipers, mortars, and tank guns.',
       'Damaged units may <strong>retreat</strong> toward their HQ (RETREAT tag) and stop attacking until safe. Defenders in Clear Defenses do not retreat.',
       'Destroyed units leave wrecks on the field: <strong>burning tanks</strong>, fallen infantry squads, knocked-out vehicles. Cover and retreat markers disappear on death.',
@@ -179,7 +179,7 @@ export const GUIDE_UNIT_CARDS = [
     cost: 120,
     build: 18,
     range: '~1,200–1,500 m',
-    desc: 'Main gun plus coax MG (~320 m) for infantry; weak to dedicated anti-tank.',
+    desc: 'Main gun plus coax MG (~520 m) for infantry; weak to dedicated anti-tank.',
     tags: ['Fire mission', 'Wreck fire'],
   },
   {

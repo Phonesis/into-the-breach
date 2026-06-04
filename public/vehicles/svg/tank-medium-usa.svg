@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="M4 Sherman">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><rect x="12" y="46" width="7" height="10"/><rect x="109" y="46" width="7" height="10"/><rect x="16" y="48" width="96" height="6"/></g>
+  <g fill="#4a5c4a"><path d="M26 44 L26 30 L40 24 L90 24 L100 30 L100 44 Z"/><path d="M40 24 L54 17 L82 17 L90 24 Z"/></g>
+  <g fill="#3a4538"><rect x="90" y="21" width="30" height="4" rx="1"/><circle cx="58" cy="20" r="9"/></g>
+  <g fill="#5a6e58" opacity="0.85"><rect x="118" y="22" width="6" height="5"/></g>
+</svg>
