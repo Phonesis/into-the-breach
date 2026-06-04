@@ -1,0 +1,49 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: United States
+          - generic: Normandy · Easy
+          - generic:
+            - generic: Wave 1 / 12
+            - generic: Prepare defenses — 18s
+        - generic:
+          - button "Surrender" [ref=e171] [cursor=pointer]
+          - generic:
+            - generic: Defense pts
+            - text: "208"
+          - generic: "Your forces: 0 · 208 supplies — train reinforcements in the panel below"
+      - generic:
+        - generic [ref=e173]:
+          - heading "No selection" [level=3] [ref=e174]
+          - paragraph [ref=e175]: Click a unit in Forces or on the battlefield to select.
+        - text: ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙
+        - generic [ref=e176]:
+          - heading "Defenses" [level=3] [ref=e177]
+          - generic [ref=e178]:
+            - button "Bunker 48" [active] [ref=e179] [cursor=pointer]:
+              - generic [ref=e180]: Bunker
+              - generic [ref=e181]: "48"
+            - button "MG Nest 34" [ref=e182] [cursor=pointer]:
+              - generic [ref=e183]: MG Nest
+              - generic [ref=e184]: "34"
+            - button "AT Gun 58" [ref=e185] [cursor=pointer]:
+              - generic [ref=e186]: AT Gun
+              - generic [ref=e187]: "58"
+            - button "Barbed Wire 14" [ref=e188] [cursor=pointer]:
+              - generic [ref=e189]: Barbed Wire
+              - generic [ref=e190]: "14"
+            - button "AT Mine 18" [ref=e191] [cursor=pointer]:
+              - generic [ref=e192]: AT Mine
+              - generic [ref=e193]: "18"
+            - button "Artillery Pit 72" [ref=e194] [cursor=pointer]:
+              - generic [ref=e195]: Artillery Pit
+              - generic [ref=e196]: "72"
+            - button "Barrage Ready" [disabled] [ref=e197]:
+              - generic [ref=e198]: Barrage
+              - generic [ref=e199]: Ready
+          - paragraph [ref=e200]
+          - paragraph [ref=e201]: LMB place on your side of the frontline · LMB emplacement to select & upgrade · Guns auto-fire.
+        - paragraph: "Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves"
+        - button "Field Manual" [ref=e202] [cursor=pointer]

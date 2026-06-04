@@ -19,7 +19,13 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
 
   let built = false;
 
-  if (type === 'tank' || type === 'superHeavyTank' || type === 'armoredCar' || type === 'artillery') {
+  if (
+    type === 'tank' ||
+    type === 'superHeavyTank' ||
+    type === 'armoredCar' ||
+    type === 'artillery' ||
+    type === 'antiTankGun'
+  ) {
     built = buildFactionVehicle(group, type, factionId, body, detail, dark);
   } else if (type === 'machineGun') {
     buildFactionMG(group, body, detail, dark, factionId);
@@ -56,6 +62,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,
     artillery: group.userData.hitRadius ?? 2.4,
+    antiTankGun: group.userData.hitRadius ?? 2.1,
   };
   const hitR = hitRadii[type] ?? group.userData.hitRadius ?? 2;
   const hitbox = new THREE.Mesh(
@@ -67,6 +74,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     superHeavyTank: 1.25,
     armoredCar: 0.85,
     artillery: 0.95,
+    antiTankGun: 0.85,
     machineGun: 0.55,
     mortar: 0.65,
     sniper: 0.5,
@@ -86,7 +94,8 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     })
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = isTankType(type) || type === 'armoredCar' ? 0.25 : 0.1;
+  ring.position.y =
+    isTankType(type) || type === 'armoredCar' || type === 'antiTankGun' ? 0.25 : 0.1;
   ring.name = 'selectionRing';
   group.add(ring);
 
@@ -260,9 +269,9 @@ export function applyUnitDeathVisual(unit) {
     return;
   }
 
-  if (type === 'artillery') {
+  if (type === 'artillery' || type === 'antiTankGun') {
     unit.corpseTimeLeft = 10;
-    applyVehicleCorpseLook(mesh, { heavy: true });
+    applyVehicleCorpseLook(mesh, { heavy: type === 'artillery' });
   }
 }
 

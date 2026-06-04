@@ -1,0 +1,25 @@
+- generic [ref=e11]:
+  - generic [ref=e12]:
+    - heading "Game Mode" [level=1] [ref=e13]
+    - paragraph [ref=e14]: Campaign, Clear Defenses, Training Ground, or Assault & Defend.
+  - generic [ref=e15]:
+    - heading "Select Mode" [level=2] [ref=e16]
+    - generic [ref=e17]:
+      - button "Campaign Full battle vs AI — capture points, economy, and enemy HQ." [ref=e18] [cursor=pointer]:
+        - generic [ref=e19]: Campaign
+        - generic [ref=e20]: Full battle vs AI — capture points, economy, and enemy HQ.
+      - button "Training Ground No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ." [ref=e21] [cursor=pointer]:
+        - generic [ref=e22]: Training Ground
+        - generic [ref=e23]: No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ.
+      - button "Assault & Defend Attackers must seize the frontline; defenders hold until time runs out or repel the assault." [ref=e24] [cursor=pointer]:
+        - generic [ref=e25]: Assault & Defend
+        - generic [ref=e26]: Attackers must seize the frontline; defenders hold until time runs out or repel the assault.
+      - button "Clear Defenses Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win." [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: Clear Defenses
+        - generic [ref=e29]: Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win.
+      - button "Tower Defence Hold the frontline against escalating waves. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages." [active] [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]: Tower Defence
+        - generic [ref=e32]: Hold the frontline against escalating waves. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.
+    - generic [ref=e33]:
+      - button "Back" [ref=e34] [cursor=pointer]
+      - button "Continue" [ref=e35] [cursor=pointer]

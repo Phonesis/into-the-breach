@@ -5,6 +5,7 @@ const MULT = {
   mortar: 1.75,
   superHeavyTank: 1.7,
   tank: 1.45,
+  antiTankGun: 1.55,
   armoredCar: 1.15,
   machineGun: 0.85,
   sniper: 0.7,

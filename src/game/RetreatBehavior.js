@@ -84,7 +84,7 @@ export function maybeTriggerRetreat(unit, hqs) {
   else if (ratio < 0.7) chance = 0.11;
 
   if (unit.def.type === 'tank') chance *= 0.45;
-  if (unit.def.type === 'artillery') chance *= 0.55;
+  if (unit.def.type === 'artillery' || unit.def.type === 'antiTankGun') chance *= 0.55;
   if (unit.def.type === 'machineGun') chance *= 1.1;
 
   if (Math.random() < chance) {

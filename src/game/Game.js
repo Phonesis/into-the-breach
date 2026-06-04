@@ -16,8 +16,21 @@ import {
   ASSAULT_ENEMY_RESOURCES,
   isAssaultMode,
   isClearanceMode,
+  isTowerDefenseMode,
+  TD_STARTING_POINTS,
   CLEARANCE_STARTING_RESOURCES,
 } from '../data/gameModes.js';
+import {
+  createTowerDefenseState,
+  startNextWave,
+  updateTowerDefenseMode,
+  updateTowerDefenseEnemyAI,
+  checkTowerDefenseBreach,
+  checkTowerDefenseVictory,
+  rewardTowerDefenseKill,
+} from './TowerDefenseMode.js';
+import { DefenseStructureManager } from './DefenseStructures.js';
+import { getFrontlineDef } from './AssaultMode.js';
 import {
   spawnClearanceDefenders,
   setupClearanceCapturePoints,
@@ -35,6 +48,7 @@ import {
   checkAssaultVictory,
 } from './AssaultMode.js';
 import { buildFrontlineVisual, disposeFrontlineVisual } from '../world/Frontline.js';
+import { createCheatKeyBuffer, shouldIgnoreCheatKeyEvent } from './CheatMode.js';
 import { buildCoverSites } from '../world/CoverSites.js';
 import { CoverSystem } from './CoverSystem.js';
 import { MAPS } from '../data/maps.js';
@@ -157,6 +171,8 @@ export class Game {
     this.tutorial = false;
     this.assault = null;
     this.assaultRole = null;
+    this.towerDefense = null;
+    this.defenses = null;
     this.difficulty = getDifficulty(DEFAULT_DIFFICULTY);
     this.lastSession = null;
     this.resources = { player: STARTING_RESOURCES, enemy: ENEMY_STARTING_RESOURCES };
@@ -170,6 +186,8 @@ export class Game {
     /** Orbit angle around the look target (radians). */
     this.cameraYaw = Math.atan2(-0.52, 0.72);
     this.keys = {};
+    this.cheatMode = false;
+    this._cheatKeys = createCheatKeyBuffer();
 
     this.production = new ProductionManager({
       getFaction: (team) => (team === PLAYER_TEAM ? this.playerFaction : this.enemyFaction),
@@ -209,9 +227,14 @@ export class Game {
       getPlayerTeam: () => PLAYER_TEAM,
       getPendingFireSupport: () =>
         this.running && !this.gameOver ? this.fireSupport.pending : null,
+      getPendingDefensePlacement: () =>
+        this.running && !this.gameOver ? this.defenses?.getPending() : null,
+      getIsTowerDefense: () =>
+        isTowerDefenseMode(this.gameMode) && this.running && !this.gameOver,
       getDeployZoneActive: () => this._isPlayerDeployZoneActive(),
       clampDeployPoint: (x, z) => this._clampPlayerDeployPoint(x, z),
       onFireSupportTarget: (mode, x, z) => this.handleFireSupportTarget(mode, x, z),
+      onDefensePlacement: (mode, x, z) => this.handleDefensePlacement(mode, x, z),
       onSelectionChange: (sel, hq = null) => {
         this.selectedHq = hq;
         if (sel.length > 0 || hq) sounds.play('select');
@@ -241,10 +264,19 @@ export class Game {
       onBattleCursorChange: () => this._syncBattleCursor(),
     });
 
+    this._placementLayer = document.getElementById('placement-layer');
+    this._onPlacementLayerUp = (e) => {
+      if (e.button !== 0) return;
+      if (!this.defenses?.getPending()) return;
+      this.placeDefenseAtScreen(e.clientX, e.clientY);
+    };
+    this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerUp);
+
     window.addEventListener('resize', () => this.onResize());
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
+      this._onCheatKeyDown(e);
       if (
         this.running &&
         (e.code === 'ArrowUp' ||
@@ -257,6 +289,12 @@ export class Game {
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
         this.ui?.updateFireSupport(this.fireSupport);
+      }
+      if (e.code === 'Escape' && this.defenses?.getPending()) {
+        this.defenses.cancelPending();
+        this.ui?.updateDefenses(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
       }
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._syncBattleCursor();
     });
@@ -308,6 +346,7 @@ export class Game {
   }
 
   startGame(factionId, mapId, gameMode = 'campaign', options = {}) {
+    sounds.enterBattle();
     sounds.unlock();
     this.stopGame();
     this.lastSession = {
@@ -319,6 +358,7 @@ export class Game {
     this.gameMode = gameMode;
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
+    this.towerDefense = isTowerDefenseMode(gameMode);
     this.campaign = isCampaignMode(gameMode);
     this.assaultRole = options.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(
@@ -332,14 +372,16 @@ export class Game {
     this.resources = {
       player: this.tutorial
         ? TUTORIAL_STARTING_RESOURCES
-        : this.clearance
-          ? CLEARANCE_STARTING_RESOURCES
-          : assault
-            ? ASSAULT_STARTING_RESOURCES
-            : this.campaign
-              ? CAMPAIGN_BALANCE.playerStartingResources
-              : STARTING_RESOURCES,
-      enemy: this.tutorial || this.clearance
+        : this.towerDefense
+          ? TD_STARTING_POINTS
+          : this.clearance
+            ? CLEARANCE_STARTING_RESOURCES
+            : assault
+              ? ASSAULT_STARTING_RESOURCES
+              : this.campaign
+                ? CAMPAIGN_BALANCE.playerStartingResources
+                : STARTING_RESOURCES,
+      enemy: this.tutorial || this.clearance || this.towerDefense
         ? 0
         : Math.floor(
             (this.campaign ? CAMPAIGN_BALANCE.enemyStartingResources : enemyBaseRes) *
@@ -348,6 +390,7 @@ export class Game {
     };
     this.production.reset();
     this.production.setBuildTimeMult(this.campaign ? CAMPAIGN_BALANCE.buildTimeMult : 1);
+    this.production.setCheatMode(this.cheatMode);
     this.battleStats.reset();
     this.fireSupport.reset();
 
@@ -376,6 +419,10 @@ export class Game {
       playerHqLabel = this.assaultRole === 'attack' ? 'Assault HQ' : 'Defensive HQ';
       enemyHqLabel = this.assaultRole === 'attack' ? 'Defensive HQ' : 'Assault HQ';
       buildFrontlineVisual(this.mapDef, this.scene);
+    } else if (this.towerDefense) {
+      this.assault = null;
+      playerHqLabel = 'Sector HQ';
+      buildFrontlineVisual(this.mapDef, this.scene);
     } else {
       this.assault = null;
     }
@@ -391,7 +438,7 @@ export class Game {
         maxHp: hqHp,
       }),
     ];
-    if (!this.clearance) {
+    if (!this.clearance && !this.towerDefense) {
       this.hqs.push(
         new HQ({
           team: ENEMY_TEAM,
@@ -415,6 +462,29 @@ export class Game {
         capturePoints: this.capturePoints,
       });
       setupAssaultCapturePoints(this.capturePoints, this.mapDef, this.assault.defenderTeam);
+    } else if (this.towerDefense) {
+      for (const cp of this.capturePoints) {
+        cp.owner = null;
+        cp.progress = 0;
+      }
+      this.towerDefense = createTowerDefenseState({
+        mapDef: this.mapDef,
+        difficulty: this.difficulty,
+      });
+      startNextWave(this.towerDefense);
+      this.defenses = new DefenseStructureManager({
+        scene: this.scene,
+        mapDef: this.mapDef,
+        getEnemyUnits: () => this._enemyAlive,
+        onChange: () => {
+          this.ui?.updateDefenses(this);
+          this._syncPlacementCapture();
+        },
+      });
+      this.defenses.setFrontlineAxis(
+        getFrontlineDef(this.mapDef),
+        this.mapDef.playerBase
+      );
     } else if (this.tutorial) {
       for (const cp of this.capturePoints) {
         cp.owner = null;
@@ -459,18 +529,20 @@ export class Game {
       ? getClearancePlayerSpawnBase(this.mapDef)
       : null;
 
-    this.units = spawnArmy({
-      faction: this.playerFaction,
-      team: PLAYER_TEAM,
-      base: clearanceSpawnBase ?? playerBasePos,
-      scene: this.scene,
-      offsetSign: assault && this.assaultRole === 'attack' ? -1 : 1,
-      tutorial: this.tutorial,
-      roster: playerRoster,
-      clearanceSpawn: this.clearance,
-      mapDef: this.clearance ? this.mapDef : null,
-      campaign: this.campaign,
-    });
+    this.units = this.towerDefense
+      ? []
+      : spawnArmy({
+          faction: this.playerFaction,
+          team: PLAYER_TEAM,
+          base: clearanceSpawnBase ?? playerBasePos,
+          scene: this.scene,
+          offsetSign: assault && this.assaultRole === 'attack' ? -1 : 1,
+          tutorial: this.tutorial,
+          roster: playerRoster,
+          clearanceSpawn: this.clearance,
+          mapDef: this.clearance ? this.mapDef : null,
+          campaign: this.campaign,
+        });
 
     if (this.clearance) {
       this.units.push(
@@ -483,7 +555,7 @@ export class Game {
           enemyArmyMult: this.difficulty.enemyArmyMult,
         })
       );
-    } else if (!this.tutorial) {
+    } else if (!this.tutorial && !this.towerDefense) {
       const enemyArmyScale =
         this.difficulty.enemyArmyMult *
         (this.campaign ? CAMPAIGN_BALANCE.enemyArmyMult : 1);
@@ -509,7 +581,7 @@ export class Game {
     }
 
     const camFocus = clearanceSpawnBase ?? playerBasePos;
-    const enemyFocus = this.tutorial
+    const enemyFocus = this.tutorial || this.towerDefense
       ? this.mapDef.enemyBase
       : this.clearance
         ? this.mapDef.enemyBase
@@ -525,7 +597,7 @@ export class Game {
       this._showDeployZoneRings(deployTeams);
     }
 
-    resetAI(0, this.tutorial ? 0 : 5);
+    resetAI(0, this.tutorial || this.towerDefense ? 0 : 5);
     this.running = true;
     this.gameOver = false;
     this._endOverlayShown = false;
@@ -548,10 +620,14 @@ export class Game {
     this.ui.showHUD(this.playerFaction, this.mapDef, this.gameMode, {
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
+      towerDefense: this.towerDefense,
     });
     this.ui.updateProduction(this);
+    this.ui.updateDefenses(this);
+    this.ui.updateTowerDefense(this);
     this.ui.updateFireSupport(this.fireSupport);
     this.ui.updateDeployCountdown(this._getDeployPhase());
+    this._syncPlacementCapture();
     this._rebuildUnitCaches();
     this._syncUnitRoster();
     this._startRenderLoop();
@@ -592,7 +668,7 @@ export class Game {
   }
 
   _getDeployZoneTeamsAt(time = this.matchTime) {
-    if (this.tutorial) return [];
+    if (this.tutorial || this.towerDefense) return [];
     if (this.clearance) {
       return time < CLEARANCE_CEASEFIRE_TIME ? [PLAYER_TEAM] : [];
     }
@@ -600,7 +676,7 @@ export class Game {
   }
 
   _getDeployPhase() {
-    if (this.tutorial || !this.running) return null;
+    if (this.tutorial || this.towerDefense || !this.running) return null;
     if (this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME) {
       return {
         secondsLeft: CLEARANCE_CEASEFIRE_TIME - this.matchTime,
@@ -643,8 +719,9 @@ export class Game {
       this.keys.ShiftRight ||
       this.controller?.isShiftHeld?.();
     const selected = this._playerAlive.filter((u) => u.selected);
+    const defensePending = !!this.defenses?.getPending();
     this.canvas.style.cursor = resolveBattleCursor({
-      fireSupportPending: !!this.fireSupport?.pending,
+      fireSupportPending: !!this.fireSupport?.pending || defensePending,
       shiftHeld,
       hasGroundFireSelection: selected.some(canGroundFire),
     });
@@ -796,6 +873,10 @@ export class Game {
     disposeFrontlineVisual(this.scene);
     disposeDeployZoneRings(this._deployZoneRings, this.scene);
     this.assault = null;
+    this.towerDefense = null;
+    this.defenses?.clear();
+    this.defenses = null;
+    this.ui?.setPlacementCapture(false);
     this.clearance = false;
     this.campaign = false;
     this.production.setBuildTimeMult(1);
@@ -821,9 +902,28 @@ export class Game {
   }
 
   spendResources(team, amount) {
+    if (this.cheatMode && team === PLAYER_TEAM) return true;
     if (this.resources[team] < amount) return false;
     this.resources[team] -= amount;
     return true;
+  }
+
+  _onCheatKeyDown(e) {
+    if (e.repeat || shouldIgnoreCheatKeyEvent(e)) return;
+    if (!this._cheatKeys.feed(e.key)) return;
+    this.toggleCheatMode();
+  }
+
+  toggleCheatMode() {
+    this.cheatMode = !this.cheatMode;
+    this.production?.setCheatMode(this.cheatMode);
+    this.ui?.setCheatHud(this.cheatMode);
+    if (this.running) {
+      this.ui?.updateProduction(this);
+      this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+      this.ui?.updateDefenses?.(this);
+      this.ui?.showCheatToast(this.cheatMode);
+    }
   }
 
   handleFireSupportTarget(mode, x, z) {
@@ -848,20 +948,120 @@ export class Game {
     this.ui?.updateFireSupport(this.fireSupport);
   }
 
+  placeDefenseAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !this.defenses?.getPending()) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return;
+    }
+    this.controller.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.controller.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    const ground = this.controller.raycastGround();
+    if (ground) this.handleDefensePlacement('place', ground.x, ground.z);
+  }
+
+  _syncPlacementCapture() {
+    const active =
+      this.running && !this.gameOver && !!this.defenses?.getPending();
+    this.ui?.setPlacementCapture(active);
+  }
+
+  handleDefensePlacement(mode, x, z) {
+    if (!this.running || this.gameOver || !this.defenses) return;
+    if (mode === 'preview') return;
+
+    if (mode === 'pick') {
+      if (this.defenses.getPending()) return;
+      const picked = this.defenses.pickAt(x, z);
+      this.defenses.selectEntry(picked);
+      this.ui?.updateDefenses(this);
+      return;
+    }
+
+    const pending = this.defenses.getPending();
+    if (pending === 'barrage') {
+      if (this.defenses.tryBarrage(x, z)) {
+        this.ui?.updateDefenses(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+      }
+      return;
+    }
+
+    if (pending) {
+      const placed = this.defenses.tryPlace(pending, x, z, (cost) =>
+        this.spendResources(PLAYER_TEAM, cost)
+      );
+      if (placed) {
+        this.ui?.updateDefenses(this);
+        this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+        return;
+      }
+      const reason = this.defenses.getPlacementRejectReason(x, z);
+      if (reason) this.ui?.showDefensePlacementHint(reason, this);
+      this.ui?.updateDefenses(this);
+      return;
+    }
+
+    const picked = this.defenses.pickAt(x, z);
+    if (picked) this.defenses.selectEntry(picked);
+    this.ui?.updateDefenses(this);
+  }
+
+  tryUpgradeDefense() {
+    if (!this.running || this.gameOver || !this.defenses) return false;
+    const ok = this.defenses.tryUpgrade((cost) => this.spendResources(PLAYER_TEAM, cost));
+    if (ok) {
+      this.ui?.updateDefenses(this);
+      this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints);
+    }
+    return ok;
+  }
+
+  armDefense(typeId) {
+    if (!this.running || this.gameOver || !this.defenses) return;
+    sounds.unlock();
+    this.fireSupport?.cancel();
+    this.defenses.arm(typeId);
+    this.ui?.updateDefenses(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  armTowerDefenseBarrage() {
+    if (!this.running || this.gameOver || !this.defenses) return;
+    sounds.unlock();
+    if (!this.defenses.armBarrage()) return;
+    this.ui?.updateDefenses(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
   tryProduce(unitType) {
-    if (!this.running || this.gameOver) return false;
+    if (!this.running || this.gameOver || this.towerDefense) return false;
     const ok = this.production.enqueue(PLAYER_TEAM, unitType, (cost) =>
       this.spendResources(PLAYER_TEAM, cost)
     );
     if (ok) {
       sounds.play('produce');
       this.ui.updateProduction(this);
-      this.ui.updateResources(this.resources.player, this.capturePoints);
+      this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
     }
     return ok;
   }
 
   tickEconomy(dt) {
+    if (this.towerDefense) {
+      this.resources.player += 0.4 * dt;
+      return;
+    }
     const hqRate = this.campaign ? CAMPAIGN_BALANCE.hqIncomeRate : HQ_INCOME_RATE;
     const cpRate = this.campaign ? CAMPAIGN_BALANCE.captureIncomeRate : CAPTURE_POINT_INCOME;
     this.resources.player += hqRate * dt;
@@ -955,11 +1155,17 @@ export class Game {
       tutorial: this.tutorial,
       assault: this.assault,
       clearance: this.clearance,
+      towerDefense: this.towerDefense,
+      defenseCount: this.defenses?.entries.filter((e) => !e.destroyed).length ?? 0,
       wipeHint: this._getArmyWipeHint(playerAlive),
     });
-    this.ui.updateResources(Math.floor(this.resources.player), this.capturePoints);
-    this.ui.updateCapturePoints(this.capturePoints);
-    this.ui.updateProduction(this);
+    this.ui.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
+    if (!this.towerDefense) this.ui.updateCapturePoints(this.capturePoints);
+    if (!this.towerDefense) this.ui.updateProduction(this);
+    if (this.towerDefense) {
+      this.ui.updateDefenses(this);
+      this.ui.updateTowerDefense(this);
+    }
     if (this.assault) this.ui.updateAssaultHUD(this.assault);
   }
 
@@ -997,6 +1203,14 @@ export class Game {
 
     if (this.clearance) {
       const result = checkClearanceVictory(this);
+      if (result) {
+        this.endGame(result.victory, result.detail);
+      }
+      return;
+    }
+
+    if (this.towerDefense) {
+      const result = checkTowerDefenseVictory(this);
       if (result) {
         this.endGame(result.victory, result.detail);
       }
@@ -1193,8 +1407,18 @@ export class Game {
     }
   }
 
-  onCombatFire({ attacker, target, def, dist, killed, targetIsHQ, targetIsScenery, groundImpact, from, to }) {
+  onCombatFire({ attacker, target, def, dist, killed, targetIsHQ, targetIsScenery, groundImpact, from, to, coaxFire }) {
     const pos = { x: from.x, z: from.z };
+
+    if (coaxFire) {
+      sounds.playWeapon('mg', pos, { rate: 1.04 + Math.random() * 0.08, volume: 0.82 });
+      if (killed && target?.def && isInfantryUnitType(target.def.type)) {
+        sounds.playInfantryDeath({ x: to.x, z: to.z });
+      } else if (killed) {
+        sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 320);
+      }
+      return;
+    }
 
     if (def.type === 'infantry') {
       attacker._mgVolley = (attacker._mgVolley ?? 0) + 1;
@@ -1208,14 +1432,17 @@ export class Game {
       sounds.playWeapon('howitzer_105', pos, { rate: 0.72 + Math.random() * 0.1, volume: 0.75 });
     } else {
       sounds.playWeapon(weaponProfileForDef(def), pos, {
-        rate: isTankType(def.type) ? 0.96 + Math.random() * 0.08 : 0.94 + Math.random() * 0.1,
+        rate:
+          isTankType(def.type) || def.type === 'antiTankGun'
+            ? 0.96 + Math.random() * 0.08
+            : 0.94 + Math.random() * 0.1,
       });
     }
 
     if (def.type === 'artillery' || def.type === 'mortar') {
       const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
       sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
-    } else if (isTankType(def.type)) {
+    } else if (isTankType(def.type) || def.type === 'antiTankGun') {
       sounds.playImpact('tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
@@ -1230,7 +1457,11 @@ export class Game {
     if (
       killed ||
       targetIsScenery ||
-      (groundImpact && (def.type === 'artillery' || def.type === 'mortar' || isTankType(def.type)))
+      (groundImpact &&
+        (def.type === 'artillery' ||
+          def.type === 'mortar' ||
+          def.type === 'antiTankGun' ||
+          isTankType(def.type)))
     ) {
       if (targetIsTank) {
         spawnSmokePuff(this.scene, to, 1.1);
@@ -1241,7 +1472,7 @@ export class Game {
         }
       } else if (def.type === 'artillery') {
         spawnShellExplosion(this.scene, to, 'heavy');
-      } else if (def.type === 'mortar' || isTankType(def.type)) {
+      } else if (def.type === 'mortar' || def.type === 'antiTankGun' || isTankType(def.type)) {
         spawnShellExplosion(this.scene, to, 'medium');
       } else {
         spawnExplosion(this.scene, to);
@@ -1286,10 +1517,18 @@ export class Game {
         this.matchTime += dt;
         tickUnitCooldowns(this._aliveUnits, dt);
         this.tickEconomy(dt);
-        this.updateCapturePoints(dt);
-        this.production.update(dt, this.units);
+        if (!this.towerDefense) {
+          this.updateCapturePoints(dt);
+          this.production.update(dt, this.units);
+        } else {
+          updateTowerDefenseMode(this, dt);
+        }
 
-        updateMovement(this._aliveUnits, dt, this.mapDef, this.hqs);
+        updateMovement(this._aliveUnits, dt, this.mapDef, this.hqs, {
+          getWireSlowMult: this.defenses
+            ? (x, z) => this.defenses.getWireSlowAt(x, z)
+            : null,
+        });
 
         const stagingTeams = this._getDeployZoneTeamsAt();
         if (stagingTeams.length) {
@@ -1328,14 +1567,24 @@ export class Game {
             this.difficulty.enemyDamageMult,
             this.scenery,
             {
-              protectPlayerHq: this.clearance,
+              protectPlayerHq: this.clearance || this.towerDefense,
               tutorialPassiveNoHq: this.tutorial,
               practiceHqDamageMult: this.tutorial ? PRACTICE_TARGET_HQ_DAMAGE_MULT : 1,
-              openingCeasefire: !this.tutorial && this.matchTime < BATTLE_OPENING_TIME,
+              openingCeasefire:
+                !this.tutorial && !this.towerDefense && this.matchTime < BATTLE_OPENING_TIME,
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
+              defenseTargets: this.defenses?.getAttackTargets() ?? [],
             }
           );
+        }
+
+        if (this.towerDefense && this.defenses) {
+          this.defenses.update(dt, this.scene, this.mapDef);
+          if (!this.gameOver) {
+            const breach = checkTowerDefenseBreach(this);
+            if (breach) this.endGame(breach.victory, breach.detail);
+          }
         }
 
         this._hudUiAccum += dt;
@@ -1381,7 +1630,15 @@ export class Game {
             this.ui?.updateFireSupport(this.fireSupport);
           }
 
-          if (!this.tutorial) {
+          if (this.towerDefense) {
+            updateTowerDefenseEnemyAI(
+              this._enemyAlive,
+              this.mapDef,
+              this.towerDefense,
+              this.defenses,
+              dt
+            );
+          } else if (!this.tutorial) {
             updateAI({
               enemyUnits: this._enemyAlive,
               playerUnits: this._playerAlive,
@@ -1451,7 +1708,10 @@ export class Game {
 
     for (const u of this.units) {
       if (!u.dead) continue;
-      if (!u._lossRecorded) this.battleStats.recordUnit(u);
+      if (!u._lossRecorded) {
+        if (this.towerDefense && u.team === ENEMY_TEAM) rewardTowerDefenseKill(this, u);
+        this.battleStats.recordUnit(u);
+      }
       if (!u.mesh?.parent) continue;
 
       deadMeshes++;

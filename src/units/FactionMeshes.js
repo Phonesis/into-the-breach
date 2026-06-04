@@ -494,6 +494,71 @@ export function build25Pounder(group, body, detail, dark) {
   group.userData.hitRadius = 2.25;
 }
 
+function buildAntiTankGunBase(group, body, detail, dark, { shieldW, shieldH, shieldD, barrelLen, barrelR }) {
+  for (const side of [-1, 1]) {
+    const trail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 2.1), dark);
+    trail.position.set(side * 0.52, 0.2, -0.95);
+    trail.rotation.x = -0.38;
+    group.add(trail);
+  }
+
+  const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.18, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  for (const x of [-0.72, 0.72]) {
+    const w = new THREE.Mesh(wheelGeo, dark);
+    w.position.set(x, 0.4, -0.05);
+    group.add(w);
+  }
+
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(shieldW, shieldH, shieldD), body);
+  shield.position.set(0, 0.88, 0.25);
+  group.add(shield);
+
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(barrelR, barrelR * 1.15, barrelLen, 10),
+    detail
+  );
+  barrel.rotation.x = -0.22;
+  barrel.position.set(0, 1.05, 1.35);
+  group.add(barrel);
+
+  const cradle = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.55), dark);
+  cradle.position.set(0, 0.82, 0.45);
+  group.add(cradle);
+
+  group.userData.hitRadius = 2.1;
+}
+
+export function buildPak40(group, body, detail, dark) {
+  buildAntiTankGunBase(group, body, detail, dark, {
+    shieldW: 1.05,
+    shieldH: 1.55,
+    shieldD: 0.1,
+    barrelLen: 3.1,
+    barrelR: 0.1,
+  });
+}
+
+export function buildM1AtGun(group, body, detail, dark) {
+  buildAntiTankGunBase(group, body, detail, dark, {
+    shieldW: 0.95,
+    shieldH: 1.35,
+    shieldD: 0.1,
+    barrelLen: 2.85,
+    barrelR: 0.09,
+  });
+}
+
+export function build6Pounder(group, body, detail, dark) {
+  buildAntiTankGunBase(group, body, detail, dark, {
+    shieldW: 1.0,
+    shieldH: 1.45,
+    shieldD: 0.11,
+    barrelLen: 2.95,
+    barrelR: 0.092,
+  });
+}
+
 export function buildFactionMG(group, body, detail, dark, factionId) {
   if (factionId === 'germany') {
     const tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.45, 6), dark);
@@ -687,18 +752,21 @@ const VEHICLE_BUILDERS = {
     superHeavyTank: buildTigerI,
     armoredCar: buildSdkfz222,
     artillery: buildLeFH18,
+    antiTankGun: buildPak40,
   },
   usa: {
     tank: buildSherman,
     superHeavyTank: buildPershing,
     armoredCar: buildM8Greyhound,
     artillery: buildM101,
+    antiTankGun: buildM1AtGun,
   },
   uk: {
     tank: buildChurchill,
     superHeavyTank: buildBlackPrince,
     armoredCar: buildDaimlerAC,
     artillery: build25Pounder,
+    antiTankGun: build6Pounder,
   },
 };
 

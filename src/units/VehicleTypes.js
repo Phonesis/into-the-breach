@@ -18,7 +18,7 @@ export function getMoveReachConfig(type) {
   if (type === 'tank') {
     return { horiz: 2.6, height: 3.4, substeps: 3, pathSegment: 8 };
   }
-  if (type === 'artillery' || type === 'armoredCar') {
+  if (type === 'artillery' || type === 'armoredCar' || type === 'antiTankGun') {
     return { horiz: 2.5, height: 3.2, substeps: 2, pathSegment: 9 };
   }
   return { horiz: 2.4, height: 3.2, substeps: 3, pathSegment: 7 };

@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { createGroundTarget, isPointInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canGroundFire } from './BattleCursor.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
+
+const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _groundHit = new THREE.Vector3();
 
 export class RTSController {
   constructor({
@@ -15,9 +19,12 @@ export class RTSController {
     getTerrainMesh,
     getPlayerTeam,
     getPendingFireSupport,
+    getPendingDefensePlacement,
+    getIsTowerDefense,
     getDeployZoneActive,
     clampDeployPoint,
     onFireSupportTarget,
+    onDefensePlacement,
     onSelectionChange,
     onHoverTarget,
     onOrder,
@@ -33,9 +40,12 @@ export class RTSController {
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.getPlayerTeam = getPlayerTeam;
     this.getPendingFireSupport = getPendingFireSupport;
+    this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
+    this.getIsTowerDefense = getIsTowerDefense ?? (() => false);
     this.getDeployZoneActive = getDeployZoneActive ?? (() => false);
     this.clampDeployPoint = clampDeployPoint ?? ((x, z) => ({ x, z }));
     this.onFireSupportTarget = onFireSupportTarget;
+    this.onDefensePlacement = onDefensePlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
@@ -128,16 +138,26 @@ export class RTSController {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const terrain = this.getTerrainMesh();
     if (terrain) {
-      const hits = this.raycaster.intersectObject(terrain, false);
-      return hits[0]?.point ?? null;
+      const hits = this.raycaster.intersectObject(terrain, true);
+      if (hits[0]) return this._snapGroundPoint(hits[0].point);
     }
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
     for (const hit of hits) {
       if (hit.object.name === 'terrain' || hit.object.geometry?.type === 'PlaneGeometry') {
-        return hit.point;
+        return this._snapGroundPoint(hit.point);
       }
     }
+    if (this.raycaster.ray.intersectPlane(_groundPlane, _groundHit)) {
+      return this._snapGroundPoint(_groundHit);
+    }
     return null;
+  }
+
+  _snapGroundPoint(point) {
+    const mapDef = this.getMapDef?.();
+    if (!mapDef || !point) return point;
+    point.y = sampleTerrainHeight(point.x, point.z, mapDef);
+    return point;
   }
 
   raycastUnit(teamFilter = null) {
@@ -284,7 +304,7 @@ export class RTSController {
   }
 
   updateHoverTarget() {
-    if (!this.enabled || this.getPendingFireSupport?.()) {
+    if (!this.enabled || this.getPendingFireSupport?.() || this.getPendingDefensePlacement?.()) {
       this.setHoveredTarget(null);
       return;
     }
@@ -338,8 +358,14 @@ export class RTSController {
 
   onPointerDown(e) {
     if (!this.enabled || e.button !== 0) return;
-    if (this.getPendingFireSupport?.()) return;
     this.setPointerFromEvent(e);
+
+    const pendingFs = this.getPendingFireSupport?.();
+    const pendingDef = this.getPendingDefensePlacement?.();
+    if (pendingFs || pendingDef) {
+      return;
+    }
+
     this.dragStart = { x: e.clientX, y: e.clientY };
     this._dragSelecting = false;
   }
@@ -347,11 +373,17 @@ export class RTSController {
   onPointerMove(e) {
     if (!this.enabled) return;
     this.setPointerFromEvent(e);
-    const pending = this.getPendingFireSupport?.();
-    if (pending) {
+    const pendingFs = this.getPendingFireSupport?.();
+    const pendingDef = this.getPendingDefensePlacement?.();
+    if (pendingFs || pendingDef) {
       const ground = this.raycastGround();
-      if (ground && this.onFireSupportTarget) {
-        this.onFireSupportTarget('preview', ground.x, ground.z);
+      if (ground) {
+        if (pendingFs && this.onFireSupportTarget) {
+          this.onFireSupportTarget('preview', ground.x, ground.z);
+        }
+        if (pendingDef && this.onDefensePlacement) {
+          this.onDefensePlacement('preview', ground.x, ground.z);
+        }
       }
       this.setHoveredTarget(null);
       return;
@@ -367,14 +399,33 @@ export class RTSController {
     if (!this.enabled || e.button !== 0) return;
     this.setPointerFromEvent(e);
 
-    const pending = this.getPendingFireSupport?.();
-    if (pending) {
+    const pendingFs = this.getPendingFireSupport?.();
+    const pendingDef = this.getPendingDefensePlacement?.();
+    if (pendingFs || pendingDef) {
       const ground = this.raycastGround();
-      if (ground && this.onFireSupportTarget) {
-        this.onFireSupportTarget('place', ground.x, ground.z);
+      if (ground) {
+        if (pendingFs && this.onFireSupportTarget) {
+          this.onFireSupportTarget('place', ground.x, ground.z);
+        }
+        if (pendingDef && this.onDefensePlacement) {
+          this.onDefensePlacement('place', ground.x, ground.z);
+        }
       }
       this.dragStart = null;
       this._dragSelecting = false;
+      return;
+    }
+
+    if (
+      !this._dragSelecting &&
+      this.getIsTowerDefense?.() &&
+      this.onDefensePlacement
+    ) {
+      const ground = this.raycastGround();
+      if (ground) {
+        this.onDefensePlacement('pick', ground.x, ground.z);
+      }
+      this.dragStart = null;
       return;
     }
 

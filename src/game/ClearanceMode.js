@@ -8,6 +8,7 @@ export const CLEARANCE_DEFENDER_LAYOUT = [
   { type: 'sniper', count: 1 },
   { type: 'mortar', count: 1 },
   { type: 'armoredCar', count: 1 },
+  { type: 'antiTankGun', count: 2 },
   { type: 'tank', count: 2 },
   { type: 'artillery', count: 1 },
 ];
@@ -18,7 +19,7 @@ export const CLEARANCE_STARTING_RESOURCES = 160;
 export const CLEARANCE_CEASEFIRE_TIME = 10;
 
 const SMALL_ARMS = new Set(['infantry', 'machineGun', 'sniper']);
-const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery']);
+const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun']);
 
 /** Tanks and armored cars resist small arms; dedicated guns hurt. */
 export function getArmorDamageMultiplier(attackerType, target) {

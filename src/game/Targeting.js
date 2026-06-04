@@ -25,6 +25,12 @@ export function isPointInRange(unit, point, slack = 1.02) {
   return distanceToPoint(unit, point) <= unit.def.range * slack;
 }
 
+export function isInCoaxRange(attacker, target, slack = 1.02) {
+  const mg = attacker.def?.coaxMG;
+  if (!mg || !target || target.dead || target.isGround) return false;
+  return distanceBetween(attacker, target) <= mg.range * slack;
+}
+
 export function getStandoffPosition(attacker, target, fraction = 0.82) {
   const tx = target.position?.x ?? target.mesh?.position.x;
   const tz = target.position?.z ?? target.mesh?.position.z;

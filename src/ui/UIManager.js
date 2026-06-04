@@ -7,6 +7,8 @@ import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
+import { DEFENSE_TYPE_LIST, DEFENSE_UPGRADES, DEFENSE_TYPES } from '../data/towerDefense.js';
+import { formatTowerDefenseHud } from '../game/TowerDefenseMode.js';
 import { getUnitIconMarkup } from './unitIcons.js';
 
 const PRODUCE_LABELS = {
@@ -14,6 +16,7 @@ const PRODUCE_LABELS = {
   machineGun: 'MG',
   sniper: 'Snp',
   mortar: 'Mrt',
+  antiTankGun: 'AT',
   armoredCar: 'AC',
   tank: 'Tk',
   superHeavyTank: 'Super Heavy Tank',
@@ -25,6 +28,7 @@ const FACTION_ROSTER_LABELS = {
   machineGun: 'MG team',
   sniper: 'Sniper',
   mortar: 'Mortar',
+  antiTankGun: 'AT gun',
   armoredCar: 'Armored car',
   tank: 'Tank',
   superHeavyTank: 'Super Heavy Tank',
@@ -41,6 +45,16 @@ export class UIManager {
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.render();
+  }
+
+  /** Nation-specific art on the faction picker (hover / selection). */
+  updateFactionScreenBg(factionId = null) {
+    const screen = this.root.querySelector('#screen-faction');
+    if (!screen) return;
+    screen.classList.remove('faction-bg-germany', 'faction-bg-usa', 'faction-bg-uk');
+    if (factionId && ['germany', 'usa', 'uk'].includes(factionId)) {
+      screen.classList.add(`faction-bg-${factionId}`);
+    }
   }
 
   render() {
@@ -89,7 +103,7 @@ export class UIManager {
       <div id="screen-faction" class="screen interactive hidden">
         <div class="title-block">
           <h1>Select Your Nation</h1>
-          <p>Infantry, MG teams, snipers, mortars, armored cars, tanks, and artillery.</p>
+          <p>Infantry, MG teams, snipers, mortars, AT guns, armored cars, tanks, and artillery.</p>
         </div>
         <div class="panel">
           <h2>Choose Side</h2>
@@ -134,6 +148,10 @@ export class UIManager {
             <div class="clearance-banner hidden" id="clearance-banner">
               Clear all dug-in defenders — no enemy HQ
             </div>
+            <div class="td-banner hidden" id="td-banner">
+              <span class="td-wave" id="td-wave-label">Wave 0 / 12</span>
+              <span class="td-phase" id="td-phase-label">Prepare defenses</span>
+            </div>
           </div>
           <div class="hud-top-right">
             <button
@@ -147,6 +165,7 @@ export class UIManager {
             <div class="hud-resources">
               <span class="resource-label">Supplies</span>
               <span class="resource-value" id="hud-resources">0</span>
+              <span class="hud-cheat-badge hidden" id="hud-cheat-badge" title="Cheat mode (iddqd)">CHEAT</span>
             </div>
             <div class="hud-stats" id="hud-army">Army: —</div>
           </div>
@@ -194,6 +213,15 @@ export class UIManager {
             <h3>Reinforcements</h3>
             <div class="produce-btns" id="produce-btns"></div>
             <p class="queue-text" id="queue-text">Queue empty</p>
+          </div>
+          <div class="defense-panel interactive hidden" id="defense-panel">
+            <h3>Defenses</h3>
+            <div class="defense-btns" id="defense-btns"></div>
+            <p class="defense-selected" id="defense-selected"></p>
+            <button type="button" class="btn btn-primary defense-upgrade-btn interactive hidden" id="btn-defense-upgrade">
+              Upgrade emplacement
+            </button>
+            <p class="defense-hint" id="defense-hint">Click a structure, then click behind the frontline to build.</p>
           </div>
           <div class="firesupport-panel interactive" id="firesupport-panel">
             <h3>Fire Support</h3>
@@ -330,6 +358,7 @@ export class UIManager {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
       const el = this.root.querySelector(`#screen-${id}`);
       if (el) el.classList.remove('hidden');
+      if (id === 'faction') this.updateFactionScreenBg(this.selectedFaction);
       if (this.callbacks.onMenuVisible) {
         this.callbacks.onMenuVisible(menuScreens.has(id));
       }
@@ -373,10 +402,13 @@ export class UIManager {
     this.root.querySelector('#btn-back-faction').onclick = () => show('faction');
 
     this.root.querySelectorAll('.faction-card').forEach((btn) => {
+      btn.addEventListener('mouseenter', () => this.updateFactionScreenBg(btn.dataset.id));
+      btn.addEventListener('mouseleave', () => this.updateFactionScreenBg(this.selectedFaction));
       btn.onclick = () => {
         this.root.querySelectorAll('.faction-card').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
         this.selectedFaction = btn.dataset.id;
+        this.updateFactionScreenBg(this.selectedFaction);
         this.root.querySelector('#btn-to-maps').disabled = false;
       };
     });
@@ -477,6 +509,7 @@ export class UIManager {
     const tutorial = gameMode === 'tutorial';
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance';
+    const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
     const banner = this.root.querySelector('#tutorial-banner');
     if (banner) banner.classList.toggle('hidden', !tutorial);
 
@@ -485,6 +518,13 @@ export class UIManager {
 
     const clearanceBanner = this.root.querySelector('#clearance-banner');
     if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
+
+    this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
+    this.root.querySelector('#production-panel')?.classList.toggle('hidden', towerDefense);
+    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense);
+    this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
+    this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense);
+    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense);
 
     const surrenderBtn = this.root.querySelector('#btn-surrender');
     if (surrenderBtn) {
@@ -505,6 +545,9 @@ export class UIManager {
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
+      } else if (towerDefense) {
+        this._defaultHudHint =
+          'Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves';
       } else {
         this._defaultHudHint =
           'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Alt+click cover';
@@ -543,7 +586,139 @@ export class UIManager {
     });
 
     this.renderFireSupportButtons();
+    this.renderDefenseButtons();
     this._bindUnitRoster();
+  }
+
+  renderDefenseButtons() {
+    const wrap = this.root.querySelector('#defense-btns');
+    if (!wrap) return;
+    wrap.innerHTML = DEFENSE_TYPE_LIST.map(
+      (d) => `
+      <button type="button" class="defense-btn interactive" data-id="${d.id}" title="${d.subtitle}">
+        <span class="defense-name">${d.name}</span>
+        <span class="defense-cost">${d.cost}</span>
+      </button>
+    `
+    ).join('');
+    wrap.innerHTML += `
+      <button type="button" class="defense-btn interactive defense-btn-barrage" data-id="barrage" title="Requires Artillery Pit — click map to strike">
+        <span class="defense-name">Barrage</span>
+        <span class="defense-cost">CD</span>
+      </button>`;
+    wrap.querySelectorAll('.defense-btn').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (id === 'barrage') this.callbacks.onTowerDefenseBarrage?.();
+        else this.callbacks.onPlaceDefense?.(id);
+      };
+    });
+
+    const upgradeBtn = this.root.querySelector('#btn-defense-upgrade');
+    upgradeBtn?.addEventListener('click', () => this.callbacks.onUpgradeDefense?.());
+  }
+
+  setPlacementCapture(active) {
+    const layer = document.getElementById('placement-layer');
+    if (!layer) return;
+    layer.classList.toggle('hidden', !active);
+    layer.classList.toggle('active', !!active);
+    layer.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }
+
+  updateDefenses(game) {
+    const isTd = game?.gameMode === 'towerDefense' || !!game?.towerDefense;
+    if (!isTd || !game.defenses) return;
+    const pts = Math.floor(game.resources.player);
+    const label = this.root.querySelector('.resource-label');
+    if (label) label.textContent = 'Defense pts';
+    const resEl = this.root.querySelector('#hud-resources');
+    if (resEl) resEl.textContent = String(pts);
+
+    const selected = game.defenses.getSelected();
+    const selEl = this.root.querySelector('#defense-selected');
+    const upgradeBtn = this.root.querySelector('#btn-defense-upgrade');
+    const path = selected ? DEFENSE_UPGRADES[selected.typeId] : null;
+    const nextDef = path ? DEFENSE_TYPES[path.next] : null;
+
+    if (selEl) {
+      if (selected) {
+        const cal = selected.def.caliber ? ` · ${selected.def.caliber} mm` : '';
+        const hpPct = Math.round((selected.hp / selected.maxHp) * 100);
+        selEl.textContent = `${selected.def.name}${cal} — ${hpPct}% HP (${selected.hp}/${selected.maxHp})`;
+      } else {
+        selEl.textContent = '';
+      }
+    }
+
+    if (upgradeBtn) {
+      const show = selected && path && nextDef;
+      upgradeBtn.classList.toggle('hidden', !show);
+      if (show) {
+        upgradeBtn.textContent = `Upgrade → ${nextDef.name} (${path.cost} pts)`;
+        upgradeBtn.disabled = pts < path.cost;
+      }
+    }
+
+    const pending = game.defenses.getPending();
+    const hint = this.root.querySelector('#defense-hint');
+    if (hint) {
+      if (pending === 'barrage') {
+        hint.textContent = 'Barrage armed — click the assault side of the map to strike.';
+      } else if (pending) {
+        const def = DEFENSE_TYPE_LIST.find((d) => d.id === pending);
+        hint.textContent = `Placing ${def?.name ?? pending} — click your side of the frontline. Esc to cancel.`;
+      } else if (selected && path) {
+        hint.textContent = 'Selected emplacement — use Upgrade or click elsewhere to deselect.';
+      } else {
+        hint.textContent =
+          'LMB place on your side of the frontline · LMB emplacement to select & upgrade · Guns auto-fire.';
+      }
+    }
+
+    this.root.querySelectorAll('.defense-btn').forEach((btn) => {
+      const id = btn.dataset.id;
+      if (id === 'barrage') {
+        const ready =
+          game.defenses.hasArtillery() && game.defenses.barrageCooldown <= 0;
+        btn.disabled = !ready && pending !== 'barrage';
+        btn.classList.toggle('selected', pending === 'barrage');
+        const costEl = btn.querySelector('.defense-cost');
+        if (costEl) {
+          costEl.textContent =
+            game.defenses.barrageCooldown > 0
+              ? `${Math.ceil(game.defenses.barrageCooldown)}s`
+              : 'Ready';
+        }
+        return;
+      }
+      const def = DEFENSE_TYPE_LIST.find((d) => d.id === id);
+      btn.disabled = !def || pts < def.cost;
+      btn.classList.toggle('selected', pending === id);
+    });
+  }
+
+  updateTowerDefense(game) {
+    const hud = formatTowerDefenseHud(game?.towerDefense);
+    if (!hud) return;
+    const waveEl = this.root.querySelector('#td-wave-label');
+    const phaseEl = this.root.querySelector('#td-phase-label');
+    if (waveEl) waveEl.textContent = `Wave ${hud.wave} / ${hud.maxWaves}`;
+    if (phaseEl) phaseEl.textContent = hud.phaseLabel;
+  }
+
+  showDefensePlacementHint(message, game = null) {
+    const hint = this.root.querySelector('#defense-hint');
+    if (!hint || !message) return;
+    hint.textContent = message;
+    hint.classList.add('defense-hint-error');
+    clearTimeout(this._defenseHintTimer);
+    this._defenseHintTimer = setTimeout(() => {
+      hint.classList.remove('defense-hint-error');
+      if (game?.towerDefense) this.updateDefenses(game);
+    }, 2200);
   }
 
   _bindUnitRoster() {
@@ -689,6 +864,8 @@ export class UIManager {
       el.textContent = `Your forces: ${playerAlive} · Practice mode`;
     } else if (clearance) {
       el.textContent = `Your forces: ${playerAlive} · Defenders left: ${enemyAlive}`;
+    } else if (opts.towerDefense) {
+      el.textContent = `Assault force: ${enemyAlive} · Defenses: ${opts.defenseCount ?? '—'}`;
     } else if (assault) {
       const you = assault.playerRole === 'attack' ? 'Assault' : 'Garrison';
       const foe = assault.playerRole === 'attack' ? 'Defenders' : 'Attackers';
@@ -698,14 +875,39 @@ export class UIManager {
     }
   }
 
-  updateResources(supplies, capturePoints) {
+  updateResources(supplies, capturePoints, cheatMode = false) {
     const el = this.root.querySelector('#hud-resources');
-    if (el) el.textContent = String(supplies);
+    if (el) el.textContent = cheatMode ? '∞' : String(supplies);
 
     const owned = capturePoints?.filter((p) => p.owner === 'player').length ?? 0;
     const total = capturePoints?.length ?? 0;
     const label = this.root.querySelector('.resource-label');
-    if (label) label.textContent = `Supplies (+${owned}/${total} pts)`;
+    if (label) {
+      label.textContent = cheatMode
+        ? 'Supplies (unlimited)'
+        : `Supplies (+${owned}/${total} pts)`;
+    }
+  }
+
+  setCheatHud(active) {
+    const badge = this.root.querySelector('#hud-cheat-badge');
+    if (badge) badge.classList.toggle('hidden', !active);
+    this.root.classList.toggle('cheat-mode-active', !!active);
+  }
+
+  showCheatToast(active) {
+    const hint = this.root.querySelector('#hud-hint');
+    if (!hint) return;
+    const prev = hint.dataset.cheatRestore;
+    if (active) {
+      if (!prev) hint.dataset.cheatRestore = hint.textContent;
+      hint.textContent = 'Cheat mode ON — instant builds, unlimited supplies (iddqd to toggle off)';
+      hint.classList.add('hud-hint-cheat');
+    } else {
+      hint.textContent = prev || hint.textContent;
+      delete hint.dataset.cheatRestore;
+      hint.classList.remove('hud-hint-cheat');
+    }
   }
 
   updateDeployCountdown(phase) {
@@ -844,12 +1046,16 @@ export class UIManager {
     const progress = game.production.getQueueProgress('player');
     const queue = game.production.getQueue('player');
 
-    this.updateResources(resources, game.capturePoints);
+    this.updateResources(resources, game.capturePoints, game.cheatMode);
+    this.setCheatHud(game.cheatMode);
 
     const qEl = this.root.querySelector('#queue-text');
     if (qEl) {
       if (progress) {
-        const pct = Math.round((1 - progress.remaining / progress.total) * 100);
+        const pct =
+          progress.total <= 0
+            ? 100
+            : Math.round((1 - progress.remaining / progress.total) * 100);
         qEl.textContent = `Building ${progress.def.name}… ${pct}% (${queue.length} queued)`;
       } else if (queue.length > 0) {
         qEl.textContent = `${queue.length} in queue`;
@@ -865,7 +1071,7 @@ export class UIManager {
       const can =
         game.production.canEnqueue('player', type, game.resources.player) && game.running;
       btn.disabled = !can;
-      btn.querySelector('.produce-cost').textContent = def.cost;
+      btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
     });
   }
 
@@ -903,6 +1109,9 @@ export class UIManager {
     if (units.length === 1) {
       const u = units[0];
       const rangeLabel = u.def.rangeMeters ? `${u.def.rangeMeters} m` : `${u.def.range * 10} m`;
+      const coaxLine = u.def.coaxMG
+        ? ` · Coax ${u.def.coaxMG.rangeMeters ?? u.def.coaxMG.range * 10} m / ${u.def.coaxMG.damage} dmg`
+        : '';
       const orderLine = u.attackOrder
         ? u.attackOrder.isGround
           ? ' · Fire mission'
@@ -916,7 +1125,7 @@ export class UIManager {
           : '';
       body.innerHTML = `
         <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}</h3>
-        <p>${u.def.designation} — HP ${Math.ceil(u.hp)}/${u.maxHp} · Range ${rangeLabel} · Dmg ${u.def.damage}${orderLine}</p>
+        <p>${u.def.designation} — HP ${Math.ceil(u.hp)}/${u.maxHp} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
         ${coverBlock}
       `;
       return;

@@ -6,6 +6,7 @@ import {
   distanceBetween,
   distanceToPoint,
   isInRange,
+  isInCoaxRange,
   isPointInRange,
   getStandoffPosition,
   findNearestEnemyInRange,
@@ -15,11 +16,14 @@ import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat } from './RetreatBehavior.js';
 import { isSceneryTarget } from './SceneryTarget.js';
+import { isDefenseTarget } from './DefenseTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
+import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar']);
+const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
 
 /** Skip VFX for distant AI units to keep frame time stable. */
 function shouldSpawnVfx(attacker, listenerX, listenerZ) {
@@ -34,6 +38,7 @@ export function tickUnitCooldowns(units, dt) {
   for (const unit of units) {
     if (unit.dead) continue;
     if (unit.attackCooldown > 0) unit.attackCooldown -= dt;
+    if (unit.mgCooldown > 0) unit.mgCooldown -= dt;
   }
 }
 
@@ -64,7 +69,8 @@ export function updateCombat(
     return true;
   });
   const sceneryTargets = scenery?.getAttackTargets?.() ?? [];
-  const targets = [...aliveUnits, ...hqsInPlay, ...sceneryTargets];
+  const defenseTargets = options.defenseTargets ?? [];
+  const targets = [...aliveUnits, ...hqsInPlay, ...sceneryTargets, ...defenseTargets];
   const playerAlive = [];
   const enemyAlive = [];
   const playerHqs = [];
@@ -79,12 +85,12 @@ export function updateCombat(
   }
   /** Auto-acquire lists — enemies only scan opposing forces (not every unit on the map). */
   const playerAutoAcquire = tutorialPassiveNoHq ? [] : [...enemyAlive, ...enemyHqs];
-  const enemyAutoAcquire = [...playerAlive, ...playerHqs];
+  const enemyAutoAcquire = [...playerAlive, ...playerHqs, ...defenseTargets];
   const lx = listener?.x ?? 0;
   const lz = listener?.z ?? 0;
 
   for (const attacker of aliveUnits) {
-    if (attacker.attackCooldown > 0 || attacker.retreating) continue;
+    if (attacker.retreating) continue;
     if (openingCeasefire) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
 
@@ -96,11 +102,13 @@ export function updateCombat(
 
     attacker.target = target;
 
-    const canFire = target.isGround
+    const canFireMain = target.isGround
       ? isPointInRange(attacker, target.position)
       : isInRange(attacker, target);
+    const canFireCoax =
+      !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
 
-    if (!canFire) continue;
+    if (!canFireMain && !canFireCoax) continue;
 
     if (!attacker._userMoveOrder) {
       if (attacker.moveTarget && attacker.attackOrder && !target.isGround) {
@@ -115,6 +123,29 @@ export function updateCombat(
     }
 
     faceTarget(attacker, target);
+
+    if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
+      fire(
+        attacker,
+        target,
+        targets,
+        scene,
+        mapDef,
+        onFire,
+        lx,
+        lz,
+        coverSystem,
+        enemyDamageMult,
+        scenery,
+        hqs,
+        options,
+        { coax: true }
+      );
+      attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
+    }
+
+    if (attacker.attackCooldown > 0 || !canFireMain) continue;
+
     fire(attacker, target, targets, scene, mapDef, onFire, lx, lz, coverSystem, enemyDamageMult, scenery, hqs, options);
     attacker.attackCooldown = 1 / attacker.def.attackSpeed;
   }
@@ -136,6 +167,7 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
     if (!attacker.attackOrder.dead) {
       if (
         !isSceneryTarget(attacker.attackOrder) &&
+        !isDefenseTarget(attacker.attackOrder) &&
         attacker.attackOrder.team === attacker.team
       ) {
         attacker.clearAttackOrder();
@@ -172,8 +204,15 @@ function fire(
   enemyDamageMult,
   scenery,
   hqs,
-  options = {}
+  options = {},
+  fireOpts = {}
 ) {
+  const coax = fireOpts.coax === true && attacker.def.coaxMG;
+  const mg = attacker.def.coaxMG;
+  const weaponRange = coax ? mg.range : attacker.def.range;
+  const weaponDamage = coax ? mg.damage : attacker.def.damage;
+  const attackerType = coax ? 'machineGun' : attacker.def.type;
+
   const map = attacker._mapDef || mapDef;
   const impact = target.isGround
     ? { x: target.position.x, z: target.position.z }
@@ -186,21 +225,29 @@ function fire(
     ? distanceToPoint(attacker, impact)
     : distanceBetween(attacker, target);
 
-  const falloff = Math.max(0.55, 1 - (dist / attacker.def.range) * 0.35);
+  const falloff = Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
   const paceMult = options.paceDamageMult ?? 1;
-  let damage = attacker.def.damage * falloff * (0.88 + Math.random() * 0.24) * paceMult;
-  if (attacker.def.type === 'sniper' && !target.isGround) {
+  let damage = weaponDamage * falloff * (0.88 + Math.random() * 0.24) * paceMult;
+  if (!coax && attacker.def.type === 'sniper' && !target.isGround) {
     const rangeRatio = dist / Math.max(attacker.def.range, 1);
     if (rangeRatio > 0.45) damage *= 1.12 + (rangeRatio - 0.45) * 0.35;
   }
   if (attacker.team === 'enemy') damage *= enemyDamageMult;
 
+  if (attacker.def.antiArmor && !target.isGround && target.def) {
+    const vsArmor = ARMOR_TARGET_TYPES.has(target.def.type);
+    damage *= vsArmor ? attacker.def.antiArmorMult ?? 1.3 : attacker.def.softMult ?? 0.35;
+  }
+
   if (!target.isGround && !isSceneryTarget(target)) {
     damage *= getIncomingDamageMultiplier(target, coverSystem);
-    damage *= getArmorDamageMultiplier(attacker.def.type, target);
+    damage *= getArmorDamageMultiplier(attackerType, target);
   }
   if (isSceneryTarget(target)) {
-    damage *= getStructureDamageMultiplier(attacker.def.type);
+    damage *= getStructureDamageMultiplier(attackerType);
+  }
+  if (isDefenseTarget(target)) {
+    damage *= getDefenseDamageMultForAttacker(attackerType);
   }
 
   if (target.isGround) {
@@ -214,13 +261,13 @@ function fire(
         });
       }
     }
-  } else if (isSceneryTarget(target)) {
+  } else if (isSceneryTarget(target) || isDefenseTarget(target)) {
     target.takeDamage(damage);
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
     target.takeDamage(scalePracticeHqDamage(target, damage, options));
     if (!target.dead && hqs) maybeTriggerRetreat(target, hqs);
-    if (scenery) {
+    if (scenery && !coax) {
       const ix = impact.x;
       const iz = impact.z;
       const r =
@@ -232,22 +279,28 @@ function fire(
               ? attacker.def.type === 'superHeavyTank'
                 ? 5.5
                 : 4.5
+              : attacker.def.type === 'antiTankGun'
+                ? 3.5
               : attacker.def.type === 'armoredCar'
                 ? 3
                 : 2;
       scenery.damageAt(ix, iz, r, damage * 0.55);
+    } else if (scenery && coax) {
+      scenery.damageAt(impact.x, impact.z, 2, damage * 0.4);
     }
   }
 
   const showVfx =
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+  const vfxType =
+    coax ? 'machineGun' : attacker.def.type === 'antiTankGun' ? 'tank' : attacker.def.type;
 
   if (showVfx && scene) {
     const from = attacker.position.clone();
-    if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + 1;
+    if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + (coax ? 0.95 : 1);
     const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
     const to = { x: impact.x, y: toY, z: impact.z };
-    spawnMuzzleFlash(scene, from, to, attacker.def.type);
+    spawnMuzzleFlash(scene, from, to, vfxType);
   }
 
   if (onFire) {
@@ -256,9 +309,10 @@ function fire(
       target,
       def: attacker.def,
       dist,
+      coaxFire: coax,
       killed: !target.isGround && target.dead,
       targetIsHQ: !target.isGround && !target.def && !isSceneryTarget(target),
-      targetIsScenery: isSceneryTarget(target),
+      targetIsScenery: isSceneryTarget(target) || isDefenseTarget(target),
       groundImpact: target.isGround,
       from: attacker.position,
       to: impact,
@@ -335,7 +389,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !unit.attackOrder.dead
     ) {
       const dist = distanceBetween(unit, unit.attackOrder);
-      const rangeSlack = unit.attackOrder.isScenery ? 1.05 : 0.88;
+      const rangeSlack =
+        unit.attackOrder.isScenery || isDefenseTarget(unit.attackOrder) ? 1.05 : 0.88;
       if (dist > unit.def.range * rangeSlack) {
         unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
       } else if (isInRange(unit, unit.attackOrder)) {
@@ -347,7 +402,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
 
     const dest = unit.moveTarget;
 
-    const holdWhenFiring = ['tank', 'artillery', 'machineGun', 'mortar', 'sniper'];
+    const holdWhenFiring = ['tank', 'artillery', 'antiTankGun', 'machineGun', 'mortar', 'sniper'];
     if (
       !unit._userMoveOrder &&
       !unit.retreating &&
@@ -373,7 +428,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       continue;
     }
 
-    advanceUnitOnTerrain(unit, dest, mapDef, dt);
+    let moveDt = dt;
+    if (options.getWireSlowMult && unit.team === 'enemy') {
+      moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z);
+    }
+    advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
     advanceMovePath(unit, mapDef);
     if (!unit.moveTarget) {
       unit._chasingAttack = false;

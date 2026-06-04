@@ -14,13 +14,27 @@ function primeAudio() {
   sounds.unlock();
 }
 
-uiRoot.addEventListener('pointerdown', () => primeAudio(), { once: true });
+function resumeAudioContext() {
+  primeAudio();
+  const ctx = sounds.ctx;
+  if (ctx?.state === 'suspended') ctx.resume();
+  if (!sounds.inBattle) sounds.setMenuMusicActive(true);
+}
+
+uiRoot.addEventListener('pointerdown', resumeAudioContext, { once: true });
+window.addEventListener('keydown', resumeAudioContext, { once: true });
 
 const ui = new UIManager(uiRoot, {
-  onMenuVisible() {
+  onMenuVisible(visible) {
     primeAudio();
+    if (sounds.inBattle) {
+      if (!visible) sounds.setMenuMusicActive(false);
+      return;
+    }
+    sounds.setMenuMusicActive(visible);
   },
   onStartGame(factionId, mapId, gameMode, options = {}) {
+    sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
       wireSelectBox(canvas, ui);
@@ -29,6 +43,7 @@ const ui = new UIManager(uiRoot, {
   },
   onReturnMenu() {
     if (game) game.stopGame();
+    sounds.leaveBattle();
     ui.hideHUD();
   },
   onReplay() {
@@ -39,6 +54,15 @@ const ui = new UIManager(uiRoot, {
   },
   onProduce(unitType) {
     game?.tryProduce(unitType);
+  },
+  onPlaceDefense(typeId) {
+    game?.armDefense(typeId);
+  },
+  onTowerDefenseBarrage() {
+    game?.armTowerDefenseBarrage();
+  },
+  onUpgradeDefense() {
+    game?.tryUpgradeDefense();
   },
   onFireSupport(type) {
     game?.armFireSupport(type);
@@ -91,3 +115,5 @@ function wireSelectBox(canvas, uiManager) {
 }
 
 // Right-click orders are handled by RTSController (pointerdown + contextmenu).
+
+resumeAudioContext();

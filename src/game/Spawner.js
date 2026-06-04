@@ -6,6 +6,7 @@ const PLAYER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -16,6 +17,7 @@ const ENEMY_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -26,6 +28,7 @@ const ASSAULT_ATTACKER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -36,6 +39,7 @@ const ASSAULT_DEFENDER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 2, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -46,6 +50,7 @@ const TUTORIAL_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -56,6 +61,7 @@ const CAMPAIGN_PLAYER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];
@@ -66,6 +72,7 @@ const CAMPAIGN_ENEMY_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
 ];

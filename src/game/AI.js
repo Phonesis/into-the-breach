@@ -257,15 +257,18 @@ function rollEnemyUnitType(assault, difficulty) {
     if (roll < 0.64) return 'infantry';
     if (roll < 0.74) return 'armoredCar';
     if (roll < 0.84) return 'sniper';
-    if (roll < 0.9) return 'mortar';
-    if (roll < 0.96) return 'tank';
+    if (roll < 0.88) return 'mortar';
+    if (roll < 0.94) return 'antiTankGun';
+    if (roll < 0.98) return 'tank';
     return 'superHeavyTank';
   }
   if (roll < 0.48 - heavyBias) return 'infantry';
   if (roll < 0.66) return 'infantry';
   if (roll < 0.76) return 'sniper';
   if (roll < 0.84) return 'armoredCar';
-  if (roll < 0.9 - heavyBias * 0.5) return 'artillery';
+  if (roll < 0.86) return 'mortar';
+  if (roll < 0.9 - heavyBias * 0.35) return 'antiTankGun';
+  if (roll < 0.93 - heavyBias * 0.45) return 'artillery';
   if (roll < 0.96 - heavyBias * 0.35) return 'tank';
   return 'superHeavyTank';
 }
@@ -277,6 +280,7 @@ function tryProduce(production, resources, spend, assault, difficulty) {
     'infantry',
     'machineGun',
     'mortar',
+    'antiTankGun',
     'armoredCar',
     'sniper',
     'tank',

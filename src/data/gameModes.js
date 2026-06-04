@@ -20,6 +20,12 @@ export const GAME_MODES = {
     name: 'Clear Defenses',
     subtitle: 'Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win.',
   },
+  towerDefense: {
+    id: 'towerDefense',
+    name: 'Tower Defence',
+    subtitle:
+      'Hold the frontline against escalating waves. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.',
+  },
 };
 
 export const GAME_MODE_LIST = Object.values(GAME_MODES);
@@ -63,6 +69,7 @@ export const UNIT_TYPE_ORDER = [
   'machineGun',
   'sniper',
   'mortar',
+  'antiTankGun',
   'armoredCar',
   'tank',
   'superHeavyTank',
@@ -80,5 +87,11 @@ export function isAssaultMode(gameMode) {
 export function isClearanceMode(gameMode) {
   return gameMode === 'clearance';
 }
+
+export function isTowerDefenseMode(gameMode) {
+  return gameMode === 'towerDefense';
+}
+
+export { TD_STARTING_POINTS } from './towerDefense.js';
 
 export { CLEARANCE_STARTING_RESOURCES } from '../game/ClearanceMode.js';

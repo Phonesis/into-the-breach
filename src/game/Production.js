@@ -16,6 +16,7 @@ export class ProductionManager {
     this.queues = { player: [], enemy: [] };
     this._spawnAngle = { player: 0, enemy: Math.PI };
     this.buildTimeMult = 1;
+    this.cheatMode = false;
   }
 
   reset() {
@@ -23,6 +24,13 @@ export class ProductionManager {
     this.queues.enemy = [];
     this._spawnAngle = { player: 0, enemy: Math.PI };
     this.buildTimeMult = 1;
+  }
+
+  setCheatMode(on) {
+    this.cheatMode = !!on;
+    if (this.cheatMode) {
+      for (const job of this.queues.player) job.remaining = 0;
+    }
   }
 
   setBuildTimeMult(mult) {
@@ -35,11 +43,16 @@ export class ProductionManager {
     const def = faction.units[unitType];
     if (!def) return false;
     const q = this.queues[team];
+    if (q.length >= MAX_QUEUE) return false;
+    if (this.cheatMode && team === 'player') return true;
     const supply = typeof resources === 'number' ? resources : 0;
-    return q.length < MAX_QUEUE && supply >= def.cost;
+    return supply >= def.cost;
   }
 
   canAffordAny(team, resources) {
+    if (this.cheatMode && team === 'player') {
+      return this.queues.player.length < MAX_QUEUE;
+    }
     const faction = this.getFaction(team);
     if (!faction?.units) return false;
     for (const unitType of Object.keys(faction.units)) {
@@ -52,12 +65,14 @@ export class ProductionManager {
     const faction = this.getFaction(team);
     const def = faction?.units[unitType];
     if (!def || this.queues[team].length >= MAX_QUEUE) return false;
-    if (!spendResources(def.cost)) return false;
+    const playerCheat = this.cheatMode && team === 'player';
+    if (!playerCheat && !spendResources(def.cost)) return false;
 
+    const buildTime = playerCheat ? 0 : def.buildTime * this.buildTimeMult;
     this.queues[team].push({
       unitType,
       def,
-      remaining: def.buildTime * this.buildTimeMult,
+      remaining: buildTime,
     });
     if (this.onQueueChange) this.onQueueChange(team);
     return true;
@@ -121,11 +136,13 @@ export class ProductionManager {
     const q = this.queues[team];
     if (q.length === 0) return null;
     const job = q[0];
+    const total =
+      this.cheatMode && team === 'player' ? 0 : job.def.buildTime * this.buildTimeMult;
     return {
       type: job.unitType,
       def: job.def,
       remaining: Math.max(0, job.remaining),
-      total: job.def.buildTime,
+      total,
     };
   }
 }

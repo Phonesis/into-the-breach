@@ -5,6 +5,7 @@ export const UNIT_LOSS_LABELS = {
   machineGun: 'MG teams',
   sniper: 'Snipers',
   mortar: 'Mortars',
+  antiTankGun: 'AT guns',
   armoredCar: 'Armored cars',
   tank: 'Tanks',
   superHeavyTank: 'Super heavy tanks',

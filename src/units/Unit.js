@@ -23,6 +23,7 @@ export class Unit {
     this._movePath = null;
     this._userMoveOrder = false;
     this.attackCooldown = 0;
+    this.mgCooldown = 0;
     this.dead = false;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;

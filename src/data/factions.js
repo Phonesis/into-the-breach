@@ -1,4 +1,87 @@
+import { publicUrl } from '../lib/publicUrl.js';
+
 /** Historically grounded unit rosters — ranges in game meters (~10 m per unit). */
+
+/** Bow / coax machine gun on medium and super-heavy tanks (~300 m). */
+export const TANK_COAX_MG = {
+  damage: 9,
+  range: 32,
+  rangeMeters: 320,
+  attackSpeed: 3.4,
+};
+
+export const SUPER_HEAVY_COAX_MG = {
+  damage: 11,
+  range: 32,
+  rangeMeters: 320,
+  attackSpeed: 3.0,
+};
+
+const atGunGermany = {
+  antiTankGun: {
+    type: 'antiTankGun',
+    name: '7.5 cm Pak 40',
+    designation: 'Panzerabwehrkanone 40',
+    description: 'Towed anti-tank gun — strong vs tanks and armored cars to ~720 m.',
+    hp: 95,
+    damage: 44,
+    range: 72,
+    rangeMeters: 720,
+    speed: 2.1,
+    attackSpeed: 0.5,
+    cost: 82,
+    buildTime: 15,
+    caliber: 75,
+    weaponSound: 'tank_75',
+    antiArmor: true,
+    antiArmorMult: 1.4,
+    softMult: 0.32,
+  },
+};
+
+const atGunUSA = {
+  antiTankGun: {
+    type: 'antiTankGun',
+    name: '57 mm Gun M1',
+    designation: 'Anti-tank gun M1 on carriage M1',
+    description: 'Towed 57 mm — dedicated tank killer to ~700 m.',
+    hp: 92,
+    damage: 42,
+    range: 70,
+    rangeMeters: 700,
+    speed: 2.2,
+    attackSpeed: 0.52,
+    cost: 80,
+    buildTime: 14,
+    caliber: 57,
+    weaponSound: 'tank_57',
+    antiArmor: true,
+    antiArmorMult: 1.35,
+    softMult: 0.34,
+  },
+};
+
+const atGunUK = {
+  antiTankGun: {
+    type: 'antiTankGun',
+    name: 'QF 6-pounder',
+    designation: 'Ordnance QF 6-pdr anti-tank gun',
+    description: 'Six-pounder AT gun — accurate fire to ~720 m.',
+    hp: 94,
+    damage: 43,
+    range: 72,
+    rangeMeters: 720,
+    speed: 2.0,
+    attackSpeed: 0.48,
+    cost: 81,
+    buildTime: 15,
+    caliber: 57,
+    weaponSound: 'tank_57',
+    antiArmor: true,
+    antiArmorMult: 1.38,
+    softMult: 0.33,
+  },
+};
 
 const scoutGermany = {
   armoredCar: {
@@ -205,7 +288,7 @@ export const FACTIONS = {
   germany: {
     id: 'germany',
     name: 'Germany',
-    flag: '/flags/germany.svg',
+    flag: publicUrl('flags/germany.svg'),
     era: 'Wehrmacht, 1943–1945',
     color: 0x3d3d3d,
     accent: 0xc8102e,
@@ -229,11 +312,12 @@ export const FACTIONS = {
       },
       ...mgMortarGermany,
       ...scoutGermany,
+      ...atGunGermany,
       tank: {
         type: 'tank',
         name: 'Panzer IV Ausf. H',
         designation: 'Sd.Kfz. 161 — 7.5 cm KwK 40 L/48',
-        description: 'Medium tank gun effective to ~1,500 m.',
+        description: '7.5 cm gun to ~1,500 m plus coax MG34 for infantry and soft targets.',
         hp: 220,
         damage: 38,
         range: 58,
@@ -244,12 +328,13 @@ export const FACTIONS = {
         buildTime: 18,
         caliber: 75,
         weaponSound: 'tank_75',
+        coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
         type: 'superHeavyTank',
         name: 'Tiger I Ausf. E',
         designation: 'Sd.Kfz. 181 — 8.8 cm KwK 36',
-        description: 'Super heavy breakthrough tank — slow, devastating at range.',
+        description: '8.8 cm gun at range plus coax MG for close defense — slow but lethal.',
         hp: 420,
         damage: 54,
         range: 62,
@@ -260,6 +345,7 @@ export const FACTIONS = {
         buildTime: 28,
         caliber: 88,
         weaponSound: 'tank_75',
+        coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
         type: 'artillery',
@@ -282,7 +368,7 @@ export const FACTIONS = {
   usa: {
     id: 'usa',
     name: 'United States',
-    flag: '/flags/usa.svg',
+    flag: publicUrl('flags/usa.svg'),
     era: 'U.S. Army, 1943–1945',
     color: 0x2d4a6e,
     accent: 0xb22234,
@@ -306,11 +392,12 @@ export const FACTIONS = {
       },
       ...mgMortarUSA,
       ...scoutUSA,
+      ...atGunUSA,
       tank: {
         type: 'tank',
         name: 'M4 Sherman',
         designation: 'Medium Tank, M4 — 75 mm M3',
-        description: '75 mm gun effective to ~1,400 m.',
+        description: '75 mm gun to ~1,400 m plus bow .30 cal for infantry and soft targets.',
         hp: 200,
         damage: 32,
         range: 54,
@@ -321,12 +408,13 @@ export const FACTIONS = {
         buildTime: 18,
         caliber: 75,
         weaponSound: 'tank_75',
+        coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
         type: 'superHeavyTank',
         name: 'M26 Pershing',
         designation: 'Heavy Tank T26E3 — 90 mm M3',
-        description: 'Late-war heavy tank — costly but hard-hitting.',
+        description: '90 mm gun at range plus coax .30 cal — costly but hard-hitting.',
         hp: 390,
         damage: 50,
         range: 60,
@@ -337,6 +425,7 @@ export const FACTIONS = {
         buildTime: 27,
         caliber: 90,
         weaponSound: 'tank_75',
+        coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
         type: 'artillery',
@@ -359,7 +448,7 @@ export const FACTIONS = {
   uk: {
     id: 'uk',
     name: 'United Kingdom',
-    flag: '/flags/uk.svg',
+    flag: publicUrl('flags/uk.svg'),
     era: 'British Army, 1943–1945',
     color: 0x1e3a5f,
     accent: 0xc8102e,
@@ -383,11 +472,12 @@ export const FACTIONS = {
       },
       ...mgMortarUK,
       ...scoutUK,
+      ...atGunUK,
       tank: {
         type: 'tank',
         name: 'Churchill Mk IV',
         designation: 'Infantry Tank Mk IV — 75 mm QF',
-        description: 'Short 75 mm — effective to ~1,200 m.',
+        description: '75 mm gun to ~1,200 m plus Besa coax for infantry and soft targets.',
         hp: 260,
         damage: 30,
         range: 50,
@@ -398,12 +488,13 @@ export const FACTIONS = {
         buildTime: 18,
         caliber: 75,
         weaponSound: 'tank_75',
+        coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
         type: 'superHeavyTank',
         name: 'Black Prince',
         designation: 'Infantry Tank, Black Prince — 17-pdr',
-        description: 'Super heavy infantry tank — very tough, high supply cost.',
+        description: '17-pdr at range plus Besa coax — very tough, high supply cost.',
         hp: 450,
         damage: 48,
         range: 58,
@@ -414,6 +505,7 @@ export const FACTIONS = {
         buildTime: 29,
         caliber: 76,
         weaponSound: 'tank_75',
+        coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
         type: 'artillery',

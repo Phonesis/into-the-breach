@@ -3,22 +3,24 @@
  */
 
 import { VehicleEngineAudio } from './VehicleEngineAudio.js';
+import { MenuMusic } from './MenuMusic.js';
+import { publicUrl } from '../lib/publicUrl.js';
 
 const SAMPLE_URLS = {
-  rifle: '/sounds/rifle.wav',
-  mg: '/sounds/mg.wav',
-  tank_75: '/sounds/tank.wav',
-  tank_57: '/sounds/tank.wav',
-  howitzer_105: '/sounds/artillery.wav',
-  howitzer_25pdr: '/sounds/artillery.wav',
-  impact: '/sounds/impact.wav',
-  explosion: '/sounds/explosion.wav',
-  engine_tank: '/sounds/engine-tank.wav',
-  engine_tank_exhaust: '/sounds/engine-tank-exhaust.wav',
-  engine_armored_car: '/sounds/engine-armored-car.wav',
-  engine_armored_car_exhaust: '/sounds/engine-armored-car-exhaust.wav',
-  engine_artillery: '/sounds/engine-artillery.wav',
-  engine_artillery_exhaust: '/sounds/engine-artillery-exhaust.wav',
+  rifle: publicUrl('sounds/rifle.wav'),
+  mg: publicUrl('sounds/mg.wav'),
+  tank_75: publicUrl('sounds/tank.wav'),
+  tank_57: publicUrl('sounds/tank.wav'),
+  howitzer_105: publicUrl('sounds/artillery.wav'),
+  howitzer_25pdr: publicUrl('sounds/artillery.wav'),
+  impact: publicUrl('sounds/impact.wav'),
+  explosion: publicUrl('sounds/explosion.wav'),
+  engine_tank: publicUrl('sounds/engine-tank.wav'),
+  engine_tank_exhaust: publicUrl('sounds/engine-tank-exhaust.wav'),
+  engine_armored_car: publicUrl('sounds/engine-armored-car.wav'),
+  engine_armored_car_exhaust: publicUrl('sounds/engine-armored-car-exhaust.wav'),
+  engine_artillery: publicUrl('sounds/engine-artillery.wav'),
+  engine_artillery_exhaust: publicUrl('sounds/engine-artillery-exhaust.wav'),
 };
 
 const INFANTRY_DEATH_COUNT = 8;
@@ -47,6 +49,9 @@ export class SoundManager {
     this._lastByType = {};
     this._listener = { x: 0, y: 0, z: 0 };
     this.vehicleEngines = null;
+    this.menuMusic = null;
+    this.menuMusicVisible = false;
+    this.inBattle = false;
     this.infantryDeathBuffers = [];
   }
 
@@ -58,7 +63,12 @@ export class SoundManager {
       this.unlocked = true;
       if (this.ctx.state === 'suspended') this.ctx.resume();
       this.vehicleEngines = new VehicleEngineAudio(this);
+      this.menuMusic = new MenuMusic(this);
       this._loadPromise = this._loadSamples();
+      this.menuMusic.ensureLoaded();
+      if (this.menuMusicVisible && !this.inBattle) {
+        this.menuMusic.setMenuActive(true);
+      }
     } catch {
       /* unavailable */
     }
@@ -116,7 +126,7 @@ export class SoundManager {
       deathLoads.push(
         (async () => {
           try {
-            const res = await fetch(`/sounds/infantry-death-${num}.wav`);
+            const res = await fetch(publicUrl(`sounds/infantry-death-${num}.wav`));
             if (!res.ok) return;
             const ab = await res.arrayBuffer();
             const buf = await this.ctx.decodeAudioData(ab);
@@ -138,7 +148,32 @@ export class SoundManager {
   setMuted(m) {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : 0.55;
-    if (m) this.clearVehicleEngines();
+    if (m) {
+      this.clearVehicleEngines();
+      this.menuMusic?.stopImmediate();
+    }
+  }
+
+  /** Call when a match starts — blocks menu theme until leaveBattle(). */
+  enterBattle() {
+    this.inBattle = true;
+    this.menuMusicVisible = false;
+    this.menuMusic?.stopImmediate();
+  }
+
+  /** Call when returning to menus (stopGame, main menu). */
+  leaveBattle() {
+    this.inBattle = false;
+  }
+
+  setMenuMusicActive(active) {
+    if (this.inBattle && active) return;
+    this.menuMusicVisible = active;
+    if (!active) {
+      this.menuMusic?.stopImmediate();
+      return;
+    }
+    this.menuMusic?.setMenuActive(true);
   }
 
   updateVehicleEngines(units, dt) {
@@ -333,7 +368,7 @@ export function weaponProfileForDef(def) {
   if (def.type === 'mortar') return 'howitzer_105';
   if (def.type === 'machineGun') return 'mg';
   if (def.type === 'artillery') return def.caliber >= 88 ? 'howitzer_105' : 'howitzer_25pdr';
-  if (def.type === 'tank' || def.type === 'superHeavyTank') {
+  if (def.type === 'tank' || def.type === 'superHeavyTank' || def.type === 'antiTankGun') {
     return def.caliber >= 70 ? 'tank_75' : 'tank_57';
   }
   return def.usesMG ? 'mg' : 'rifle';

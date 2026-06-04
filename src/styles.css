@@ -29,6 +29,23 @@ body,
   filter: contrast(1.04) saturate(1.08);
 }
 
+/* Captures LMB while a defense is armed — sits above canvas, below HUD chrome */
+.placement-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  cursor: crosshair;
+}
+
+.placement-layer.active {
+  pointer-events: auto;
+}
+
+.placement-layer.hidden {
+  display: none;
+}
+
 #app::after {
   content: '';
   position: fixed;
@@ -58,8 +75,59 @@ body,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, rgba(8, 12, 18, 0.92) 0%, rgba(20, 28, 38, 0.88) 100%);
+  background-color: #0a0c0f;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   pointer-events: auto;
+}
+
+.screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 88% 72% at 50% 42%, rgba(8, 12, 18, 0.2) 0%, rgba(8, 12, 18, 0.78) 100%),
+    linear-gradient(180deg, rgba(8, 12, 18, 0.5) 0%, rgba(20, 28, 38, 0.82) 100%);
+}
+
+.screen > * {
+  position: relative;
+  z-index: 1;
+}
+
+#screen-title {
+  background-image: url('menu/menu-title.jpg');
+}
+
+#screen-mode {
+  background-image: url('menu/menu-mode.jpg');
+}
+
+#screen-assault-role {
+  background-image: url('menu/menu-assault.jpg');
+}
+
+#screen-faction {
+  background-image: url('menu/menu-faction.jpg');
+}
+
+#screen-faction.faction-bg-germany {
+  background-image: url('menu/menu-faction-germany.jpg');
+}
+
+#screen-faction.faction-bg-usa {
+  background-image: url('menu/menu-faction-usa.jpg');
+}
+
+#screen-faction.faction-bg-uk {
+  background-image: url('menu/menu-faction-uk.jpg');
+}
+
+#screen-map {
+  background-image: url('menu/menu-map.jpg');
 }
 
 .screen.hidden,
@@ -597,6 +665,27 @@ body,
   color: #c9a227;
 }
 
+.hud-cheat-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #1a1208;
+  background: linear-gradient(180deg, #f0c040, #c9a227);
+  border-radius: 3px;
+  vertical-align: 0.2em;
+}
+
+.hud-cheat-badge.hidden {
+  display: none;
+}
+
+.cheat-mode-active .resource-value {
+  color: #7dffb8;
+}
+
 .unit-roster {
   position: absolute;
   left: 0.65rem;
@@ -967,6 +1056,130 @@ body,
   display: none;
 }
 
+.td-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.55rem;
+  background: rgba(60, 90, 120, 0.2);
+  border: 1px solid rgba(90, 159, 212, 0.4);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  max-width: 22rem;
+}
+
+.td-banner.hidden {
+  display: none;
+}
+
+.td-wave {
+  font-weight: 700;
+  color: #5a9fd4;
+  letter-spacing: 0.05em;
+}
+
+.td-phase {
+  color: #b8c8d8;
+}
+
+.defense-panel {
+  background: rgba(18, 24, 32, 0.92);
+  border: 1px solid rgba(90, 159, 212, 0.35);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  min-width: 200px;
+  max-width: 280px;
+}
+
+.defense-panel h3 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.2rem;
+  letter-spacing: 0.08em;
+  color: #5a9fd4;
+  margin-bottom: 0.6rem;
+}
+
+.defense-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.defense-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(90, 159, 212, 0.35);
+  border-radius: 6px;
+  background: rgba(30, 55, 80, 0.55);
+  color: #e8e4dc;
+  cursor: pointer;
+  font-size: 0.72rem;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.defense-btn:hover:not(:disabled) {
+  border-color: rgba(90, 159, 212, 0.7);
+  background: rgba(40, 65, 95, 0.75);
+}
+
+.defense-btn.selected {
+  border-color: #5a9fd4;
+  background: rgba(50, 80, 110, 0.85);
+}
+
+.defense-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.defense-btn-barrage {
+  border-color: rgba(201, 162, 39, 0.45);
+  background: rgba(80, 45, 25, 0.45);
+}
+
+.defense-name {
+  font-weight: 600;
+}
+
+.defense-cost {
+  font-size: 0.68rem;
+  opacity: 0.8;
+  color: #c9a227;
+}
+
+.defense-selected {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  color: #9ecae8;
+  min-height: 1.1em;
+}
+
+.defense-upgrade-btn {
+  margin-top: 0.5rem;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.defense-upgrade-btn.hidden {
+  display: none;
+}
+
+.defense-hint.defense-hint-error {
+  color: #f0a0a0;
+  font-weight: 600;
+}
+
+.defense-hint {
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+  opacity: 0.75;
+  line-height: 1.35;
+}
+
 .assault-banner {
   display: flex;
   flex-direction: column;
@@ -1088,6 +1301,13 @@ body,
   opacity: 0.95;
   color: #f0d080;
   max-width: 320px;
+  font-weight: 600;
+}
+
+.hud-hint.hud-hint-cheat {
+  opacity: 0.95;
+  color: #7dffb8;
+  max-width: 360px;
   font-weight: 600;
 }
 
