@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Germany — WWII Reichskriegsflagge (Balkenkreuz, no party emblem)">
+  <!-- Naval / war ensign: hoist B-W-R, red field, iron cross in disc -->
+  <rect width="1200" height="800" fill="#CE1126"/>
+  <rect width="480" height="800" fill="#000"/>
+  <rect y="133" width="480" height="133" fill="#fff"/>
+  <rect y="400" width="480" height="133" fill="#fff"/>
+  <rect y="533" width="480" height="133" fill="#000"/>
+  <!-- Canton: iron cross (substitute for party emblem on historical ensign) -->
+  <rect width="200" height="200" fill="#000"/>
+  <g transform="translate(100,100)" fill="#fff">
+    <rect x="-14" y="-55" width="28" height="110"/>
+    <rect x="-55" y="-14" width="110" height="28"/>
+  </g>
+  <g transform="translate(700,400)">
+    <circle r="155" fill="#fff"/>
+    <g fill="#1a1a1a">
+      <rect x="-22" y="-95" width="44" height="190"/>
+      <rect x="-95" y="-22" width="190" height="44"/>
+      <rect x="-95" y="-95" width="55" height="55"/>
+      <rect x="40" y="-95" width="55" height="55"/>
+      <rect x="-95" y="40" width="55" height="55"/>
+      <rect x="40" y="40" width="55" height="55"/>
+    </g>
+  </g>
+</svg>

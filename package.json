@@ -1,0 +1,20 @@
+{
+  "name": "into-the-breach",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "bake-sounds": "node scripts/bake-gun-sounds.mjs",
+    "bake-engines": "node scripts/bake-engine-sounds.mjs",
+    "bake-infantry-death": "node scripts/bake-infantry-death.mjs"
+  },
+  "dependencies": {
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,5 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - heading "WW2 RTS" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Command historically accurate forces. Capture strategic points, build your army, destroy the enemy HQ.
+  - button "Begin" [ref=e8] [cursor=pointer]

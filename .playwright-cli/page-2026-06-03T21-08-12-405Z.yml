@@ -1,0 +1,38 @@
+- generic [ref=e53]:
+  - generic [ref=e54]:
+    - heading "Select Theater" [level=1] [ref=e55]
+    - paragraph [ref=e56]: Fight on battlefields modeled after real WW2 campaigns.
+  - generic [ref=e57]:
+    - heading "Choose Map" [level=2] [ref=e58]
+    - generic [ref=e59]:
+      - button "Normandy Operation Overlord — Cotentin Peninsula, June 1944 Hedgerows · Farm tracks · Overcast skies" [ref=e60] [cursor=pointer]:
+        - generic [ref=e61]: Normandy
+        - generic [ref=e62]: Operation Overlord — Cotentin Peninsula, June 1944
+        - generic [ref=e63]: Hedgerows · Farm tracks · Overcast skies
+      - button "North Africa Second Battle of El Alamein — Western Desert, Oct 1942 Open desert · Escarpments · Heat haze" [ref=e64] [cursor=pointer]:
+        - generic [ref=e65]: North Africa
+        - generic [ref=e66]: Second Battle of El Alamein — Western Desert, Oct 1942
+        - generic [ref=e67]: Open desert · Escarpments · Heat haze
+      - button "Eastern Front Battle of Kursk — Steppe south of Orel, July 1943 Rolling steppe · Treelines · Summer dust" [ref=e68] [cursor=pointer]:
+        - generic [ref=e69]: Eastern Front
+        - generic [ref=e70]: Battle of Kursk — Steppe south of Orel, July 1943
+        - generic [ref=e71]: Rolling steppe · Treelines · Summer dust
+      - button "Italy Battle of Monte Cassino — Liri Valley, Jan 1944 Hill country · Olive groves · Mountain mist" [ref=e72] [cursor=pointer]:
+        - generic [ref=e73]: Italy
+        - generic [ref=e74]: Battle of Monte Cassino — Liri Valley, Jan 1944
+        - generic [ref=e75]: Hill country · Olive groves · Mountain mist
+    - generic [ref=e76]:
+      - heading "AI Difficulty" [level=2] [ref=e77]
+      - generic [ref=e78]:
+        - button "Easy Softer AI, weaker attacks, slower enemy reinforcements." [ref=e79] [cursor=pointer]:
+          - generic [ref=e80]: Easy
+          - generic [ref=e81]: Softer AI, weaker attacks, slower enemy reinforcements.
+        - button "Medium Balanced opponent — previous default challenge." [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: Medium
+          - generic [ref=e84]: Balanced opponent — previous default challenge.
+        - button "Hard Aggressive AI, stronger firepower, faster production." [ref=e85] [cursor=pointer]:
+          - generic [ref=e86]: Hard
+          - generic [ref=e87]: Aggressive AI, stronger firepower, faster production.
+    - generic [ref=e88]:
+      - button "Back" [ref=e89] [cursor=pointer]
+      - button "Deploy Forces" [disabled] [ref=e90]

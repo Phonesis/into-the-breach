@@ -1,0 +1,22 @@
+- generic [ref=e28]:
+  - generic [ref=e29]:
+    - heading "Select Your Nation" [level=1] [ref=e30]
+    - paragraph [ref=e31]: Each faction fields infantry, machine gun teams, mortars, tanks, and artillery.
+  - generic [ref=e32]:
+    - heading "Choose Side" [level=2] [ref=e33]
+    - generic [ref=e34]:
+      - button "Germany Wehrmacht, 1943–1945 Grenadier Squad · MG42 Team · GrW 34 Team" [ref=e35] [cursor=pointer]:
+        - generic [ref=e37]: Germany
+        - generic [ref=e38]: Wehrmacht, 1943–1945
+        - generic [ref=e39]: Grenadier Squad · MG42 Team · GrW 34 Team
+      - button "United States U.S. Army, 1943–1945 Rifle Squad · M1919 MG Team · M2 Mortar Squad" [ref=e40] [cursor=pointer]:
+        - generic [ref=e42]: United States
+        - generic [ref=e43]: U.S. Army, 1943–1945
+        - generic [ref=e44]: Rifle Squad · M1919 MG Team · M2 Mortar Squad
+      - button "United Kingdom British Army, 1943–1945 Rifle Section · Vickers MG Team · 3-inch Mortar Team" [ref=e45] [cursor=pointer]:
+        - generic [ref=e47]: United Kingdom
+        - generic [ref=e48]: British Army, 1943–1945
+        - generic [ref=e49]: Rifle Section · Vickers MG Team · 3-inch Mortar Team
+    - generic [ref=e50]:
+      - button "Back" [ref=e51] [cursor=pointer]
+      - button "Continue" [disabled] [ref=e52]

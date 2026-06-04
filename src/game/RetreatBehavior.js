@@ -1,0 +1,137 @@
+import * as THREE from 'three';
+import { hasReachedMoveDest } from '../world/Terrain.js';
+
+const _retreatTex = { tex: null };
+
+function getRetreatTexture() {
+  if (_retreatTex.tex) return _retreatTex.tex;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(180, 40, 30, 0.92)';
+  ctx.beginPath();
+  ctx.roundRect(8, 10, 112, 44, 8);
+  ctx.fill();
+  ctx.strokeStyle = '#ffcc66';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = '#ffe8a0';
+  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RETREAT', 64, 32);
+  ctx.fillStyle = '#ff6622';
+  ctx.beginPath();
+  ctx.moveTo(64, 2);
+  ctx.lineTo(52, 10);
+  ctx.lineTo(76, 10);
+  ctx.closePath();
+  ctx.fill();
+  _retreatTex.tex = new THREE.CanvasTexture(canvas);
+  return _retreatTex.tex;
+}
+
+export function attachRetreatMarker(unit) {
+  if (!unit.mesh || unit.retreatMarker) return;
+  const mat = new THREE.SpriteMaterial({
+    map: getRetreatTexture(),
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.name = 'retreatMarker';
+  sprite.scale.set(4.2, 2.1, 1);
+  sprite.position.y = unit.def.type === 'tank' ? 4.2 : unit.def.type === 'artillery' ? 3.8 : 2.8;
+  sprite.renderOrder = 25;
+  unit.mesh.add(sprite);
+  unit.retreatMarker = sprite;
+}
+
+export function removeRetreatMarker(unit) {
+  const marker = unit.retreatMarker;
+  if (!marker) return;
+  if (marker.parent) marker.parent.remove(marker);
+  unit.retreatMarker.material?.dispose();
+  unit.retreatMarker = null;
+}
+
+export function startRetreat(unit, hq) {
+  if (!hq || hq.dead || unit.dead || unit.retreating) return;
+  unit.retreating = true;
+  unit.clearAttackOrder();
+  unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+  attachRetreatMarker(unit);
+}
+
+export function clearRetreat(unit) {
+  unit.retreating = false;
+  removeRetreatMarker(unit);
+}
+
+/** Random panic retreat toward friendly HQ after taking fire. */
+export function maybeTriggerRetreat(unit, hqs) {
+  if (unit.dead || unit.retreating || unit.defensiveHold) return;
+
+  const hq = hqs.find((h) => h.team === unit.team && !h.dead);
+  if (!hq) return;
+
+  const ratio = unit.hp / unit.maxHp;
+  let chance = 0.05;
+  if (ratio < 0.3) chance = 0.32;
+  else if (ratio < 0.5) chance = 0.2;
+  else if (ratio < 0.7) chance = 0.11;
+
+  if (unit.def.type === 'tank') chance *= 0.45;
+  if (unit.def.type === 'artillery') chance *= 0.55;
+  if (unit.def.type === 'machineGun') chance *= 1.1;
+
+  if (Math.random() < chance) {
+    startRetreat(unit, hq);
+  }
+}
+
+export function updateRetreatState(unit, hq, mapDef) {
+  if (unit.dead) {
+    clearRetreat(unit);
+    return;
+  }
+
+  if (!unit.retreating) {
+    removeRetreatMarker(unit);
+    return;
+  }
+
+  if (!hq || hq.dead) {
+    clearRetreat(unit);
+    unit.moveTarget = null;
+    return;
+  }
+
+  const hqDest = { x: hq.position.x, z: hq.position.z };
+  unit.moveTarget = hqDest;
+
+  const dx = unit.position.x - hq.position.x;
+  const dz = unit.position.z - hq.position.z;
+  const dist = Math.hypot(dx, dz);
+
+  const reachedHq =
+    dist < 18 ||
+    (mapDef &&
+      hasReachedMoveDest(unit, hqDest, mapDef, 3.5, 5.5)) ||
+    (!unit.moveTarget && dist < 24);
+
+  if (reachedHq) {
+    clearRetreat(unit);
+    unit.moveTarget = null;
+    unit._movePath = null;
+    return;
+  }
+
+  if (unit.retreatMarker) {
+    unit.retreatMarker.position.y =
+      (unit.def.type === 'tank' ? 4.2 : unit.def.type === 'artillery' ? 3.8 : 2.8) +
+      Math.sin(Date.now() * 0.006) * 0.15;
+  }
+}

@@ -1,0 +1,19 @@
+- generic [ref=e9]:
+  - generic [ref=e10]:
+    - heading "Game Mode" [level=1] [ref=e11]
+    - paragraph [ref=e12]: Campaign, Training Ground, or Assault & Defend with a contested frontline.
+  - generic [ref=e13]:
+    - heading "Select Mode" [level=2] [ref=e14]
+    - generic [ref=e15]:
+      - button "Campaign Full battle vs AI — capture points, economy, and enemy HQ." [ref=e16] [cursor=pointer]:
+        - generic [ref=e17]: Campaign
+        - generic [ref=e18]: Full battle vs AI — capture points, economy, and enemy HQ.
+      - button "Training Ground No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ." [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]: Training Ground
+        - generic [ref=e21]: No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ.
+      - button "Assault & Defend Attackers must seize the frontline; defenders hold until time runs out or repel the assault." [ref=e22] [cursor=pointer]:
+        - generic [ref=e23]: Assault & Defend
+        - generic [ref=e24]: Attackers must seize the frontline; defenders hold until time runs out or repel the assault.
+    - generic [ref=e25]:
+      - button "Back" [ref=e26] [cursor=pointer]
+      - button "Continue" [disabled] [ref=e27]

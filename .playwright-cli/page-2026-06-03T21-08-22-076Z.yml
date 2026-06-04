@@ -1,0 +1,56 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: United States
+          - generic: Normandy · Easy
+        - generic:
+          - generic: Supplies (+2/3 pts)
+          - text: "151"
+        - generic: "Your forces: 8 · Enemy: 5"
+      - generic:
+        - generic "Saint-Lô Crossroads — Held (yours)":
+          - generic: Saint-Lô Crossroads ★
+          - generic: 100%
+        - generic "Carentan Road — Held (enemy)":
+          - generic: Carentan Road
+          - generic: 100%
+        - generic "Vire Bridge — Held (yours)":
+          - generic: Vire Bridge
+          - generic: 100%
+      - generic:
+        - generic:
+          - generic:
+            - heading "No selection" [level=3]
+            - paragraph: Click or drag to select your units.
+        - generic [ref=e91]:
+          - heading "Reinforcements" [level=3] [ref=e92]
+          - generic [ref=e93]:
+            - button "Inf ⚙ 50" [ref=e94] [cursor=pointer]:
+              - generic [ref=e95]: Inf
+              - generic [ref=e96]: ⚙ 50
+            - button "MG ⚙ 65" [ref=e97] [cursor=pointer]:
+              - generic [ref=e98]: MG
+              - generic [ref=e99]: ⚙ 65
+            - button "Mrt ⚙ 75" [ref=e100] [cursor=pointer]:
+              - generic [ref=e101]: Mrt
+              - generic [ref=e102]: ⚙ 75
+            - button "Tk ⚙ 120" [ref=e103] [cursor=pointer]:
+              - generic [ref=e104]: Tk
+              - generic [ref=e105]: ⚙ 120
+            - button "Arty ⚙ 90" [ref=e106] [cursor=pointer]:
+              - generic [ref=e107]: Arty
+              - generic [ref=e108]: ⚙ 90
+          - paragraph [ref=e109]: Queue empty — click to train
+        - generic [ref=e110]:
+          - heading "Fire Support" [level=3] [ref=e111]
+          - generic [ref=e112]:
+            - button "Strafe Ready" [ref=e113] [cursor=pointer]:
+              - generic [ref=e114]: Strafe
+              - generic [ref=e115]: Ready
+            - button "Barrage Ready" [ref=e116] [cursor=pointer]:
+              - generic [ref=e117]: Barrage
+              - generic [ref=e118]: Ready
+          - paragraph [ref=e119]: Call off-map support — each strike has a long cooldown
+        - paragraph: WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB target · RMB orders
