@@ -43,18 +43,20 @@ export function buildCoverSites(mapDef, scene, scenery = null) {
     }
   };
 
-  const count = mapDef.terrain === 'desert' ? 14 : mapDef.terrain === 'bocage' ? 22 : 18;
+  const sizeScale = mapDef.sizeScale ?? 1;
+  const baseCount = mapDef.terrain === 'desert' ? 14 : mapDef.terrain === 'bocage' ? 22 : 18;
+  const count = Math.round(baseCount * sizeScale * (sizeScale > 1 ? 1.1 : 1));
 
   for (let i = 0; i < count; i++) {
     const x = (Math.random() - 0.5) * size * 0.75;
     const z = (Math.random() - 0.5) * size * 0.75;
-    if (Math.abs(x) < 10 && Math.abs(z) < 8) continue;
+    if (Math.abs(x) < 10 * sizeScale && Math.abs(z) < 8 * sizeScale) continue;
     const t = Math.random() < 0.25 ? 'heavy' : 'medium';
     addBunker(x, z, t);
   }
 
   if (mapDef.terrain === 'bocage') {
-    for (let i = 0; i < 35; i++) {
+    for (let i = 0; i < Math.round(35 * sizeScale * (sizeScale > 1 ? 1.1 : 1)); i++) {
       const hx = (Math.random() - 0.5) * size * 0.55;
       const hz = (Math.random() - 0.5) * size * 0.55;
       zones.push({ x: hx, z: hz, type: 'heavy' });
@@ -71,10 +73,10 @@ export function buildCoverSites(mapDef, scene, scenery = null) {
   }
 
   const fl = mapDef.frontline ?? { x: 0, z: 0 };
-  addBunker(fl.x - 8, fl.z, 'heavy');
-  addBunker(fl.x + 8, fl.z, 'heavy');
-  addBunker(fl.x, fl.z - 10, 'medium');
-  addBunker(fl.x, fl.z + 10, 'medium');
+  addBunker(fl.x - 8 * sizeScale, fl.z, 'heavy');
+  addBunker(fl.x + 8 * sizeScale, fl.z, 'heavy');
+  addBunker(fl.x, fl.z - 10 * sizeScale, 'medium');
+  addBunker(fl.x, fl.z + 10 * sizeScale, 'medium');
 
   return zones;
 }

@@ -1,0 +1,50 @@
+- generic [ref=e163]:
+  - generic [ref=e164]:
+    - heading "Select Theater" [level=1] [ref=e165]
+    - paragraph [ref=e166]: Fight on battlefields modeled after real WW2 campaigns.
+  - generic [ref=e167]:
+    - heading "Choose Map" [level=2] [ref=e168]
+    - generic [ref=e169]:
+      - button "Normandy Operation Overlord — Cotentin Peninsula, June 1944 Hedgerows · Farm tracks · Overcast skies" [ref=e170] [cursor=pointer]:
+        - generic [ref=e171]: Normandy
+        - generic [ref=e172]: Operation Overlord — Cotentin Peninsula, June 1944
+        - generic [ref=e173]: Hedgerows · Farm tracks · Overcast skies
+      - button "North Africa Second Battle of El Alamein — Western Desert, Oct 1942 Open desert · Escarpments · Heat haze" [ref=e174] [cursor=pointer]:
+        - generic [ref=e175]: North Africa
+        - generic [ref=e176]: Second Battle of El Alamein — Western Desert, Oct 1942
+        - generic [ref=e177]: Open desert · Escarpments · Heat haze
+      - button "Eastern Front Battle of Kursk — Steppe south of Orel, July 1943 Rolling steppe · Treelines · Summer dust" [ref=e178] [cursor=pointer]:
+        - generic [ref=e179]: Eastern Front
+        - generic [ref=e180]: Battle of Kursk — Steppe south of Orel, July 1943
+        - generic [ref=e181]: Rolling steppe · Treelines · Summer dust
+      - button "Italy Battle of Monte Cassino — Liri Valley, Jan 1944 Hill country · Olive groves · Mountain mist" [ref=e182] [cursor=pointer]:
+        - generic [ref=e183]: Italy
+        - generic [ref=e184]: Battle of Monte Cassino — Liri Valley, Jan 1944
+        - generic [ref=e185]: Hill country · Olive groves · Mountain mist
+    - generic [ref=e186]:
+      - heading "Map Size" [level=2] [ref=e187]
+      - generic [ref=e188]:
+        - button "Small Standard battlefield (current size)" [ref=e189] [cursor=pointer]:
+          - generic [ref=e190]: Small
+          - generic [ref=e191]: Standard battlefield (current size)
+        - button "Medium 1.75× wider — expanded maneuver room" [ref=e192] [cursor=pointer]:
+          - generic [ref=e193]: Medium
+          - generic [ref=e194]: 1.75× wider — expanded maneuver room
+        - button "Large 2.5× wider — grand theater" [ref=e195] [cursor=pointer]:
+          - generic [ref=e196]: Large
+          - generic [ref=e197]: 2.5× wider — grand theater
+    - generic [ref=e198]:
+      - heading "AI Difficulty" [level=2] [ref=e199]
+      - generic [ref=e200]:
+        - button "Easy Softer AI, weaker attacks, slower enemy reinforcements." [ref=e201] [cursor=pointer]:
+          - generic [ref=e202]: Easy
+          - generic [ref=e203]: Softer AI, weaker attacks, slower enemy reinforcements.
+        - button "Medium Balanced opponent — previous default challenge." [ref=e204] [cursor=pointer]:
+          - generic [ref=e205]: Medium
+          - generic [ref=e206]: Balanced opponent — previous default challenge.
+        - button "Hard Aggressive AI, stronger firepower, faster production." [ref=e207] [cursor=pointer]:
+          - generic [ref=e208]: Hard
+          - generic [ref=e209]: Aggressive AI, stronger firepower, faster production.
+    - generic [ref=e210]:
+      - button "Back" [ref=e211] [cursor=pointer]
+      - button "Deploy Forces" [disabled] [ref=e212]

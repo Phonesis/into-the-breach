@@ -1,14 +1,3 @@
-import { isTankType } from '../units/VehicleTypes.js';
-
-const BOMBARD_TYPES = new Set(['artillery', 'mortar', 'machineGun', 'armoredCar']);
-
-/** Units that can Shift+LMB fire missions on open ground (within range). */
-export function canGroundFire(unit) {
-  if (!unit?.def) return false;
-  const type = unit.def.type;
-  return BOMBARD_TYPES.has(type) || isTankType(type);
-}
-
 /** 32×32 fire-mission reticle (hotspot center). */
 const TARGET_SVG = encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
@@ -24,16 +13,29 @@ const TARGET_SVG = encodeURIComponent(`
 
 export const CURSOR_GROUND_FIRE = `url("data:image/svg+xml,${TARGET_SVG}") 16 16, crosshair`;
 
+/** Any combat unit that can receive a Shift+LMB manual fire order. */
+export function canManualFireOrder(unit) {
+  if (!unit?.def) return false;
+  if (unit.def.nonCombat || unit.def.damage <= 0) return false;
+  if (unit.def.type === 'medic' || unit.def.type === 'engineer') return false;
+  return true;
+}
+
+/** @deprecated use canManualFireOrder */
+export function canGroundFire(unit) {
+  return canManualFireOrder(unit);
+}
+
 /**
- * @param {{ fireSupportPending?: boolean, shiftHeld?: boolean, hasGroundFireSelection?: boolean }} state
+ * @param {{ fireSupportPending?: boolean, shiftHeld?: boolean, hasManualFireSelection?: boolean }} state
  * @returns {string} Inline cursor for canvas, or '' to use stylesheet default.
  */
 export function resolveBattleCursor({
   fireSupportPending = false,
   shiftHeld = false,
-  hasGroundFireSelection = false,
+  hasManualFireSelection = false,
 } = {}) {
   if (fireSupportPending) return 'crosshair';
-  if (shiftHeld && hasGroundFireSelection) return CURSOR_GROUND_FIRE;
+  if (shiftHeld && hasManualFireSelection) return CURSOR_GROUND_FIRE;
   return '';
 }

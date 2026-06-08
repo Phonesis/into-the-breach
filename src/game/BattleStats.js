@@ -3,6 +3,8 @@ import { UNIT_TYPE_ORDER } from '../data/gameModes.js';
 export const UNIT_LOSS_LABELS = {
   infantry: 'Infantry',
   machineGun: 'MG teams',
+  medic: 'Medics',
+  engineer: 'Engineers',
   sniper: 'Snipers',
   mortar: 'Mortars',
   antiTankGun: 'AT guns',

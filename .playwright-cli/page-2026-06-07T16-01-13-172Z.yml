@@ -1,0 +1,26 @@
+- generic [ref=e151]:
+  - generic [ref=e152]:
+    - heading "Select Theater" [level=1] [ref=e153]
+    - paragraph [ref=e154]: Fight on battlefields modeled after real WW2 campaigns.
+  - generic [ref=e155]:
+    - heading "Choose Map" [level=2] [ref=e156]
+    - generic [ref=e157]:
+      - button "Normandy Operation Overlord — Cotentin Peninsula, June 1944 Hedgerows · Farm tracks · Overcast skies" [ref=e158] [cursor=pointer]:
+        - generic [ref=e159]: Normandy
+        - generic [ref=e160]: Operation Overlord — Cotentin Peninsula, June 1944
+        - generic [ref=e161]: Hedgerows · Farm tracks · Overcast skies
+      - button "North Africa Second Battle of El Alamein — Western Desert, Oct 1942 Open desert · Escarpments · Heat haze" [ref=e162] [cursor=pointer]:
+        - generic [ref=e163]: North Africa
+        - generic [ref=e164]: Second Battle of El Alamein — Western Desert, Oct 1942
+        - generic [ref=e165]: Open desert · Escarpments · Heat haze
+      - button "Eastern Front Battle of Kursk — Steppe south of Orel, July 1943 Rolling steppe · Treelines · Summer dust" [ref=e166] [cursor=pointer]:
+        - generic [ref=e167]: Eastern Front
+        - generic [ref=e168]: Battle of Kursk — Steppe south of Orel, July 1943
+        - generic [ref=e169]: Rolling steppe · Treelines · Summer dust
+      - button "Italy Battle of Monte Cassino — Liri Valley, Jan 1944 Hill country · Olive groves · Mountain mist" [ref=e170] [cursor=pointer]:
+        - generic [ref=e171]: Italy
+        - generic [ref=e172]: Battle of Monte Cassino — Liri Valley, Jan 1944
+        - generic [ref=e173]: Hill country · Olive groves · Mountain mist
+    - generic [ref=e174]:
+      - button "Back" [ref=e175] [cursor=pointer]
+      - button "Deploy Forces" [disabled] [ref=e176]

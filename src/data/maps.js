@@ -88,3 +88,5 @@ export const MAPS = {
 };
 
 export const MAP_LIST = Object.values(MAPS);
+
+export { buildMapDef, getMapSizePreset, MAP_SIZE_LIST, MAP_SIZE_PRESETS } from './mapSizes.js';

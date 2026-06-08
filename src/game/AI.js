@@ -31,6 +31,7 @@ export function updateAI({
   campaign,
   difficulty,
   openingCeasefire = false,
+  lastStand = false,
 }) {
   const d = difficulty ?? { aiTickMult: 1, aiProdMult: 1, captureChanceMult: 1, attackAggressionMult: 1 };
 
@@ -69,6 +70,11 @@ export function updateAI({
 
     if (clearance) {
       updateClearanceDefender(unit, alivePlayers);
+      continue;
+    }
+
+    if (lastStand) {
+      updateLastStandUnit(unit, alivePlayers, mapDef, d);
       continue;
     }
 
@@ -205,6 +211,85 @@ function enemyNeedsCapture(points, assault) {
   return points.some((p) => !p.isFrontline && p.owner !== 'enemy');
 }
 
+function updateLastStandUnit(unit, players, mapDef, difficulty) {
+  const d = difficulty ?? { attackAggressionMult: 1 };
+  const hold = unit.defensiveHold;
+  const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
+  const focus = pickAttackTarget(unit, players);
+
+  if (isDefensive) {
+    const engageChance = 0.55 * d.attackAggressionMult;
+
+    if (focus) {
+      unit.setAttackOrder(focus);
+      if (!isInRange(unit, focus)) {
+        const distToHold = hold ? Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z) : Infinity;
+        const chaseRadius = hold ? hold.radius * 2.4 : 22;
+        if (
+          unit.distanceTo(focus) < unit.def.range * 1.05 ||
+          (hold && distToHold < chaseRadius && Math.random() < engageChance)
+        ) {
+          unit.moveTarget = getStandoffPosition(unit, focus);
+        } else if (hold && distToHold > hold.radius) {
+          unit.clearAttackOrder();
+          unit.moveTarget = {
+            x: hold.x + (Math.random() - 0.5) * 4,
+            z: hold.z + (Math.random() - 0.5) * 4,
+          };
+        }
+      }
+      return;
+    }
+
+    if (hold) {
+      const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+      if (dist > hold.radius) {
+        unit.clearAttackOrder();
+        unit.moveTarget = {
+          x: hold.x + (Math.random() - 0.5) * 3,
+          z: hold.z + (Math.random() - 0.5) * 3,
+        };
+      } else {
+        unit.clearAttackOrder();
+        unit.moveTarget = null;
+      }
+      return;
+    }
+  }
+
+  if (focus) {
+    unit.setAttackOrder(focus);
+    if (!isInRange(unit, focus)) {
+      unit.moveTarget = getStandoffPosition(unit, focus);
+    }
+    return;
+  }
+
+  if (unit.attackOrder && !unit.attackOrder.dead) return;
+
+  const nearest = findNearestEnemy(unit, players);
+  if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.75) {
+    unit.setAttackOrder(nearest);
+    unit.moveTarget = getStandoffPosition(unit, nearest);
+    return;
+  }
+
+  if (players.length === 0) return;
+
+  const advanceChance = 0.42 + 0.28 * (d.attackAggressionMult - 1);
+  if (Math.random() < advanceChance) {
+    const center = averagePosition(players);
+    unit.clearAttackOrder();
+    unit.moveTarget = {
+      x: center.x + (Math.random() - 0.5) * 14,
+      z: center.z + (Math.random() - 0.5) * 14,
+    };
+    const half = mapDef.size / 2 - 8;
+    unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
+    unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
+  }
+}
+
 function updateClearanceDefender(unit, players) {
   const hold = unit.defensiveHold;
   const focus = pickAttackTarget(unit, players);
@@ -263,7 +348,9 @@ function rollEnemyUnitType(assault, difficulty) {
     return 'superHeavyTank';
   }
   if (roll < 0.48 - heavyBias) return 'infantry';
-  if (roll < 0.66) return 'infantry';
+  if (roll < 0.54) return 'medic';
+  if (roll < 0.6) return 'engineer';
+  if (roll < 0.68) return 'infantry';
   if (roll < 0.76) return 'sniper';
   if (roll < 0.84) return 'armoredCar';
   if (roll < 0.86) return 'mortar';
@@ -278,6 +365,8 @@ function tryProduce(production, resources, spend, assault, difficulty) {
   const tryOrder = [
     pick,
     'infantry',
+    'medic',
+    'engineer',
     'machineGun',
     'mortar',
     'antiTankGun',

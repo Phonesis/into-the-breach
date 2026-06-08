@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HQ_DEPLOY_RADIUS } from '../game/OpeningDeployZone.js';
+import { getDeployRadius } from '../data/mapSizes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 
 const TEAM_RING = {
@@ -12,9 +12,10 @@ export function createDeployZoneRings(hqs, mapDef, scene) {
   for (const hq of hqs) {
     if (hq.dead) continue;
     const palette = TEAM_RING[hq.team] ?? TEAM_RING.player;
+    const radius = getDeployRadius(mapDef);
     const y = sampleTerrainHeight(hq.position.x, hq.position.z, mapDef) + 0.18;
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(HQ_DEPLOY_RADIUS * 0.88, HQ_DEPLOY_RADIUS, 72),
+      new THREE.RingGeometry(radius * 0.88, radius, 72),
       new THREE.MeshStandardMaterial({
         color: palette.color,
         emissive: palette.emissive,

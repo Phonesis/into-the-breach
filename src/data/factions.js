@@ -182,6 +182,114 @@ const scoutUK = {
   },
 };
 
+const medicGermany = {
+  medic: {
+    type: 'medic',
+    name: 'Sanitätstrupp',
+    designation: 'Wehrmacht Sanitätsunteroffizier',
+    description: 'Combat medics — slowly heal nearby infantry; steadies retreating troops.',
+    hp: 58,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.6,
+    attackSpeed: 0,
+    cost: 55,
+    buildTime: 9,
+    nonCombat: true,
+  },
+};
+
+const medicUSA = {
+  medic: {
+    type: 'medic',
+    name: 'Combat Medic',
+    designation: 'U.S. Army Aid Man',
+    description: 'Field medics — heal foot troops in a 14 m radius; reduce panic retreats.',
+    hp: 60,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.8,
+    attackSpeed: 0,
+    cost: 55,
+    buildTime: 9,
+    nonCombat: true,
+  },
+};
+
+const medicUK = {
+  medic: {
+    type: 'medic',
+    name: 'RAMC Section',
+    designation: 'Royal Army Medical Corps orderly',
+    description: 'Medical section — restores HP to nearby infantry and MG teams.',
+    hp: 57,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.5,
+    attackSpeed: 0,
+    cost: 55,
+    buildTime: 9,
+    nonCombat: true,
+  },
+};
+
+const engineerGermany = {
+  engineer: {
+    type: 'engineer',
+    name: 'Pioniertrupp',
+    designation: 'Wehrmacht Pioniere',
+    description: 'Combat engineers — repair nearby vehicles and steady panicked crews.',
+    hp: 56,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.4,
+    attackSpeed: 0,
+    cost: 62,
+    buildTime: 10,
+    nonCombat: true,
+  },
+};
+
+const engineerUSA = {
+  engineer: {
+    type: 'engineer',
+    name: 'Engineer Squad',
+    designation: 'U.S. Army Engineer Section',
+    description: 'Field engineers — restore HP to armor and guns within 16 m; reduce vehicle retreats.',
+    hp: 58,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.5,
+    attackSpeed: 0,
+    cost: 62,
+    buildTime: 10,
+    nonCombat: true,
+  },
+};
+
+const engineerUK = {
+  engineer: {
+    type: 'engineer',
+    name: 'RE Section',
+    designation: 'Royal Engineers field park',
+    description: 'Sapper section — maintains tanks, guns, and carriers in the field.',
+    hp: 55,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.3,
+    attackSpeed: 0,
+    cost: 62,
+    buildTime: 10,
+    nonCombat: true,
+  },
+};
+
 const mgMortarGermany = {
   machineGun: {
     type: 'machineGun',
@@ -288,7 +396,7 @@ export const FACTIONS = {
   germany: {
     id: 'germany',
     name: 'Germany',
-    flag: publicUrl('flags/germany.svg'),
+    flag: publicUrl('flags/germany.jpg'),
     era: 'Wehrmacht, 1943–1945',
     color: 0x3d3d3d,
     accent: 0xc8102e,
@@ -310,6 +418,8 @@ export const FACTIONS = {
         usesMG: true,
         weaponSound: 'rifle',
       },
+      ...medicGermany,
+      ...engineerGermany,
       ...mgMortarGermany,
       ...scoutGermany,
       ...atGunGermany,
@@ -390,6 +500,8 @@ export const FACTIONS = {
         usesMG: true,
         weaponSound: 'rifle',
       },
+      ...medicUSA,
+      ...engineerUSA,
       ...mgMortarUSA,
       ...scoutUSA,
       ...atGunUSA,
@@ -470,6 +582,8 @@ export const FACTIONS = {
         usesMG: true,
         weaponSound: 'rifle',
       },
+      ...medicUK,
+      ...engineerUK,
       ...mgMortarUK,
       ...scoutUK,
       ...atGunUK,

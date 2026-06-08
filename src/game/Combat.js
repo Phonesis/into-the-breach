@@ -9,6 +9,8 @@ import {
   isInCoaxRange,
   isPointInRange,
   isCoaxSoftTarget,
+  canEngageManualOrder,
+  getGroundFireMoveDest,
   getStandoffPosition,
   tankCanEngageTarget,
   findNearestEnemyInRange,
@@ -93,6 +95,13 @@ export function updateCombat(
 
   for (const attacker of aliveUnits) {
     if (attacker.retreating) continue;
+    if (
+      attacker.def.type === 'medic' ||
+      attacker.def.type === 'engineer' ||
+      attacker.def.nonCombat ||
+      attacker.def.damage <= 0
+    )
+      continue;
     if (openingCeasefire) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
 
@@ -133,6 +142,7 @@ export function updateCombat(
         attacker,
         target,
         targets,
+        aliveUnits,
         scene,
         mapDef,
         onFire,
@@ -155,7 +165,22 @@ export function updateCombat(
 
     if (!fireMainGun) continue;
 
-    fire(attacker, target, targets, scene, mapDef, onFire, lx, lz, coverSystem, enemyDamageMult, scenery, hqs, options);
+    fire(
+      attacker,
+      target,
+      targets,
+      aliveUnits,
+      scene,
+      mapDef,
+      onFire,
+      lx,
+      lz,
+      coverSystem,
+      enemyDamageMult,
+      scenery,
+      hqs,
+      options
+    );
     attacker.attackCooldown = 1 / attacker.def.attackSpeed;
   }
 }
@@ -204,6 +229,7 @@ function fire(
   attacker,
   target,
   allTargets,
+  livingUnits,
   scene,
   mapDef,
   onFire,
@@ -260,7 +286,7 @@ function fire(
   }
 
   if (target.isGround) {
-    applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options);
+    applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options, livingUnits);
     if (map && scene) {
       const t = attacker.def.type;
       if (t === 'artillery' || t === 'mortar') {
@@ -275,7 +301,7 @@ function fire(
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
     target.takeDamage(scalePracticeHqDamage(target, damage, options));
-    if (!target.dead && hqs) maybeTriggerRetreat(target, hqs);
+    if (!target.dead && hqs) maybeTriggerRetreat(target, hqs, livingUnits);
     if (scenery && !coax) {
       const ix = impact.x;
       const iz = impact.z;
@@ -329,7 +355,17 @@ function fire(
   }
 }
 
-function applySplashDamage(attacker, point, baseDamage, targets, coverSystem, scenery, hqs, options = {}) {
+function applySplashDamage(
+  attacker,
+  point,
+  baseDamage,
+  targets,
+  coverSystem,
+  scenery,
+  hqs,
+  options = {},
+  units = []
+) {
   const splash =
     attacker.def.type === 'artillery'
       ? 9
@@ -356,7 +392,7 @@ function applySplashDamage(attacker, point, baseDamage, targets, coverSystem, sc
     splashDmg *= getIncomingDamageMultiplier(other, coverSystem);
     splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
     other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
-    if (!other.dead && hqs) maybeTriggerRetreat(other, hqs);
+    if (!other.dead && hqs) maybeTriggerRetreat(other, hqs, units);
   }
 }
 
@@ -375,15 +411,14 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       }
     }
 
-    if (unit.attackOrder?.isGround && unit.moveTarget) {
+    if (unit.attackOrder?.isGround && unit._userMoveOrder) {
       unit.clearAttackOrder();
     } else if (
       !unit._userMoveOrder &&
       !unit.retreating &&
-      unit._chasingAttack &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
-      tankCanEngageTarget(unit, unit.attackOrder)
+      canEngageManualOrder(unit, unit.attackOrder)
     ) {
       unit.moveTarget = null;
       unit._chasingAttack = false;
@@ -392,21 +427,23 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     if (
       !unit._userMoveOrder &&
       !unit.retreating &&
-      unit._chasingAttack &&
       unit.attackOrder &&
-      !unit.attackOrder.isGround &&
-      !unit.attackOrder.dead
+      !unit.attackOrder.dead &&
+      !canEngageManualOrder(unit, unit.attackOrder)
     ) {
-      const dist = distanceBetween(unit, unit.attackOrder);
-      const rangeSlack =
-        unit.attackOrder.isScenery || isDefenseTarget(unit.attackOrder) ? 1.05 : 0.88;
-      const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
-        ? unit.def.coaxMG.range * rangeSlack
-        : unit.def.range * rangeSlack;
-      if (dist > chaseRange) {
-        unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
-      } else if (tankCanEngageTarget(unit, unit.attackOrder)) {
-        unit.moveTarget = null;
+      if (unit.attackOrder.isGround) {
+        const dest = getGroundFireMoveDest(unit, unit.attackOrder.position);
+        if (dest) unit.moveTarget = dest;
+      } else {
+        const dist = distanceBetween(unit, unit.attackOrder);
+        const rangeSlack =
+          unit.attackOrder.isScenery || isDefenseTarget(unit.attackOrder) ? 1.05 : 0.88;
+        const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
+          ? unit.def.coaxMG.range * rangeSlack
+          : unit.def.range * rangeSlack;
+        if (dist > chaseRange) {
+          unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
+        }
       }
     }
 
@@ -426,22 +463,10 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     if (
       !unit._userMoveOrder &&
       !unit.retreating &&
-      unit._chasingAttack &&
       unit.attackOrder &&
-      !unit.attackOrder.isGround &&
       !unit.attackOrder.dead &&
-      tankCanEngageTarget(unit, unit.attackOrder) &&
+      canEngageManualOrder(unit, unit.attackOrder) &&
       holdWhenFiring.includes(unit.def.type)
-    ) {
-      unit.moveTarget = null;
-      unit._chasingAttack = false;
-      continue;
-    }
-
-    if (
-      !unit._userMoveOrder &&
-      unit.attackOrder?.isGround &&
-      isPointInRange(unit, unit.attackOrder.position)
     ) {
       unit.moveTarget = null;
       unit._chasingAttack = false;

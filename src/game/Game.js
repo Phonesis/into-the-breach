@@ -17,9 +17,21 @@ import {
   isAssaultMode,
   isClearanceMode,
   isTowerDefenseMode,
+  isLastStandMode,
+  LAST_STAND_SUPPLIES,
   TD_STARTING_POINTS,
   CLEARANCE_STARTING_RESOURCES,
+  getProducibleUnits,
 } from '../data/gameModes.js';
+import {
+  createLastStandState,
+  updateLastStandEnemyDeploy,
+  flushEnemyDeployment,
+  assignLastStandEnemyStances,
+  checkLastStandVictory,
+  isLastStandDeployPhase,
+  tryPlacePlayerUnit,
+} from './LastStandMode.js';
 import {
   createTowerDefenseState,
   startNextWave,
@@ -39,7 +51,14 @@ import {
   CLEARANCE_CEASEFIRE_TIME,
 } from './ClearanceMode.js';
 import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
+import { updateMedicHealing } from './MedicBehavior.js';
+import { updateEngineerHealing } from './EngineerBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
+import {
+  preloadUnitFieldIcons,
+  syncPlayerFieldIcons,
+  syncUnitFieldIcon,
+} from '../visual/UnitFieldIcons.js';
 import {
   createAssaultState,
   setupAssaultCapturePoints,
@@ -51,7 +70,8 @@ import { buildFrontlineVisual, disposeFrontlineVisual } from '../world/Frontline
 import { createCheatKeyBuffer, shouldIgnoreCheatKeyEvent } from './CheatMode.js';
 import { buildCoverSites } from '../world/CoverSites.js';
 import { CoverSystem } from './CoverSystem.js';
-import { MAPS } from '../data/maps.js';
+import { MAPS, buildMapDef } from '../data/maps.js';
+import { getDeployRadius, formatMapHudLabel } from '../data/mapSizes.js';
 import { getDifficulty, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import {
   isCampaignMode,
@@ -98,7 +118,7 @@ import { updateAI, resetAI } from './AI.js';
 import { containTeamsToDeployZone, clampPointToHqZone } from './OpeningDeployZone.js';
 import { createDeployZoneRings, disposeDeployZoneRings } from '../visual/DeployZoneRing.js';
 import { RTSController } from '../input/RTSController.js';
-import { canGroundFire, resolveBattleCursor } from '../input/BattleCursor.js';
+import { canManualFireOrder, resolveBattleCursor } from '../input/BattleCursor.js';
 import { HQ } from './HQ.js';
 import { createCapturePoints } from './CapturePoint.js';
 import { ProductionManager } from './Production.js';
@@ -160,6 +180,8 @@ export class Game {
     this._rafActive = false;
     this._postMatchRenderAccum = 0;
     this._fireSupportUiAccum = 0;
+    this._fieldIconUiAccum = 0;
+    this.showUnitFieldIcons = true;
     this.matchTime = 0;
     this.mapDef = null;
     this.units = [];
@@ -176,6 +198,7 @@ export class Game {
     this.assault = null;
     this.assaultRole = null;
     this.towerDefense = null;
+    this.lastStand = null;
     this.defenses = null;
     this.difficulty = getDifficulty(DEFAULT_DIFFICULTY);
     this.lastSession = null;
@@ -208,7 +231,10 @@ export class Game {
       getMapDef: () => this.mapDef,
       onSpawn: (team, _unitType, unit) => {
         if (this.campaign && unit) applyCampaignUnitHp(unit);
-        if (team === PLAYER_TEAM) sounds.play('spawn');
+        if (team === PLAYER_TEAM) {
+          sounds.play('spawn');
+          syncUnitFieldIcon(unit, this.showUnitFieldIcons);
+        }
         this._rebuildUnitCaches();
       },
       onQueueChange: () => this.ui?.updateProduction(this),
@@ -233,12 +259,18 @@ export class Game {
         this.running && !this.gameOver ? this.fireSupport.pending : null,
       getPendingDefensePlacement: () =>
         this.running && !this.gameOver ? this.defenses?.getPending() : null,
+      getPendingLastStandDeploy: () =>
+        this.running && !this.gameOver && isLastStandDeployPhase(this)
+          ? this.lastStand?.pendingType ?? null
+          : null,
       getIsTowerDefense: () =>
         isTowerDefenseMode(this.gameMode) && this.running && !this.gameOver,
       getDeployZoneActive: () => this._isPlayerDeployZoneActive(),
+      getShiftHeld: () => !!(this.keys.ShiftLeft || this.keys.ShiftRight),
       clampDeployPoint: (x, z) => this._clampPlayerDeployPoint(x, z),
       onFireSupportTarget: (mode, x, z) => this.handleFireSupportTarget(mode, x, z),
       onDefensePlacement: (mode, x, z) => this.handleDefensePlacement(mode, x, z),
+      onLastStandPlacement: (mode, x, z) => this.handleLastStandPlacement(mode, x, z),
       onSelectionChange: (sel, hq = null) => {
         this.selectedHq = hq;
         if (sel.length > 0 || hq) sounds.play('select');
@@ -260,8 +292,11 @@ export class Game {
       },
       onOrder: (type, selected) => {
         sounds.play('order');
-        if (type === 'attack' && selected?.length) {
+        if ((type === 'attack' || type === 'fire') && selected?.length) {
           this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq);
+        }
+        if (type === 'fire') {
+          this.ui?.updateFireMissionControls(this._countActiveFireMissions());
         }
         this._syncBattleCursor();
       },
@@ -271,8 +306,13 @@ export class Game {
     this._placementLayer = document.getElementById('placement-layer');
     this._onPlacementLayerUp = (e) => {
       if (e.button !== 0) return;
-      if (!this.defenses?.getPending()) return;
-      this.placeDefenseAtScreen(e.clientX, e.clientY);
+      if (this.defenses?.getPending()) {
+        this.placeDefenseAtScreen(e.clientX, e.clientY);
+        return;
+      }
+      if (isLastStandDeployPhase(this) && this.lastStand?.pendingType) {
+        this.placeLastStandAtScreen(e.clientX, e.clientY);
+      }
     };
     this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerUp);
 
@@ -297,6 +337,12 @@ export class Game {
       if (e.code === 'Escape' && this.defenses?.getPending()) {
         this.defenses.cancelPending();
         this.ui?.updateDefenses(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+      }
+      if (e.code === 'Escape' && this.lastStand?.pendingType) {
+        this.lastStand.pendingType = null;
+        this.ui?.updateLastStandDeploy(this);
         this._syncPlacementCapture();
         this._syncBattleCursor();
       }
@@ -363,6 +409,7 @@ export class Game {
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
     this.towerDefense = isTowerDefenseMode(gameMode);
+    this.lastStand = isLastStandMode(gameMode) ? createLastStandState() : null;
     this.campaign = isCampaignMode(gameMode);
     this.assaultRole = options.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(
@@ -370,27 +417,33 @@ export class Game {
     );
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
-    this.mapDef = MAPS[mapId];
+    this.mapDef = buildMapDef(MAPS[mapId], options.mapSize ?? 'small');
+    const mapScale = this.mapDef.sizeScale ?? 1;
+    this.zoomMax = Math.round(100 * mapScale);
     const assault = isAssaultMode(gameMode);
     const enemyBaseRes = assault ? ASSAULT_ENEMY_RESOURCES : ENEMY_STARTING_RESOURCES;
     this.resources = {
-      player: this.tutorial
-        ? TUTORIAL_STARTING_RESOURCES
-        : this.towerDefense
-          ? TD_STARTING_POINTS
-          : this.clearance
-            ? CLEARANCE_STARTING_RESOURCES
-            : assault
-              ? ASSAULT_STARTING_RESOURCES
-              : this.campaign
-                ? CAMPAIGN_BALANCE.playerStartingResources
-                : STARTING_RESOURCES,
-      enemy: this.tutorial || this.clearance || this.towerDefense
-        ? 0
-        : Math.floor(
-            (this.campaign ? CAMPAIGN_BALANCE.enemyStartingResources : enemyBaseRes) *
-              this.difficulty.enemyResourceMult
-          ),
+      player: this.lastStand
+        ? LAST_STAND_SUPPLIES
+        : this.tutorial
+          ? TUTORIAL_STARTING_RESOURCES
+          : this.towerDefense
+            ? TD_STARTING_POINTS
+            : this.clearance
+              ? CLEARANCE_STARTING_RESOURCES
+              : assault
+                ? ASSAULT_STARTING_RESOURCES
+                : this.campaign
+                  ? CAMPAIGN_BALANCE.playerStartingResources
+                  : STARTING_RESOURCES,
+      enemy: this.lastStand
+        ? LAST_STAND_SUPPLIES
+        : this.tutorial || this.clearance || this.towerDefense
+          ? 0
+          : Math.floor(
+              (this.campaign ? CAMPAIGN_BALANCE.enemyStartingResources : enemyBaseRes) *
+                this.difficulty.enemyResourceMult
+            ),
     };
     this.production.reset();
     this.production.setBuildTimeMult(this.campaign ? CAMPAIGN_BALANCE.buildTimeMult : 1);
@@ -432,27 +485,30 @@ export class Game {
     }
 
     const hqHp = this.campaign ? CAMPAIGN_BALANCE.hqMaxHp : 800;
-    this.hqs = [
-      new HQ({
-        team: PLAYER_TEAM,
-        position: playerBasePos,
-        mapDef: this.mapDef,
-        scene: this.scene,
-        label: playerHqLabel,
-        maxHp: hqHp,
-      }),
-    ];
-    if (!this.clearance && !this.towerDefense) {
+    this.hqs = [];
+    if (!this.lastStand) {
       this.hqs.push(
         new HQ({
-          team: ENEMY_TEAM,
-          position: enemyBasePos,
+          team: PLAYER_TEAM,
+          position: playerBasePos,
           mapDef: this.mapDef,
           scene: this.scene,
-          label: enemyHqLabel,
-          maxHp: this.tutorial ? PRACTICE_TARGET_HQ_HP : hqHp,
+          label: playerHqLabel,
+          maxHp: hqHp,
         })
       );
+      if (!this.clearance && !this.towerDefense) {
+        this.hqs.push(
+          new HQ({
+            team: ENEMY_TEAM,
+            position: enemyBasePos,
+            mapDef: this.mapDef,
+            scene: this.scene,
+            label: enemyHqLabel,
+            maxHp: this.tutorial ? PRACTICE_TARGET_HQ_HP : hqHp,
+          })
+        );
+      }
     }
 
     this.capturePoints = createCapturePoints(this.mapDef, this.scene);
@@ -498,6 +554,11 @@ export class Game {
         this.capturePoints[0].owner = PLAYER_TEAM;
         this.capturePoints[0].progress = 1;
       }
+    } else if (this.lastStand) {
+      for (const cp of this.capturePoints) {
+        cp.owner = null;
+        cp.progress = 0;
+      }
     } else {
       for (const cp of this.capturePoints) {
         cp.owner = null;
@@ -533,7 +594,7 @@ export class Game {
       ? getClearancePlayerSpawnBase(this.mapDef)
       : null;
 
-    this.units = this.towerDefense
+    this.units = this.towerDefense || this.lastStand
       ? []
       : spawnArmy({
           faction: this.playerFaction,
@@ -596,12 +657,13 @@ export class Game {
     this._rosterKey = '';
 
     const deployTeams = this._getDeployZoneTeamsAt(0);
+    const deployRadius = getDeployRadius(this.mapDef);
     if (deployTeams.length) {
-      containTeamsToDeployZone(this.units, this.hqs, this.mapDef, deployTeams);
+      containTeamsToDeployZone(this.units, this.hqs, this.mapDef, deployTeams, deployRadius);
       this._showDeployZoneRings(deployTeams);
     }
 
-    resetAI(0, this.tutorial || this.towerDefense ? 0 : 5);
+    resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
     this.running = true;
     this.gameOver = false;
     this._endOverlayShown = false;
@@ -611,6 +673,7 @@ export class Game {
     this._victoryCheckAccum = 0;
     this._captureUiAccum = 0;
     this._coverUiAccum = 0;
+    this._fieldIconUiAccum = 0;
     this._selectionUiKey = '';
     this._hoverUiId = '';
     this._combatAccum = 0;
@@ -625,12 +688,21 @@ export class Game {
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
       towerDefense: this.towerDefense,
+      lastStand: !!this.lastStand,
+    });
+    this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
+    preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
+      if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
     });
     this.ui.updateProduction(this);
     this.ui.updateDefenses(this);
     this.ui.updateTowerDefense(this);
     this.ui.updateFireSupport(this.fireSupport);
-    this.ui.updateDeployCountdown(this._getDeployPhase());
+    if (this.lastStand) {
+      this.ui.updateLastStandDeploy(this);
+    } else {
+      this.ui.updateDeployCountdown(this._getDeployPhase());
+    }
     this._syncPlacementCapture();
     this._rebuildUnitCaches();
     this._syncUnitRoster();
@@ -658,7 +730,7 @@ export class Game {
   }
 
   _maybeUpdateSelectionPanel(selected, dt) {
-    if (!selected.length || !this.ui) return;
+    if ((!selected.length && !this.selectedHq) || !this.ui) return;
     const hover = this.controller?.hoveredTarget;
     const hoverKey = hover
       ? `${hover.id ?? ''}:${hover.team ?? ''}:${hover.dead ? 1 : 0}`
@@ -672,7 +744,7 @@ export class Game {
   }
 
   _getDeployZoneTeamsAt(time = this.matchTime) {
-    if (this.tutorial || this.towerDefense) return [];
+    if (this.tutorial || this.towerDefense || this.lastStand) return [];
     if (this.clearance) {
       return time < CLEARANCE_CEASEFIRE_TIME ? [PLAYER_TEAM] : [];
     }
@@ -680,7 +752,7 @@ export class Game {
   }
 
   _getDeployPhase() {
-    if (this.tutorial || this.towerDefense || !this.running) return null;
+    if (this.tutorial || this.towerDefense || this.lastStand || !this.running) return null;
     if (this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME) {
       return {
         secondsLeft: CLEARANCE_CEASEFIRE_TIME - this.matchTime,
@@ -709,7 +781,7 @@ export class Game {
   _clampPlayerDeployPoint(x, z) {
     if (!this._isPlayerDeployZoneActive()) return { x, z };
     const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
-    return clampPointToHqZone(x, z, hq);
+    return clampPointToHqZone(x, z, hq, getDeployRadius(this.mapDef));
   }
 
   _syncBattleCursor() {
@@ -724,10 +796,11 @@ export class Game {
       this.controller?.isShiftHeld?.();
     const selected = this._playerAlive.filter((u) => u.selected);
     const defensePending = !!this.defenses?.getPending();
+    const deployPending = !!(this.lastStand?.pendingType && isLastStandDeployPhase(this));
     this.canvas.style.cursor = resolveBattleCursor({
-      fireSupportPending: !!this.fireSupport?.pending || defensePending,
+      fireSupportPending: !!this.fireSupport?.pending || defensePending || deployPending,
       shiftHeld,
-      hasGroundFireSelection: selected.some(canGroundFire),
+      hasManualFireSelection: selected.some(canManualFireOrder),
     });
   }
 
@@ -750,6 +823,10 @@ export class Game {
   /** End quiet sector / clearance ceasefire immediately (player override). */
   launchBattleNow() {
     if (!this.running || this.gameOver || this.tutorial) return;
+    if (this.lastStand) {
+      this.launchLastStandBattle();
+      return;
+    }
     if (!this._getDeployPhase()) return;
 
     this.matchTime = this.clearance ? CLEARANCE_CEASEFIRE_TIME : BATTLE_OPENING_TIME;
@@ -769,7 +846,8 @@ export class Game {
     const dirZ = dz / len;
 
     this.cameraYaw = Math.atan2(-dirX, -dirZ);
-    this.zoom = 34;
+    const mapScale = this.mapDef?.sizeScale ?? 1;
+    this.zoom = 34 * Math.sqrt(mapScale);
 
     this.cameraTarget.set(
       playerFocus.x + dirX * 8,
@@ -813,6 +891,11 @@ export class Game {
     this.ui.updateUnitRoster(alive, selected);
   }
 
+  setUnitFieldIconsEnabled(enabled) {
+    this.showUnitFieldIcons = !!enabled;
+    syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+  }
+
   selectPlayerUnitById(unitId, additive = false) {
     const unit = this.units.find(
       (u) => u.id === unitId && u.team === PLAYER_TEAM && !u.dead
@@ -853,7 +936,79 @@ export class Game {
     }
   }
 
+  _countActiveFireMissions() {
+    return this._playerAlive.filter((u) => !u.dead && u.attackOrder?.isGround).length;
+  }
+
+  launchLastStandBattle() {
+    if (!this.lastStand || this.lastStand.phase !== 'deploy') return false;
+    if (this._playerAlive.length === 0) return false;
+
+    flushEnemyDeployment(this);
+    assignLastStandEnemyStances(this);
+    this._rebuildUnitCaches();
+    this.lastStand.phase = 'battle';
+    this.lastStand.pendingType = null;
+    this.lastStand.supplies.player = 0;
+    this.lastStand.supplies.enemy = 0;
+    this.resources.player = 0;
+    this.resources.enemy = 0;
+    this.ui?.updateLastStandDeploy(this);
+    this.ui?.updateProduction(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+    this._faceUnitsToward(
+      this.units.filter((u) => u.team === PLAYER_TEAM && !u.dead),
+      this.mapDef.enemyBase
+    );
+    this._faceUnitsToward(
+      this.units.filter((u) => u.team === ENEMY_TEAM && !u.dead),
+      this.mapDef.playerBase
+    );
+    sounds.play('order');
+    return true;
+  }
+
+  handleLastStandPlacement(mode, x, z) {
+    if (!this.lastStand || this.lastStand.phase !== 'deploy') return;
+    if (mode !== 'place') return;
+
+    const type = this.lastStand.pendingType;
+    if (!type) return;
+
+    const result = tryPlacePlayerUnit(this, type, x, z);
+    if (!result.ok) return;
+
+    sounds.play('spawn');
+    this._rebuildUnitCaches();
+    this._syncUnitRoster();
+    syncUnitFieldIcon(result.unit, this.showUnitFieldIcons);
+    this.resources.player = this.lastStand.supplies.player;
+    this.ui?.updateLastStandDeploy(this);
+    this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+  }
+
+  cancelAllFireMissions() {
+    if (!this.running || this.gameOver) return false;
+
+    let cleared = 0;
+    for (const u of this._playerAlive) {
+      if (u.dead || !u.attackOrder?.isGround) continue;
+      u.clearAttackOrder();
+      u.moveTarget = null;
+      cleared++;
+    }
+    if (cleared === 0) return false;
+
+    sounds.play('order');
+    const sel = this._playerAlive.filter((u) => u.selected);
+    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq);
+    this.ui?.updateFireMissionControls(this._countActiveFireMissions());
+    return true;
+  }
+
   stopGame() {
+    this.zoomMax = 100;
     this.running = false;
     this.gameOver = false;
     this._endOverlayShown = false;
@@ -878,6 +1033,7 @@ export class Game {
     disposeDeployZoneRings(this._deployZoneRings, this.scene);
     this.assault = null;
     this.towerDefense = null;
+    this.lastStand = null;
     this.defenses?.clear();
     this.defenses = null;
     this.ui?.setPlacementCapture(false);
@@ -952,8 +1108,7 @@ export class Game {
     this.ui?.updateFireSupport(this.fireSupport);
   }
 
-  placeDefenseAtScreen(clientX, clientY) {
-    if (!this.running || this.gameOver || !this.defenses?.getPending()) return;
+  _screenToGround(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
     if (
       clientX < rect.left ||
@@ -961,17 +1116,34 @@ export class Game {
       clientY < rect.top ||
       clientY > rect.bottom
     ) {
-      return;
+      return null;
     }
     this.controller.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.controller.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-    const ground = this.controller.raycastGround();
+    return this.controller.raycastGround();
+  }
+
+  placeDefenseAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !this.defenses?.getPending()) return;
+    const ground = this._screenToGround(clientX, clientY);
     if (ground) this.handleDefensePlacement('place', ground.x, ground.z);
+  }
+
+  placeLastStandAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !isLastStandDeployPhase(this) || !this.lastStand?.pendingType) {
+      return;
+    }
+    const ground = this._screenToGround(clientX, clientY);
+    if (ground) this.handleLastStandPlacement('place', ground.x, ground.z);
   }
 
   _syncPlacementCapture() {
     const active =
-      this.running && !this.gameOver && !!this.defenses?.getPending();
+      (this.running && !this.gameOver && !!this.defenses?.getPending()) ||
+      (this.running &&
+        !this.gameOver &&
+        isLastStandDeployPhase(this) &&
+        !!this.lastStand?.pendingType);
     this.ui?.setPlacementCapture(active);
   }
 
@@ -1050,6 +1222,21 @@ export class Game {
 
   tryProduce(unitType) {
     if (!this.running || this.gameOver || this.towerDefense) return false;
+
+    if (this.lastStand) {
+      if (this.lastStand.phase !== 'deploy') return false;
+      const def = this.playerFaction?.units?.[unitType];
+      if (!def) return false;
+      if (!this.cheatMode && this.lastStand.supplies.player < def.cost) return false;
+      this.lastStand.pendingType = this.lastStand.pendingType === unitType ? null : unitType;
+      sounds.play('select');
+      this.ui?.updateLastStandDeploy(this);
+      this.ui?.updateProduction(this);
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+      return true;
+    }
+
     const ok = this.production.enqueue(PLAYER_TEAM, unitType, (cost) =>
       this.spendResources(PLAYER_TEAM, cost)
     );
@@ -1062,6 +1249,7 @@ export class Game {
   }
 
   tickEconomy(dt) {
+    if (this.lastStand) return;
     if (this.towerDefense) {
       this.resources.player += 0.4 * dt;
       return;
@@ -1171,6 +1359,7 @@ export class Game {
       this.ui.updateTowerDefense(this);
     }
     if (this.assault) this.ui.updateAssaultHUD(this.assault);
+    this.ui.updateFireMissionControls(this._countActiveFireMissions());
   }
 
   checkVictory() {
@@ -1191,6 +1380,14 @@ export class Game {
           true,
           'Practice complete! You destroyed the target HQ. Return to the menu to play Campaign mode.'
         );
+      }
+      return;
+    }
+
+    if (this.lastStand) {
+      const result = checkLastStandVictory(this);
+      if (result) {
+        this.endGame(result.victory, result.detail);
       }
       return;
     }
@@ -1240,7 +1437,9 @@ export class Game {
   }
 
   _getArmyWipeHint(playerAlive) {
-    if (this.tutorial || this.clearance || playerAlive > 0 || this.gameOver) return null;
+    if (this.tutorial || this.clearance || this.lastStand || playerAlive > 0 || this.gameOver) {
+      return null;
+    }
 
     const queue = this.production.getQueue(PLAYER_TEAM).length;
     const res = Math.floor(this.resources.player);
@@ -1520,12 +1719,29 @@ export class Game {
     if (simActive) {
         this.matchTime += dt;
         tickUnitCooldowns(this._aliveUnits, dt);
+        updateMedicHealing(this._aliveUnits, dt);
+        updateEngineerHealing(this._aliveUnits, dt);
         this.tickEconomy(dt);
-        if (!this.towerDefense) {
+        if (this.lastStand && isLastStandDeployPhase(this)) {
+          updateLastStandEnemyDeploy(this, dt);
+          this._rebuildUnitCaches();
+          this._lastStandUiAccum = (this._lastStandUiAccum ?? 0) + dt;
+          if (this._lastStandUiAccum >= 0.15) {
+            this._lastStandUiAccum = 0;
+            this.ui?.updateLastStandDeploy(this);
+            this.ui?.updateResources(this.lastStand.supplies.player, this.capturePoints, this.cheatMode);
+          }
+        } else if (!this.towerDefense) {
           this.updateCapturePoints(dt);
           this.production.update(dt, this.units);
         } else {
           updateTowerDefenseMode(this, dt);
+        }
+
+        if (isLastStandDeployPhase(this)) {
+          this.updateCamera(dt);
+          this._renderFrame();
+          return;
         }
 
         updateMovement(this._aliveUnits, dt, this.mapDef, this.hqs, {
@@ -1536,7 +1752,13 @@ export class Game {
 
         const stagingTeams = this._getDeployZoneTeamsAt();
         if (stagingTeams.length) {
-          containTeamsToDeployZone(this._aliveUnits, this.hqs, this.mapDef, stagingTeams);
+          containTeamsToDeployZone(
+            this._aliveUnits,
+            this.hqs,
+            this.mapDef,
+            stagingTeams,
+            getDeployRadius(this.mapDef)
+          );
         }
         this._syncDeployZoneVisuals();
         sounds.setListener(this.cameraTarget.x, this.cameraTarget.z);
@@ -1551,6 +1773,11 @@ export class Game {
         if (this.coverSystem && this._coverUiAccum >= 0.12) {
           this._coverUiAccum = 0;
           this.coverSystem.updateUnits(this._aliveUnits);
+        }
+        this._fieldIconUiAccum += dt;
+        if (this._fieldIconUiAccum >= 0.12) {
+          this._fieldIconUiAccum = 0;
+          syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
         }
         const playerSelected = this._playerAlive.filter((u) => u.selected);
         this._maybeUpdateSelectionPanel(playerSelected, dt);
@@ -1572,10 +1799,13 @@ export class Game {
             this.scenery,
             {
               protectPlayerHq: this.clearance || this.towerDefense,
-              tutorialPassiveNoHq: this.tutorial,
+              tutorialPassiveNoHq: this.tutorial || !!this.lastStand,
               practiceHqDamageMult: this.tutorial ? PRACTICE_TARGET_HQ_DAMAGE_MULT : 1,
               openingCeasefire:
-                !this.tutorial && !this.towerDefense && this.matchTime < BATTLE_OPENING_TIME,
+                !this.tutorial &&
+                !this.towerDefense &&
+                !this.lastStand &&
+                this.matchTime < BATTLE_OPENING_TIME,
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
@@ -1642,7 +1872,7 @@ export class Game {
               this.defenses,
               dt
             );
-          } else if (!this.tutorial) {
+          } else if (!this.tutorial && !isLastStandDeployPhase(this)) {
             updateAI({
               enemyUnits: this._enemyAlive,
               playerUnits: this._playerAlive,
@@ -1655,7 +1885,9 @@ export class Game {
               assault: this.assault,
               clearance: this.clearance,
               campaign: this.campaign,
-              openingCeasefire: this.matchTime < BATTLE_OPENING_TIME,
+              lastStand: !!this.lastStand && this.lastStand.phase === 'battle',
+              openingCeasefire:
+                !this.lastStand && this.matchTime < BATTLE_OPENING_TIME,
               difficulty: this.campaign
                 ? getCampaignDifficulty(this.difficulty)
                 : this.difficulty,

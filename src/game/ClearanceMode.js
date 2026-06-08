@@ -18,19 +18,19 @@ export const CLEARANCE_STARTING_RESOURCES = 160;
 /** Enemies hold fire briefly so forward defensive lines do not wipe the staging area. */
 export const CLEARANCE_CEASEFIRE_TIME = 10;
 
-const SMALL_ARMS = new Set(['infantry', 'machineGun', 'sniper']);
 const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun']);
 
-/** Tanks and armored cars resist small arms; dedicated guns hurt. */
+/** Tanks ignore rifle/MG fire; dedicated anti-armor weapons hurt. */
 export function getArmorDamageMultiplier(attackerType, target) {
   if (!target?.def) return 1;
   const t = target.def.type;
 
   if (t === 'tank' || t === 'superHeavyTank') {
     const isSuper = t === 'superHeavyTank';
-    if (SMALL_ARMS.has(attackerType)) {
-      return attackerType === 'sniper' ? (isSuper ? 0.08 : 0.12) : isSuper ? 0.14 : 0.2;
+    if (attackerType === 'infantry' || attackerType === 'machineGun' || attackerType === 'armoredCar') {
+      return 0;
     }
+    if (attackerType === 'sniper') return isSuper ? 0.08 : 0.12;
     if (attackerType === 'mortar') return isSuper ? 1.05 : 1.15;
     if (ANTI_ARMOR.has(attackerType)) return isSuper ? 1.25 : 1.4;
     return 1;

@@ -8,6 +8,8 @@ export const COAX_SOFT_TARGET_TYPES = new Set([
   'machineGun',
   'sniper',
   'mortar',
+  'medic',
+  'engineer',
   'armoredCar',
 ]);
 
@@ -59,6 +61,27 @@ export function tankCanEngageTarget(attacker, target) {
   if (isInRange(attacker, target)) return true;
   if (!isTankType(attacker.def?.type) || !attacker.def?.coaxMG) return false;
   return isInCoaxRange(attacker, target);
+}
+
+/** True when a player-issued attack order is in weapon range (ground, cover, or unit). */
+export function canEngageManualOrder(unit, target) {
+  if (!target || target.dead) return false;
+  if (target.isGround) return isPointInRange(unit, target.position);
+  return tankCanEngageTarget(unit, target);
+}
+
+/** Move destination when closing on a ground fire mission point. */
+export function getGroundFireMoveDest(unit, point, fraction = 0.85) {
+  const dx = point.x - unit.position.x;
+  const dz = point.z - unit.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz) || 1;
+  const stopDist = unit.def.range * fraction;
+  if (dist <= stopDist) return null;
+  const ratio = (dist - stopDist) / dist;
+  return {
+    x: unit.position.x + dx * ratio,
+    z: unit.position.z + dz * ratio,
+  };
 }
 
 export function getStandoffPosition(attacker, target, fraction = null) {

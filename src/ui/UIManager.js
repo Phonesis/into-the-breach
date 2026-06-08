@@ -1,5 +1,6 @@
 import { FACTION_LIST } from '../data/factions.js';
 import { MAP_LIST } from '../data/maps.js';
+import { MAP_SIZE_LIST, formatMapHudLabel } from '../data/mapSizes.js';
 import { GAME_MODE_LIST, ASSAULT_ROLE_LIST, getProducibleUnits } from '../data/gameModes.js';
 import { DIFFICULTY_LIST, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import { FIRE_SUPPORT_LIST } from '../data/fireSupport.js';
@@ -13,6 +14,8 @@ import { getUnitIconMarkup } from './unitIcons.js';
 
 const PRODUCE_LABELS = {
   infantry: 'Inf',
+  medic: 'Medic',
+  engineer: 'Eng',
   machineGun: 'MG',
   sniper: 'Snp',
   mortar: 'Mrt',
@@ -23,8 +26,12 @@ const PRODUCE_LABELS = {
   artillery: 'Arty',
 };
 
+const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
+
 const FACTION_ROSTER_LABELS = {
   infantry: 'Infantry',
+  medic: 'Medic section',
+  engineer: 'Engineer section',
   machineGun: 'MG team',
   sniper: 'Sniper',
   mortar: 'Mortar',
@@ -41,10 +48,14 @@ export class UIManager {
     this.callbacks = callbacks;
     this.selectedFaction = null;
     this.selectedMap = null;
+    this.selectedMapSize = 'small';
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
+    this._hudTowerDefense = false;
+    this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.render();
+    this._syncFieldIconToggle();
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -73,7 +84,7 @@ export class UIManager {
       <div id="screen-mode" class="screen interactive hidden">
         <div class="title-block">
           <h1>Game Mode</h1>
-          <p>Campaign, Clear Defenses, Training Ground, or Assault & Defend.</p>
+          <p>Campaign, Last Stand, Clear Defenses, Training Ground, or Assault & Defend.</p>
         </div>
         <div class="panel">
           <h2>Select Mode</h2>
@@ -123,6 +134,10 @@ export class UIManager {
         <div class="panel">
           <h2>Choose Map</h2>
           <div class="map-grid" id="map-grid"></div>
+          <div class="map-size-block" id="map-size-block">
+            <h2>Map Size</h2>
+            <div class="map-size-grid" id="map-size-grid"></div>
+          </div>
           <div class="difficulty-block" id="difficulty-block">
             <h2>AI Difficulty</h2>
             <div class="difficulty-grid" id="difficulty-grid"></div>
@@ -151,6 +166,9 @@ export class UIManager {
             <div class="td-banner hidden" id="td-banner">
               <span class="td-wave" id="td-wave-label">Wave 0 / 12</span>
               <span class="td-phase" id="td-phase-label">Prepare defenses</span>
+            </div>
+            <div class="laststand-banner hidden" id="laststand-banner">
+              Last Stand — deploy your army, then fight to the last unit. No HQ or reinforcements.
             </div>
           </div>
           <div class="hud-top-right">
@@ -193,6 +211,16 @@ export class UIManager {
 
         <aside class="unit-roster interactive" id="unit-roster" aria-label="Your forces">
           <h3 class="unit-roster-title">Forces</h3>
+          <button
+            type="button"
+            class="unit-roster-toggle interactive"
+            id="btn-toggle-field-icons"
+            title="Show unit type icons above your forces on the battlefield"
+            aria-pressed="true"
+          >
+            <span class="unit-roster-toggle-icon" aria-hidden="true">${getUnitIconMarkup('infantry')}</span>
+            <span class="unit-roster-toggle-label">Field icons</span>
+          </button>
           <div class="unit-roster-list" id="unit-roster-list"></div>
         </aside>
 
@@ -208,8 +236,13 @@ export class UIManager {
               <button type="button" class="btn btn-target interactive" id="btn-engage-target">Engage target</button>
               <p class="target-offer-hint">Or left-click the highlighted enemy</p>
             </div>
+            <div class="fire-mission-actions hidden" id="fire-mission-actions">
+              <button type="button" class="btn btn-cancel-fire interactive" id="btn-cancel-fire-missions">
+                Cancel fire missions
+              </button>
+            </div>
           </div>
-          <div class="production-panel interactive" id="production-panel">
+          <div class="production-panel interactive hidden" id="production-panel">
             <h3>Reinforcements</h3>
             <div class="produce-btns" id="produce-btns"></div>
             <p class="queue-text" id="queue-text">Queue empty</p>
@@ -228,7 +261,7 @@ export class UIManager {
             <div class="firesupport-btns" id="firesupport-btns"></div>
             <p class="firesupport-hint" id="firesupport-hint">Off-map assets on cooldown</p>
           </div>
-          <p class="hud-hint" id="hud-hint">LMB select · Shift+LMB fire mission · RMB move/attack · Alt+click destroy cover</p>
+          <p class="hud-hint" id="hud-hint">LMB select · Shift+LMB fire at ground or cover · RMB move/attack</p>
           <button type="button" class="btn-guide-hud interactive" id="btn-guide-hud">Field Manual</button>
         </div>
       </div>
@@ -263,6 +296,7 @@ export class UIManager {
     this.renderAssaultRoles();
     this.renderFactions();
     this.renderMaps();
+    this.renderMapSizes();
     this.renderDifficulties();
     const guideEl = this.root.querySelector('#guide-content');
     if (guideEl) guideEl.innerHTML = renderGameGuideHtml();
@@ -351,6 +385,20 @@ export class UIManager {
     ).join('');
   }
 
+  renderMapSizes() {
+    const grid = this.root.querySelector('#map-size-grid');
+    if (!grid) return;
+    grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
+      const selected = preset.id === this.selectedMapSize;
+      return `
+      <button type="button" class="card-btn interactive map-size-card${selected ? ' selected' : ''}" data-id="${preset.id}">
+        <span class="name">${preset.name}</span>
+        <span class="meta">${preset.subtitle}</span>
+      </button>
+    `;
+    }).join('');
+  }
+
   bind() {
     const menuScreens = new Set(['title', 'mode', 'assault-role', 'faction', 'map']);
 
@@ -367,6 +415,12 @@ export class UIManager {
     this.root.querySelector('#btn-start').onclick = () => show('mode');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
     this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
+    this.root.querySelector('#btn-toggle-field-icons')?.addEventListener('click', () => {
+      this.setUnitFieldIconsEnabled(!this.showUnitFieldIcons);
+      if (this.callbacks.onToggleUnitFieldIcons) {
+        this.callbacks.onToggleUnitFieldIcons(this.showUnitFieldIcons);
+      }
+    });
     this.root.querySelector('#btn-guide-close').onclick = () => this.closeGuide();
     this.root.querySelector('#btn-back-title').onclick = () => show('title');
 
@@ -415,8 +469,17 @@ export class UIManager {
 
     this.root.querySelector('#btn-to-maps').onclick = () => {
       this.updateDifficultyPanel();
+      this.renderMapSizes();
       show('map');
     };
+
+    this.root.querySelector('#map-size-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.map-size-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.map-size-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedMapSize = btn.dataset.id;
+    });
 
     this.root.querySelector('#difficulty-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.difficulty-card');
@@ -442,6 +505,7 @@ export class UIManager {
         this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
+          mapSize: this.selectedMapSize ?? 'small',
         });
       }
     };
@@ -464,6 +528,10 @@ export class UIManager {
     this.root.querySelector('#btn-engage-target').onclick = () => {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
+
+    this.root.querySelector('#btn-cancel-fire-missions')?.addEventListener('click', () => {
+      this.callbacks.onCancelFireMissions?.();
+    });
 
     this.root.querySelector('#btn-surrender')?.addEventListener('click', () => {
       const tutorial = !this.root.querySelector('#tutorial-banner')?.classList.contains('hidden');
@@ -504,12 +572,15 @@ export class UIManager {
     this.root.querySelector('#hud').classList.remove('hidden');
     this.root.querySelector('#hud-faction').textContent = faction.name;
     const diffLabel = options.difficulty ? ` · ${options.difficulty.name}` : '';
-    this.root.querySelector('#hud-map').textContent = `${mapDef.name}${diffLabel}`;
+    this.root.querySelector('#hud-map').textContent = `${formatMapHudLabel(mapDef)}${diffLabel}`;
 
     const tutorial = gameMode === 'tutorial';
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance';
     const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
+    const lastStand = gameMode === 'lastStand' || options.lastStand;
+    this._hudLastStand = lastStand;
+    this._hudLastStandDeploy = lastStand;
     const banner = this.root.querySelector('#tutorial-banner');
     if (banner) banner.classList.toggle('hidden', !tutorial);
 
@@ -520,11 +591,15 @@ export class UIManager {
     if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
-    this.root.querySelector('#production-panel')?.classList.toggle('hidden', towerDefense);
-    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense);
+    this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
+    this._hudTowerDefense = towerDefense;
+    this._setProductionPanelVisible(lastStand);
+    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense || lastStand);
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense);
-    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense);
+    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
+    const prodTitle = this.root.querySelector('#production-panel h3');
+    if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
 
     const surrenderBtn = this.root.querySelector('#btn-surrender');
     if (surrenderBtn) {
@@ -548,9 +623,12 @@ export class UIManager {
       } else if (towerDefense) {
         this._defaultHudHint =
           'Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves';
+      } else if (lastStand) {
+        this._defaultHudHint =
+          'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
       } else {
         this._defaultHudHint =
-          'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Alt+click cover';
+          'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Shift+LMB fire ground/cover';
       }
       hint.textContent = this._defaultHudHint;
       hint.classList.remove('hud-hint-opening');
@@ -572,6 +650,7 @@ export class UIManager {
         const short = PRODUCE_LABELS[type] ?? type;
         return `
         <button class="produce-btn interactive" data-type="${type}" title="${def.name} — ${def.designation}">
+          <span class="produce-icon" aria-hidden="true">${getUnitIconMarkup(type)}</span>
           <span class="produce-name">${short}</span>
           <span class="produce-cost">${def.cost}</span>
         </button>
@@ -588,6 +667,32 @@ export class UIManager {
     this.renderFireSupportButtons();
     this.renderDefenseButtons();
     this._bindUnitRoster();
+    this._syncFieldIconToggle();
+  }
+
+  setUnitFieldIconsEnabled(on) {
+    this.showUnitFieldIcons = !!on;
+    localStorage.setItem(UNIT_FIELD_ICONS_KEY, on ? '1' : '0');
+    this._syncFieldIconToggle();
+  }
+
+  _syncFieldIconToggle() {
+    const btn = this.root.querySelector('#btn-toggle-field-icons');
+    if (!btn) return;
+    btn.classList.toggle('off', !this.showUnitFieldIcons);
+    btn.setAttribute('aria-pressed', this.showUnitFieldIcons ? 'true' : 'false');
+    btn.title = this.showUnitFieldIcons
+      ? 'Hide unit type icons above your forces'
+      : 'Show unit type icons above your forces';
+  }
+
+  _setProductionPanelVisible(visible) {
+    const panel = this.root.querySelector('#production-panel');
+    if (!panel) return;
+    const show = this._hudLastStand
+      ? this._hudLastStandDeploy
+      : !this._hudTowerDefense && visible;
+    panel.classList.toggle('hidden', !show);
   }
 
   renderDefenseButtons() {
@@ -910,6 +1015,77 @@ export class UIManager {
     }
   }
 
+  updateLastStandDeploy(game) {
+    if (!game?.lastStand) return;
+
+    const banner = this.root.querySelector('#opening-countdown');
+    const title = this.root.querySelector('#opening-countdown-title');
+    const value = this.root.querySelector('#opening-countdown-value');
+    const sub = this.root.querySelector('#opening-countdown-sub');
+    const fill = this.root.querySelector('#opening-countdown-fill');
+    const launchBtn = this.root.querySelector('#btn-launch-battle-now');
+    const qEl = this.root.querySelector('#queue-text');
+    const playerCount = game._playerAlive?.length ?? 0;
+    const enemyCount = game._enemyAlive?.length ?? 0;
+    const supplies = game.cheatMode ? '∞' : game.lastStand.supplies.player;
+
+    if (game.lastStand.phase !== 'deploy') {
+      banner?.classList.add('hidden');
+      launchBtn?.classList.add('hidden');
+      this._hudLastStandDeploy = false;
+      this._setProductionPanelVisible(false);
+      const hint = this.root.querySelector('#hud-hint');
+      if (hint) {
+        hint.textContent = 'Last Stand — no reinforcements · wipe out all enemy units to win';
+        hint.classList.remove('hud-hint-opening');
+      }
+      return;
+    }
+
+    this._hudLastStandDeploy = true;
+    this._setProductionPanelVisible(true);
+    banner?.classList.remove('hidden');
+    if (title) title.textContent = 'Deploy your forces';
+    if (value) value.textContent = String(playerCount);
+    if (sub) {
+      sub.textContent = `${supplies} supplies left · ${enemyCount} enemy units placed · Esc cancels selection`;
+    }
+    if (fill) fill.style.width = '100%';
+    if (launchBtn) {
+      launchBtn.textContent = 'Begin Battle';
+      launchBtn.classList.remove('hidden');
+      launchBtn.disabled = playerCount === 0 || !this.callbacks.onLaunchBattleNow;
+    }
+    if (qEl) {
+      const pending = game.lastStand.pendingType;
+      qEl.textContent = pending
+        ? `Placing ${game.playerFaction.units[pending]?.name ?? pending} — click the map`
+        : 'Select a unit type, then click the map to deploy';
+    }
+
+    const resources = game.cheatMode ? '∞' : Math.floor(game.lastStand.supplies.player);
+    const resEl = this.root.querySelector('#hud-resources');
+    if (resEl) resEl.textContent = String(resources);
+
+    this.root.querySelectorAll('.produce-btn').forEach((btn) => {
+      const type = btn.dataset.type;
+      const def = game.playerFaction?.units?.[type];
+      if (!def) return;
+      const can =
+        game.cheatMode ||
+        game.lastStand.supplies.player >= def.cost;
+      btn.disabled = !can;
+      btn.classList.toggle('armed', game.lastStand.pendingType === type);
+      btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
+    });
+
+    const hint = this.root.querySelector('#hud-hint');
+    if (hint) {
+      hint.textContent = this._defaultHudHint ?? hint.textContent;
+      hint.classList.add('hud-hint-opening');
+    }
+  }
+
   updateDeployCountdown(phase) {
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
@@ -1042,6 +1218,10 @@ export class UIManager {
 
   updateProduction(game) {
     if (!game?.playerFaction) return;
+    if (game.lastStand) {
+      this.updateLastStandDeploy(game);
+      return;
+    }
     const resources = Math.floor(game.resources.player);
     const progress = game.production.getQueueProgress('player');
     const queue = game.production.getQueue('player');
@@ -1075,11 +1255,25 @@ export class UIManager {
     });
   }
 
+  updateFireMissionControls(activeCount = 0) {
+    const wrap = this.root.querySelector('#fire-mission-actions');
+    const btn = this.root.querySelector('#btn-cancel-fire-missions');
+    if (!wrap || !btn) return;
+    const n = Math.max(0, activeCount | 0);
+    wrap.classList.toggle('hidden', n === 0);
+    btn.textContent = n === 1 ? 'Cancel fire mission' : `Cancel fire missions (${n})`;
+  }
+
   updateSelection(units, hoverTarget = null, hq = null) {
     const body = this.root.querySelector('#selection-body');
     const offer = this.root.querySelector('#target-offer');
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
+
+    const showProduction =
+      (this._hudLastStand && this._hudLastStandDeploy) ||
+      (hq && !hq.dead && hq.team === 'player');
+    this._setProductionPanelVisible(showProduction);
 
     const targetName = hoverTarget && !hoverTarget.dead ? TargetIndicators.getTargetLabel(hoverTarget) : null;
     if (offer) {
@@ -1118,11 +1312,23 @@ export class UIManager {
           : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
         : '';
       const cover = getCoverStatus(u);
-      const coverBlock = cover.inCover
-        ? `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`
-        : u.def?.type === 'infantry' || u.def?.type === 'machineGun' || u.def?.type === 'sniper'
-          ? '<p class="unit-cover-status exposed"><strong>Exposed</strong> — no cover bonus. Move into sandbags, hedges, or fighting pits.</p>'
-          : '';
+      let coverBlock = '';
+      if (cover.inCover) {
+        coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
+      } else if (u.def?.type === 'engineer') {
+        coverBlock =
+          '<p class="unit-support-status">Support — repairs vehicles within ~16 m; nearby armor retreats less often.</p>';
+      } else if (u.def?.type === 'medic') {
+        coverBlock =
+          '<p class="unit-support-status">Support — heals infantry within ~14 m; nearby troops retreat less often.</p>';
+      } else if (
+        u.def?.type === 'infantry' ||
+        u.def?.type === 'machineGun' ||
+        u.def?.type === 'sniper'
+      ) {
+        coverBlock =
+          '<p class="unit-cover-status exposed"><strong>Exposed</strong> — no cover bonus. Move into sandbags, hedges, or fighting pits.</p>';
+      }
       body.innerHTML = `
         <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}</h3>
         <p>${u.def.designation} — HP ${Math.ceil(u.hp)}/${u.maxHp} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>

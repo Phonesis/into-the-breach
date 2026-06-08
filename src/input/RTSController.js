@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { createGroundTarget, isPointInRange } from '../game/Targeting.js';
+import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
-import { canGroundFire } from './BattleCursor.js';
+import { canManualFireOrder } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 
 const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -20,11 +20,14 @@ export class RTSController {
     getPlayerTeam,
     getPendingFireSupport,
     getPendingDefensePlacement,
+    getPendingLastStandDeploy,
     getIsTowerDefense,
     getDeployZoneActive,
+    getShiftHeld,
     clampDeployPoint,
     onFireSupportTarget,
     onDefensePlacement,
+    onLastStandPlacement,
     onSelectionChange,
     onHoverTarget,
     onOrder,
@@ -41,11 +44,14 @@ export class RTSController {
     this.getPlayerTeam = getPlayerTeam;
     this.getPendingFireSupport = getPendingFireSupport;
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
+    this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
     this.getIsTowerDefense = getIsTowerDefense ?? (() => false);
     this.getDeployZoneActive = getDeployZoneActive ?? (() => false);
+    this.getShiftHeld = getShiftHeld ?? (() => this._modifierShift);
     this.clampDeployPoint = clampDeployPoint ?? ((x, z) => ({ x, z }));
     this.onFireSupportTarget = onFireSupportTarget;
     this.onDefensePlacement = onDefensePlacement;
+    this.onLastStandPlacement = onLastStandPlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
@@ -57,8 +63,6 @@ export class RTSController {
     this.enabled = false;
     this._lastOrderAt = 0;
     this.hoveredTarget = null;
-    /** Alt held on last pointer event — required to target trees/hedges/cover for attack. */
-    this._modifierAlt = false;
     this._modifierShift = false;
     this._lastHoverRayAt = 0;
 
@@ -102,16 +106,20 @@ export class RTSController {
       this._modifierShift = shift;
       this.onBattleCursorChange?.();
     }
-    this._modifierAlt = !!e.altKey;
   }
 
   isShiftHeld() {
-    return this._modifierShift;
+    return this._modifierShift || this.getShiftHeld();
   }
 
   _unitPickMesh(unit) {
     if (!unit?.mesh) return null;
     return unit.mesh.getObjectByName?.('selectionHitbox') ?? unit.mesh;
+  }
+
+  _hqPickMesh(hq) {
+    if (!hq?.mesh) return null;
+    return hq.mesh.getObjectByName?.('hqPickBox') ?? hq.mesh;
   }
 
   _collectUnitPickMeshes({ teamFilter = null, enemyOnly = false } = {}) {
@@ -135,22 +143,7 @@ export class RTSController {
   }
 
   raycastGround() {
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const terrain = this.getTerrainMesh();
-    if (terrain) {
-      const hits = this.raycaster.intersectObject(terrain, true);
-      if (hits[0]) return this._snapGroundPoint(hits[0].point);
-    }
-    const hits = this.raycaster.intersectObjects(this.scene.children, true);
-    for (const hit of hits) {
-      if (hit.object.name === 'terrain' || hit.object.geometry?.type === 'PlaneGeometry') {
-        return this._snapGroundPoint(hit.point);
-      }
-    }
-    if (this.raycaster.ray.intersectPlane(_groundPlane, _groundHit)) {
-      return this._snapGroundPoint(_groundHit);
-    }
-    return null;
+    return this._raycastGroundHit()?.point ?? null;
   }
 
   _snapGroundPoint(point) {
@@ -208,7 +201,7 @@ export class RTSController {
     const player = this.getPlayerTeam();
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hqs = this.getHqs().filter((h) => !h.dead && h.team === player);
-    const meshes = hqs.map((h) => h.mesh);
+    const meshes = hqs.map((h) => this._hqPickMesh(h)).filter(Boolean);
     const hits = this.raycaster.intersectObjects(meshes, false);
     for (const hit of hits) {
       let obj = hit.object;
@@ -223,7 +216,7 @@ export class RTSController {
     const player = this.getPlayerTeam();
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hqs = this.getHqs().filter((h) => !h.dead && h.team !== player);
-    const meshes = hqs.map((h) => h.mesh);
+    const meshes = hqs.map((h) => this._hqPickMesh(h)).filter(Boolean);
     const hits = this.raycaster.intersectObjects(meshes, false);
     for (const hit of hits) {
       let obj = hit.object;
@@ -234,13 +227,35 @@ export class RTSController {
     return null;
   }
 
-  raycastSceneryTarget() {
+  _raycastGroundHit() {
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const terrain = this.getTerrainMesh();
+    if (terrain) {
+      const hits = this.raycaster.intersectObject(terrain, true);
+      if (hits[0]) {
+        return { point: this._snapGroundPoint(hits[0].point), distance: hits[0].distance };
+      }
+    }
+    const hits = this.raycaster.intersectObjects(this.scene.children, true);
+    for (const hit of hits) {
+      if (hit.object.name === 'terrain' || hit.object.geometry?.type === 'PlaneGeometry') {
+        return { point: this._snapGroundPoint(hit.point), distance: hit.distance };
+      }
+    }
+    if (this.raycaster.ray.intersectPlane(_groundPlane, _groundHit)) {
+      const origin = this.raycaster.ray.origin;
+      const dist = origin.distanceTo(_groundHit);
+      return { point: this._snapGroundPoint(_groundHit), distance: dist };
+    }
+    return null;
+  }
+
+  _raycastSceneryHit() {
     const scenery = this.getScenery();
     if (!scenery) return null;
     const meshes = scenery.getMeshes();
     if (!meshes.length) return null;
 
-    this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(meshes, true);
     let bestEntry = null;
     let bestDist = Infinity;
@@ -255,28 +270,43 @@ export class RTSController {
       }
     }
     if (!bestEntry) return null;
-    return wrapSceneryTarget(bestEntry, scenery);
+    return { target: wrapSceneryTarget(bestEntry, scenery), distance: bestDist };
   }
 
   /**
-   * Enemy unit or HQ under cursor. Scenery/cover only when Alt is held
-   * so trees and hedges are not picked ahead of combat targets.
+   * Pick cover vs open ground for Shift+LMB — scenery only when it is closer than the terrain hit.
    */
+  _pickShiftFireTarget() {
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const groundHit = this._raycastGroundHit();
+    const sceneryHit = this._raycastSceneryHit();
+    const sceneryBias = 0.6;
+
+    if (sceneryHit && groundHit && sceneryHit.distance < groundHit.distance - sceneryBias) {
+      return { kind: 'scenery', target: sceneryHit.target };
+    }
+    if (groundHit) return { kind: 'ground', point: groundHit.point };
+    if (sceneryHit) return { kind: 'scenery', target: sceneryHit.target };
+    return null;
+  }
+
+  raycastSceneryTarget() {
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this._raycastSceneryHit()?.target ?? null;
+  }
+
+  /** Enemy unit or HQ under cursor (cover/scenery uses Shift+LMB manual fire). */
   raycastAttackTarget() {
     const unit = this.raycastEnemyUnit();
     const hq = this.raycastEnemyHQ();
 
     const combat = [];
-    if (unit) combat.push({ target: unit, dist: this._raycastHitDistance(unit.mesh) });
-    if (hq) combat.push({ target: hq, dist: this._raycastHitDistance(hq.mesh) });
+    if (unit) combat.push({ target: unit, dist: this._raycastHitDistance(this._unitPickMesh(unit)) });
+    if (hq) combat.push({ target: hq, dist: this._raycastHitDistance(this._hqPickMesh(hq)) });
 
     if (combat.length) {
       combat.sort((a, b) => a.dist - b.dist);
       return combat[0].target;
-    }
-
-    if (this._modifierAlt) {
-      return this.raycastSceneryTarget();
     }
 
     return null;
@@ -289,7 +319,7 @@ export class RTSController {
     if (unit && hq) {
       this.raycaster.setFromCamera(this.pointer, this.camera);
       const unitHits = this.raycaster.intersectObject(this._unitPickMesh(unit), false);
-      const hqHits = this.raycaster.intersectObject(hq.mesh, false);
+      const hqHits = this.raycaster.intersectObject(this._hqPickMesh(hq), false);
       const ud = unitHits[0]?.distance ?? Infinity;
       const hd = hqHits[0]?.distance ?? Infinity;
       return ud <= hd ? unit : hq;
@@ -304,7 +334,12 @@ export class RTSController {
   }
 
   updateHoverTarget() {
-    if (!this.enabled || this.getPendingFireSupport?.() || this.getPendingDefensePlacement?.()) {
+    if (
+      !this.enabled ||
+      this.getPendingFireSupport?.() ||
+      this.getPendingDefensePlacement?.() ||
+      this.getPendingLastStandDeploy?.()
+    ) {
       this.setHoveredTarget(null);
       return;
     }
@@ -315,40 +350,76 @@ export class RTSController {
     const now = performance.now();
     if (now - this._lastHoverRayAt < 50) return;
     this._lastHoverRayAt = now;
+    if (this._modifierShift) {
+      const pick = this._pickShiftFireTarget();
+      if (pick?.kind === 'scenery') {
+        this.setHoveredTarget(pick.target);
+        return;
+      }
+    }
     this.setHoveredTarget(this.raycastAttackTarget());
   }
 
-  issueAttackOn(target) {
+  issueAttackOn(target, { inRangeOnly = false } = {}) {
     if (!this.enabled || !target || target.dead) return false;
     if (this.getDeployZoneActive()) return false;
 
     const selected = this.getSelectedPlayerUnits();
     if (selected.length === 0) return false;
 
-    this._lastOrderAt = Date.now();
-    for (const u of selected) u.setAttackOrder(target);
-    if (this.onOrder) this.onOrder('attack', selected);
-    return true;
-  }
-
-  /** Shift+LMB ground bombardment (in range only; cleared on move). */
-  issueGroundFireAt(point) {
-    if (!this.enabled) return false;
-    if (this.getDeployZoneActive()) return false;
-
-    const selected = this.getSelectedPlayerUnits();
-    if (selected.length === 0) return false;
-
-    this._lastOrderAt = Date.now();
-    const groundTarget = createGroundTarget(point.x, point.z);
     const fireUnits = [];
     for (const u of selected) {
-      if (!canGroundFire(u) || !isPointInRange(u, point)) continue;
-      u.setGroundAttack(groundTarget);
+      if (inRangeOnly) {
+        if (!canManualFireOrder(u) || !isInRange(u, target)) continue;
+      }
+      u.setAttackOrder(target);
       fireUnits.push(u);
     }
     if (fireUnits.length === 0) return false;
-    if (this.onOrder) this.onOrder('fire', fireUnits);
+
+    this._lastOrderAt = Date.now();
+    if (this.onOrder) this.onOrder('attack', fireUnits);
+    return true;
+  }
+
+  /** Shift+LMB ground fire — units move into range if needed; cleared on RMB move. */
+  issueGroundFireAt(point) {
+    if (!this.enabled) return false;
+
+    const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
+    if (selected.length === 0) return false;
+
+    this._lastOrderAt = Date.now();
+    for (const u of selected) {
+      u.setGroundAttack(createGroundTarget(point.x, point.z));
+    }
+    if (this.onOrder) this.onOrder('fire', selected);
+    return true;
+  }
+
+  /** Shift+LMB — attack cover under cursor, otherwise fire at open ground. */
+  issueShiftManualFire() {
+    if (!this.enabled) return false;
+
+    const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
+    if (selected.length === 0) return false;
+
+    const pick = this._pickShiftFireTarget();
+    if (!pick) return false;
+
+    this._lastOrderAt = Date.now();
+    if (pick.kind === 'scenery') {
+      for (const u of selected) {
+        u.setAttackOrder(pick.target);
+      }
+      if (this.onOrder) this.onOrder('attack', selected);
+      return true;
+    }
+
+    for (const u of selected) {
+      u.setGroundAttack(createGroundTarget(pick.point.x, pick.point.z));
+    }
+    if (this.onOrder) this.onOrder('fire', selected);
     return true;
   }
 
@@ -362,7 +433,8 @@ export class RTSController {
 
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
-    if (pendingFs || pendingDef) {
+    const pendingDeploy = this.getPendingLastStandDeploy?.();
+    if (pendingFs || pendingDef || pendingDeploy) {
       return;
     }
 
@@ -375,7 +447,8 @@ export class RTSController {
     this.setPointerFromEvent(e);
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
-    if (pendingFs || pendingDef) {
+    const pendingDeploy = this.getPendingLastStandDeploy?.();
+    if (pendingFs || pendingDef || pendingDeploy) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -401,7 +474,8 @@ export class RTSController {
 
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
-    if (pendingFs || pendingDef) {
+    const pendingDeploy = this.getPendingLastStandDeploy?.();
+    if (pendingFs || pendingDef || pendingDeploy) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -409,6 +483,9 @@ export class RTSController {
         }
         if (pendingDef && this.onDefensePlacement) {
           this.onDefensePlacement('place', ground.x, ground.z);
+        }
+        if (pendingDeploy && this.onLastStandPlacement) {
+          this.onLastStandPlacement('place', ground.x, ground.z);
         }
       }
       this.dragStart = null;
@@ -453,18 +530,19 @@ export class RTSController {
       this._notifySelection(units, null);
     } else {
       const selectedBefore = units.filter((u) => u.selected && !u.dead);
-      const enemyTarget = selectedBefore.length > 0 ? this.raycastAttackTarget() : null;
-      if (enemyTarget) {
-        this.issueAttackOn(enemyTarget);
+      const shiftHeld = e.shiftKey || this.isShiftHeld();
+      const shiftManualFire =
+        shiftHeld &&
+        selectedBefore.length > 0 &&
+        selectedBefore.some((u) => canManualFireOrder(u));
+
+      if (shiftManualFire) {
+        this.issueShiftManualFire();
         this._notifySelection(units);
       } else {
-        const ground = this.raycastGround();
-        const shiftGroundFire =
-          e.shiftKey &&
-          selectedBefore.length > 0 &&
-          selectedBefore.some((u) => canGroundFire(u)) &&
-          ground;
-        if (shiftGroundFire && this.issueGroundFireAt({ x: ground.x, z: ground.z })) {
+        const enemyTarget = selectedBefore.length > 0 ? this.raycastAttackTarget() : null;
+        if (enemyTarget) {
+          this.issueAttackOn(enemyTarget);
           this._notifySelection(units);
         } else {
           const playerHq = this.raycastPlayerHQ();

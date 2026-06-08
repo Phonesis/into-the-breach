@@ -24,7 +24,7 @@ const SAMPLE_URLS = {
 };
 
 const INFANTRY_DEATH_COUNT = 8;
-const INFANTRY_TYPES = new Set(['infantry', 'machineGun', 'sniper']);
+const INFANTRY_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer', 'mortar']);
 
 /** Per-type gain on top of distance falloff (explosion buffer). */
 const EXPLOSION_IMPACT_GAIN = {

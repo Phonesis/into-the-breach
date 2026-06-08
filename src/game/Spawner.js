@@ -1,7 +1,10 @@
 import { Unit } from '../units/Unit.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
 
 const PLAYER_ARMY = [
   { type: 'infantry', count: 3, spread: 6 },
+  { type: 'medic', count: 1, spread: 5 },
+  { type: 'engineer', count: 1, spread: 5 },
   { type: 'machineGun', count: 1, spread: 5 },
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
@@ -13,6 +16,8 @@ const PLAYER_ARMY = [
 
 const ENEMY_ARMY = [
   { type: 'infantry', count: 3, spread: 6 },
+  { type: 'medic', count: 1, spread: 5 },
+  { type: 'engineer', count: 1, spread: 5 },
   { type: 'machineGun', count: 1, spread: 5 },
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
@@ -46,6 +51,7 @@ const ASSAULT_DEFENDER_ARMY = [
 
 const TUTORIAL_ARMY = [
   { type: 'infantry', count: 3, spread: 6 },
+  { type: 'engineer', count: 1, spread: 5 },
   { type: 'machineGun', count: 1, spread: 5 },
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
@@ -170,4 +176,18 @@ export function spawnArmy({
   }
 
   return units;
+}
+
+export function spawnUnitAt({ def, faction, team, x, z, scene, mapDef = null }) {
+  const unit = new Unit({
+    def,
+    faction,
+    team,
+    position: { x, z },
+    scene,
+  });
+  if (mapDef) {
+    unit.position.y = sampleTerrainHeight(x, z, mapDef);
+  }
+  return unit;
 }

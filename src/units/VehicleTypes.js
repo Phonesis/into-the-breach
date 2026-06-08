@@ -2,6 +2,32 @@
 
 export const TANK_TYPES = new Set(['tank', 'superHeavyTank']);
 
+/** Infantry-scale units that medics can treat (excludes towed guns and vehicles). */
+export const FOOT_SOLDIER_TYPES = new Set([
+  'infantry',
+  'machineGun',
+  'sniper',
+  'mortar',
+  'medic',
+]);
+
+export function isFootSoldier(type) {
+  return FOOT_SOLDIER_TYPES.has(type);
+}
+
+/** Mechanical units engineers can repair (tanks, guns, and wheeled armor). */
+export const VEHICLE_UNIT_TYPES = new Set([
+  'tank',
+  'superHeavyTank',
+  'armoredCar',
+  'artillery',
+  'antiTankGun',
+]);
+
+export function isVehicleUnit(type) {
+  return VEHICLE_UNIT_TYPES.has(type);
+}
+
 export function isTankType(type) {
   return TANK_TYPES.has(type);
 }

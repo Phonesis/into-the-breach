@@ -9,7 +9,8 @@ import {
 
 export function buildTerrain(mapDef, scene, scenery = null) {
   const size = mapDef.size;
-  const segments = 128;
+  const sizeScale = mapDef.sizeScale ?? 1;
+  const segments = Math.min(256, Math.round(128 * Math.sqrt(sizeScale)));
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
@@ -117,12 +118,17 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     envMapIntensity: 0.4,
   });
 
-  const count = mapDef.terrain === 'desert' ? 22 : mapDef.terrain === 'bocage' ? 75 : 55;
+  const decorScale = mapDef.sizeScale ?? 1;
+  const baseCount = mapDef.terrain === 'desert' ? 22 : mapDef.terrain === 'bocage' ? 75 : 55;
+  const count = Math.round(baseCount * decorScale * (decorScale > 1 ? 1.15 : 1));
+
+  const centerExclusionX = 14 * decorScale;
+  const centerExclusionZ = 10 * decorScale;
 
   for (let i = 0; i < count; i++) {
     const x = (Math.random() - 0.5) * size * 0.82;
     const z = (Math.random() - 0.5) * size * 0.82;
-    if (Math.abs(x) < 14 && Math.abs(z) < 10) continue;
+    if (Math.abs(x) < centerExclusionX && Math.abs(z) < centerExclusionZ) continue;
 
     const y = heightAt(x, z, mapDef, seed);
 
@@ -159,7 +165,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     }
   }
 
-  const bushCount = mapDef.terrain === 'bocage' ? 40 : 28;
+  const bushCount = Math.round((mapDef.terrain === 'bocage' ? 40 : 28) * decorScale * (decorScale > 1 ? 1.1 : 1));
   for (let i = 0; i < bushCount; i++) {
     const x = (Math.random() - 0.5) * size * 0.78;
     const z = (Math.random() - 0.5) * size * 0.78;

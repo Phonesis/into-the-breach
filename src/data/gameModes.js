@@ -26,7 +26,16 @@ export const GAME_MODES = {
     subtitle:
       'Hold the frontline against escalating waves. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.',
   },
+  lastStand: {
+    id: 'lastStand',
+    name: 'Last Stand',
+    subtitle:
+      'Deploy your entire army anywhere on the map (2,000 supplies). No HQ or reinforcements — fight to the last unit.',
+  },
 };
+
+/** Deployment budget per side in Last Stand mode. */
+export const LAST_STAND_SUPPLIES = 2000;
 
 export const GAME_MODE_LIST = Object.values(GAME_MODES);
 
@@ -66,6 +75,8 @@ export const ASSAULT_ENEMY_RESOURCES = 120;
 /** Unit keys shown in production UI (order matters). */
 export const UNIT_TYPE_ORDER = [
   'infantry',
+  'medic',
+  'engineer',
   'machineGun',
   'sniper',
   'mortar',
@@ -90,6 +101,10 @@ export function isClearanceMode(gameMode) {
 
 export function isTowerDefenseMode(gameMode) {
   return gameMode === 'towerDefense';
+}
+
+export function isLastStandMode(gameMode) {
+  return gameMode === 'lastStand';
 }
 
 export { TD_STARTING_POINTS } from './towerDefense.js';

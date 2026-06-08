@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { applyUnitDeathVisual, createUnitMesh, setSelectionRing } from './UnitMeshes.js';
 import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
+import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { distanceBetween, getStandoffPosition } from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
@@ -32,6 +33,7 @@ export class Unit {
     this._mgVolley = 0;
     this.retreating = false;
     this.retreatMarker = null;
+    this.fieldIcon = null;
     this.defensiveHold = null;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
@@ -80,9 +82,12 @@ export class Unit {
   }
 
   setGroundAttack(groundTarget) {
+    clearRetreat(this);
     this.attackOrder = groundTarget;
     this.target = groundTarget;
     this._chasingAttack = false;
+    this._userMoveOrder = false;
+    this._movePath = null;
     this.moveTarget = null;
   }
 
@@ -147,6 +152,7 @@ export class Unit {
   dispose(scene) {
     removeRetreatMarker(this);
     removeCoverMarker(this);
+    removeFieldIcon(this);
     scene.remove(this.mesh);
     this.mesh.traverse((child) => {
       if (child.geometry) child.geometry.dispose();

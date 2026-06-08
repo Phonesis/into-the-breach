@@ -1,0 +1,79 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: United States
+          - generic: Normandy · Easy
+          - generic: Last Stand — deploy your army, then fight to the last unit. No HQ or reinforcements.
+        - generic:
+          - button "Surrender" [ref=e213] [cursor=pointer]
+          - generic:
+            - generic: Supplies (+0/3 pts)
+            - text: "10000"
+          - generic: "Army: —"
+      - generic [ref=e214]:
+        - paragraph [ref=e215]: Deploy your forces
+        - paragraph [ref=e216]: "0"
+        - paragraph [ref=e217]: 10000 supplies left · 59 enemy units placed · Esc cancels selection
+        - button "Begin Battle" [disabled] [ref=e220]
+      - complementary "Your forces" [ref=e221]:
+        - heading "Forces" [level=3] [ref=e222]
+        - button "Field icons" [pressed] [ref=e223] [cursor=pointer]:
+          - img [ref=e225]
+          - generic [ref=e230]: Field icons
+        - paragraph [ref=e232]: No units in the field
+      - generic:
+        - generic [ref=e234]:
+          - heading "No selection" [level=3] [ref=e235]
+          - paragraph [ref=e236]: Click a unit in Forces or on the battlefield to select.
+        - generic [ref=e237]:
+          - heading "Deployment" [level=3] [ref=e238]
+          - generic [ref=e239]:
+            - button "Inf ⚙ 50" [ref=e240] [cursor=pointer]:
+              - img [ref=e242]
+              - generic [ref=e247]: Inf
+              - generic [ref=e248]: ⚙ 50
+            - button "Medic ⚙ 55" [ref=e249] [cursor=pointer]:
+              - img [ref=e251]
+              - generic [ref=e260]: Medic
+              - generic [ref=e261]: ⚙ 55
+            - button "Eng ⚙ 62" [ref=e262] [cursor=pointer]:
+              - img [ref=e264]
+              - generic [ref=e271]: Eng
+              - generic [ref=e272]: ⚙ 62
+            - button "MG ⚙ 65" [ref=e273] [cursor=pointer]:
+              - img [ref=e275]
+              - generic [ref=e283]: MG
+              - generic [ref=e284]: ⚙ 65
+            - button "Snp ⚙ 72" [ref=e285] [cursor=pointer]:
+              - img [ref=e287]
+              - generic [ref=e294]: Snp
+              - generic [ref=e295]: ⚙ 72
+            - button "Mrt ⚙ 75" [ref=e296] [cursor=pointer]:
+              - img [ref=e298]
+              - generic [ref=e304]: Mrt
+              - generic [ref=e305]: ⚙ 75
+            - button "AT ⚙ 80" [ref=e306] [cursor=pointer]:
+              - img [ref=e308]
+              - generic [ref=e319]: AT
+              - generic [ref=e320]: ⚙ 80
+            - button "AC ⚙ 88" [ref=e321] [cursor=pointer]:
+              - img [ref=e323]
+              - generic [ref=e333]: AC
+              - generic [ref=e334]: ⚙ 88
+            - button "Tk ⚙ 120" [ref=e335] [cursor=pointer]:
+              - img [ref=e337]
+              - generic [ref=e346]: Tk
+              - generic [ref=e347]: ⚙ 120
+            - button "Super Heavy Tank ⚙ 255" [ref=e348] [cursor=pointer]:
+              - img [ref=e350]
+              - generic [ref=e360]: Super Heavy Tank
+              - generic [ref=e361]: ⚙ 255
+            - button "Arty ⚙ 90" [ref=e362] [cursor=pointer]:
+              - img [ref=e364]
+              - generic [ref=e374]: Arty
+              - generic [ref=e375]: ⚙ 90
+          - paragraph [ref=e376]: Placing Rifle Squad — click the map
+        - paragraph: "Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready"
+        - button "Field Manual" [ref=e377] [cursor=pointer]

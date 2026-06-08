@@ -121,7 +121,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   const b = d.barrel;
   const barrel = new THREE.Mesh(
     new THREE.CylinderGeometry(b.r0, b.r1, b.len, 10),
-    detail
+    body
   );
   barrel.rotation.x = Math.PI / 2;
   barrel.position.set(b.offsetX ?? 0, b.y, b.z);
@@ -130,7 +130,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
 
   if (b.mantlet) {
     const [mw, mh, md] = b.mantletSize ?? [0.44, 0.3, 0.36];
-    addBox(group, new THREE.BoxGeometry(mw, mh, md), detail, {
+    addBox(group, new THREE.BoxGeometry(mw, mh, md), body, {
       y: b.y - 0.02,
       z: b.z - b.len * 0.32,
       part: 'mantlet',
@@ -146,7 +146,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     group.add(mb);
   }
 
-  const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.12, 8), detail);
+  const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.12, 8), body);
   cupola.position.set(0, t.y + t.h * 0.55, t.z - t.d * 0.15);
   group.add(cupola);
 
@@ -164,7 +164,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     const a = d.antenna;
     const mast = new THREE.Mesh(
       new THREE.CylinderGeometry(0.02, 0.025, a.h, 6),
-      detail
+      dark
     );
     mast.position.set(0, a.y + a.h * 0.5, a.z);
     group.add(mast);
@@ -237,7 +237,7 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   const b = d.barrel;
   const gun = new THREE.Mesh(
     new THREE.CylinderGeometry(b.r0, b.r1, b.len, 8),
-    detail
+    body
   );
   gun.rotation.x = Math.PI / 2;
   gun.position.set(b.offsetX ?? 0.22, b.y, b.z);
@@ -246,7 +246,7 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   if (d.secondaryGun) {
     const s = d.secondaryGun;
     if (s.style === 'box') {
-      addBox(group, new THREE.BoxGeometry(s.len, 0.1, 0.1), detail, {
+      addBox(group, new THREE.BoxGeometry(s.len, 0.1, 0.1), dark, {
         x: 0.15,
         y: s.y,
         z: s.z,
@@ -262,79 +262,267 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   group.userData.hitRadius = d.hitRadius;
 }
 
-export function buildArtilleryFromDesign(group, body, detail, dark, d) {
-  for (const side of [-1, 1]) {
-    const trail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.13, 0.1, d.trailLen),
+function buildTowedGunCarriage(group, detail, dark, d) {
+  const carriage = d.carriage ?? {};
+  const wheelSpread = carriage.wheelSpread ?? 0.72;
+  const axleZ = carriage.axleZ ?? -0.08;
+  const trailSpread = carriage.trailSpread ?? 0.54;
+  const axleY = d.wheelR + 0.02;
+
+  addBox(group, new THREE.BoxGeometry(wheelSpread * 2 + 0.2, 0.12, 0.18), dark, {
+    y: axleY,
+    z: axleZ,
+  });
+
+  addBox(group, new THREE.BoxGeometry(0.44, 0.1, 0.78), dark, {
+    y: axleY + d.wheelR * 0.52,
+    z: 0.14,
+  });
+
+  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.24, 14);
+  wheelGeo.rotateZ(Math.PI / 2);
+  for (const x of [-wheelSpread, wheelSpread]) {
+    const wheel = new THREE.Mesh(wheelGeo, dark);
+    wheel.position.set(x, axleY, axleZ);
+    wheel.userData.tankPart = 'track';
+    group.add(wheel);
+
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(d.wheelR * 0.34, d.wheelR * 0.34, 0.27, 8),
       dark
     );
-    trail.position.set(side * 0.54, 0.22, -d.trailLen * 0.48);
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(x, axleY, axleZ);
+    group.add(hub);
+
+    const fender = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, d.wheelR * 0.55, d.wheelR * 0.9),
+      dark
+    );
+    fender.position.set(x, axleY + d.wheelR * 0.42, axleZ + 0.02);
+    group.add(fender);
+  }
+
+  for (const side of [-1, 1]) {
+    const trail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.11, 0.09, d.trailLen),
+      dark
+    );
+    trail.position.set(side * trailSpread, 0.22, -d.trailLen * 0.48);
     trail.rotation.x = -0.38;
     group.add(trail);
+
+    const spade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.34, 0.06),
+      dark
+    );
+    spade.position.set(side * trailSpread, 0.07, -d.trailLen * 0.93);
+    spade.rotation.x = -0.58;
+    group.add(spade);
+
+    const trailBrace = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.06, d.trailLen * 0.42),
+      dark
+    );
+    trailBrace.position.set(side * (trailSpread * 0.55), 0.34, -d.trailLen * 0.22);
+    trailBrace.rotation.x = -0.22;
+    group.add(trailBrace);
   }
-  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.22, 12);
-  wheelGeo.rotateZ(Math.PI / 2);
-  for (const x of [-0.72, 0.72]) {
-    const w = new THREE.Mesh(wheelGeo, dark);
-    w.position.set(x, d.wheelR + 0.02, -0.08);
-    group.add(w);
+}
+
+function addGunShield(group, body, detail, dark, sh) {
+  const shieldY = sh.y ?? 0.9;
+  const shieldZ = sh.z ?? 0.3;
+
+  if (sh.style === 'box') {
+    addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, {
+      y: shieldY,
+      z: shieldZ,
+      part: 'hull',
+    });
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.92, 0.07, sh.d * 1.15), body, {
+      y: shieldY + sh.h * 0.42,
+      z: shieldZ,
+      part: 'hull',
+    });
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.35, sh.h * 0.55, sh.d * 0.85), dark, {
+      y: shieldY - sh.h * 0.08,
+      z: shieldZ + sh.d * 0.18,
+    });
+    return;
   }
+
+  if (sh.style === 'at') {
+    addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, {
+      y: shieldY,
+      z: shieldZ,
+      part: 'hull',
+    });
+    for (const side of [-1, 1]) {
+      addBox(group, new THREE.BoxGeometry(sh.w * 0.22, sh.h * 0.82, sh.d * 0.92), body, {
+        x: side * sh.w * 0.42,
+        y: shieldY - sh.h * 0.04,
+        z: shieldZ,
+        part: 'hull',
+      });
+    }
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.48, sh.h * 0.22, sh.d * 1.05), dark, {
+      y: shieldY - sh.h * 0.38,
+      z: shieldZ + sh.d * 0.12,
+    });
+    return;
+  }
+
+  addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, {
+    y: shieldY,
+    z: shieldZ,
+    part: 'hull',
+  });
+  for (const side of [-1, 1]) {
+    addBox(group, new THREE.BoxGeometry(0.09, sh.h * 0.72, sh.d * 0.95), body, {
+      x: side * (sh.w * 0.5 + 0.02),
+      y: shieldY - sh.h * 0.05,
+      z: shieldZ,
+      part: 'hull',
+    });
+  }
+  addBox(group, new THREE.BoxGeometry(sh.w * 0.55, 0.08, sh.d * 1.1), dark, {
+    y: shieldY - sh.h * 0.42,
+    z: shieldZ + sh.d * 0.1,
+  });
+}
+
+/** Horizontal gun tube (breech + barrel) rigidly mounted on the carriage, extending along +Z. */
+function addGunTube(group, body, dark, tube, mount, part = null) {
+  const r0 = tube.r0 ?? 0.09;
+  const r1 = tube.r1 ?? r0 * 1.15;
+  const len = tube.len;
+  const breechLen = tube.breechLen ?? 0.34;
+  const pitch = tube.elev ?? 0;
+
+  const gun = new THREE.Group();
+  gun.position.set(mount.x, mount.y, mount.z);
+  if (pitch) gun.rotation.x = pitch;
+
+  const trunnion = new THREE.Mesh(
+    new THREE.BoxGeometry(r0 * 4.8, r0 * 3.2, breechLen * 0.95),
+    dark
+  );
+  trunnion.position.set(0, -r0 * 0.4, 0);
+  gun.add(trunnion);
+
+  const breech = new THREE.Mesh(
+    new THREE.CylinderGeometry(r0 * 1.42, r0 * 1.22, breechLen, 10),
+    body
+  );
+  breech.rotation.x = Math.PI / 2;
+  breech.position.set(0, 0, 0);
+  gun.add(breech);
+
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(r1, r0, len, 10),
+    body
+  );
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0, breechLen / 2 + len / 2);
+  if (part) barrel.userData.tankPart = part;
+  gun.add(barrel);
+
+  if (tube.muzzleBrake) {
+    const mb = new THREE.Mesh(
+      new THREE.CylinderGeometry(r1 * 1.32, r1, 0.26, 8),
+      dark
+    );
+    mb.rotation.x = Math.PI / 2;
+    mb.position.set(0, 0, breechLen / 2 + len + 0.08);
+    gun.add(mb);
+  }
+
+  group.add(gun);
+  return gun;
+}
+
+export function buildArtilleryFromDesign(group, body, detail, dark, d) {
+  buildTowedGunCarriage(group, detail, dark, d);
+
   const sh = d.shield;
-  if (sh.h < 0.5) {
-    addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, { y: 0.58, z: 0.22 });
-  } else {
-    addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, { y: 0.94, z: 0.38 });
-  }
+  addGunShield(group, body, detail, dark, sh);
+
+  const mountY = d.cradle?.y ?? sh.y;
+  const mountZ = d.cradle?.z ?? sh.z + sh.d * 0.35;
+
   if (d.cradle) {
     const c = d.cradle;
-    addBox(group, new THREE.BoxGeometry(c.w, c.h, c.d), detail, {
+    addBox(group, new THREE.BoxGeometry(c.w, c.h, c.d), dark, {
       y: c.y,
       z: c.z,
     });
+    addBox(group, new THREE.BoxGeometry(c.w * 0.82, c.h * 0.55, c.d * 0.72), dark, {
+      y: c.y - c.h * 0.18,
+      z: c.z - c.d * 0.06,
+    });
+    const recoil = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.05, c.d * 0.78, 8),
+      dark
+    );
+    recoil.rotation.x = Math.PI / 2;
+    recoil.position.set(0, c.y - c.h * 0.22, c.z + c.d * 0.08);
+    group.add(recoil);
+
+    const saddle = new THREE.Mesh(
+      new THREE.BoxGeometry(c.w * 1.05, 0.09, c.d * 0.62),
+      dark
+    );
+    saddle.position.set(0, c.y - c.h * 0.48, c.z - c.d * 0.08);
+    group.add(saddle);
+  } else {
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.72, sh.h * 0.42, sh.d * 2.4), dark, {
+      y: sh.y - sh.h * 0.12,
+      z: sh.z + sh.d * 0.35,
+    });
   }
-  const tube = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.085, 0.105, d.tube.len, 10),
-    detail
-  );
-  tube.rotation.x = d.tube.elev;
-  tube.position.set(0, 1.32, 1.28);
-  group.add(tube);
-  if (d.tube.muzzleBrake) {
-    const mb = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.1, 0.26, 8), dark);
-    mb.rotation.x = d.tube.elev;
-    mb.position.set(0, 1.58, 2.32);
-    group.add(mb);
+
+  addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ });
+
+  if (sh.style !== 'box') {
+    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.05), dark);
+    sight.position.set(sh.w * 0.38, sh.y + sh.h * 0.15, sh.z);
+    group.add(sight);
   }
+
   group.userData.hitRadius = d.hitRadius;
 }
 
 export function buildAtGunFromDesign(group, body, detail, dark, d) {
-  for (const side of [-1, 1]) {
-    const trail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.08, d.trailLen),
-      dark
-    );
-    trail.position.set(side * 0.52, 0.2, -d.trailLen * 0.46);
-    trail.rotation.x = -0.38;
-    group.add(trail);
-  }
-  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.2, 12);
-  wheelGeo.rotateZ(Math.PI / 2);
-  for (const x of [-0.72, 0.72]) {
-    const w = new THREE.Mesh(wheelGeo, dark);
-    w.position.set(x, d.wheelR + 0.02, -0.05);
-    group.add(w);
-  }
+  buildTowedGunCarriage(group, detail, dark, d);
+
   const sh = d.shield;
-  addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, { y: 0.88, z: 0.25 });
-  addBox(group, new THREE.BoxGeometry(0.52, 0.28, 0.58), dark, { y: 0.82, z: 0.48 });
-  const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(d.tube.r0 ?? 0.1, (d.tube.r0 ?? 0.1) * 1.15, d.tube.len, 10),
-    detail
+  addGunShield(group, body, detail, dark, sh);
+
+  const mountY = sh.y + sh.h * 0.02;
+  const mountZ = sh.z + sh.d * 0.42;
+
+  addBox(group, new THREE.BoxGeometry(0.56, 0.32, 0.68), dark, {
+    y: mountY - 0.14,
+    z: mountZ - 0.18,
+  });
+  addBox(group, new THREE.BoxGeometry(0.42, 0.16, 0.52), dark, {
+    y: mountY - 0.06,
+    z: mountZ - 0.08,
+  });
+  addBox(group, new THREE.BoxGeometry(sh.w * 0.38, sh.h * 0.12, sh.d * 1.8), dark, {
+    y: mountY - 0.2,
+    z: mountZ - 0.22,
+  });
+
+  addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
+
+  const trailLock = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.09, 0.24),
+    dark
   );
-  barrel.rotation.x = d.tube.elev;
-  barrel.position.set(0, 1.05, 1.38);
-  barrel.userData.tankPart = 'barrel';
-  group.add(barrel);
+  trailLock.position.set(0, mountY - 0.12, mountZ - 0.35);
+  group.add(trailLock);
+
   group.userData.hitRadius = d.hitRadius;
 }

@@ -8,6 +8,8 @@ const MULT = {
   antiTankGun: 1.55,
   armoredCar: 1.15,
   machineGun: 0.85,
+  medic: 0.9,
+  engineer: 0.9,
   sniper: 0.7,
   infantry: 0.55,
 };

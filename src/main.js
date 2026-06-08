@@ -1,6 +1,9 @@
 import { Game } from './game/Game.js';
 import { UIManager } from './ui/UIManager.js';
 import { sounds } from './audio/SoundManager.js';
+import { preloadUnitTextures } from './units/UnitTextures.js';
+
+preloadUnitTextures().catch((err) => console.warn('Unit camo textures failed to load:', err));
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
@@ -33,7 +36,8 @@ const ui = new UIManager(uiRoot, {
     }
     sounds.setMenuMusicActive(visible);
   },
-  onStartGame(factionId, mapId, gameMode, options = {}) {
+  async onStartGame(factionId, mapId, gameMode, options = {}) {
+    await preloadUnitTextures();
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -51,6 +55,9 @@ const ui = new UIManager(uiRoot, {
   },
   onConfirmTarget() {
     game?.confirmTargetAttack();
+  },
+  onCancelFireMissions() {
+    game?.cancelAllFireMissions();
   },
   onProduce(unitType) {
     game?.tryProduce(unitType);
@@ -75,6 +82,9 @@ const ui = new UIManager(uiRoot, {
   },
   onSurrender() {
     game?.surrender();
+  },
+  onToggleUnitFieldIcons(enabled) {
+    game?.setUnitFieldIconsEnabled(enabled);
   },
 });
 

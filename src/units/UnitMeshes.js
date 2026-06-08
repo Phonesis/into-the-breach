@@ -5,16 +5,20 @@ import {
   buildFactionInfantry,
   buildFactionMG,
   buildFactionMortar,
+  buildFactionMedic,
+  buildFactionEngineer,
   buildFactionSniper,
 } from './FactionMeshes.js';
 import { isTankType } from './VehicleTypes.js';
+import { getBodyTexture, getGhillieTexture } from './UnitTextures.js';
 
 export { mat };
 
 export function createUnitMesh(type, teamColor, accentColor, factionId = 'germany') {
   const group = new THREE.Group();
-  const body = mat(teamColor, { rough: 0.72 });
-  const detail = mat(accentColor, { metal: 0.4, rough: 0.55 });
+  const bodyTex = getBodyTexture(factionId, type);
+  const body = mat(teamColor, { rough: 0.72, map: bodyTex ?? undefined });
+  const detail = mat(teamColor, { metal: 0.32, rough: 0.65, map: bodyTex ?? undefined });
   const dark = mat(0x1a1a1a, { metal: 0.5 });
 
   let built = false;
@@ -33,11 +37,21 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   } else if (type === 'mortar') {
     buildFactionMortar(group, body, detail, dark, factionId);
     built = true;
+  } else if (type === 'medic') {
+    buildFactionMedic(group, body, dark, factionId);
+    built = true;
+  } else if (type === 'engineer') {
+    buildFactionEngineer(group, body, dark, factionId);
+    built = true;
   } else if (type === 'infantry') {
     buildFactionInfantry(group, body, dark, factionId);
     built = true;
   } else if (type === 'sniper') {
-    buildFactionSniper(group, body, detail, dark, factionId);
+    const ghillieTex = getGhillieTexture();
+    const ghillie = ghillieTex
+      ? mat(0xffffff, { rough: 0.95, metal: 0.05, map: ghillieTex })
+      : null;
+    buildFactionSniper(group, body, detail, dark, factionId, ghillie);
     built = true;
   }
 
@@ -58,6 +72,8 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     machineGun: 2,
     sniper: 1.5,
     mortar: 2.2,
+    medic: 1.4,
+    engineer: 1.4,
     armoredCar: group.userData.hitRadius ?? 2.6,
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,
@@ -77,6 +93,8 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     antiTankGun: 0.85,
     machineGun: 0.55,
     mortar: 0.65,
+    medic: 0.52,
+    engineer: 0.52,
     sniper: 0.5,
     infantry: 0.55,
   };
@@ -148,17 +166,54 @@ function hideUnitChrome(mesh) {
   });
 }
 
-function darkenCorpseMesh(child, factor = 0.34) {
+function toScorchedMaterial(src, preset = {}) {
+  if (!src?.clone) return null;
+
+  const {
+    colorScale = 0.36,
+    emissive = 0x000000,
+    emissiveIntensity = 0,
+    metalness = 0.05,
+    roughness = 0.98,
+  } = preset;
+
+  const wreckMat = src.clone();
+  if (wreckMat.map) {
+    wreckMat.color.setRGB(colorScale, colorScale, colorScale);
+  } else if (wreckMat.color) {
+    wreckMat.color.multiplyScalar(colorScale);
+  }
+  if (wreckMat.emissive) {
+    wreckMat.emissive.setHex(emissive);
+    wreckMat.emissiveIntensity = emissiveIntensity;
+  }
+  wreckMat.metalness = metalness;
+  wreckMat.roughness = roughness;
+  return wreckMat;
+}
+
+function applyScorchedMaterial(child, preset) {
   if (!child.isMesh || WRECK_SKIP_MESHES.has(child.name)) return;
   const src = child.material;
   if (!src) return;
-  const corpseMat = src.clone();
-  if (corpseMat.color) corpseMat.color.multiplyScalar(factor);
-  corpseMat.emissive?.setHex?.(0x000000);
-  corpseMat.emissiveIntensity = 0;
-  corpseMat.metalness = 0.05;
-  corpseMat.roughness = 0.98;
-  child.material = corpseMat;
+
+  if (Array.isArray(src)) {
+    child.material = src.map((m) => toScorchedMaterial(m, preset) ?? m);
+    return;
+  }
+
+  const wreckMat = toScorchedMaterial(src, preset);
+  if (wreckMat) child.material = wreckMat;
+}
+
+function darkenCorpseMesh(child, factor = 0.34) {
+  applyScorchedMaterial(child, {
+    colorScale: factor,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+    metalness: 0.05,
+    roughness: 0.98,
+  });
 }
 
 function addGroundStain(mesh, spread = 2.4) {
@@ -259,7 +314,14 @@ export function applyUnitDeathVisual(unit) {
     return;
   }
 
-  if (type === 'infantry' || type === 'machineGun' || type === 'sniper' || type === 'mortar') {
+  if (
+    type === 'infantry' ||
+    type === 'machineGun' ||
+    type === 'sniper' ||
+    type === 'mortar' ||
+    type === 'medic' ||
+    type === 'engineer'
+  ) {
     unit.corpseTimeLeft = type === 'infantry' ? 14 : 11;
     applyInfantryCorpseLook(mesh);
     return;
@@ -289,8 +351,20 @@ export function applyTankWreckLook(mesh) {
   if (!mesh?.userData?.isTank || mesh.userData.wreckApplied) return;
   mesh.userData.wreckApplied = true;
 
-  const char = mat(0x1a1510, { rough: 0.95, emissive: 0x220800, emissiveIntensity: 0.35 });
-  const burn = mat(0x0d0a08, { rough: 1, emissive: 0x331100, emissiveIntensity: 0.2 });
+  const hullPreset = {
+    colorScale: 0.34,
+    emissive: 0x220800,
+    emissiveIntensity: 0.28,
+    metalness: 0.08,
+    roughness: 0.98,
+  };
+  const burnPreset = {
+    colorScale: 0.26,
+    emissive: 0x331100,
+    emissiveIntensity: 0.16,
+    metalness: 0.08,
+    roughness: 0.98,
+  };
   const brokenSide = Math.random() > 0.5 ? 1 : -1;
 
   mesh.traverse((child) => {
@@ -302,14 +376,8 @@ export function applyTankWreckLook(mesh) {
       return;
     }
 
-    const src = child.material;
-    if (!src) return;
-
-    const wreckMat = (part === 'hull' ? char : burn).clone();
-    if (src.color) wreckMat.color.copy(src.color).multiplyScalar(0.22);
-    wreckMat.metalness = 0.08;
-    wreckMat.roughness = 0.98;
-    child.material = wreckMat;
+    const preset = part === 'hull' || part === 'turret' ? hullPreset : burnPreset;
+    applyScorchedMaterial(child, preset);
 
     if (part === 'track') {
       const side = Math.sign(child.position.x) || brokenSide;
@@ -363,7 +431,18 @@ export function applyTankWreckLook(mesh) {
     mesh.add(chunk);
   }
 
-  const turretMat = char.clone();
+  const factionId = mesh.userData.factionId ?? 'germany';
+  const unitType = mesh.userData.type ?? 'tank';
+  const bodyTex = getBodyTexture(factionId, unitType);
+  const turretMat = bodyTex
+    ? mat(0xffffff, {
+        rough: 0.95,
+        map: bodyTex,
+        emissive: 0x220800,
+        emissiveIntensity: 0.28,
+      })
+    : mat(0x1a1510, { rough: 0.95, emissive: 0x220800, emissiveIntensity: 0.28 });
+  if (bodyTex) turretMat.color.multiplyScalar(0.34);
   const turretHulk = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.38, 1.05), turretMat);
   turretHulk.position.set(brokenSide * 1.55, 0.22, -0.35 + (Math.random() - 0.5) * 0.5);
   turretHulk.rotation.set(0.15, brokenSide * 0.5, (Math.random() - 0.5) * 0.6);
