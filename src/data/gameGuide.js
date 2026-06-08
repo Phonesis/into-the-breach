@@ -23,6 +23,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Training Ground</strong> — No enemy AI. Practice orders, capture, production, fire missions, and fire support vs a passive practice HQ. Button reads <strong>Leave Training</strong> instead of Surrender.',
       '<strong>Assault &amp; Defend</strong> — Attack or Defend. Central frontline (★) must be seized or held. Both sides field anti-tank guns; defenders start with an extra AT piece. Attackers can also win by destroying the defender HQ or wiping defenders; defenders win by surviving 8 minutes, destroying the assault HQ, or eliminating the assault when they cannot reinforce.',
       '<strong>Tower Defence</strong> — No player army. Hold the frontline against 12 escalating waves. Spend <strong>defense points</strong> on bunkers, MG nests, AT guns, <strong>AT mines</strong> (vehicles only), barbed wire, and artillery pits. Emplacements <strong>take damage</strong> and can be <strong>upgraded</strong> (select with LMB → Upgrade) to heavier bunkers, .50 cal, 88 mm, razor wire, or 155 mm pits. Guns fire automatically; barrage needs an artillery pit. Lose if the line is breached or your HQ falls.',
+      '<strong>Last Stand</strong> — <strong>2,000</strong> deployment supplies per side. Pick units and <strong>LMB</strong> anywhere on the map to place them; the enemy deploys in parallel. <strong>Begin Battle</strong> when ready. No HQ, capture points, reinforcements, or fire support. Win by destroying every enemy unit; lose if your army is wiped out.',
     ],
   },
   {
@@ -33,6 +34,7 @@ export const GAME_GUIDE_SECTIONS = [
       ['LMB drag', 'Box-select on the battlefield'],
       ['RMB', 'Move to ground, or attack enemy under cursor'],
       ['Shift + LMB', 'Fire at open ground or cover (trees, hedges, bunkers) — all combat units in range'],
+      ['Esc', 'Cancel fire-support targeting, active unit fire missions, Last Stand placement, or pending TD build'],
       ['WASD / arrows', 'Pan camera · wheel zoom'],
       ['Forces list', 'Click a unit row to select; Shift-click to add'],
       ['Engage target', 'Confirm attack on highlighted enemy (selection panel)'],
@@ -46,7 +48,8 @@ export const GAME_GUIDE_SECTIONS = [
     title: 'Supplies & capture points',
     body: [
       'Supplies pay for reinforcements (top HUD). Your HQ generates passive income every second; each captured flank point adds more.',
-      'Three capture zones per map. In Assault, the center frontline starts with the defender; flanks are neutral.',
+      'Three capture zones per map (not used in Last Stand or Tower Defence). In Assault, the center frontline starts with the defender; flanks are neutral.',
+      '<strong>Map size</strong> on the theater screen: <strong>Small</strong> (1×), <strong>Medium</strong> (1.75×, default), or <strong>Large</strong> (2.5×). Larger maps scale bases, capture points, and staging rings.',
       '<strong>Quiet sector</strong> (~32 s in Campaign / Assault): no combat fire; all units stay inside the HQ staging ring. Click <strong>Launch Battle Now</strong> on the banner when ready. Clear Defenses uses a shorter ~10 s ceasefire for your side only.',
       'Up to <strong>four</strong> units queued at your HQ. Reinforcements spawn in a ring around the HQ when their timer finishes.',
       'Campaign uses slower income and ~1.65× longer build times so battles develop gradually.',
@@ -67,11 +70,11 @@ export const GAME_GUIDE_SECTIONS = [
     title: 'Combat',
     body: [
       'LMB on an enemy (with units selected) issues an attack. Hover highlights valid targets; use <strong>Engage target</strong> or LMB on the highlighted enemy.',
-      '<strong>Shift + LMB</strong> orders manual fire for selected combat units in range: click <strong>cover</strong> (trees, hedges, bunkers) to destroy it, or <strong>open ground</strong> for a fire mission. Works for every fighting unit — infantry, tanks, AT guns, and artillery. A red reticle appears on the cursor while Shift is held. <strong>RMB move</strong> cancels fire orders.',
+      '<strong>Shift + LMB</strong> orders manual fire for selected combat units in range: click <strong>cover</strong> (trees, hedges, bunkers) to destroy it, or <strong>open ground</strong> for a fire mission. Works for every fighting unit — infantry, tanks, AT guns, and artillery. A red reticle appears on the cursor while Shift is held. <strong>RMB move</strong> or <strong>Esc</strong> cancels active fire missions.',
       'Idle units auto-fire on enemies in range. Damage falls off with distance.',
       'Tanks and <strong>super heavy tanks</strong> carry a <strong>coax machine gun</strong> (~520 m) alongside the main gun — effective vs infantry and soft targets; tanks close on soft targets and use the coax instead of wasting main-gun rounds. Rifles and MGs cannot damage tanks — use AT guns, mortars, tank guns, or artillery. Super heavies are slower, tougher, and hit harder. <strong>Anti-tank guns</strong> (~700 m) excel vs tanks and armored cars but are weak vs infantry. Mortars, tank guns, and artillery are strong anti-armor.',
       'Armored cars take partial small-arms damage (~32%) but die quickly to snipers, mortars, and tank guns.',
-      'Damaged units may <strong>retreat</strong> toward their HQ (RETREAT tag) and stop attacking until safe. <strong>Medics</strong> nearby reduce retreat chance and slowly heal infantry, MG, mortar, and sniper teams. <strong>Engineers</strong> repair nearby vehicles and steady panicked tank and gun crews. Defenders in Clear Defenses do not retreat.',
+      'Damaged units may <strong>retreat</strong> toward their HQ (RETREAT tag) and stop attacking until safe. <strong>Medics</strong> nearby reduce retreat chance and slowly heal infantry, MG, mortar, and sniper teams — a <strong>green cross</strong> floats above units being healed. <strong>Engineers</strong> repair nearby vehicles and steady panicked tank and gun crews — a <strong>spanner</strong> icon shows while a vehicle is being repaired. Defenders in Clear Defenses do not retreat.',
       'Destroyed units leave wrecks on the field: <strong>burning tanks</strong>, fallen infantry squads, knocked-out vehicles. Cover and retreat markers disappear on death.',
       'Small-arms tracers only; tanks and artillery use impact VFX. Heavy fire can scar terrain (craters).',
     ],
@@ -92,9 +95,9 @@ export const GAME_GUIDE_SECTIONS = [
     title: 'Fire support',
     body: [
       'Off-map strikes from the HUD — no friendly fire on your units or HQ.',
-      '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with MG bursts along your line.',
+      '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with spatial fly-by audio and MG bursts along your line.',
       '<strong>Artillery barrage</strong> (~95 s cooldown) — Shell warnings, then clustered impacts.',
-      'Click Strafe or Barrage, then LMB on valid ground. Esc cancels targeting.',
+      'Click Strafe or Barrage, then LMB on valid ground. Esc cancels targeting. Not available in Last Stand or Tower Defence.',
     ],
   },
   {

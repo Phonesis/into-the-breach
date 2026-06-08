@@ -3,6 +3,7 @@ import { applyUnitDeathVisual, createUnitMesh, setSelectionRing } from './UnitMe
 import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
+import { removeHealMarker } from '../visual/HealMarkers.js';
 import { distanceBetween, getStandoffPosition } from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
@@ -34,6 +35,8 @@ export class Unit {
     this.retreating = false;
     this.retreatMarker = null;
     this.fieldIcon = null;
+    this.healMarker = null;
+    this.healMarkerKind = null;
     this.defensiveHold = null;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
@@ -79,6 +82,15 @@ export class Unit {
     this.attackOrder = null;
     this.target = null;
     this._chasingAttack = false;
+  }
+
+  cancelGroundFire() {
+    if (!this.attackOrder?.isGround) return false;
+    this.clearAttackOrder();
+    this.moveTarget = null;
+    this._movePath = null;
+    this._userMoveOrder = false;
+    return true;
   }
 
   setGroundAttack(groundTarget) {
@@ -144,6 +156,7 @@ export class Unit {
       this.dead = true;
       clearRetreat(this);
       removeCoverMarker(this);
+      removeHealMarker(this);
       if (this.selected) this.setSelected(false);
       applyUnitDeathVisual(this);
     }
@@ -153,6 +166,7 @@ export class Unit {
     removeRetreatMarker(this);
     removeCoverMarker(this);
     removeFieldIcon(this);
+    removeHealMarker(this);
     scene.remove(this.mesh);
     this.mesh.traverse((child) => {
       if (child.geometry) child.geometry.dispose();

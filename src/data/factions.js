@@ -32,7 +32,7 @@ const atGunGermany = {
     cost: 82,
     buildTime: 15,
     caliber: 75,
-    weaponSound: 'tank_75',
+    weaponSound: 'at_75_germany',
     antiArmor: true,
     antiArmorMult: 1.4,
     softMult: 0.32,
@@ -54,7 +54,7 @@ const atGunUSA = {
     cost: 80,
     buildTime: 14,
     caliber: 57,
-    weaponSound: 'tank_57',
+    weaponSound: 'at_57_usa',
     antiArmor: true,
     antiArmorMult: 1.35,
     softMult: 0.34,
@@ -76,7 +76,7 @@ const atGunUK = {
     cost: 81,
     buildTime: 15,
     caliber: 57,
-    weaponSound: 'tank_57',
+    weaponSound: 'at_57_uk',
     antiArmor: true,
     antiArmorMult: 1.38,
     softMult: 0.33,
@@ -97,7 +97,7 @@ const scoutGermany = {
     attackSpeed: 2.4,
     cost: 88,
     buildTime: 13,
-    weaponSound: 'mg',
+    weaponSound: 'mg_germany',
   },
   sniper: {
     type: 'sniper',
@@ -112,7 +112,7 @@ const scoutGermany = {
     attackSpeed: 0.48,
     cost: 72,
     buildTime: 11,
-    weaponSound: 'rifle',
+    weaponSound: 'rifle_germany',
   },
 };
 
@@ -130,7 +130,7 @@ const scoutUSA = {
     attackSpeed: 2.5,
     cost: 88,
     buildTime: 13,
-    weaponSound: 'mg',
+    weaponSound: 'mg_usa',
   },
   sniper: {
     type: 'sniper',
@@ -145,7 +145,7 @@ const scoutUSA = {
     attackSpeed: 0.5,
     cost: 72,
     buildTime: 11,
-    weaponSound: 'rifle',
+    weaponSound: 'rifle_usa',
   },
 };
 
@@ -163,7 +163,7 @@ const scoutUK = {
     attackSpeed: 2.3,
     cost: 88,
     buildTime: 13,
-    weaponSound: 'mg',
+    weaponSound: 'mg_uk',
   },
   sniper: {
     type: 'sniper',
@@ -178,7 +178,7 @@ const scoutUK = {
     attackSpeed: 0.46,
     cost: 72,
     buildTime: 11,
-    weaponSound: 'rifle',
+    weaponSound: 'rifle_uk',
   },
 };
 
@@ -304,7 +304,7 @@ const mgMortarGermany = {
     attackSpeed: 2.8,
     cost: 65,
     buildTime: 10,
-    weaponSound: 'mg',
+    weaponSound: 'mg_germany',
   },
   mortar: {
     type: 'mortar',
@@ -320,7 +320,7 @@ const mgMortarGermany = {
     cost: 75,
     buildTime: 12,
     caliber: 81,
-    weaponSound: 'mortar',
+    weaponSound: 'mortar_germany',
   },
 };
 
@@ -338,7 +338,7 @@ const mgMortarUSA = {
     attackSpeed: 2.6,
     cost: 65,
     buildTime: 10,
-    weaponSound: 'mg',
+    weaponSound: 'mg_usa',
   },
   mortar: {
     type: 'mortar',
@@ -354,7 +354,7 @@ const mgMortarUSA = {
     cost: 75,
     buildTime: 12,
     caliber: 60,
-    weaponSound: 'mortar',
+    weaponSound: 'mortar_usa',
   },
 };
 
@@ -372,7 +372,7 @@ const mgMortarUK = {
     attackSpeed: 2.5,
     cost: 65,
     buildTime: 10,
-    weaponSound: 'mg',
+    weaponSound: 'mg_uk',
   },
   mortar: {
     type: 'mortar',
@@ -388,7 +388,7 @@ const mgMortarUK = {
     cost: 75,
     buildTime: 12,
     caliber: 81,
-    weaponSound: 'mortar',
+    weaponSound: 'mortar_uk',
   },
 };
 
@@ -416,7 +416,7 @@ export const FACTIONS = {
         cost: 50,
         buildTime: 8,
         usesMG: true,
-        weaponSound: 'rifle',
+        weaponSound: 'rifle_germany',
       },
       ...medicGermany,
       ...engineerGermany,
@@ -437,7 +437,7 @@ export const FACTIONS = {
         cost: 120,
         buildTime: 18,
         caliber: 75,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_75_germany',
         coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
@@ -454,7 +454,7 @@ export const FACTIONS = {
         cost: 260,
         buildTime: 28,
         caliber: 88,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_88_germany',
         coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
@@ -471,7 +471,7 @@ export const FACTIONS = {
         cost: 90,
         buildTime: 14,
         caliber: 105,
-        weaponSound: 'howitzer_105',
+        weaponSound: 'howitzer_105_germany',
       },
     },
   },
@@ -498,7 +498,7 @@ export const FACTIONS = {
         cost: 50,
         buildTime: 8,
         usesMG: true,
-        weaponSound: 'rifle',
+        weaponSound: 'rifle_usa',
       },
       ...medicUSA,
       ...engineerUSA,
@@ -519,7 +519,7 @@ export const FACTIONS = {
         cost: 120,
         buildTime: 18,
         caliber: 75,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_75_usa',
         coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
@@ -536,7 +536,7 @@ export const FACTIONS = {
         cost: 255,
         buildTime: 27,
         caliber: 90,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_90_usa',
         coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
@@ -553,7 +553,7 @@ export const FACTIONS = {
         cost: 90,
         buildTime: 14,
         caliber: 105,
-        weaponSound: 'howitzer_105',
+        weaponSound: 'howitzer_105_usa',
       },
     },
   },
@@ -580,7 +580,7 @@ export const FACTIONS = {
         cost: 50,
         buildTime: 8,
         usesMG: true,
-        weaponSound: 'rifle',
+        weaponSound: 'rifle_uk',
       },
       ...medicUK,
       ...engineerUK,
@@ -601,7 +601,7 @@ export const FACTIONS = {
         cost: 120,
         buildTime: 18,
         caliber: 75,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_75_uk',
         coaxMG: TANK_COAX_MG,
       },
       superHeavyTank: {
@@ -618,7 +618,7 @@ export const FACTIONS = {
         cost: 265,
         buildTime: 29,
         caliber: 76,
-        weaponSound: 'tank_75',
+        weaponSound: 'tank_17pdr_uk',
         coaxMG: SUPER_HEAVY_COAX_MG,
       },
       artillery: {
@@ -635,7 +635,7 @@ export const FACTIONS = {
         cost: 90,
         buildTime: 14,
         caliber: 88,
-        weaponSound: 'howitzer_25pdr',
+        weaponSound: 'howitzer_25pdr_uk',
       },
     },
   },

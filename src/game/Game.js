@@ -59,6 +59,7 @@ import {
   syncPlayerFieldIcons,
   syncUnitFieldIcon,
 } from '../visual/UnitFieldIcons.js';
+import { syncHealMarkers } from '../visual/HealMarkers.js';
 import {
   createAssaultState,
   setupAssaultCapturePoints,
@@ -99,6 +100,7 @@ import {
   setupSceneEnvironment,
   setupLighting,
   updateLightingForTarget,
+  updateSkyForCamera,
 } from '../world/SceneSetup.js';
 import { applySceneEnvironment } from '../world/EnvironmentMap.js';
 
@@ -111,7 +113,7 @@ import {
 } from '../effects/CombatEffects.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
-import { clearTerrainDamage } from '../world/TerrainDamage.js';
+import { addExplosionCrater, clearTerrainDamage } from '../world/TerrainDamage.js';
 import { spawnArmy } from './Spawner.js';
 import { updateCombat, updateMovement, tickUnitCooldowns } from './Combat.js';
 import { updateAI, resetAI } from './AI.js';
@@ -123,7 +125,12 @@ import { HQ } from './HQ.js';
 import { createCapturePoints } from './CapturePoint.js';
 import { ProductionManager } from './Production.js';
 import { BattleStats } from './BattleStats.js';
-import { sounds, weaponProfileForDef, isInfantryUnitType } from '../audio/SoundManager.js';
+import {
+  sounds,
+  resolveWeaponProfile,
+  mgProfileForFaction,
+  isInfantryUnitType,
+} from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import {
   applyUnitDeathVisual,
@@ -296,6 +303,7 @@ export class Game {
           this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq);
         }
         if (type === 'fire') {
+          this._selectionUiKey = '';
           this.ui?.updateFireMissionControls(this._countActiveFireMissions());
         }
         this._syncBattleCursor();
@@ -333,6 +341,8 @@ export class Game {
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
         this.ui?.updateFireSupport(this.fireSupport);
+      } else if (e.code === 'Escape' && this._countActiveFireMissions() > 0) {
+        this.cancelAllFireMissions();
       }
       if (e.code === 'Escape' && this.defenses?.getPending()) {
         this.defenses.cancelPending();
@@ -417,7 +427,7 @@ export class Game {
     );
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
-    this.mapDef = buildMapDef(MAPS[mapId], options.mapSize ?? 'small');
+    this.mapDef = buildMapDef(MAPS[mapId], options.mapSize ?? 'medium');
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
     const assault = isAssaultMode(gameMode);
@@ -454,7 +464,7 @@ export class Game {
     setupSceneEnvironment(this.scene, this.mapDef);
     this.lights = setupLighting(this.scene);
 
-    this.scenery = new DestructibleScenery(this.scene);
+    this.scenery = new DestructibleScenery(this.scene, this.mapDef, () => this._terrainMesh);
     this.coverSystem = new CoverSystem([]);
     this.scenery.setCoverSystem(this.coverSystem);
     const terrain = buildTerrain(this.mapDef, this.scene, this.scenery);
@@ -536,6 +546,7 @@ export class Game {
         scene: this.scene,
         mapDef: this.mapDef,
         getEnemyUnits: () => this._enemyAlive,
+        getTerrainMesh: () => this._terrainMesh,
         onChange: () => {
           this.ui?.updateDefenses(this);
           this._syncPlacementCapture();
@@ -726,16 +737,24 @@ export class Game {
   }
 
   _renderFrame() {
+    updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _selectionUiKeyFor(selected, hover = null) {
+    const hoverKey = hover
+      ? `${hover.id ?? ''}:${hover.team ?? ''}:${hover.dead ? 1 : 0}`
+      : '';
+    const unitKey = selected
+      .map((u) => `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}`)
+      .join(',');
+    return `${unitKey}|${hoverKey}|${this.selectedHq?.id ?? ''}`;
   }
 
   _maybeUpdateSelectionPanel(selected, dt) {
     if ((!selected.length && !this.selectedHq) || !this.ui) return;
     const hover = this.controller?.hoveredTarget;
-    const hoverKey = hover
-      ? `${hover.id ?? ''}:${hover.team ?? ''}:${hover.dead ? 1 : 0}`
-      : '';
-    const key = `${selected.map((u) => `${u.id}:${Math.ceil(u.hp)}`).join(',')}|${hoverKey}|${this.selectedHq?.id ?? ''}`;
+    const key = this._selectionUiKeyFor(selected, hover);
     this._selectionUiAccum += dt;
     if (key === this._selectionUiKey && this._selectionUiAccum < 0.2) return;
     this._selectionUiKey = key;
@@ -992,19 +1011,24 @@ export class Game {
     if (!this.running || this.gameOver) return false;
 
     let cleared = 0;
-    for (const u of this._playerAlive) {
-      if (u.dead || !u.attackOrder?.isGround) continue;
-      u.clearAttackOrder();
-      u.moveTarget = null;
-      cleared++;
+    for (const u of this.units) {
+      if (u.dead || u.team !== PLAYER_TEAM) continue;
+      if (u.cancelGroundFire()) cleared++;
     }
     if (cleared === 0) return false;
 
     sounds.play('order');
     const sel = this._playerAlive.filter((u) => u.selected);
+    this._selectionUiKey = '';
     this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq);
     this.ui?.updateFireMissionControls(this._countActiveFireMissions());
+    this.targetIndicators?.update(sel, this._playerAlive);
     return true;
+  }
+
+  _spawnExplosionCrater(x, z, tier = 'medium') {
+    if (!this.scene || !this.mapDef) return;
+    addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh);
   }
 
   stopGame() {
@@ -1612,9 +1636,13 @@ export class Game {
 
   onCombatFire({ attacker, target, def, dist, killed, targetIsHQ, targetIsScenery, groundImpact, from, to, coaxFire }) {
     const pos = { x: from.x, z: from.z };
+    const factionId = attacker.faction?.id;
 
     if (coaxFire) {
-      sounds.playWeapon('mg', pos, { rate: 1.04 + Math.random() * 0.08, volume: 0.82 });
+      sounds.playWeapon(mgProfileForFaction(factionId), pos, {
+        rate: 1.04 + Math.random() * 0.08,
+        volume: 0.82,
+      });
       if (killed && target?.def && isInfantryUnitType(target.def.type)) {
         sounds.playInfantryDeath({ x: to.x, z: to.z });
       } else if (killed) {
@@ -1623,24 +1651,28 @@ export class Game {
       return;
     }
 
+    let profile = resolveWeaponProfile(def, factionId);
+    let rate = 0.94 + Math.random() * 0.1;
+    let volume = 1;
+
     if (def.type === 'infantry') {
       attacker._mgVolley = (attacker._mgVolley ?? 0) + 1;
       const useMg = def.usesMG && attacker._mgVolley % 2 !== 0;
-      sounds.playWeapon(useMg ? 'mg' : 'rifle', pos, { rate: useMg ? 1.02 : 0.98 + Math.random() * 0.06 });
+      if (useMg) profile = mgProfileForFaction(factionId);
+      rate = useMg ? 1.02 : 0.98 + Math.random() * 0.06;
     } else if (def.type === 'sniper') {
-      sounds.playWeapon('rifle', pos, { rate: 0.92 + Math.random() * 0.04, volume: 0.9 });
+      rate = 0.92 + Math.random() * 0.04;
+      volume = 0.9;
     } else if (def.type === 'machineGun' || def.type === 'armoredCar') {
-      sounds.playWeapon('mg', pos, { rate: def.type === 'armoredCar' ? 1.05 + Math.random() * 0.06 : 0.98 + Math.random() * 0.08 });
+      rate = def.type === 'armoredCar' ? 1.05 + Math.random() * 0.06 : 0.98 + Math.random() * 0.08;
     } else if (def.type === 'mortar') {
-      sounds.playWeapon('howitzer_105', pos, { rate: 0.72 + Math.random() * 0.1, volume: 0.75 });
-    } else {
-      sounds.playWeapon(weaponProfileForDef(def), pos, {
-        rate:
-          isTankType(def.type) || def.type === 'antiTankGun'
-            ? 0.96 + Math.random() * 0.08
-            : 0.94 + Math.random() * 0.1,
-      });
+      rate = 0.72 + Math.random() * 0.1;
+      volume = 0.75;
+    } else if (isTankType(def.type) || def.type === 'antiTankGun') {
+      rate = 0.96 + Math.random() * 0.08;
     }
+
+    sounds.playWeapon(profile, pos, { rate, volume });
 
     if (def.type === 'artillery' || def.type === 'mortar') {
       const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
@@ -1673,12 +1705,16 @@ export class Game {
           target.wreckFire = spawnTankWreckFire(this.scene, target.position, target.mesh);
           sounds.play('explosion');
         }
+        this._spawnExplosionCrater(to.x, to.z, 'medium');
       } else if (def.type === 'artillery') {
         spawnShellExplosion(this.scene, to, 'heavy');
+        this._spawnExplosionCrater(to.x, to.z, 'heavy');
       } else if (def.type === 'mortar' || def.type === 'antiTankGun' || isTankType(def.type)) {
         spawnShellExplosion(this.scene, to, 'medium');
+        this._spawnExplosionCrater(to.x, to.z, def.type === 'mortar' ? 'medium' : 'medium');
       } else {
         spawnExplosion(this.scene, to);
+        this._spawnExplosionCrater(to.x, to.z, groundImpact ? 'medium' : 'light');
       }
       if (!targetIsTank) {
         sounds.playImpact(
@@ -1721,6 +1757,7 @@ export class Game {
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
+        syncHealMarkers(this._aliveUnits);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
           updateLastStandEnemyDeploy(this, dt);
@@ -1850,14 +1887,15 @@ export class Game {
           return;
         }
 
+        this.fireSupport.update(dt);
+        updateFireSupportEffects(dt, this.scene);
+
         if (fieldHasUnits || hasCorpses) {
           updateWreckEffects(dt, this.camera);
           updateHqBurnEffects(dt, this.camera, this.hqs);
           this.rangeRings.updateForUnits(this._aliveUnits);
           this.targetIndicators.update(playerSelected, this._playerAlive);
           updateCombatEffects(dt);
-          this.fireSupport.update(dt);
-          updateFireSupportEffects(dt, this.scene);
           this._fireSupportUiAccum += dt;
           if (this._fireSupportUiAccum >= 0.15) {
             this._fireSupportUiAccum = 0;

@@ -48,7 +48,7 @@ export class UIManager {
     this.callbacks = callbacks;
     this.selectedFaction = null;
     this.selectedMap = null;
-    this.selectedMapSize = 'small';
+    this.selectedMapSize = 'medium';
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
@@ -505,7 +505,7 @@ export class UIManager {
         this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
-          mapSize: this.selectedMapSize ?? 'small',
+          mapSize: this.selectedMapSize ?? 'medium',
         });
       }
     };
@@ -529,7 +529,12 @@ export class UIManager {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
 
-    this.root.querySelector('#btn-cancel-fire-missions')?.addEventListener('click', () => {
+    const cancelFireBtn = this.root.querySelector('#btn-cancel-fire-missions');
+    const stopHudPointer = (e) => e.stopPropagation();
+    cancelFireBtn?.addEventListener('pointerdown', stopHudPointer);
+    cancelFireBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.callbacks.onCancelFireMissions?.();
     });
 

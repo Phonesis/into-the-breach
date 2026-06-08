@@ -14,16 +14,18 @@ import {
 } from '../data/towerDefense.js';
 import { spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
+import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 
 const ARMOR_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
 
 export class DefenseStructureManager {
-  constructor({ scene, mapDef, getEnemyUnits, onChange }) {
+  constructor({ scene, mapDef, getEnemyUnits, getTerrainMesh, onChange }) {
     this.scene = scene;
     this.mapDef = mapDef;
     this.getEnemyUnits = getEnemyUnits;
+    this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.onChange = onChange;
     this.entries = [];
     this.pendingType = null;
@@ -259,6 +261,7 @@ export class DefenseStructureManager {
     }
     const y = sampleTerrainHeight(x, z, this.mapDef);
     spawnShellExplosion(this.scene, { x, y: y + 1, z }, 'heavy');
+    addExplosionCrater(this.scene, this.mapDef, x, z, 'heavy', this.getTerrainMesh());
     sounds.playWeapon('howitzer_105', { x, z }, { rate: 0.8, volume: 0.9 });
     sounds.playImpact('shell', { x, z }, 0.35);
     this.barrageCooldown = barrage.cooldown;
@@ -323,6 +326,7 @@ export class DefenseStructureManager {
         if (d > entry.def.triggerRadius) continue;
         const y = sampleTerrainHeight(entry.x, entry.z, this.mapDef);
         spawnExplosion(this.scene, { x: entry.x, y: y + 0.5, z: entry.z });
+        addExplosionCrater(this.scene, this.mapDef, entry.x, entry.z, 'light', this.getTerrainMesh());
         sounds.play('explosion');
         u.takeDamage(entry.def.damage);
         this.destroyEntry(entry);

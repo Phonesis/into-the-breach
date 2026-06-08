@@ -38,24 +38,38 @@ export function setupRenderer(renderer) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 }
 
+function skyRadiusForMap(mapSize) {
+  return Math.max(420, (mapSize ?? 140) * 2.2);
+}
+
 export function setupSceneEnvironment(scene, mapDef) {
   const sky = new THREE.Color(mapDef.skyColor ?? 0x6b7d8f);
   const fog = new THREE.Color(mapDef.fogColor ?? 0x8a9aaa);
   const horizon = sky.clone().lerp(fog, 0.55);
   const top = sky.clone().lerp(new THREE.Color(0x4a6a9a), 0.35);
+  const mapSize = mapDef.size ?? 140;
+  const skyRadius = skyRadiusForMap(mapSize);
 
-  scene.background = null;
+  scene.background = horizon.clone();
   scene.fog = new THREE.FogExp2(fog.getHex(), mapDef.fogDensity ?? 0.0052);
 
   disposeSceneEnvironment(scene);
 
-  const skyGroup = createSkyDome(top, horizon);
+  const skyGroup = createSkyDome(top, horizon, skyRadius);
   skyGroup.name = 'sky';
+  skyGroup.userData.skyRadius = skyRadius;
   scene.add(skyGroup);
 
-  addCloudLayers(scene, sky, fog);
+  addHorizonSkirt(skyGroup, horizon, fog, mapDef.groundColor ?? fog.getHex(), mapSize, skyRadius);
+  addCloudLayers(skyGroup, sky, fog, mapSize, skyRadius);
 
   return { skyGroup, fogColor: fog, sunDir: new THREE.Vector3(-0.55, 0.62, 0.42).normalize() };
+}
+
+/** Keep the sky dome centered on the camera so edges of large maps still show sky. */
+export function updateSkyForCamera(scene, x, z) {
+  const sky = scene.getObjectByName('sky');
+  if (sky) sky.position.set(x, 0, z);
 }
 
 export function disposeSceneEnvironment(scene) {
@@ -77,9 +91,9 @@ export function disposeSceneEnvironment(scene) {
   }
 }
 
-function createSkyDome(topColor, horizonColor) {
+function createSkyDome(topColor, horizonColor, radius) {
   const group = new THREE.Group();
-  const geo = new THREE.SphereGeometry(280, 48, 24, 0, Math.PI * 2, 0, Math.PI * 0.52);
+  const geo = new THREE.SphereGeometry(radius, 64, 32, 0, Math.PI * 2, 0, Math.PI * 0.56);
   const uniforms = {
     uTop: { value: topColor },
     uHorizon: { value: horizonColor },
@@ -96,17 +110,19 @@ function createSkyDome(topColor, horizonColor) {
     fog: false,
   });
   const dome = new THREE.Mesh(geo, mat);
+  dome.renderOrder = -3;
   group.add(dome);
 
+  const sunScale = radius / 280;
   const sunCore = new THREE.Mesh(
-    new THREE.SphereGeometry(10, 24, 24),
+    new THREE.SphereGeometry(10 * sunScale, 24, 24),
     new THREE.MeshBasicMaterial({ color: 0xfff6e8, transparent: true, opacity: 0.55, fog: false })
   );
-  sunCore.position.set(-72, 68, 48);
+  sunCore.position.set(-72 * sunScale, 68 * sunScale, 48 * sunScale);
   group.add(sunCore);
 
   const sunHalo = new THREE.Mesh(
-    new THREE.SphereGeometry(22, 20, 20),
+    new THREE.SphereGeometry(22 * sunScale, 20, 20),
     new THREE.MeshBasicMaterial({ color: 0xffe4b8, transparent: true, opacity: 0.14, fog: false })
   );
   sunHalo.position.copy(sunCore.position);
@@ -116,13 +132,66 @@ function createSkyDome(topColor, horizonColor) {
   return group;
 }
 
-function addCloudLayers(scene, skyColor, fogColor) {
+function addHorizonSkirt(skyGroup, horizonColor, fogColor, groundHex, mapSize, skyRadius) {
+  const inner = mapSize * 0.42;
+  const outer = skyRadius * 0.82;
+  const geo = new THREE.RingGeometry(inner, outer, 96, 1);
+  geo.rotateX(-Math.PI / 2);
+
+  const groundColor = new THREE.Color(groundHex);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uInner: { value: inner },
+      uOuter: { value: outer },
+      uGround: { value: groundColor },
+      uHorizon: { value: horizonColor },
+      uFog: { value: fogColor },
+    },
+    vertexShader: `
+      varying vec2 vXZ;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vXZ = w.xz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uInner;
+      uniform float uOuter;
+      uniform vec3 uGround;
+      uniform vec3 uHorizon;
+      uniform vec3 uFog;
+      varying vec2 vXZ;
+      void main() {
+        float r = length(vXZ);
+        float t = clamp((r - uInner) / (uOuter - uInner), 0.0, 1.0);
+        vec3 col = mix(uGround, mix(uFog, uHorizon, pow(t, 0.65)), smoothstep(0.0, 0.35, t));
+        float alpha = smoothstep(uInner, uInner + 8.0, r) * (1.0 - smoothstep(uOuter - 24.0, uOuter, r));
+        gl_FragColor = vec4(col, alpha * 0.92);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+
+  const skirt = new THREE.Mesh(geo, mat);
+  skirt.position.y = -0.35;
+  skirt.renderOrder = -2;
+  skirt.name = 'horizonSkirt';
+  skyGroup.add(skirt);
+}
+
+function addCloudLayers(skyGroup, skyColor, fogColor, mapSize, skyRadius) {
   const cloudColor = new THREE.Color(skyColor).lerp(new THREE.Color(0xffffff), 0.62);
   const mistColor = fogColor.clone().lerp(cloudColor, 0.4);
+  const spread = Math.max(130, mapSize * 0.55);
+  const heightScale = skyRadius / 420;
 
   const layers = [
-    { count: 5, y: 52, scale: 1.4, opacity: 0.28, color: cloudColor },
-    { count: 4, y: 38, scale: 1.8, opacity: 0.18, color: mistColor },
+    { count: 6, y: 52 * heightScale, scale: 1.4, opacity: 0.28, color: cloudColor },
+    { count: 5, y: 38 * heightScale, scale: 1.8, opacity: 0.18, color: mistColor },
   ];
 
   for (const layer of layers) {
@@ -148,9 +217,13 @@ function addCloudLayers(scene, skyColor, fogColor) {
         blob.scale.set(1.4 + Math.random(), 0.28 + Math.random() * 0.15, 1 + Math.random() * 0.4);
         puff.add(blob);
       }
-      puff.position.set((Math.random() - 0.5) * 130, layer.y + Math.random() * 12, (Math.random() - 0.5) * 130);
+      puff.position.set(
+        (Math.random() - 0.5) * spread * 2,
+        layer.y + Math.random() * 12 * heightScale,
+        (Math.random() - 0.5) * spread * 2
+      );
       puff.scale.setScalar(layer.scale);
-      scene.add(puff);
+      skyGroup.add(puff);
     }
   }
 }

@@ -3,16 +3,18 @@
  */
 
 import { VehicleEngineAudio } from './VehicleEngineAudio.js';
+import { StrafeAircraftAudio } from './StrafeAircraftAudio.js';
 import { MenuMusic } from './MenuMusic.js';
 import { publicUrl } from '../lib/publicUrl.js';
+import {
+  getAllWeaponSampleUrls,
+  pickSampleFile,
+  minGapMsForProfile,
+  resolveWeaponProfile,
+  mgProfileForFaction,
+} from './WeaponSounds.js';
 
 const SAMPLE_URLS = {
-  rifle: publicUrl('sounds/rifle.wav'),
-  mg: publicUrl('sounds/mg.wav'),
-  tank_75: publicUrl('sounds/tank.wav'),
-  tank_57: publicUrl('sounds/tank.wav'),
-  howitzer_105: publicUrl('sounds/artillery.wav'),
-  howitzer_25pdr: publicUrl('sounds/artillery.wav'),
   impact: publicUrl('sounds/impact.wav'),
   explosion: publicUrl('sounds/explosion.wav'),
   engine_tank: publicUrl('sounds/engine-tank.wav'),
@@ -21,6 +23,9 @@ const SAMPLE_URLS = {
   engine_armored_car_exhaust: publicUrl('sounds/engine-armored-car-exhaust.wav'),
   engine_artillery: publicUrl('sounds/engine-artillery.wav'),
   engine_artillery_exhaust: publicUrl('sounds/engine-artillery-exhaust.wav'),
+  aircraft_flyby: publicUrl('sounds/aircraft-flyby.wav'),
+  aircraft_flyby_exhaust: publicUrl('sounds/aircraft-flyby-exhaust.wav'),
+  aircraft_flyby_prop: publicUrl('sounds/aircraft-flyby-prop.wav'),
 };
 
 const INFANTRY_DEATH_COUNT = 8;
@@ -43,12 +48,14 @@ export class SoundManager {
     this.dryBus = null;
     this.wetBus = null;
     this.buffers = {};
+    this.weaponBuffers = {};
     this.unlocked = false;
     this.muted = false;
     this._loadPromise = null;
     this._lastByType = {};
     this._listener = { x: 0, y: 0, z: 0 };
     this.vehicleEngines = null;
+    this.strafeAircraft = null;
     this.menuMusic = null;
     this.menuMusicVisible = false;
     this.inBattle = false;
@@ -63,6 +70,7 @@ export class SoundManager {
       this.unlocked = true;
       if (this.ctx.state === 'suspended') this.ctx.resume();
       this.vehicleEngines = new VehicleEngineAudio(this);
+      this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
       this._loadPromise = this._loadSamples();
       this.menuMusic.ensureLoaded();
@@ -114,6 +122,21 @@ export class SoundManager {
           if (!res.ok) return;
           const ab = await res.arrayBuffer();
           this.buffers[key] = await this.ctx.decodeAudioData(ab);
+        } catch {
+          /* missing sample */
+        }
+      })
+    );
+
+    const weaponUrls = getAllWeaponSampleUrls();
+    await Promise.all(
+      weaponUrls.map(async (url) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const ab = await res.arrayBuffer();
+          const stem = url.split('/').pop().replace(/\.wav$/i, '');
+          this.weaponBuffers[stem] = await this.ctx.decodeAudioData(ab);
         } catch {
           /* missing sample */
         }
@@ -178,33 +201,45 @@ export class SoundManager {
 
   updateVehicleEngines(units, dt) {
     this.vehicleEngines?.update(units, dt, this._listener);
+    this.strafeAircraft?.update(dt, this._listener);
   }
 
   clearVehicleEngines() {
     this.vehicleEngines?.clear();
+    this.strafeAircraft?.clear();
   }
 
-  /** @param {'rifle'|'mg'|'tank_75'|'tank_57'|'howitzer_105'|'howitzer_25pdr'} profile */
+  startStrafeFlyby(opts) {
+    this.strafeAircraft?.startFlyby(opts);
+  }
+
+  /** Play a weapon profile (faction-specific ids from WeaponSounds.js). */
   playWeapon(profile, worldPos = null, opts = {}) {
     if (!this.unlocked || !this.ctx || this.muted) return;
     if (this.ctx.state === 'suspended') this.ctx.resume();
 
-    const minGap =
-      profile.startsWith('howitzer') ? 280 : profile.startsWith('tank') ? 120 : profile === 'mg' ? 55 : 70;
+    const minGap = minGapMsForProfile(profile);
     const now = performance.now();
     if (now - (this._lastByType[profile] ?? 0) < minGap) return;
     this._lastByType[profile] = now;
 
-    const key = profile.startsWith('tank') ? 'tank_75' : profile.startsWith('howitzer') ? 'howitzer_105' : profile;
-    const buf = this.buffers[key];
+    const sampleFile = pickSampleFile(profile, this.weaponBuffers);
+    if (!sampleFile) return;
+    const buf = this.weaponBuffers[sampleFile.replace(/\.wav$/i, '')];
     if (!buf) return;
 
     const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
     const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
     const vol = (opts.volume ?? 1) * this._distanceGain(dist);
     const rate = (opts.rate ?? 1) * (0.94 + Math.random() * 0.12);
+    const wet =
+      profile.startsWith('howitzer') || profile.startsWith('mortar')
+        ? 0.5
+        : profile.startsWith('tank') || profile.startsWith('at')
+          ? 0.34
+          : 0.28;
 
-    this._playBuffer(buf, { pan, vol, rate, wet: profile.startsWith('howitzer') ? 0.5 : 0.28 });
+    this._playBuffer(buf, { pan, vol, rate, wet });
   }
 
   /** Infantry / MG / sniper casualty — random field yell. */
@@ -253,8 +288,8 @@ export class SoundManager {
     this._playBuffer(buf, {
       pan,
       vol,
-      rate: 0.9 + Math.random() * 0.15,
-      wet: useExplosion ? 0.42 : 0.45,
+      rate: useExplosion ? 0.86 + Math.random() * 0.1 : 0.9 + Math.random() * 0.15,
+      wet: useExplosion ? 0.3 : 0.45,
       delay: delaySec,
     });
   }
@@ -275,8 +310,8 @@ export class SoundManager {
         if (this.buffers.explosion) {
           this._playBuffer(this.buffers.explosion, {
             vol: EXPLOSION_DIRECT_GAIN,
-            wet: 0.4,
-            rate: 0.94 + Math.random() * 0.06,
+            wet: 0.28,
+            rate: 0.86 + Math.random() * 0.08,
           });
         }
         break;
@@ -362,14 +397,4 @@ export function isInfantryUnitType(type) {
   return INFANTRY_TYPES.has(type);
 }
 
-export function weaponProfileForDef(def) {
-  if (def.weaponSound === 'mortar') return 'howitzer_105';
-  if (def.weaponSound) return def.weaponSound;
-  if (def.type === 'mortar') return 'howitzer_105';
-  if (def.type === 'machineGun') return 'mg';
-  if (def.type === 'artillery') return def.caliber >= 88 ? 'howitzer_105' : 'howitzer_25pdr';
-  if (def.type === 'tank' || def.type === 'superHeavyTank' || def.type === 'antiTankGun') {
-    return def.caliber >= 70 ? 'tank_75' : 'tank_57';
-  }
-  return def.usesMG ? 'mg' : 'rifle';
-}
+export { resolveWeaponProfile, mgProfileForFaction, weaponProfileForDef } from './WeaponSounds.js';

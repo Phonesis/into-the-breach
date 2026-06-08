@@ -8,7 +8,7 @@ import {
   spawnStrafePlane,
   spawnStrikeImpact,
 } from '../effects/FireSupportEffects.js';
-import { sounds } from '../audio/SoundManager.js';
+import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/SoundManager.js';
 
 const PLAYER = 'player';
 
@@ -132,8 +132,20 @@ export class FireSupportManager {
       this.events.push({
         at: def.warnTime,
         fn: () => {
-          spawnStrafePlane(scene, mapDef, startX, startZ, perpX, perpZ);
-          sounds.playWeapon('mg', { x: tx, z: tz }, { rate: 0.85, volume: 0.9 });
+          const planeSpeed = 38;
+          const flyDuration = def.runLength / planeSpeed + 0.55;
+          spawnStrafePlane(scene, mapDef, startX, startZ, perpX, perpZ, flyDuration);
+          sounds.startStrafeFlyby({
+            x: startX,
+            z: startZ,
+            velX: perpX * planeSpeed,
+            velZ: perpZ * planeSpeed,
+            duration: flyDuration,
+          });
+          sounds.playWeapon(mgProfileForFaction(this.game.playerFaction?.id), { x: tx, z: tz }, {
+            rate: 0.85,
+            volume: 0.9,
+          });
         },
       });
 
@@ -145,7 +157,7 @@ export class FireSupportManager {
         this.events.push({
           at: t,
           fn: () => {
-            spawnStrikeImpact(scene, mapDef, ix, iz, false);
+            spawnStrikeImpact(scene, mapDef, ix, iz, false, this.game._terrainMesh);
             this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15);
             sounds.playImpact('bullet', { x: ix, z: iz }, 0.02);
           },
@@ -153,7 +165,11 @@ export class FireSupportManager {
       }
     } else if (type === 'barrage') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.radius, true);
-      sounds.playWeapon('howitzer_105', { x: tx, z: tz }, { rate: 0.7, volume: 0.8 });
+      const artyProfile = resolveWeaponProfile(
+        this.game.playerFaction?.units?.artillery ?? { type: 'artillery' },
+        this.game.playerFaction?.id
+      );
+      sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.7, volume: 0.8 });
 
       for (let i = 0; i < def.shellCount; i++) {
         const t = def.warnTime + i * def.shellInterval;
@@ -164,7 +180,7 @@ export class FireSupportManager {
         this.events.push({
           at: t,
           fn: () => {
-            spawnStrikeImpact(scene, mapDef, ix, iz, true);
+            spawnStrikeImpact(scene, mapDef, ix, iz, true, this.game._terrainMesh);
             this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2);
             sounds.playImpact('shell', { x: ix, z: iz }, 0.05);
           },

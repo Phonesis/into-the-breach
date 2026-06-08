@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { spawnExplosion } from '../effects/CombatEffects.js';
+import { addExplosionCrater } from './TerrainDamage.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 
 const _scorch = new THREE.Color(0x2a2218);
@@ -31,8 +32,10 @@ const KIND_COVER = {
 
 /** Trees, hedges, rocks, and sandbag positions that can be destroyed by fire. */
 export class DestructibleScenery {
-  constructor(scene) {
+  constructor(scene, mapDef = null, getTerrainMesh = null) {
     this.scene = scene;
+    this.mapDef = mapDef;
+    this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.objects = [];
     this.coverSystem = null;
   }
@@ -146,6 +149,9 @@ export class DestructibleScenery {
     obj.destroyed = true;
     const y = obj.group.position.y + 0.5;
     spawnExplosion(this.scene, { x: obj.x, y, z: obj.z });
+    if (this.mapDef) {
+      addExplosionCrater(this.scene, this.mapDef, obj.x, obj.z, 'light', this.getTerrainMesh());
+    }
 
     if (obj.hasCover && this.coverSystem) {
       const r = (obj.coverRadius ?? obj.radius) + 1.5;

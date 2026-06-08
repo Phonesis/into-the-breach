@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { spawnShellExplosion } from './CombatEffects.js';
 
 const active = [];
@@ -65,7 +66,7 @@ export function spawnStrikeWarning(scene, mapDef, x, z, radius, isBarrage) {
   });
 }
 
-export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ) {
+export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5) {
   const y = sampleTerrainHeight(x, z, mapDef) + 22;
   const group = new THREE.Group();
   const body = new THREE.Mesh(
@@ -89,34 +90,13 @@ export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ) {
     velX: dirX * speed,
     velZ: dirZ * speed,
     baseY: y,
-    life: 2.5,
-    maxLife: 2.5,
+    life,
+    maxLife: life,
   });
 }
 
-export function spawnStrikeImpact(scene, mapDef, x, z, heavy = false) {
+export function spawnStrikeImpact(scene, mapDef, x, z, heavy = false, terrainMesh = null) {
   const y = sampleTerrainHeight(x, z, mapDef);
   spawnShellExplosion(scene, { x, y: y + 0.5, z }, heavy ? 'heavy' : 'medium');
-
-  const geo = new THREE.RingGeometry(0.5, heavy ? 3.5 : 2, 16);
-  geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x1a1410,
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide,
-  });
-  const scorch = new THREE.Mesh(geo, mat);
-  scorch.position.set(x, y + 0.15, z);
-  scene.add(scorch);
-
-  active.push({
-    type: 'scorch',
-    mesh: scorch,
-    material: mat,
-    geometries: [geo],
-    materials: [mat],
-    life: 8,
-    maxLife: 8,
-  });
+  addExplosionCrater(scene, mapDef, x, z, heavy ? 'heavy' : 'medium', terrainMesh);
 }

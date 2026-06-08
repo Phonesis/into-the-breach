@@ -23,8 +23,8 @@ export const MAP_SIZE_PRESETS = {
 
 export const MAP_SIZE_LIST = Object.values(MAP_SIZE_PRESETS);
 
-export function getMapSizePreset(sizeId = 'small') {
-  return MAP_SIZE_PRESETS[sizeId] ?? MAP_SIZE_PRESETS.small;
+export function getMapSizePreset(sizeId = 'medium') {
+  return MAP_SIZE_PRESETS[sizeId] ?? MAP_SIZE_PRESETS.medium;
 }
 
 function scaleXZ(point, scale) {
@@ -36,7 +36,7 @@ function scaleXZ(point, scale) {
 }
 
 /** Apply a size preset to a base theater definition. */
-export function buildMapDef(baseMap, sizeId = 'small') {
+export function buildMapDef(baseMap, sizeId = 'medium') {
   const preset = getMapSizePreset(sizeId);
   const scale = preset.scale;
 
@@ -68,7 +68,7 @@ export function getDeployRadius(mapDef) {
 
 export function formatMapHudLabel(mapDef) {
   if (!mapDef) return '—';
-  const preset = getMapSizePreset(mapDef.mapSize ?? 'small');
+  const preset = getMapSizePreset(mapDef.mapSize ?? 'medium');
   if (preset.scale === 1) return mapDef.name;
   return `${mapDef.name} · ${preset.name}`;
 }

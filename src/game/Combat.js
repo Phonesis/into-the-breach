@@ -1,7 +1,7 @@
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
 import { sampleTerrainHeight, hasReachedMoveDest, advanceUnitOnTerrain } from '../world/Terrain.js';
 import { advanceMovePath } from './MovePath.js';
-import { addTerrainCrater } from '../world/TerrainDamage.js';
+
 import {
   distanceBetween,
   distanceToPoint,
@@ -287,15 +287,6 @@ function fire(
 
   if (target.isGround) {
     applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options, livingUnits);
-    if (map && scene) {
-      const t = attacker.def.type;
-      if (t === 'artillery' || t === 'mortar') {
-        addTerrainCrater(scene, map, impact.x, impact.z, {
-          radius: t === 'artillery' ? 4.5 : 3.5,
-          heavy: true,
-        });
-      }
-    }
   } else if (isSceneryTarget(target) || isDefenseTarget(target)) {
     target.takeDamage(damage);
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
