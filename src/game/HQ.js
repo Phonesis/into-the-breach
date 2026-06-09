@@ -1,9 +1,27 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { refreshHqDamageVisuals, removeHqBurn } from '../effects/HqBurnEffects.js';
+import { getInfantryUniformTexture, getVehicleCamoTexture } from '../units/UnitTextures.js';
+
+function camoMaterial(baseColor, camoTex, repeat) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: camoTex ? 0xffffff : baseColor,
+    roughness: 0.82,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+  });
+  if (camoTex) {
+    const tex = camoTex.clone();
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeat[0], repeat[1]);
+    mat.map = tex;
+  }
+  return mat;
+}
 
 export class HQ {
-  constructor({ team, position, mapDef, scene, label, maxHp = 800 }) {
+  constructor({ team, position, mapDef, scene, label, maxHp = 800, faction = null }) {
     this.team = team;
     this.maxHp = maxHp;
     this.hp = this.maxHp;
@@ -17,38 +35,31 @@ export class HQ {
     const wallColor = isPlayer ? 0x3a5a7a : 0x6a3a3a;
     const roofColor = 0x2a2a2a;
     const sandbag = 0x8a7a5a;
+    const factionId = faction?.id ?? null;
+    const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
+    const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
 
     const group = new THREE.Group();
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: wallColor,
-      roughness: 0.82,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-    });
+    const wallMat = camoMaterial(wallColor, vehicleCamo, [3.2, 2.4]);
     const roofMat = new THREE.MeshStandardMaterial({
       color: roofColor,
       roughness: 0.9,
       emissive: 0x000000,
       emissiveIntensity: 0,
     });
-    const bagMat = new THREE.MeshStandardMaterial({
-      color: sandbag,
-      roughness: 0.95,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-    });
+    const bagMat = camoMaterial(sandbag, infantryCamo ?? vehicleCamo, [2.4, 1.6]);
 
     const base = new THREE.Mesh(new THREE.BoxGeometry(8, 2.2, 8), wallMat);
     base.position.y = 1.1;
     base.castShadow = true;
     base.receiveShadow = true;
-    base.userData.baseColor = new THREE.Color(wallColor);
+    base.userData.baseColor = new THREE.Color(vehicleCamo ? 0xffffff : wallColor);
     group.add(base);
 
     const upper = new THREE.Mesh(new THREE.BoxGeometry(6, 1.5, 6), wallMat);
     upper.position.y = 2.9;
     upper.castShadow = true;
-    upper.userData.baseColor = new THREE.Color(wallColor);
+    upper.userData.baseColor = new THREE.Color(vehicleCamo ? 0xffffff : wallColor);
     group.add(upper);
 
     const roof = new THREE.Mesh(new THREE.ConeGeometry(4.5, 2, 4), roofMat);
@@ -74,7 +85,7 @@ export class HQ {
       bags.position.set(bx, 0.45, bz);
       bags.rotation.y = bx === 0 ? 0 : Math.PI / 2;
       bags.castShadow = true;
-      bags.userData.baseColor = new THREE.Color(sandbag);
+      bags.userData.baseColor = new THREE.Color(infantryCamo || vehicleCamo ? 0xffffff : sandbag);
       this._bagMeshes.push(bags);
       group.add(bags);
     }
@@ -86,17 +97,22 @@ export class HQ {
     pole.position.y = 5;
     group.add(pole);
 
-    const flagColor = isPlayer ? 0x3b82f6 : 0xef4444;
-    const flag = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.8, 1.6, 4, 2),
-      new THREE.MeshStandardMaterial({
-        color: flagColor,
-        side: THREE.DoubleSide,
-        roughness: 0.7,
-        emissive: flagColor,
-        emissiveIntensity: 0.15,
-      })
-    );
+    const flagColor = faction?.accent ?? (isPlayer ? 0x3b82f6 : 0xef4444);
+    const flagMat = new THREE.MeshStandardMaterial({
+      color: faction?.flag ? 0xffffff : flagColor,
+      side: THREE.DoubleSide,
+      roughness: 0.7,
+      emissive: flagColor,
+      emissiveIntensity: faction?.flag ? 0.05 : 0.15,
+    });
+    if (faction?.flag) {
+      new THREE.TextureLoader().load(faction.flag, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        flagMat.map = tex;
+        flagMat.needsUpdate = true;
+      });
+    }
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6, 4, 2), flagMat);
     flag.position.set(1.4, 6.2, 0);
     this._flagMesh = flag;
     group.add(flag);
@@ -167,7 +183,10 @@ export class HQ {
     scene.remove(this.mesh);
     this.mesh.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
-      if (c.material) c.material.dispose();
+      if (c.material) {
+        if (c.material.map) c.material.map.dispose();
+        c.material.dispose();
+      }
     });
   }
 }

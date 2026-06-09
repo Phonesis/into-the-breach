@@ -25,6 +25,13 @@ export const VEHICLE_SVG = {
     artillery: 'vehicles/svg/artillery-uk.svg',
     antiTankGun: 'vehicles/svg/at-gun-uk.svg',
   },
+  russia: {
+    tank: 'vehicles/svg/tank-medium-russia.svg',
+    superHeavyTank: 'vehicles/svg/tank-super-russia.svg',
+    armoredCar: 'vehicles/svg/armored-car-russia.svg',
+    artillery: 'vehicles/svg/artillery-russia.svg',
+    antiTankGun: 'vehicles/svg/at-gun-russia.svg',
+  },
 };
 
 /** @typedef {'box'|'cylinder'|'forward'} TurretStyle */
@@ -191,6 +198,57 @@ const DESIGNS = {
       shield: { w: 1.0, h: 1.48, d: 0.11, style: 'at', y: 0.87, z: 0.25 },
       tube: { len: 2.98, r0: 0.092, r1: 0.105, elev: 0, breechLen: 0.31 },
       hitRadius: 2.1,
+    },
+  },
+  russia: {
+    tank: {
+      hull: { w: 2.28, h: 0.66, d: 3.42, y: 0.54, z: 0.02 },
+      glacis: { w: 2.18, h: 0.62, d: 1.62, y: 0.68, z: 1.42, tilt: -0.58 },
+      track: { spread: 1.22, height: 0.5, length: 3.38, wheels: 6, skirt: false },
+      turret: { style: 'cylinder', w: 1.22, h: 0.52, d: 1.18, y: 1.06, z: -0.08, bustle: false },
+      barrel: { len: 2.72, r0: 0.1, r1: 0.12, y: 1.06, z: 1.72 },
+      coax: { len: 0.46, y: 1.02, z: 0.3 },
+      hitRadius: 2.2,
+    },
+    superHeavyTank: {
+      hull: { w: 2.72, h: 0.78, d: 4.35, y: 0.66, z: 0.06 },
+      glacis: { w: 2.32, h: 0.58, d: 1.52, y: 0.82, z: 1.88, tilt: -0.48 },
+      track: { spread: 1.28, height: 0.56, length: 4.22, wheels: 8, skirt: false },
+      turret: { style: 'box', w: 1.72, h: 0.62, d: 1.58, y: 1.32, z: -0.1, bustle: false },
+      barrel: { len: 3.28, r0: 0.12, r1: 0.14, y: 1.32, z: 2.12, mantlet: true },
+      coax: { len: 0.46, y: 1.28, z: 0.38 },
+      hitRadius: 2.75,
+    },
+    armoredCar: {
+      hull: { w: 1.72, h: 0.46, d: 2.85, y: 0.5 },
+      nose: { w: 1.42, h: 0.36, d: 0.72, y: 0.52, z: 1.05, tilt: -0.28 },
+      wheels: [
+        [-0.82, 0.32, 0.85],
+        [0.82, 0.32, 0.85],
+        [-0.82, 0.32, -0.85],
+        [0.82, 0.32, -0.85],
+      ],
+      wheelR: 0.32,
+      turret: { style: 'cylinder', w: 0.58, h: 0.32, d: 0.58, y: 0.88, z: -0.05 },
+      barrel: { len: 0.82, r0: 0.05, r1: 0.06, y: 0.92, z: 0.42 },
+      hitRadius: 1.95,
+    },
+    artillery: {
+      trailLen: 2.32,
+      wheelR: 0.44,
+      carriage: { wheelSpread: 0.74, axleZ: -0.08, trailSpread: 0.54 },
+      shield: { w: 1.08, h: 0.72, d: 0.12, style: 'tall', y: 0.9, z: 0.34 },
+      tube: { len: 2.58, elev: 0, r0: 0.092, r1: 0.112, breechLen: 0.36 },
+      cradle: { w: 0.46, h: 0.28, d: 0.74, y: 0.84, z: 0.4 },
+      hitRadius: 2.24,
+    },
+    antiTankGun: {
+      trailLen: 2.18,
+      wheelR: 0.4,
+      carriage: { wheelSpread: 0.72, axleZ: -0.05, trailSpread: 0.52 },
+      shield: { w: 1.08, h: 1.52, d: 0.1, style: 'at', y: 0.88, z: 0.24 },
+      tube: { len: 3.05, r0: 0.095, r1: 0.108, elev: 0, breechLen: 0.32 },
+      hitRadius: 2.12,
     },
   },
 };

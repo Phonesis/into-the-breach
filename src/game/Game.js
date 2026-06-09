@@ -62,6 +62,7 @@ import {
 import { syncHealMarkers } from '../visual/HealMarkers.js';
 import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
 import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
+import { updateSurrenderState, syncSurrenderMarkers } from './SurrenderBehavior.js';
 import {
   createAssaultState,
   setupAssaultCapturePoints,
@@ -556,6 +557,7 @@ export class Game {
           scene: this.scene,
           label: playerHqLabel,
           maxHp: hqHp,
+          faction: this.playerFaction,
         })
       );
       if (!this.clearance && !this.towerDefense) {
@@ -567,6 +569,7 @@ export class Game {
             scene: this.scene,
             label: enemyHqLabel,
             maxHp: this.tutorial ? PRACTICE_TARGET_HQ_HP : hqHp,
+            faction: this.enemyFaction,
           })
         );
       }
@@ -1372,8 +1375,8 @@ export class Game {
 
     let panForward = 0;
     let panRight = 0;
-    if (this.keys['KeyW'] || pad?.panForward) panForward -= 1;
-    if (this.keys['KeyS'] || pad?.panBack) panForward += 1;
+    if (this.keys['KeyW'] || pad?.panForward) panForward += 1;
+    if (this.keys['KeyS'] || pad?.panBack) panForward -= 1;
     if (this.keys['KeyA'] || pad?.panLeft) panRight -= 1;
     if (this.keys['KeyD'] || pad?.panRight) panRight += 1;
 
@@ -1816,6 +1819,8 @@ export class Game {
         syncDamageSmoke(this._aliveUnits);
         updateDamageSmoke(this._aliveUnits, dt);
         syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
+        updateSurrenderState(this, this.units, dt);
+        syncSurrenderMarkers(this._aliveUnits);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
           updateLastStandEnemyDeploy(this, dt);
@@ -1894,7 +1899,7 @@ export class Game {
             this.scenery,
             {
               protectPlayerHq: this.clearance || this.towerDefense,
-              tutorialPassiveNoHq: this.tutorial || !!this.lastStand,
+              tutorialPassiveNoHq: this.tutorial,
               practiceHqDamageMult: this.tutorial ? PRACTICE_TARGET_HQ_DAMAGE_MULT : 1,
               openingCeasefire:
                 !this.tutorial &&
@@ -1904,8 +1909,12 @@ export class Game {
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
+              clearance: this.clearance,
+              tutorial: this.tutorial,
+              towerDefense: this.towerDefense,
             }
           );
+          this._rebuildUnitCaches();
         }
 
         if (this.towerDefense && this.defenses) {
@@ -1926,16 +1935,20 @@ export class Game {
           this._victoryCheckAccum += dt;
           if (this._victoryCheckAccum >= 0.1) {
             this._victoryCheckAccum = 0;
+            this._rebuildUnitCaches();
             this.checkVictory();
           }
         } else {
           this._victoryCheckAccum += dt;
+          const livingPlayer = this.units.filter((u) => u.team === PLAYER_TEAM && !u.dead).length;
+          const livingEnemy = this.units.filter((u) => u.team === ENEMY_TEAM && !u.dead).length;
           if (
             this._victoryCheckAccum >= 0.12 ||
-            this._playerAlive.length === 0 ||
-            this._enemyAlive.length === 0
+            livingPlayer === 0 ||
+            livingEnemy === 0
           ) {
             this._victoryCheckAccum = 0;
+            this._rebuildUnitCaches();
             this.checkVictory();
           }
         }

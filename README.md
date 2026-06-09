@@ -78,7 +78,7 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 
 ### Campaign
 
-- Opponent faction mirrors your pick (e.g. USA vs Germany).
+- Opponent faction mirrors your pick (e.g. USA vs Germany, Soviet Union vs Germany).
 - **Difficulty:** Easy, Medium, or Hard — adjusts enemy damage, income, army size, and AI aggression.
 - **Pacing:** Higher unit HP, lower damage, slower HQ/capture income, longer build times, larger opening armies, and slower AI reinforcement (see `src/data/campaignPace.js`).
 - AI produces units, captures points, and attacks.
@@ -140,7 +140,7 @@ Pick **Attack** or **Defend** in the menu. Central **frontline** capture point (
 
 ## Factions & units
 
-Three playable factions, each with **eleven** buildable unit types. Ranges in the HUD use **meters** (`rangeMeters`); combat uses world-space range with distance falloff.
+Four playable factions, each with **eleven** buildable unit types. Ranges in the HUD use **meters** (`rangeMeters`); combat uses world-space range with distance falloff.
 
 | Type | Role | Supply cost | Build time (s) |
 |------|------|-------------|----------------|
@@ -165,6 +165,7 @@ Campaign multiplies build times by **~1.65×**.
 | Germany | 7.5 cm Pak 40 | 720 | 82 |
 | United States | 57 mm Gun M1 | 700 | 80 |
 | United Kingdom | QF 6-pounder | 720 | 81 |
+| Soviet Union | ZIS-3 (76 mm) | 720 | 81 |
 
 Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infantry. Holds position while firing (like artillery).
 
@@ -175,6 +176,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | Germany | Tiger I Ausf. E (8.8 cm) | Highest HP; slowest |
 | United States | M26 Pershing (90 mm) | Late-war heavy |
 | United Kingdom | Black Prince (17-pdr) | Super-heavy infantry tank |
+| Soviet Union | IS-2 (122 mm D-25T) | Late-war heavy breakthrough tank |
 
 ### Germany (Wehrmacht) — other units
 
@@ -208,6 +210,17 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | Churchill Mk IV | 75 mm QF + Besa coax | 1,200 |
 | 25-pounder Gun | QF 25-pdr | 12,000 |
 | Daimler AC | Armored car | 980 |
+
+### Soviet Union (Red Army) — other units
+
+| Unit | Designation | Game range (m) |
+|------|-------------|----------------|
+| Rifle Squad | Mosin-Nagant / DP-27 | 430 |
+| DP-27 MG Team | Degtyaryov DP-27 | 980 |
+| 82 mm Mortar | BM-37 battalion mortar | 2,100 |
+| T-34-85 | 85 mm ZiS-S-53 + coax DT | 1,450 |
+| M-30 Howitzer | 122 mm M1938 | 11,800 |
+| BA-64 | Armored car | 960 |
 
 **Selection:** LMB on a unit, drag a **box** on the ground, or click a row in the **Forces** panel (left). Shift-click adds to selection. Tanks use an invisible pick sphere. Selected units show a **range ring** and stats (designation, **health bar**, range, coax stats on tanks, cover % for infantry/MG). The Forces roster shows a mini HP bar and percentage per unit.
 
@@ -274,6 +287,7 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 - **Vehicle damage smoke:** Tanks, armored cars, artillery, and towed guns below **50% HP** trail **black engine smoke** from the rear until repaired or destroyed.
 - **Health bars:** When **field icons** are enabled, floating bars appear above **damaged** or **selected** units (green → yellow → red by HP; player/enemy border tint). The **Forces** roster and **selection panel** always show HP bars with numeric values. Turning field icons off hides world bars and icons together.
 - **Retreat:** Damaged units may fall back to their HQ (**RETREAT** marker) and stop attacking until safe. Clear Defenses defenders do not retreat.
+- **Surrender & prisoners:** Isolated infantry teams (rifles, MG, sniper, mortar, medic, engineer, towed AT crews) under fire may **surrender** (**SURRENDER** banner). They stop fighting and are not fired upon. An **enemy within ~11 m** captures them — they march off the map and count as a loss. A **friendly within ~11 m** **liberates** them back into the fight. Tanks and artillery do not surrender; Clear Defenses dug-in defenders never surrender.
 - **Casualties:** Destroyed units leave **wrecks** — burning tanks, fallen infantry, knocked-out vehicles. Cover and retreat markers are cleared on death.
 - **Tracers:** Short streaks for infantry/MG only; tanks, AT guns, and artillery use impact VFX without bullet tracers.
 
@@ -358,7 +372,7 @@ The manual includes a section nav, control reference table, illustrated **unit c
 
 ### Vehicle art pipeline
 
-Side-view **Imagine** references live in `public/vehicles/refs/` (e.g. `medium-tank.jpg`, `medium-tank-usa.jpg`). Faction SVG silhouettes are emitted to `public/vehicles/svg/` via `npm run generate-vehicle-svgs` (proportions in `src/units/vehicleDesigns.js`). In-game meshes are built from those designs in `VehicleMeshKit.js` / `FactionMeshes.js`.
+Side-view **Imagine** references live in `public/vehicles/refs/` (e.g. `medium-tank.jpg`, `medium-tank-usa.jpg`, `medium-tank-russia.jpg`, `super-heavy-russia.jpg`, `armored-car-russia.jpg`, `artillery-russia.jpg`, `at-gun-russia.jpg`). Faction SVG silhouettes are emitted to `public/vehicles/svg/` via `npm run generate-vehicle-svgs` (proportions in `src/units/vehicleDesigns.js`). In-game meshes are built from those designs in `VehicleMeshKit.js` / `FactionMeshes.js`. Soviet flag: `public/flags/russia.svg`.
 
 ---
 
@@ -393,6 +407,7 @@ src/
     CoverSystem.js        # Infantry/MG damage reduction
     FireSupport.js        # Cooldowns & strike execution
     RetreatBehavior.js    # Damaged-unit fallback to HQ
+    SurrenderBehavior.js  # Isolated units surrender, capture, liberation
     BattleStats.js        # End-screen casualty tallies
     MovePath.js           # Ridge-aware movement waypoints
     HQ.js                 # Headquarters entities

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyUnitDeathVisual, createUnitMesh, setSelectionRing } from './UnitMeshes.js';
 import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
+import { clearSurrender, removeSurrenderMarker } from '../game/SurrenderBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
@@ -36,6 +37,11 @@ export class Unit {
     this._mgVolley = 0;
     this.retreating = false;
     this.retreatMarker = null;
+    this.surrendered = false;
+    this.surrenderMarker = null;
+    this._underFireTimer = 0;
+    this._liberationGrace = 0;
+    this._captureExit = null;
     this.fieldIcon = null;
     this.healMarker = null;
     this.healMarkerKind = null;
@@ -72,6 +78,7 @@ export class Unit {
   }
 
   setAttackOrder(target) {
+    if (this.surrendered || this._captureExit) return;
     clearRetreat(this);
     this.attackOrder = target;
     this.target = target;
@@ -97,6 +104,7 @@ export class Unit {
   }
 
   setGroundAttack(groundTarget) {
+    if (this.surrendered || this._captureExit) return;
     clearRetreat(this);
     this.attackOrder = groundTarget;
     this.target = groundTarget;
@@ -113,6 +121,7 @@ export class Unit {
    * @param {boolean} [playerOrder] — player-issued moves are not cancelled by combat auto-fire
    */
   moveTo(x, z, mapDef = null, playerOrder = false) {
+    if (this.surrendered || this._captureExit) return;
     clearRetreat(this);
     this.clearAttackOrder();
     this._userMoveOrder = playerOrder;
@@ -152,13 +161,15 @@ export class Unit {
   }
 
   takeDamage(amount) {
-    if (this.dead) return;
+    if (this.dead || this.surrendered || this._captureExit) return;
     this.hp -= amount;
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
       clearRetreat(this);
+      clearSurrender(this);
       removeCoverMarker(this);
+      removeFieldIcon(this);
       removeHealMarker(this);
       removeDamageSmoke(this);
       removeUnitHealthBar(this);
@@ -169,6 +180,7 @@ export class Unit {
 
   dispose(scene) {
     removeRetreatMarker(this);
+    removeSurrenderMarker(this);
     removeCoverMarker(this);
     removeFieldIcon(this);
     removeHealMarker(this);

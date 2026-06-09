@@ -14,6 +14,7 @@ const PAL = {
   germany: { hull: '#5a5d52', track: '#2a2a28', gun: '#3d4038', accent: '#6b7058' },
   usa: { hull: '#4a5c4a', track: '#2a2a28', gun: '#3a4538', accent: '#5a6e58' },
   uk: { hull: '#4a5568', track: '#2a2a28', gun: '#384552', accent: '#5a6578' },
+  russia: { hull: '#4f5a42', track: '#2a2a28', gun: '#384438', accent: '#5c6848' },
 };
 
 function wrap(id, nation, body) {
@@ -121,6 +122,37 @@ const SVGS = {
       tracks: `<circle cx="37" cy="52" r="7"/><circle cx="89" cy="52" r="7"/><path d="M19 54 L9 42 L15 40 L25 52 Z M107 54 L117 42 L111 40 L101 52 Z"/>`,
       hull: `<rect x="43" y="23" width="10" height="21" rx="1"/>`,
       gun: `<rect x="53" y="18" width="56" height="4"/>`,
+    }),
+  'tank-medium-russia': () =>
+    wrap('T-34-85', 'russia', {
+      tracks: `<rect x="12" y="46" width="8" height="10"/><rect x="108" y="46" width="8" height="10"/><rect x="16" y="48" width="96" height="6"/>`,
+      hull: `<path d="M24 44 L38 28 L96 24 L104 32 L104 44 Z"/><path d="M38 28 L52 20 L84 18 L96 24 Z"/>`,
+      gun: `<rect x="92" y="20" width="30" height="4" rx="1"/><circle cx="58" cy="18" r="9"/>`,
+      detail: `<rect x="48" y="14" width="20" height="10" rx="1"/>`,
+    }),
+  'tank-super-russia': () =>
+    wrap('IS-2', 'russia', {
+      tracks: `<rect x="10" y="45" width="9" height="11"/><rect x="109" y="45" width="9" height="11"/><rect x="14" y="48" width="100" height="7"/>`,
+      hull: `<path d="M22 44 L22 26 L36 20 L100 20 L108 28 L108 44 Z"/><path d="M36 20 L50 14 L88 14 L100 20 Z"/>`,
+      gun: `<rect x="94" y="16" width="30" height="5"/><rect x="46" y="12" width="28" height="12"/>`,
+    }),
+  'armored-car-russia': () =>
+    wrap('BA-64', 'russia', {
+      tracks: `<circle cx="30" cy="50" r="8"/><circle cx="98" cy="50" r="8"/>`,
+      hull: `<path d="M34 44 L34 32 L102 32 L102 44 Z"/><path d="M102 34 L112 38 L112 44 L102 44 Z"/>`,
+      gun: `<rect x="104" y="28" width="12" height="3"/><circle cx="72" cy="24" r="7"/>`,
+    }),
+  'artillery-russia': () =>
+    wrap('M-30', 'russia', {
+      tracks: `<circle cx="35" cy="52" r="8"/><circle cx="93" cy="52" r="8"/><path d="M17 54 L7 41 L13 39 L23 52 Z M111 54 L121 41 L115 39 L105 52 Z"/>`,
+      hull: `<rect x="42" y="26" width="16" height="20" rx="1"/>`,
+      gun: `<rect x="56" y="12" width="50" height="5" transform="rotate(-9 56 12)"/>`,
+    }),
+  'at-gun-russia': () =>
+    wrap('ZIS-3', 'russia', {
+      tracks: `<circle cx="37" cy="52" r="7"/><circle cx="89" cy="52" r="7"/><path d="M19 54 L9 42 L15 40 L25 52 Z M107 54 L117 42 L111 40 L101 52 Z"/>`,
+      hull: `<rect x="44" y="22" width="10" height="22" rx="1"/>`,
+      gun: `<rect x="54" y="17" width="58" height="4"/>`,
     }),
 };
 

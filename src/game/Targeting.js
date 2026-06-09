@@ -108,7 +108,7 @@ export function filterAcquireNearAttacker(attacker, targets, rangeMult = 2.25) {
   const az = attacker.position.z;
   const near = [];
   for (const other of targets) {
-    if (other.dead || other.team === attacker.team) continue;
+    if (other.dead || other.team === attacker.team || other.surrendered || other._captureExit) continue;
     const tx = other.position?.x ?? other.mesh?.position.x ?? 0;
     const tz = other.position?.z ?? other.mesh?.position.z ?? 0;
     const dx = tx - ax;
@@ -128,7 +128,7 @@ export function findNearestEnemyInRange(unit, targets, maxRangeMultiplier = 1) {
     maxR = Math.max(maxR, unit.def.coaxMG.range * maxRangeMultiplier);
   }
   for (const other of targets) {
-    if (other.dead || other.team === unit.team) continue;
+    if (other.dead || other.team === unit.team || other.surrendered || other._captureExit) continue;
     const d = distanceBetween(unit, other);
     if (d > maxR) continue;
     const isUnit = other.def !== undefined;
@@ -149,7 +149,7 @@ export function findNearestEnemy(unit, targets) {
   let best = null;
   let bestDist = Infinity;
   for (const other of targets) {
-    if (other.dead || other.team === unit.team) continue;
+    if (other.dead || other.team === unit.team || other.surrendered || other._captureExit) continue;
     const d = distanceBetween(unit, other);
     if (d < bestDist) {
       bestDist = d;

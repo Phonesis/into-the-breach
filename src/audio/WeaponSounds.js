@@ -39,6 +39,14 @@ export const WEAPON_SAMPLE_FILES = {
   howitzer_105_germany: ['howitzer-105-germany.wav'],
   howitzer_105_usa: ['howitzer-105-usa.wav'],
   howitzer_25pdr_uk: ['howitzer-25pdr-uk.wav'],
+
+  rifle_russia: ['rifle-russia.wav', 'rifle-russia-b.wav'],
+  mg_russia: ['mg-russia.wav', 'mg-russia-b.wav'],
+  tank_76_russia: ['tank-76-russia.wav'],
+  tank_122_russia: ['tank-122-russia.wav'],
+  at_76_russia: ['at-76-russia.wav'],
+  mortar_russia: ['mortar-russia.wav'],
+  howitzer_122_russia: ['howitzer-122-russia.wav'],
 };
 
 const PROFILE_FALLBACK = {
@@ -63,6 +71,13 @@ const PROFILE_FALLBACK = {
   howitzer_105_germany: 'howitzer_105',
   howitzer_105_usa: 'howitzer_105',
   howitzer_25pdr_uk: 'howitzer_25pdr',
+  rifle_russia: 'rifle',
+  mg_russia: 'mg',
+  tank_76_russia: 'tank_75',
+  tank_122_russia: 'tank_75',
+  at_76_russia: 'tank_75',
+  mortar_russia: 'howitzer_105',
+  howitzer_122_russia: 'howitzer_105',
 };
 
 const PROFILE_MIN_GAP_MS = {
@@ -90,7 +105,7 @@ export function getAllWeaponSampleUrls() {
 
 export function mgProfileForFaction(factionId = 'germany') {
   const id = factionId ?? 'germany';
-  if (id === 'usa' || id === 'uk' || id === 'germany') return `mg_${id}`;
+  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia') return `mg_${id}`;
   return 'mg';
 }
 
@@ -111,21 +126,27 @@ export function resolveWeaponProfile(def, factionId = null) {
     return `rifle_${faction}`;
   }
   if (def?.type === 'artillery') {
-    if (def.weaponSound === 'howitzer_25pdr' || def.caliber === 88) {
-      return faction === 'uk' ? 'howitzer_25pdr_uk' : 'howitzer_105';
+    if (def.weaponSound === 'howitzer_122_russia' || (faction === 'russia' && def.caliber >= 120)) {
+      return 'howitzer_122_russia';
+    }
+    if (def.weaponSound === 'howitzer_25pdr' || (faction === 'uk' && def.caliber === 88)) {
+      return 'howitzer_25pdr_uk';
     }
     return `howitzer_105_${faction}`;
   }
   if (def?.type === 'antiTankGun') {
+    if (faction === 'russia' || def.weaponSound === 'at_76_russia') return 'at_76_russia';
     if (def.caliber >= 70) return `at_75_${faction}`;
     return faction === 'germany' ? 'at_75_germany' : `at_57_${faction}`;
   }
   if (def?.type === 'superHeavyTank') {
+    if (faction === 'russia' || def.weaponSound === 'tank_122_russia') return 'tank_122_russia';
     if (faction === 'germany' || def.caliber >= 88) return 'tank_88_germany';
     if (faction === 'usa' || def.caliber >= 85) return 'tank_90_usa';
     return 'tank_17pdr_uk';
   }
   if (def?.type === 'tank') {
+    if (faction === 'russia' || def.weaponSound === 'tank_76_russia') return 'tank_76_russia';
     return `tank_75_${faction}`;
   }
   if (def?.type === 'armoredCar') {

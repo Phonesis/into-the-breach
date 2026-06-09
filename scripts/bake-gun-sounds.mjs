@@ -479,4 +479,29 @@ writeWav('howitzer-105-germany.wav', makeArtillery({ rumbleLow: 26, rumbleMid: 5
 writeWav('howitzer-105-usa.wav', makeArtillery({ rumbleLow: 30, rumbleMid: 58, tailHigh: 320 }));
 writeWav('howitzer-25pdr-uk.wav', makeArtillery({ rumbleLow: 32, rumbleMid: 64, tailHigh: 340, duration: 1.25 }));
 
+// —— Soviet Union ——
+writeWav('rifle-russia.wav', makeRifle({ thumpHz: 102, crackVol: 1.28, thumpVol: 0.55, crackDecay: 125 }));
+writeWav('rifle-russia-b.wav', makeRifle({ thumpHz: 96, crackVol: 1.2, bodyVol: 0.74, duration: 0.34 }));
+writeWav(
+  'mg-russia.wav',
+  makeMgBurst({
+    shots: 5,
+    gap: 0.09,
+    rifleOpts: { thumpHz: 92, crackVol: 1.08, bodyVol: 0.62, crackDecay: 128 },
+  })
+);
+writeWav(
+  'mg-russia-b.wav',
+  makeMgBurst({
+    shots: 6,
+    gap: 0.082,
+    rifleOpts: { thumpHz: 88, crackVol: 1.02, thumpVol: 0.5 },
+  })
+);
+writeWav('tank-76-russia.wav', makeTank({ boomLow: 40, boomMid: 98, duration: 0.9, crackVol: 0.88 }));
+writeWav('tank-122-russia.wav', makeTank({ boomLow: 32, boomMid: 82, duration: 1.12, boomLowVol: 1.02, crackVol: 0.92 }));
+writeWav('at-76-russia.wav', makeTank({ boomLow: 42, boomMid: 100, duration: 0.8, crackVol: 0.86 }));
+writeWav('mortar-russia.wav', makeMortar({ pop: 64, duration: 0.58 }));
+writeWav('howitzer-122-russia.wav', makeArtillery({ rumbleLow: 28, rumbleMid: 56, tailHigh: 300, duration: 1.22 }));
+
 console.log('Done — samples in public/sounds/');

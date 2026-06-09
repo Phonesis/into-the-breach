@@ -126,7 +126,7 @@ export function preloadUnitFieldIcons(types) {
 }
 
 function attachFieldIcon(unit) {
-  if (!unit.mesh || unit.fieldIcon) return;
+  if (!unit.mesh || unit.dead || unit.fieldIcon) return;
 
   const type = unit.def?.type ?? 'infantry';
   const entry = textureCache.get(type);

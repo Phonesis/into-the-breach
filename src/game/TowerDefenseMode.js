@@ -164,7 +164,7 @@ export function updateTowerDefenseEnemyAI(enemyUnits, mapDef, td, defenses, dt) 
   const az = advanceZ / advLen;
 
   for (const unit of enemyUnits) {
-    if (unit.retreating) continue;
+    if (unit.retreating || unit.surrendered || unit._captureExit) continue;
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
 
     const toPlayerX = pb.x - fl.x;

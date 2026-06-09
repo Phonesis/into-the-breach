@@ -103,6 +103,26 @@ export function build6Pounder(group, body, detail, dark) {
   buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('uk', 'antiTankGun'));
 }
 
+function buildT3485(group, body, detail, dark) {
+  buildTankFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'tank'));
+}
+
+function buildIS2(group, body, detail, dark) {
+  buildTankFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'superHeavyTank'));
+}
+
+function buildBA64(group, body, detail, dark) {
+  buildArmoredCarFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'armoredCar'));
+}
+
+function buildM30(group, body, detail, dark) {
+  buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'artillery'));
+}
+
+function buildZIS3(group, body, detail, dark) {
+  buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'antiTankGun'));
+}
+
 function addMgTripod(group, dark, { spread = 0.46, legLen = 0.54, pivotY = 0.34 } = {}) {
   const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.1, 8), dark);
   pivot.position.y = pivotY;
@@ -140,6 +160,10 @@ function addMgCrewman(group, body, dark, factionId, x, z, { gunner = false } = {
     helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
     helmet.scale.set(1.05, 0.85, 1.05);
     helmet.position.y = gunner ? 0.6 : 0.7;
+  } else if (factionId === 'russia') {
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), body);
+    helmet.scale.set(1.06, 0.82, 1.06);
+    helmet.position.y = gunner ? 0.59 : 0.69;
   } else {
     helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), mat(0x4a4a48, { rough: 0.75 }));
     helmet.scale.set(1.08, 0.78, 1.08);
@@ -227,6 +251,31 @@ export function buildFactionMG(group, body, detail, dark, factionId) {
     const lid = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.03, 0.16), mat(0x3d4a32, { rough: 0.8 }));
     lid.position.set(-0.28, 0.47, 0.22);
     group.add(lid);
+  } else if (factionId === 'russia') {
+    addMgTripod(group, dark, { spread: 0.4, legLen: 0.48, pivotY: 0.34 });
+
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.12), dark);
+    receiver.position.set(0.06, 0.48, 0.06);
+    group.add(receiver);
+
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.52, 8), dark);
+    barrel.rotation.z = Math.PI / 2;
+    barrel.position.set(0.42, 0.5, 0.06);
+    group.add(barrel);
+
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.1), dark);
+    stock.position.set(-0.16, 0.47, 0.02);
+    group.add(stock);
+
+    const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 12), dark);
+    pan.rotation.x = Math.PI / 2;
+    pan.position.set(0, 0.62, 0.02);
+    group.add(pan);
+
+    const panRim = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 6, 16), mat(0x3a3028, { rough: 0.85 }));
+    panRim.rotation.x = Math.PI / 2;
+    panRim.position.set(0, 0.65, 0.02);
+    group.add(panRim);
   } else {
     addMgTripod(group, dark, { spread: 0.4, legLen: 0.5, pivotY: 0.35 });
 
@@ -294,6 +343,10 @@ export function buildFactionMedic(group, body, dark, factionId) {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
       helmet.scale.set(1.05, 0.85, 1.05);
       helmet.position.y = 0.72;
+    } else if (factionId === 'russia') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
+      helmet.scale.set(1.08, 0.8, 1.08);
+      helmet.position.y = 0.71;
     } else {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), mat(0x4a4a48, { rough: 0.75 }));
       helmet.scale.set(1.08, 0.78, 1.08);
@@ -358,6 +411,10 @@ export function buildFactionEngineer(group, body, dark, factionId) {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat(0xc4a035, { rough: 0.72 }));
       helmet.scale.set(1.05, 0.85, 1.05);
       helmet.position.y = 0.72;
+    } else if (factionId === 'russia') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
+      helmet.scale.set(1.08, 0.8, 1.08);
+      helmet.position.y = 0.71;
     } else {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), mat(0x4a4a48, { rough: 0.75 }));
       helmet.scale.set(1.08, 0.78, 1.08);
@@ -438,6 +495,10 @@ export function buildFactionInfantry(group, body, dark, factionId) {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), body);
       helmet.scale.set(1.05, 0.85, 1.05);
       helmet.position.y = 0.76;
+    } else if (helmetStyle === 'russia') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
+      helmet.scale.set(1.08, 0.8, 1.08);
+      helmet.position.y = 0.75;
     } else {
       helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat(0x4a4a48, { rough: 0.75 }));
       helmet.scale.set(1.1, 0.75, 1.1);
@@ -526,6 +587,13 @@ const VEHICLE_BUILDERS = {
     armoredCar: buildDaimlerAC,
     artillery: build25Pounder,
     antiTankGun: build6Pounder,
+  },
+  russia: {
+    tank: buildT3485,
+    superHeavyTank: buildIS2,
+    armoredCar: buildBA64,
+    artillery: buildM30,
+    antiTankGun: buildZIS3,
   },
 };
 

@@ -66,7 +66,7 @@ export function updateAI({
   const idleAdvanceChance = 0.45 + 0.25 * (d.attackAggressionMult - 1);
 
   for (const unit of aliveEnemies) {
-    if (unit.retreating) continue;
+    if (unit.retreating || unit.surrendered || unit._captureExit) continue;
 
     if (clearance) {
       updateClearanceDefender(unit, alivePlayers);

@@ -19,6 +19,7 @@ import {
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat } from './RetreatBehavior.js';
+import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
 import { isSceneryTarget } from './SceneryTarget.js';
 import { isDefenseTarget } from './DefenseTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
@@ -88,13 +89,14 @@ export function updateCombat(
     else if (h.team === 'enemy') enemyHqs.push(h);
   }
   /** Auto-acquire lists — enemies only scan opposing forces (not every unit on the map). */
-  const playerAutoAcquire = tutorialPassiveNoHq ? [] : [...enemyAlive, ...enemyHqs];
+  const playerAutoAcquire = [...enemyAlive];
+  if (!tutorialPassiveNoHq) playerAutoAcquire.push(...enemyHqs);
   const enemyAutoAcquire = [...playerAlive, ...playerHqs, ...defenseTargets];
   const lx = listener?.x ?? 0;
   const lz = listener?.z ?? 0;
 
   for (const attacker of aliveUnits) {
-    if (attacker.retreating) continue;
+    if (attacker.retreating || attacker.surrendered || attacker._captureExit) continue;
     if (
       attacker.def.type === 'medic' ||
       attacker.def.type === 'engineer' ||
@@ -202,7 +204,9 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
       if (
         !isSceneryTarget(attacker.attackOrder) &&
         !isDefenseTarget(attacker.attackOrder) &&
-        attacker.attackOrder.team === attacker.team
+        (attacker.attackOrder.team === attacker.team ||
+          attacker.attackOrder.surrendered ||
+          attacker.attackOrder._captureExit)
       ) {
         attacker.clearAttackOrder();
         return null;
@@ -211,8 +215,6 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
     }
     attacker.clearAttackOrder();
   }
-
-  if (attacker._userMoveOrder) return null;
 
   return findNearestEnemyInRange(attacker, acquireTargets, 1);
 }
@@ -291,8 +293,15 @@ function fire(
     target.takeDamage(damage);
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
-    target.takeDamage(scalePracticeHqDamage(target, damage, options));
-    if (!target.dead && hqs) maybeTriggerRetreat(target, hqs, livingUnits);
+    if (!target.surrendered) {
+      markUnderFire(target);
+      target.takeDamage(scalePracticeHqDamage(target, damage, options));
+      if (!target.dead && !target.surrendered) {
+        if (!maybeTriggerSurrender(target, livingUnits, options) && hqs) {
+          maybeTriggerRetreat(target, hqs, livingUnits);
+        }
+      }
+    }
     if (scenery && !coax) {
       const ix = impact.x;
       const iz = impact.z;
@@ -382,14 +391,21 @@ function applySplashDamage(
     let splashDmg = baseDamage * t * t * 0.65;
     splashDmg *= getIncomingDamageMultiplier(other, coverSystem);
     splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
-    other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
-    if (!other.dead && hqs) maybeTriggerRetreat(other, hqs, units);
+    if (!other.surrendered) {
+      markUnderFire(other);
+      other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
+      if (!other.dead && !other.surrendered) {
+        if (!maybeTriggerSurrender(other, units, options) && hqs) {
+          maybeTriggerRetreat(other, hqs, units);
+        }
+      }
+    }
   }
 }
 
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
-    if (unit.dead) continue;
+    if (unit.dead || unit.surrendered || unit._captureExit) continue;
 
     if (unit.retreating) {
       const hq = hqs.find((h) => h.team === unit.team && !h.dead);

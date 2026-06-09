@@ -209,11 +209,19 @@ export function flushEnemyDeployment(game) {
   }
 }
 
+function livingTeamCount(units, team) {
+  let n = 0;
+  for (const u of units) {
+    if (u.team === team && !u.dead) n++;
+  }
+  return n;
+}
+
 export function checkLastStandVictory(game) {
   if (!game.lastStand || game.lastStand.phase !== 'battle') return null;
 
-  const playerAlive = game._playerAlive.length;
-  const enemyAlive = game._enemyAlive.length;
+  const playerAlive = livingTeamCount(game.units, 'player');
+  const enemyAlive = livingTeamCount(game.units, 'enemy');
 
   if (playerAlive === 0 && enemyAlive === 0) {
     return { victory: false, detail: 'Mutual annihilation — your forces are gone.' };

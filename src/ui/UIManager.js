@@ -91,8 +91,8 @@ export class UIManager {
   updateFactionScreenBg(factionId = null) {
     const screen = this.root.querySelector('#screen-faction');
     if (!screen) return;
-    screen.classList.remove('faction-bg-germany', 'faction-bg-usa', 'faction-bg-uk');
-    if (factionId && ['germany', 'usa', 'uk'].includes(factionId)) {
+    screen.classList.remove('faction-bg-germany', 'faction-bg-usa', 'faction-bg-uk', 'faction-bg-russia');
+    if (factionId && ['germany', 'usa', 'uk', 'russia'].includes(factionId)) {
       screen.classList.add(`faction-bg-${factionId}`);
     }
   }
@@ -1408,10 +1408,14 @@ export class UIManager {
         coverBlock =
           '<p class="unit-cover-status exposed"><strong>Exposed</strong> — no cover bonus. Move into sandbags, hedges, or fighting pits.</p>';
       }
+      const surrenderBlock = u.surrendered
+        ? '<p class="unit-surrender-status"><strong>Surrendered</strong> — move a friendly unit within ~11 m to liberate; enemy contact captures them.</p>'
+        : '';
       body.innerHTML = `
-        <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}</h3>
+        <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
+        ${surrenderBlock}
         ${coverBlock}
       `;
       return;

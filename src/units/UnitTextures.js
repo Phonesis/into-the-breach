@@ -1,18 +1,20 @@
 import * as THREE from 'three';
 import { publicUrl } from '../lib/publicUrl.js';
 
-const FACTIONS = ['germany', 'usa', 'uk'];
+const FACTIONS = ['germany', 'usa', 'uk', 'russia'];
 
 const TEXTURE_PATHS = {
   vehicle: {
     germany: 'textures/units/vehicles/germany-camo.jpg',
     usa: 'textures/units/vehicles/usa-camo.jpg',
     uk: 'textures/units/vehicles/uk-camo.jpg',
+    russia: 'textures/units/vehicles/russia-camo.jpg',
   },
   infantry: {
     germany: 'textures/units/infantry/germany-uniform.jpg',
     usa: 'textures/units/infantry/usa-uniform.jpg',
     uk: 'textures/units/infantry/uk-uniform.jpg',
+    russia: 'textures/units/infantry/russia-uniform.jpg',
   },
   ghillie: 'textures/units/infantry/sniper-ghillie.jpg',
 };
@@ -76,6 +78,14 @@ export function getBodyTexture(factionId, unitType) {
     return cache.get(`vehicle:${factionId}`) ?? null;
   }
   return null;
+}
+
+export function getVehicleCamoTexture(factionId) {
+  return cache.get(`vehicle:${factionId}`) ?? null;
+}
+
+export function getInfantryUniformTexture(factionId) {
+  return cache.get(`infantry:${factionId}`) ?? null;
 }
 
 export function getGhillieTexture() {

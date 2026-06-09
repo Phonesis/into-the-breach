@@ -114,6 +114,35 @@ body,
   background-image: url('/menu/menu-faction.jpg');
 }
 
+#screen-faction .panel {
+  max-width: min(96vw, 1280px);
+  background: rgba(12, 18, 26, 0.16);
+  border-color: rgba(201, 162, 39, 0.28);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+#screen-faction .faction-card {
+  background: rgba(24, 32, 44, 0.28);
+}
+
+#screen-faction .faction-card:hover {
+  background: rgba(36, 46, 60, 0.38);
+}
+
+#screen-faction .faction-card.selected {
+  background: rgba(48, 58, 40, 0.34);
+}
+
+#screen-faction .panel h2,
+#screen-faction .faction-card .name,
+#screen-faction .faction-card .meta,
+#screen-faction .faction-card .units-preview-label,
+#screen-faction .faction-units {
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+}
+
 #screen-faction.faction-bg-germany {
   background-image: url('/menu/menu-faction-germany.jpg');
 }
@@ -124,6 +153,10 @@ body,
 
 #screen-faction.faction-bg-uk {
   background-image: url('/menu/menu-faction-uk.jpg');
+}
+
+#screen-faction.faction-bg-russia {
+  background-image: url('/menu/menu-faction-russia.jpg');
 }
 
 #screen-map {
@@ -240,7 +273,7 @@ body,
 }
 
 .faction-grid {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .mode-grid {
@@ -604,6 +637,17 @@ body,
   background: rgba(40, 32, 28, 0.5);
   border: 1px solid rgba(120, 100, 80, 0.35);
   color: rgba(232, 200, 160, 0.85);
+}
+
+.unit-surrender-status {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 0.35rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(38, 38, 48, 0.72);
+  border: 1px solid rgba(200, 200, 210, 0.4);
+  color: #e8e4dc;
 }
 
 .unit-support-status {
