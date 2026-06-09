@@ -1,6 +1,8 @@
 /** Spatial Spitfire fly-by — layered Merlin loops with Doppler and proximity mixing. */
 
-const DOPPLER_STRENGTH = 0.0075;
+const DOPPLER_STRENGTH = 0.0058;
+const EXHAUST_RATE_BIAS = 0.84;
+const EXHAUST_DOPPLER_MAX = 1.1;
 
 function calcPan(wx, listenerX) {
   return Math.max(-1, Math.min(1, (wx - listenerX) / 48));
@@ -23,9 +25,9 @@ function proximityGain(dist) {
   return 0.015 + (1 - smoothstep01(t)) * 0.985;
 }
 
-function dopplerRate(radialVel) {
-  const raw = 1 - radialVel * DOPPLER_STRENGTH;
-  return Math.max(0.68, Math.min(1.38, raw));
+function dopplerRate(radialVel, bias = 1, max = 1.32) {
+  const raw = (1 - radialVel * DOPPLER_STRENGTH) * bias;
+  return Math.max(0.72, Math.min(max, raw));
 }
 
 class FlybyVoice {
@@ -60,9 +62,19 @@ class FlybyVoice {
 
     this.bodyPeak = ctx.createBiquadFilter();
     this.bodyPeak.type = 'peaking';
-    this.bodyPeak.frequency.value = 210;
-    this.bodyPeak.Q.value = 1.1;
+    this.bodyPeak.frequency.value = 185;
+    this.bodyPeak.Q.value = 1.05;
     this.bodyPeak.gain.value = 0;
+
+    this.exhaustLowpass = ctx.createBiquadFilter();
+    this.exhaustLowpass.type = 'lowpass';
+    this.exhaustLowpass.frequency.value = 240;
+    this.exhaustLowpass.Q.value = 0.65;
+
+    this.exhaustSub = ctx.createBiquadFilter();
+    this.exhaustSub.type = 'lowshelf';
+    this.exhaustSub.frequency.value = 220;
+    this.exhaustSub.gain.value = 5.5;
 
     this.master.connect(this.panner);
     this.panner.connect(this.lowpass);
@@ -74,25 +86,34 @@ class FlybyVoice {
     const t0 = ctx.currentTime;
     const offset = Math.random() * mainBuf.duration * 0.4;
 
-    this._addLoop(mainBuf, 1, t0, offset);
+    this._addLoop(mainBuf, 1, 'main', t0, offset);
     if (buffers.aircraft_flyby_exhaust) {
-      this._addLoop(buffers.aircraft_flyby_exhaust, 0.72, t0, offset * 1.07);
+      this._addLoop(buffers.aircraft_flyby_exhaust, 0.58, 'exhaust', t0, offset * 1.07);
     }
     if (buffers.aircraft_flyby_prop) {
-      this._addLoop(buffers.aircraft_flyby_prop, 0.55, t0, offset * 0.93);
+      this._addLoop(buffers.aircraft_flyby_prop, 0.52, 'prop', t0, offset * 0.93);
     }
   }
 
-  _addLoop(buffer, gain, t0, offset) {
+  _addLoop(buffer, gain, role, t0, offset) {
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
     const g = this.ctx.createGain();
     g.gain.value = gain;
-    src.connect(g);
-    g.connect(this.master);
+
+    if (role === 'exhaust') {
+      src.connect(g);
+      g.connect(this.exhaustLowpass);
+      this.exhaustLowpass.connect(this.exhaustSub);
+      this.exhaustSub.connect(this.master);
+    } else {
+      src.connect(g);
+      g.connect(this.master);
+    }
+
     src.start(t0, offset);
-    this.sources.push({ src, gain: g });
+    this.sources.push({ src, gain: g, role });
   }
 
   update(dt, listener) {
@@ -116,33 +137,35 @@ class FlybyVoice {
     const relZ = listener.z - this.z;
     const relLen = Math.sqrt(relX * relX + relZ * relZ) || 1;
     const radialVel = -(this.velX * relX + this.velZ * relZ) / relLen;
-    const rate = dopplerRate(radialVel);
+    const mainRate = dopplerRate(radialVel);
+    const exhaustRate = dopplerRate(radialVel, EXHAUST_RATE_BIAS, EXHAUST_DOPPLER_MAX);
+    const propRate = dopplerRate(radialVel, 0.94, 1.22);
 
-    const filterHz = 280 + proximity * 7200;
-    const bodyBoost = proximity * 8.5;
+    const filterHz = 260 + proximity * 4200;
+    const exhaustFilterHz = 140 + proximity * 480;
+    const bodyBoost = proximity * 7.5;
+    const exhaustShelf = 4 + proximity * 3.5;
     const wetMix = 0.42 - proximity * 0.3;
 
-    const propGain = 0.18 + proximity * 0.92;
-    const exhaustGain = 0.35 + proximity * 0.75;
+    const propGain = 0.16 + proximity * 0.88;
+    const exhaustGain = 0.2 + proximity * 0.42;
 
     const t = this.ctx.currentTime;
     this.panner.pan.setTargetAtTime(pan, t, 0.035);
     this.master.gain.setTargetAtTime(vol * 1.05, t, 0.05);
     this.wet.gain.setTargetAtTime(vol * wetMix, t, 0.05);
     this.lowpass.frequency.setTargetAtTime(filterHz, t, 0.07);
+    this.exhaustLowpass.frequency.setTargetAtTime(exhaustFilterHz, t, 0.08);
+    this.exhaustSub.gain.setTargetAtTime(exhaustShelf, t, 0.08);
     this.bodyPeak.gain.setTargetAtTime(bodyBoost, t, 0.07);
 
-    for (const { src, gain } of this.sources) {
-      if (src.playbackRate) src.playbackRate.setTargetAtTime(rate, t, 0.06);
-    }
-
-    const layers = this.sources;
-    if (layers.length >= 3) {
-      layers[0].gain.gain.setTargetAtTime(1, t, 0.06);
-      layers[1].gain.gain.setTargetAtTime(exhaustGain, t, 0.06);
-      layers[2].gain.gain.setTargetAtTime(propGain, t, 0.06);
-    } else if (layers.length === 2) {
-      layers[1].gain.gain.setTargetAtTime(exhaustGain, t, 0.06);
+    for (const { src, gain, role } of this.sources) {
+      if (!src.playbackRate) continue;
+      const rate = role === 'exhaust' ? exhaustRate : role === 'prop' ? propRate : mainRate;
+      src.playbackRate.setTargetAtTime(rate, t, 0.06);
+      if (role === 'main') gain.gain.setTargetAtTime(1, t, 0.06);
+      else if (role === 'exhaust') gain.gain.setTargetAtTime(exhaustGain, t, 0.06);
+      else if (role === 'prop') gain.gain.setTargetAtTime(propGain, t, 0.06);
     }
 
     if (this.life >= this.maxLife + 0.4) {
@@ -168,6 +191,8 @@ class FlybyVoice {
     this.panner.disconnect();
     this.lowpass.disconnect();
     this.bodyPeak.disconnect();
+    this.exhaustLowpass.disconnect();
+    this.exhaustSub.disconnect();
   }
 }
 

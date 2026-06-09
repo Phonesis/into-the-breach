@@ -3,6 +3,7 @@ import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 
 const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _groundHit = new THREE.Vector3();
@@ -65,6 +66,10 @@ export class RTSController {
     this.hoveredTarget = null;
     this._modifierShift = false;
     this._lastHoverRayAt = 0;
+    this._tabletMode = isTabletLikeDevice();
+    this._longPressTimer = null;
+    this._longPressFired = false;
+    this._longPressMs = 480;
 
     this._onPointerDown = this.onPointerDown.bind(this);
     this._onPointerMove = this.onPointerMove.bind(this);
@@ -440,6 +445,22 @@ export class RTSController {
 
     this.dragStart = { x: e.clientX, y: e.clientY };
     this._dragSelecting = false;
+    this._longPressFired = false;
+    this._clearLongPressTimer();
+
+    if (
+      this._tabletMode &&
+      this.getSelectedPlayerUnits().length > 0 &&
+      !this.getPendingFireSupport?.() &&
+      !this.getPendingDefensePlacement?.() &&
+      !this.getPendingLastStandDeploy?.()
+    ) {
+      this._longPressTimer = setTimeout(() => {
+        this._longPressTimer = null;
+        this._longPressFired = true;
+        this.issueMoveOrAttack();
+      }, this._longPressMs);
+    }
   }
 
   onPointerMove(e) {
@@ -465,12 +486,30 @@ export class RTSController {
     if (!this.dragStart) return;
     const dx = e.clientX - this.dragStart.x;
     const dy = e.clientY - this.dragStart.y;
-    if (Math.hypot(dx, dy) > 6) this._dragSelecting = true;
+    if (Math.hypot(dx, dy) > 6) {
+      this._dragSelecting = true;
+      this._clearLongPressTimer();
+    }
+  }
+
+  _clearLongPressTimer() {
+    if (this._longPressTimer) {
+      clearTimeout(this._longPressTimer);
+      this._longPressTimer = null;
+    }
   }
 
   onPointerUp(e) {
     if (!this.enabled || e.button !== 0) return;
     this.setPointerFromEvent(e);
+    this._clearLongPressTimer();
+
+    if (this._longPressFired) {
+      this._longPressFired = false;
+      this.dragStart = null;
+      this._dragSelecting = false;
+      return;
+    }
 
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();

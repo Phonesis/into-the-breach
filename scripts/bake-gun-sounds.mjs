@@ -329,32 +329,34 @@ function bakeMerlinMain({
   return seamlessLoop(out);
 }
 
-/** Twin-stack exhaust crackle (played as a secondary loop). */
-function bakeMerlinExhaust({ duration = 2.65, crankHz = 40.5, cylinders = 6 } = {}) {
+/** Low exhaust rumble — kept dark; runtime adds proximity brightness on main/prop only. */
+function bakeMerlinExhaust({ duration = 2.65, crankHz = 36.5, cylinders = 6 } = {}) {
   const len = Math.floor(duration * SR);
   const out = new Float32Array(len);
   const st = [0, 0, 0, 0, 0, 0];
   const firingHz = crankHz * cylinders;
   let lp = 0;
-  let hp = 0;
+  let sub = 0;
 
   for (let i = 0; i < len; i++) {
     const t = i / SR;
     const bankA = exhaustPulse(t * firingHz);
     const bankB = exhaustPulse(t * firingHz + 0.5);
-    const stacks = bankA * 0.64 + bankB * 0.6;
+    const stacks = bankA * 0.6 + bankB * 0.56;
 
     const pn = pinkNoise(st);
-    lp += 0.07 * (pn - lp);
-    const bright = pn - lp;
-    hp += 0.18 * (bright - hp);
+    lp += 0.045 * (pn - lp);
+    sub += 0.022 * (pn - sub);
 
     const growl =
-      Math.sin(2 * Math.PI * firingHz * t) * 0.14 +
-      Math.sin(2 * Math.PI * firingHz * 1.5 * t) * 0.09 +
-      Math.sin(2 * Math.PI * firingHz * 2.1 * t) * 0.05;
+      Math.sin(2 * Math.PI * crankHz * 0.5 * t) * 0.22 +
+      Math.sin(2 * Math.PI * crankHz * t) * 0.16 +
+      Math.sin(2 * Math.PI * firingHz * 0.5 * t) * 0.12 +
+      Math.sin(2 * Math.PI * firingHz * t) * 0.08;
 
-    out[i] = softClip((hp * stacks * 0.82 + lp * stacks * 0.35 + growl) * 0.95);
+    const churn = sub * stacks * 0.95 + lp * stacks * 0.62;
+
+    out[i] = softClip((churn + growl * stacks * 0.55) * 0.92);
   }
 
   return seamlessLoop(out);

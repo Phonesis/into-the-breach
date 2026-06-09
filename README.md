@@ -209,7 +209,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | 25-pounder Gun | QF 25-pdr | 12,000 |
 | Daimler AC | Armored car | 980 |
 
-**Selection:** LMB on a unit, drag a **box** on the ground, or click a row in the **Forces** panel (left). Shift-click adds to selection. Tanks use an invisible pick sphere. Selected units show a **range ring** and stats (designation, HP, range, coax stats on tanks, cover % for infantry/MG).
+**Selection:** LMB on a unit, drag a **box** on the ground, or click a row in the **Forces** panel (left). Shift-click adds to selection. Tanks use an invisible pick sphere. Selected units show a **range ring** and stats (designation, **health bar**, range, coax stats on tanks, cover % for infantry/MG). The Forces roster shows a mini HP bar and percentage per unit.
 
 ---
 
@@ -224,12 +224,15 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **Esc** | Cancel fire-support targeting, **active unit fire missions**, Last Stand placement, or pending TD emplacement |
 | **WASD / arrows** | Pan camera |
 | **Mouse wheel / trackpad** | Zoom |
-| **Forces panel** | Click to select; Shift-click to add |
+| **Forces panel** | Click to select; Shift-click to add; each row shows an HP bar |
+| **Field icons** | Toggle (Forces header) — show/hide unit-type icons and **world health bars** above your troops; preference saved in browser |
 | **Engage target** | Confirm attack on highlighted enemy (selection panel) |
 | **Launch Battle Now** | Skip quiet-sector staging (countdown banner) |
 | **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
 | **Production buttons** | Queue unit at your HQ (when HQ is alive) |
 | **Strafe / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
+| **Tablet / touch** | **Camera pad** (bottom-right): pan, rotate, zoom · **pinch** on battlefield to zoom · **long-press** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
+| **Cheat mode** | Type **`iddqd`** during a battle, or open the game with **`?cheat=1`** in the URL (unlimited supplies, instant builds) |
 
 **Manual fire** (Shift + LMB): any selected combat unit in range can fire at open ground or destroy cover scenery. Ground bombardment units (MG, mortar, armored car, tank, super heavy, artillery) use **fire missions** on open ground. Anti-tank guns use direct fire only. **RMB move** or **Esc** cancels an active fire mission.
 
@@ -268,6 +271,8 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 - **Anti-tank guns:** Bonus damage vs tanks, super heavies, and armored cars; weak vs infantry. Tank-gun VFX and sounds.
 - **Armor:** **Rifles and MGs cannot damage tanks or super heavies** (0% — use AT guns, mortars, tank guns, or artillery). **Armored cars** take partial small-arms damage (~32%). Snipers chip armor slightly; mortars and dedicated AT weapons are effective.
 - **Medics & engineers:** Medics heal nearby infantry/MG/mortar/sniper teams and show a **green cross** while healing. Engineers repair nearby vehicles and show a **spanner** while repairing. Both reduce retreat chance for allies in range.
+- **Vehicle damage smoke:** Tanks, armored cars, artillery, and towed guns below **50% HP** trail **black engine smoke** from the rear until repaired or destroyed.
+- **Health bars:** When **field icons** are enabled, floating bars appear above **damaged** or **selected** units (green → yellow → red by HP; player/enemy border tint). The **Forces** roster and **selection panel** always show HP bars with numeric values. Turning field icons off hides world bars and icons together.
 - **Retreat:** Damaged units may fall back to their HQ (**RETREAT** marker) and stop attacking until safe. Clear Defenses defenders do not retreat.
 - **Casualties:** Destroyed units leave **wrecks** — burning tanks, fallen infantry, knocked-out vehicles. Cover and retreat markers are cleared on death.
 - **Tracers:** Short streaks for infantry/MG only; tanks, AT guns, and artillery use impact VFX without bullet tracers.
@@ -337,7 +342,7 @@ Content lives in `src/data/gameGuide.js` and is rendered into the **Field Manual
 - Title screen → **Field Manual**
 - During battle → **Field Manual** (bottom HUD)
 
-The manual includes a section nav, control reference table, illustrated **unit cards** (eleven types, same icons as the Forces panel), per-faction **medium vs super-heavy** and **anti-tank gun** tables, and sections on objectives, modes, economy, combat, cover, fire support, and difficulty.
+The manual includes a section nav, control reference table, illustrated **unit cards** (eleven types, same icons as the Forces panel), per-faction **medium vs super-heavy** and **anti-tank gun** tables, and sections on objectives, modes, controls, **Forces & battlefield UI** (field icons, health bars, tablet camera pad), economy, combat, cover, fire support, and difficulty.
 
 ---
 
@@ -400,7 +405,10 @@ src/
     VehicleTypes.js       # Tank types, move tuning
   ui/
     UIManager.js          # Menu, HUD, Field Manual, overlays
+    TabletCameraControls.js # On-screen camera pad for touch devices
     unitIcons.js          # SVG icons for roster & manual
+  lib/
+    tabletDetect.js       # Tablet/phone detection (?tablet=1 override)
   input/
     RTSController.js      # Select, move, attack, fire missions
     BattleCursor.js       # Shift fire-mission reticle
@@ -413,6 +421,9 @@ src/
   effects/                # Tracers, wrecks, fire support VFX
   visual/
     HealMarkers.js        # Medic cross / engineer spanner icons
+    UnitHealthBars.js     # Floating HP bars (tied to field-icons toggle)
+    DamageSmoke.js        # Black engine smoke on damaged vehicles
+    UnitFieldIcons.js     # Unit-type icons above player forces
     DefenseMeshes.js      # TD emplacement meshes
 scripts/
   bake-gun-sounds.mjs

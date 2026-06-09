@@ -11,6 +11,8 @@ import { renderGameGuideHtml } from '../data/gameGuide.js';
 import { DEFENSE_TYPE_LIST, DEFENSE_UPGRADES, DEFENSE_TYPES } from '../data/towerDefense.js';
 import { formatTowerDefenseHud } from '../game/TowerDefenseMode.js';
 import { getUnitIconMarkup } from './unitIcons.js';
+import { TabletCameraControls } from './TabletCameraControls.js';
+import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 
 const PRODUCE_LABELS = {
   infantry: 'Inf',
@@ -25,6 +27,32 @@ const PRODUCE_LABELS = {
   superHeavyTank: 'Super Heavy Tank',
   artillery: 'Arty',
 };
+
+function hpPercent(hp, maxHp) {
+  return Math.max(0, Math.min(100, Math.round((hp / Math.max(maxHp, 1)) * 100)));
+}
+
+function hpTier(pct) {
+  if (pct < 30) return 'critical';
+  if (pct < 60) return 'warn';
+  return 'ok';
+}
+
+function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
+  const pct = hpPercent(hp, maxHp);
+  const tier = hpTier(pct);
+  const valueLine = showValues
+    ? `<span class="hp-bar-values">${Math.ceil(hp)} / ${maxHp}</span>`
+    : '';
+  return `
+    <div class="hp-bar-wrap${compact ? ' hp-bar-wrap--compact' : ''}">
+      <div class="hp-bar-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+        <span class="hp-bar-fill hp-bar-fill--${tier}" style="width:${pct}%"></span>
+      </div>
+      ${valueLine}
+    </div>
+  `;
+}
 
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 
@@ -55,6 +83,7 @@ export class UIManager {
     this._hudTowerDefense = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.render();
+    this.tabletCamera = new TabletCameraControls(this.root);
     this._syncFieldIconToggle();
   }
 
@@ -183,7 +212,7 @@ export class UIManager {
             <div class="hud-resources">
               <span class="resource-label">Supplies</span>
               <span class="resource-value" id="hud-resources">0</span>
-              <span class="hud-cheat-badge hidden" id="hud-cheat-badge" title="Cheat mode (iddqd)">CHEAT</span>
+              <span class="hud-cheat-badge hidden" id="hud-cheat-badge" title="Cheat mode (iddqd or ?cheat=1)">CHEAT</span>
             </div>
             <div class="hud-stats" id="hud-army">Army: —</div>
           </div>
@@ -208,6 +237,25 @@ export class UIManager {
         </div>
 
         <div class="capture-bar" id="capture-bar"></div>
+
+        <div id="tablet-camera" class="tablet-camera hidden interactive" aria-label="Camera controls">
+          <p class="tablet-camera-label">Camera</p>
+          <div class="tablet-camera-rotate">
+            <button type="button" class="tablet-cam-btn" data-cam="rotateLeft" aria-label="Rotate view left">⟲</button>
+            <button type="button" class="tablet-cam-btn" data-cam="rotateRight" aria-label="Rotate view right">⟳</button>
+          </div>
+          <div class="tablet-camera-pad" role="group" aria-label="Pan camera">
+            <button type="button" class="tablet-cam-btn pad-up" data-cam="panForward" aria-label="Pan forward">▲</button>
+            <button type="button" class="tablet-cam-btn pad-left" data-cam="panLeft" aria-label="Pan left">◀</button>
+            <button type="button" class="tablet-cam-btn pad-center" tabindex="-1" aria-hidden="true">◎</button>
+            <button type="button" class="tablet-cam-btn pad-right" data-cam="panRight" aria-label="Pan right">▶</button>
+            <button type="button" class="tablet-cam-btn pad-down" data-cam="panBack" aria-label="Pan back">▼</button>
+          </div>
+          <div class="tablet-camera-zoom" role="group" aria-label="Zoom">
+            <button type="button" class="tablet-cam-btn" data-cam="zoomIn" aria-label="Move camera in">＋</button>
+            <button type="button" class="tablet-cam-btn" data-cam="zoomOut" aria-label="Move camera out">－</button>
+          </div>
+        </div>
 
         <aside class="unit-roster interactive" id="unit-roster" aria-label="Your forces">
           <h3 class="unit-roster-title">Forces</h3>
@@ -614,6 +662,9 @@ export class UIManager {
         : 'Surrender and return to the main menu';
     }
 
+    const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
+    this.tabletCamera?.setVisible(tabletOn);
+
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
       if (tutorial) {
@@ -631,11 +682,23 @@ export class UIManager {
       } else if (lastStand) {
         this._defaultHudHint =
           'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
+      } else if (tabletOn) {
+        this._defaultHudHint =
+          'Tap to select · Use camera pad (right) to pan, rotate, and zoom · Long-press map for move/attack';
       } else {
         this._defaultHudHint =
           'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Shift+LMB fire ground/cover';
       }
       hint.textContent = this._defaultHudHint;
+      if (tabletOn && tutorial) {
+        hint.textContent =
+          'Tutorial: tap to select · camera pad (right) · long-press map to move/attack';
+      } else if (tabletOn && lastStand) {
+        hint.textContent =
+          'Last Stand: tap unit, tap map to place · camera pad (right) · Begin Battle when ready';
+      } else if (tabletOn && !hint.textContent.includes('camera pad')) {
+        hint.textContent += ' · Camera pad (right)';
+      }
       hint.classList.remove('hud-hint-opening');
     }
 
@@ -877,7 +940,8 @@ export class UIManager {
     list.innerHTML = sorted
       .map((u) => {
         const short = PRODUCE_LABELS[u.type] ?? u.type;
-        const hpPct = Math.max(0, Math.round((u.hp / u.maxHp) * 100));
+        const hpPct = hpPercent(u.hp, u.maxHp);
+        const tier = hpTier(hpPct);
         const sel = selectedIds.has(u.id) ? ' selected' : '';
         const low = hpPct < 35 ? ' low-hp' : '';
         return `
@@ -885,7 +949,10 @@ export class UIManager {
           <span class="unit-roster-icon">${getUnitIconMarkup(u.type)}</span>
           <span class="unit-roster-meta">
             <span class="unit-roster-name">${short}</span>
-            <span class="unit-roster-hp">${hpPct}%</span>
+            <span class="unit-roster-hp-wrap">
+              <span class="unit-roster-hp-bar"><span class="unit-roster-hp-fill unit-roster-hp-fill--${tier}" style="width:${hpPct}%"></span></span>
+              <span class="unit-roster-hp">${hpPct}%</span>
+            </span>
           </span>
         </button>
       `;
@@ -947,8 +1014,13 @@ export class UIManager {
     }
   }
 
+  getTabletCameraInput() {
+    return this.tabletCamera?.getInput() ?? null;
+  }
+
   hideHUD() {
     this.closeGuide();
+    this.tabletCamera?.setVisible(false);
     this.root.querySelector('#hud').classList.add('hidden');
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
@@ -1011,7 +1083,8 @@ export class UIManager {
     const prev = hint.dataset.cheatRestore;
     if (active) {
       if (!prev) hint.dataset.cheatRestore = hint.textContent;
-      hint.textContent = 'Cheat mode ON — instant builds, unlimited supplies (iddqd to toggle off)';
+      hint.textContent =
+        'Cheat mode ON — instant builds, unlimited supplies (iddqd to toggle off, or remove ?cheat=1 from the URL)';
       hint.classList.add('hud-hint-cheat');
     } else {
       hint.textContent = prev || hint.textContent;
@@ -1291,7 +1364,8 @@ export class UIManager {
       const teamLabel = hq.team === 'player' ? 'Your headquarters' : 'Enemy headquarters';
       body.innerHTML = `
         <h3 class="hq-selected-title">${hq.name ?? 'Headquarters'}</h3>
-        <p class="hq-selected-meta">${teamLabel} · HP <strong>${Math.ceil(hq.hp)}</strong> / ${hq.maxHp}</p>
+        <p class="hq-selected-meta">${teamLabel}</p>
+        ${hpBarMarkup(hq.hp, hq.maxHp)}
         <p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>
       `;
       return;
@@ -1336,7 +1410,8 @@ export class UIManager {
       }
       body.innerHTML = `
         <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}</h3>
-        <p>${u.def.designation} — HP ${Math.ceil(u.hp)}/${u.maxHp} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
+        ${hpBarMarkup(u.hp, u.maxHp)}
+        <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
         ${coverBlock}
       `;
       return;
@@ -1355,7 +1430,14 @@ export class UIManager {
         : uniqueTargets.length > 1
           ? `<p class="selection-orders">Multiple targets (${uniqueTargets.length})</p>`
           : '';
-    body.innerHTML = `<h3>${units.length} units selected</h3><p>${summary}</p>${orderNote}`;
+    const totalHp = units.reduce((sum, u) => sum + u.hp, 0);
+    const totalMax = units.reduce((sum, u) => sum + u.maxHp, 0);
+    body.innerHTML = `
+      <h3>${units.length} units selected</h3>
+      ${hpBarMarkup(totalHp, totalMax, { showValues: true })}
+      <p>${summary}</p>
+      ${orderNote}
+    `;
   }
 
   showEndOverlay(victory, message, report, canReplay = false) {

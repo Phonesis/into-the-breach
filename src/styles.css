@@ -628,6 +628,55 @@ body,
   margin-top: 0.25rem;
 }
 
+.hp-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  margin: 0.35rem 0 0.55rem;
+}
+
+.hp-bar-wrap--compact {
+  margin: 0.2rem 0 0.35rem;
+}
+
+.hp-bar-track {
+  display: block;
+  height: 0.55rem;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  overflow: hidden;
+}
+
+.hp-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.15s ease-out, background-color 0.15s ease-out;
+}
+
+.hp-bar-fill--ok {
+  background: linear-gradient(90deg, #16a34a, #4ade80);
+}
+
+.hp-bar-fill--warn {
+  background: linear-gradient(90deg, #ca8a04, #facc15);
+}
+
+.hp-bar-fill--critical {
+  background: linear-gradient(90deg, #b91c1c, #f87171);
+}
+
+.hp-bar-values {
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.88;
+}
+
+.selection-unit-meta {
+  margin-top: 0.15rem;
+}
+
 .hq-selected-hint {
   font-size: 0.72rem;
   opacity: 0.6;
@@ -908,6 +957,42 @@ body,
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+.unit-roster-hp-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.12rem;
+  width: 100%;
+  min-width: 2.4rem;
+}
+
+.unit-roster-hp-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.unit-roster-hp-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.12s ease-out;
+}
+
+.unit-roster-hp-fill--ok {
+  background: #4ade80;
+}
+
+.unit-roster-hp-fill--warn {
+  background: #facc15;
+}
+
+.unit-roster-hp-fill--critical {
+  background: #f87171;
 }
 
 .unit-roster-hp {
@@ -1437,6 +1522,120 @@ body,
   font-size: 0.7rem;
   opacity: 0.6;
   margin-top: 0.35rem;
+}
+
+/* —— Tablet camera pad (touch devices without keyboard) —— */
+.tablet-camera {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 5.75rem;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.5rem 0.65rem;
+  background: rgba(10, 14, 20, 0.82);
+  border: 1px solid rgba(201, 162, 39, 0.28);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tablet-camera.hidden {
+  display: none;
+}
+
+.tablet-camera-label {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  color: #c9a227;
+}
+
+.tablet-camera-rotate,
+.tablet-camera-zoom {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tablet-camera-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 2.65rem);
+  grid-template-rows: repeat(3, 2.65rem);
+  gap: 0.28rem;
+}
+
+.tablet-cam-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e8ecf0;
+  background: rgba(36, 48, 62, 0.95);
+  border: 1px solid rgba(120, 140, 165, 0.45);
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.1s, border-color 0.1s, transform 0.08s;
+}
+
+.tablet-cam-btn.is-active,
+.tablet-cam-btn:active {
+  background: rgba(201, 162, 39, 0.35);
+  border-color: rgba(201, 162, 39, 0.75);
+  color: #fff8e8;
+  transform: scale(0.94);
+}
+
+.tablet-cam-btn.pad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.tablet-cam-btn.pad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.tablet-cam-btn.pad-center {
+  grid-column: 2;
+  grid-row: 2;
+  opacity: 0.35;
+  pointer-events: none;
+  font-size: 0.85rem;
+}
+
+.tablet-cam-btn.pad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.tablet-cam-btn.pad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+@media (max-width: 720px) {
+  .tablet-camera {
+    right: 0.45rem;
+    bottom: 4.75rem;
+    transform: scale(0.92);
+    transform-origin: bottom right;
+  }
+
+  .hud-hint {
+    max-width: 42vw;
+  }
 }
 
 .hud-hint {

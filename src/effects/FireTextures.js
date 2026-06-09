@@ -64,6 +64,25 @@ export function getSmokeTexture() {
   return smokeTexture;
 }
 
+let damageSmokeTexture = null;
+
+/** Dark exhaust / engine-damage smoke puff. */
+export function getDamageSmokeTexture() {
+  if (damageSmokeTexture) return damageSmokeTexture;
+  damageSmokeTexture = makeCanvas(128, 128, (ctx, w, h) => {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.5);
+    g.addColorStop(0, 'rgba(18, 18, 18, 0.78)');
+    g.addColorStop(0.3, 'rgba(10, 10, 10, 0.58)');
+    g.addColorStop(0.58, 'rgba(4, 4, 4, 0.28)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+  return damageSmokeTexture;
+}
+
 export function getEmberTexture() {
   if (emberTexture) return emberTexture;
   emberTexture = makeCanvas(32, 32, (ctx, w, h) => {

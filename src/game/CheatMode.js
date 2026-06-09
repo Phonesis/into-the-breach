@@ -2,6 +2,21 @@
 
 export const CHEAT_CODE = 'iddqd';
 
+/** `?cheat=1` enables cheat mode on load (for touch devices); `?cheat=0` forces off. */
+export function isCheatModeFromUrl() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('cheat') === '1') return true;
+    if (params.get('cheat') === '0') return false;
+  } catch {
+    /* ignore */
+  }
+
+  return false;
+}
+
 export function createCheatKeyBuffer(code = CHEAT_CODE) {
   let buffer = '';
   return {

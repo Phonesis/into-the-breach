@@ -4,6 +4,8 @@ import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
+import { removeDamageSmoke } from '../visual/DamageSmoke.js';
+import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import { distanceBetween, getStandoffPosition } from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
@@ -37,6 +39,7 @@ export class Unit {
     this.fieldIcon = null;
     this.healMarker = null;
     this.healMarkerKind = null;
+    this.damageSmoke = null;
     this.defensiveHold = null;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
@@ -157,6 +160,8 @@ export class Unit {
       clearRetreat(this);
       removeCoverMarker(this);
       removeHealMarker(this);
+      removeDamageSmoke(this);
+      removeUnitHealthBar(this);
       if (this.selected) this.setSelected(false);
       applyUnitDeathVisual(this);
     }
@@ -167,6 +172,8 @@ export class Unit {
     removeCoverMarker(this);
     removeFieldIcon(this);
     removeHealMarker(this);
+    removeDamageSmoke(this);
+    removeUnitHealthBar(this);
     scene.remove(this.mesh);
     this.mesh.traverse((child) => {
       if (child.geometry) child.geometry.dispose();

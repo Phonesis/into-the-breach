@@ -60,6 +60,8 @@ import {
   syncUnitFieldIcon,
 } from '../visual/UnitFieldIcons.js';
 import { syncHealMarkers } from '../visual/HealMarkers.js';
+import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
+import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
 import {
   createAssaultState,
   setupAssaultCapturePoints,
@@ -68,8 +70,13 @@ import {
   checkAssaultVictory,
 } from './AssaultMode.js';
 import { buildFrontlineVisual, disposeFrontlineVisual } from '../world/Frontline.js';
-import { createCheatKeyBuffer, shouldIgnoreCheatKeyEvent } from './CheatMode.js';
+import {
+  createCheatKeyBuffer,
+  isCheatModeFromUrl,
+  shouldIgnoreCheatKeyEvent,
+} from './CheatMode.js';
 import { buildCoverSites } from '../world/CoverSites.js';
+import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 import { CoverSystem } from './CoverSystem.js';
 import { MAPS, buildMapDef } from '../data/maps.js';
 import { getDeployRadius, formatMapHudLabel } from '../data/mapSizes.js';
@@ -220,7 +227,7 @@ export class Game {
     /** Orbit angle around the look target (radians). */
     this.cameraYaw = Math.atan2(-0.52, 0.72);
     this.keys = {};
-    this.cheatMode = false;
+    this.cheatMode = isCheatModeFromUrl();
     this._cheatKeys = createCheatKeyBuffer();
 
     this.production = new ProductionManager({
@@ -326,6 +333,7 @@ export class Game {
 
     window.addEventListener('resize', () => this.onResize());
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    if (isTabletLikeDevice()) this._bindPinchZoom(canvas);
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
       this._onCheatKeyDown(e);
@@ -388,6 +396,49 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  _bindPinchZoom(canvas) {
+    let lastPinchDist = 0;
+
+    const pinchDist = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    canvas.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length === 2) {
+          lastPinchDist = pinchDist(e.touches);
+        }
+      },
+      { passive: true }
+    );
+
+    canvas.addEventListener(
+      'touchmove',
+      (e) => {
+        if (!this.running || e.touches.length !== 2) return;
+        const dist = pinchDist(e.touches);
+        if (lastPinchDist > 0) {
+          const delta = (lastPinchDist - dist) * 0.045;
+          this.zoom = THREE.MathUtils.clamp(this.zoom + delta, this.zoomMin, this.zoomMax);
+        }
+        lastPinchDist = dist;
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      'touchend',
+      (e) => {
+        if (e.touches.length < 2) lastPinchDist = 0;
+      },
+      { passive: true }
+    );
   }
 
   onWheel(e) {
@@ -706,6 +757,8 @@ export class Game {
       if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
     });
     this.ui.updateProduction(this);
+    this.ui.setCheatHud(this.cheatMode);
+    if (this.cheatMode) this.ui.showCheatToast(true);
     this.ui.updateDefenses(this);
     this.ui.updateTowerDefense(this);
     this.ui.updateFireSupport(this.fireSupport);
@@ -913,6 +966,7 @@ export class Game {
   setUnitFieldIconsEnabled(enabled) {
     this.showUnitFieldIcons = !!enabled;
     syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+    syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
   }
 
   selectPlayerUnitById(unitId, additive = false) {
@@ -1311,16 +1365,17 @@ export class Game {
     const panSpeed = 35 * dt;
     const rotateSpeed = 1.65 * dt;
     const dollySpeed = 42 * dt;
+    const pad = this.ui?.getTabletCameraInput?.();
 
-    if (this.keys['ArrowLeft']) this.cameraYaw += rotateSpeed;
-    if (this.keys['ArrowRight']) this.cameraYaw -= rotateSpeed;
+    if (this.keys['ArrowLeft'] || pad?.rotateLeft) this.cameraYaw += rotateSpeed;
+    if (this.keys['ArrowRight'] || pad?.rotateRight) this.cameraYaw -= rotateSpeed;
 
     let panForward = 0;
     let panRight = 0;
-    if (this.keys['KeyW']) panForward -= 1;
-    if (this.keys['KeyS']) panForward += 1;
-    if (this.keys['KeyA']) panRight -= 1;
-    if (this.keys['KeyD']) panRight += 1;
+    if (this.keys['KeyW'] || pad?.panForward) panForward -= 1;
+    if (this.keys['KeyS'] || pad?.panBack) panForward += 1;
+    if (this.keys['KeyA'] || pad?.panLeft) panRight -= 1;
+    if (this.keys['KeyD'] || pad?.panRight) panRight += 1;
 
     const viewForward = new THREE.Vector3();
     this.camera.getWorldDirection(viewForward);
@@ -1330,10 +1385,10 @@ export class Game {
       .crossVectors(viewForward, new THREE.Vector3(0, 1, 0))
       .normalize();
 
-    if (this.keys['ArrowUp']) {
+    if (this.keys['ArrowUp'] || pad?.zoomIn) {
       this.cameraTarget.addScaledVector(viewForward, dollySpeed);
     }
-    if (this.keys['ArrowDown']) {
+    if (this.keys['ArrowDown'] || pad?.zoomOut) {
       this.cameraTarget.addScaledVector(viewForward, -dollySpeed);
     }
 
@@ -1758,6 +1813,9 @@ export class Game {
         updateMedicHealing(this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
         syncHealMarkers(this._aliveUnits);
+        syncDamageSmoke(this._aliveUnits);
+        updateDamageSmoke(this._aliveUnits, dt);
+        syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
           updateLastStandEnemyDeploy(this, dt);
