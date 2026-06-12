@@ -56,6 +56,12 @@ const ui = new UIManager(uiRoot, {
   onConfirmTarget() {
     game?.confirmTargetAttack();
   },
+  onTabletTargetMode(on) {
+    game?.setTabletTargetMode(on);
+  },
+  onTabletFireMode(on) {
+    game?.setTabletFireMode(on);
+  },
   onCancelFireMissions() {
     game?.cancelAllFireMissions();
   },
@@ -80,11 +86,17 @@ const ui = new UIManager(uiRoot, {
   onLaunchBattleNow() {
     game?.launchBattleNow();
   },
+  onSkipTowerDefenseWave() {
+    game?.skipTowerDefenseWave();
+  },
   onSurrender() {
     game?.surrender();
   },
   onToggleUnitFieldIcons(enabled) {
     game?.setUnitFieldIconsEnabled(enabled);
+  },
+  onToggleFrontline(enabled) {
+    game?.setShowFrontlineEnabled(enabled);
   },
 });
 

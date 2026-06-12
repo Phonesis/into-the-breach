@@ -8,7 +8,13 @@ import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
-import { DEFENSE_TYPE_LIST, DEFENSE_UPGRADES, DEFENSE_TYPES } from '../data/towerDefense.js';
+import {
+  DEFENSE_TYPE_LIST,
+  DEFENSE_UPGRADES,
+  DEFENSE_TYPES,
+  TD_MAX_ARTILLERY_PITS,
+  getArtilleryPitCount,
+} from '../data/towerDefense.js';
 import { formatTowerDefenseHud } from '../game/TowerDefenseMode.js';
 import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
@@ -55,6 +61,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 }
 
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
+const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
 
 const FACTION_ROSTER_LABELS = {
   infantry: 'Infantry',
@@ -82,9 +89,11 @@ export class UIManager {
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this._hudTowerDefense = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
+    this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.render();
     this.tabletCamera = new TabletCameraControls(this.root);
     this._syncFieldIconToggle();
+    this._syncFrontlineToggle();
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -196,6 +205,16 @@ export class UIManager {
               <span class="td-wave" id="td-wave-label">Wave 0 / 12</span>
               <span class="td-phase" id="td-phase-label">Prepare defenses</span>
             </div>
+            <button
+              type="button"
+              class="frontline-toggle interactive hidden"
+              id="btn-toggle-frontline"
+              title="Show red frontline on the map"
+              aria-pressed="true"
+            >
+              <span class="frontline-toggle-swatch" aria-hidden="true"></span>
+              <span class="frontline-toggle-label">Frontline</span>
+            </button>
             <div class="laststand-banner hidden" id="laststand-banner">
               Last Stand — deploy your army, then fight to the last unit. No HQ or reinforcements.
             </div>
@@ -236,10 +255,48 @@ export class UIManager {
           </div>
         </div>
 
+        <div id="td-wave-countdown" class="td-wave-countdown hidden" aria-live="polite">
+          <div class="td-wave-countdown-card" id="td-wave-countdown-card">
+            <p class="td-wave-countdown-title" id="td-wave-countdown-title">Prepare defenses</p>
+            <p class="td-wave-countdown-value" id="td-wave-countdown-value">30</p>
+            <p class="td-wave-countdown-sub" id="td-wave-countdown-sub">Wave 1 / 12</p>
+            <div class="td-wave-countdown-track">
+              <div class="td-wave-countdown-fill" id="td-wave-countdown-fill"></div>
+            </div>
+            <button
+              type="button"
+              class="btn btn-primary td-wave-countdown-skip interactive"
+              id="btn-td-skip-wave-countdown"
+            >
+              Start Wave Now
+            </button>
+          </div>
+        </div>
+
         <div class="capture-bar" id="capture-bar"></div>
 
         <div id="tablet-camera" class="tablet-camera hidden interactive" aria-label="Camera controls">
           <p class="tablet-camera-label">Camera</p>
+          <div class="tablet-camera-actions" role="group" aria-label="Battle orders">
+            <button
+              type="button"
+              class="tablet-cam-btn tablet-mode-btn"
+              id="btn-tablet-target"
+              aria-pressed="false"
+              title="Tap an enemy to highlight — tap again or Engage to attack"
+            >
+              Target
+            </button>
+            <button
+              type="button"
+              class="tablet-cam-btn tablet-mode-btn"
+              id="btn-tablet-fire"
+              aria-pressed="false"
+              title="Tap ground or cover to fire (like Shift + click)"
+            >
+              Fire
+            </button>
+          </div>
           <div class="tablet-camera-rotate">
             <button type="button" class="tablet-cam-btn" data-cam="rotateLeft" aria-label="Rotate view left">⟲</button>
             <button type="button" class="tablet-cam-btn" data-cam="rotateRight" aria-label="Rotate view right">⟳</button>
@@ -282,7 +339,7 @@ export class UIManager {
             <div class="target-offer hidden" id="target-offer">
               <p class="target-offer-label" id="target-offer-label">Enemy in sights</p>
               <button type="button" class="btn btn-target interactive" id="btn-engage-target">Engage target</button>
-              <p class="target-offer-hint">Or left-click the highlighted enemy</p>
+              <p class="target-offer-hint" id="target-offer-hint">Or left-click the highlighted enemy</p>
             </div>
             <div class="fire-mission-actions hidden" id="fire-mission-actions">
               <button type="button" class="btn btn-cancel-fire interactive" id="btn-cancel-fire-missions">
@@ -469,6 +526,12 @@ export class UIManager {
         this.callbacks.onToggleUnitFieldIcons(this.showUnitFieldIcons);
       }
     });
+    this.root.querySelector('#btn-toggle-frontline')?.addEventListener('click', () => {
+      this.setFrontlineVisible(!this.showFrontline);
+      if (this.callbacks.onToggleFrontline) {
+        this.callbacks.onToggleFrontline(this.showFrontline);
+      }
+    });
     this.root.querySelector('#btn-guide-close').onclick = () => this.closeGuide();
     this.root.querySelector('#btn-back-title').onclick = () => show('title');
 
@@ -573,9 +636,32 @@ export class UIManager {
       this.callbacks.onLaunchBattleNow?.();
     });
 
+    this.root.querySelector('#btn-td-skip-wave-countdown')?.addEventListener('click', () => {
+      this.callbacks.onSkipTowerDefenseWave?.();
+    });
+
     this.root.querySelector('#btn-engage-target').onclick = () => {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
+
+    const tabletTargetBtn = this.root.querySelector('#btn-tablet-target');
+    const tabletFireBtn = this.root.querySelector('#btn-tablet-fire');
+    const stopTabletPointer = (e) => e.stopPropagation();
+    for (const btn of [tabletTargetBtn, tabletFireBtn]) {
+      btn?.addEventListener('pointerdown', stopTabletPointer);
+    }
+    tabletTargetBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const on = !tabletTargetBtn.classList.contains('is-active');
+      this.setTabletTargetMode(on);
+      if (this.callbacks.onTabletTargetMode) this.callbacks.onTabletTargetMode(on);
+    });
+    tabletFireBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const on = !tabletFireBtn.classList.contains('is-active');
+      this.setTabletFireMode(on);
+      if (this.callbacks.onTabletFireMode) this.callbacks.onTabletFireMode(on);
+    });
 
     const cancelFireBtn = this.root.querySelector('#btn-cancel-fire-missions');
     const stopHudPointer = (e) => e.stopPropagation();
@@ -644,8 +730,12 @@ export class UIManager {
     if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
+    this.root.querySelector('#td-wave-countdown')?.classList.add('hidden');
     this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
     this._hudTowerDefense = towerDefense;
+    this._hudHasFrontline = assault || towerDefense;
+    this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
+    this._syncFrontlineToggle();
     this._setProductionPanelVisible(lastStand);
     this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense || lastStand);
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
@@ -684,7 +774,7 @@ export class UIManager {
           'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
       } else if (tabletOn) {
         this._defaultHudHint =
-          'Tap to select · Use camera pad (right) to pan, rotate, and zoom · Long-press map for move/attack';
+          'Tap to select · Target: tap enemy twice or Engage · Fire: tap ground/cover · Long-press = move/attack';
       } else {
         this._defaultHudHint =
           'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Shift+LMB fire ground/cover';
@@ -692,7 +782,7 @@ export class UIManager {
       hint.textContent = this._defaultHudHint;
       if (tabletOn && tutorial) {
         hint.textContent =
-          'Tutorial: tap to select · camera pad (right) · long-press map to move/attack';
+          'Tutorial: tap to select · Target/Fire buttons (camera pad) · long-press map to move/attack';
       } else if (tabletOn && lastStand) {
         hint.textContent =
           'Last Stand: tap unit, tap map to place · camera pad (right) · Begin Battle when ready';
@@ -752,6 +842,22 @@ export class UIManager {
     btn.title = this.showUnitFieldIcons
       ? 'Hide unit type icons above your forces'
       : 'Show unit type icons above your forces';
+  }
+
+  setFrontlineVisible(on) {
+    this.showFrontline = !!on;
+    localStorage.setItem(FRONTLINE_VISIBLE_KEY, on ? '1' : '0');
+    this._syncFrontlineToggle();
+  }
+
+  _syncFrontlineToggle() {
+    const btn = this.root.querySelector('#btn-toggle-frontline');
+    if (!btn) return;
+    btn.classList.toggle('off', !this.showFrontline);
+    btn.setAttribute('aria-pressed', this.showFrontline ? 'true' : 'false');
+    btn.title = this.showFrontline
+      ? 'Hide red frontline on the map'
+      : 'Show red frontline on the map';
   }
 
   _setProductionPanelVisible(visible) {
@@ -856,19 +962,32 @@ export class UIManager {
       if (id === 'barrage') {
         const ready =
           game.defenses.hasArtillery() && game.defenses.barrageCooldown <= 0;
+        const cdMax = game.defenses.getEffectiveBarrageCooldown();
         btn.disabled = !ready && pending !== 'barrage';
         btn.classList.toggle('selected', pending === 'barrage');
+        const pitCount = getArtilleryPitCount(game.defenses.entries);
+        btn.title =
+          pitCount > 0
+            ? `Artillery barrage — ${cdMax}s cooldown (${pitCount} pit${pitCount === 1 ? '' : 's'})`
+            : 'Requires Artillery Pit — click map to strike';
         const costEl = btn.querySelector('.defense-cost');
         if (costEl) {
           costEl.textContent =
             game.defenses.barrageCooldown > 0
               ? `${Math.ceil(game.defenses.barrageCooldown)}s`
-              : 'Ready';
+              : `${cdMax}s`;
         }
         return;
       }
       const def = DEFENSE_TYPE_LIST.find((d) => d.id === id);
-      btn.disabled = !def || pts < def.cost;
+      const atCap = id === 'artillery' && game.defenses.isArtilleryPitCapReached();
+      btn.disabled = !def || pts < def.cost || atCap;
+      if (id === 'artillery') {
+        const pitCount = getArtilleryPitCount(game.defenses.entries);
+        btn.title = atCap
+          ? `Maximum ${TD_MAX_ARTILLERY_PITS} artillery pits`
+          : `${def.subtitle} (${pitCount}/${TD_MAX_ARTILLERY_PITS})`;
+      }
       btn.classList.toggle('selected', pending === id);
     });
   }
@@ -880,6 +999,34 @@ export class UIManager {
     const phaseEl = this.root.querySelector('#td-phase-label');
     if (waveEl) waveEl.textContent = `Wave ${hud.wave} / ${hud.maxWaves}`;
     if (phaseEl) phaseEl.textContent = hud.phaseLabel;
+
+    const countdown = this.root.querySelector('#td-wave-countdown');
+    const card = this.root.querySelector('#td-wave-countdown-card');
+    const title = this.root.querySelector('#td-wave-countdown-title');
+    const value = this.root.querySelector('#td-wave-countdown-value');
+    const sub = this.root.querySelector('#td-wave-countdown-sub');
+    const fill = this.root.querySelector('#td-wave-countdown-fill');
+    const skipBtn = this.root.querySelector('#btn-td-skip-wave-countdown');
+    if (!countdown) return;
+
+    const showCountdown =
+      this._hudTowerDefense && hud.phase === 'prepare' && hud.secondsLeft > 0.05;
+    countdown.classList.toggle('hidden', !showCountdown);
+    if (!showCountdown) {
+      card?.classList.remove('td-wave-countdown-urgent');
+      return;
+    }
+
+    const s = Math.max(1, Math.ceil(hud.secondsLeft));
+    const pct = Math.min(100, Math.max(0, hud.prepareProgress * 100));
+    if (title) title.textContent = hud.countdownTitle;
+    if (value) value.textContent = String(s);
+    if (sub) sub.textContent = hud.countdownSubtitle;
+    if (fill) fill.style.width = `${pct}%`;
+    card?.classList.toggle('td-wave-countdown-urgent', s <= 5);
+    if (skipBtn) {
+      skipBtn.disabled = !this.callbacks.onSkipTowerDefenseWave;
+    }
   }
 
   showDefensePlacementHint(message, game = null) {
@@ -1018,9 +1165,25 @@ export class UIManager {
     return this.tabletCamera?.getInput() ?? null;
   }
 
+  setTabletTargetMode(on) {
+    const btn = this.root.querySelector('#btn-tablet-target');
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  setTabletFireMode(on) {
+    const btn = this.root.querySelector('#btn-tablet-fire');
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
   hideHUD() {
     this.closeGuide();
     this.tabletCamera?.setVisible(false);
+    this.callbacks.onTabletTargetMode?.(false);
+    this.callbacks.onTabletFireMode?.(false);
     this.root.querySelector('#hud').classList.add('hidden');
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
@@ -1354,9 +1517,16 @@ export class UIManager {
     this._setProductionPanelVisible(showProduction);
 
     const targetName = hoverTarget && !hoverTarget.dead ? TargetIndicators.getTargetLabel(hoverTarget) : null;
+    const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
+    const targetHint = this.root.querySelector('#target-offer-hint');
     if (offer) {
       offer.classList.toggle('hidden', !(units.length > 0 && targetName));
       if (offerLabel && targetName) offerLabel.textContent = `Target: ${targetName}`;
+    }
+    if (targetHint) {
+      targetHint.textContent = tabletOn
+        ? 'Tap enemy again or press Engage'
+        : 'Or left-click the highlighted enemy';
     }
 
     if (hq && !hq.dead) {
@@ -1475,31 +1645,73 @@ export class UIManager {
   }
 
   renderBattleReport(report) {
-    const col = (side, lines, total, hqLost, hqLabel) => {
-      const rows =
-        lines.length > 0
-          ? lines
-              .map((l) => `<li><span class="loss-type">${l.label}</span><span class="loss-n">${l.count}</span></li>`)
-              .join('')
-          : '<li class="loss-none">No unit losses</li>';
+    const listRows = (lines, emptyLabel) =>
+      lines.length > 0
+        ? lines
+            .map(
+              (l) =>
+                `<li><span class="loss-type">${l.label}</span><span class="loss-n">${l.count}</span></li>`
+            )
+            .join('')
+        : `<li class="loss-none">${emptyLabel}</li>`;
+
+    const col = (
+      side,
+      { unitLines, unitTotal, defenseLines, defenseTotal, hqLost, hqLabel, materielLabel, showDefenses = false }
+    ) => {
+      const unitRows = listRows(unitLines, 'No unit losses');
       const hqRow = hqLost
         ? `<li class="loss-hq"><span class="loss-type">${hqLabel}</span><span class="loss-n">Destroyed</span></li>`
+        : '';
+      const defenseBlock = showDefenses
+        ? `
+          <p class="end-stats-subheading">Emplacements lost</p>
+          <p class="end-stats-total">${defenseTotal} emplacement${defenseTotal === 1 ? '' : 's'} lost</p>
+          <ul class="end-stats-list">${listRows(defenseLines, 'No emplacement losses')}</ul>
+        `
         : '';
       return `
         <div class="end-stats-col">
           <h3>${side}</h3>
-          <p class="end-stats-total">${total} unit${total === 1 ? '' : 's'} lost</p>
-          <ul class="end-stats-list">${rows}${hqRow}</ul>
+          <p class="end-stats-subheading">Units lost</p>
+          <p class="end-stats-total">${unitTotal} unit${unitTotal === 1 ? '' : 's'} lost</p>
+          <ul class="end-stats-list">${unitRows}${hqRow}</ul>
+          ${defenseBlock}
+          <p class="end-stats-materiel">
+            <span class="end-stats-materiel-label">Est. materiel cost</span>
+            <span class="end-stats-materiel-value">${materielLabel}</span>
+          </p>
         </div>
       `;
     };
 
+    const showPlayerDefenses =
+      report.towerDefense || (report.playerDefenseTotal ?? 0) > 0;
+
     return `
       <h3 class="end-stats-heading">Battle casualties</h3>
       <div class="end-stats-grid">
-        ${col(report.playerName, report.playerLines, report.playerTotal, report.playerHqLost, 'Headquarters')}
-        ${col(report.enemyName, report.enemyLines, report.enemyTotal, report.enemyHqLost, report.tutorial ? 'Practice HQ' : 'Headquarters')}
+        ${col(report.playerName, {
+          unitLines: report.playerLines,
+          unitTotal: report.playerTotal,
+          defenseLines: report.playerDefenseLines ?? [],
+          defenseTotal: report.playerDefenseTotal ?? 0,
+          hqLost: report.playerHqLost,
+          hqLabel: 'Headquarters',
+          materielLabel: report.playerMaterielLabel,
+          showDefenses: showPlayerDefenses,
+        })}
+        ${col(report.enemyName, {
+          unitLines: report.enemyLines,
+          unitTotal: report.enemyTotal,
+          defenseLines: [],
+          defenseTotal: 0,
+          hqLost: report.enemyHqLost,
+          hqLabel: report.tutorial ? 'Practice HQ' : 'Headquarters',
+          materielLabel: report.enemyMaterielLabel,
+        })}
       </div>
+      <p class="end-stats-footnote">${report.materielNote}</p>
     `;
   }
 

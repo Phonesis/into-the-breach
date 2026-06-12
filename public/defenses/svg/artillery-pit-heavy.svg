@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Heavy artillery pit">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#6b7058"><path d="M10 52 Q64 30 118 52 Z"/></g>
+  <g fill="#5a5d52"><rect x="16" y="42" width="14" height="9"/><rect x="34" y="38" width="16" height="11"/><rect x="54" y="34" width="20" height="13"/><rect x="76" y="38" width="16" height="11"/><rect x="96" y="42" width="14" height="9"/></g>
+  <g fill="#2a2a28"><circle cx="30" cy="48" r="7"/><circle cx="98" cy="48" r="7"/></g>
+  <g fill="#3d4038"><rect x="44" y="12" width="52" height="6" transform="rotate(-8 44 12)"/></g>
+  <g fill="#5a5d52"><rect x="38" y="22" width="16" height="16" rx="1"/></g>
+</svg>

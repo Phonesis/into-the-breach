@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="AT mine">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#6b7058"><ellipse cx="64" cy="50" rx="52" ry="6"/></g>
+  <g fill="#3d4038"><ellipse cx="64" cy="46" rx="22" ry="8"/><ellipse cx="64" cy="42" rx="14" ry="6" fill="#5a5d52"/></g>
+  <g fill="#2a2a28"><rect x="62" y="30" width="4" height="10"/><rect x="58" y="28" width="12" height="3"/></g>
+</svg>

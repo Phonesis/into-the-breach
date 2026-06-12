@@ -11,6 +11,9 @@ import {
   MINE_VEHICLE_TYPES,
   getBarrageDefForTier,
   getMaxBarrageTier,
+  getArtilleryPitCount,
+  getBarrageCooldownForEntries,
+  TD_MAX_ARTILLERY_PITS,
 } from '../data/towerDefense.js';
 import { spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
@@ -20,13 +23,41 @@ import { getStructureDamageMultiplier } from './StructureDamage.js';
 
 const ARMOR_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
 
+const MORTAR_SOUND_BY_FACTION = {
+  germany: 'mortar_germany',
+  usa: 'mortar_usa',
+  uk: 'mortar_uk',
+  russia: 'mortar_russia',
+};
+
+function disposeMeshTree(mesh) {
+  if (!mesh) return;
+  mesh.traverse((c) => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (c.material.map) c.material.map.dispose();
+      c.material.dispose();
+    }
+  });
+}
+
 export class DefenseStructureManager {
-  constructor({ scene, mapDef, getEnemyUnits, getTerrainMesh, onChange }) {
+  constructor({
+    scene,
+    mapDef,
+    getEnemyUnits,
+    getTerrainMesh,
+    onChange,
+    factionId = 'germany',
+    factionAccent = 0xc9a227,
+  }) {
     this.scene = scene;
     this.mapDef = mapDef;
     this.getEnemyUnits = getEnemyUnits;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.onChange = onChange;
+    this.factionId = factionId;
+    this.factionAccent = factionAccent;
     this.entries = [];
     this.pendingType = null;
     this.barrageCooldown = 0;
@@ -42,6 +73,11 @@ export class DefenseStructureManager {
     this._front = { x: dx / len, z: dz / len };
     this._fl = fl;
     this._playerBase = playerBase;
+  }
+
+  /** Y rotation so emplacement +Z local faces toward the frontline (enemy). */
+  _placementFacingYaw() {
+    return Math.atan2(this._front.x, this._front.z);
   }
 
   getSelected() {
@@ -83,6 +119,7 @@ export class DefenseStructureManager {
       this.pendingType = null;
       return true;
     }
+    if (typeId === 'artillery' && this.isArtilleryPitCapReached()) return false;
     this.pendingType = typeId;
     this.barragePending = false;
     this.selectEntry(null, { keepPending: true });
@@ -132,7 +169,18 @@ export class DefenseStructureManager {
     return true;
   }
 
-  getPlacementRejectReason(x, z) {
+  isArtilleryPitCapReached() {
+    return getArtilleryPitCount(this.entries) >= TD_MAX_ARTILLERY_PITS;
+  }
+
+  getEffectiveBarrageCooldown() {
+    return getBarrageCooldownForEntries(this.entries);
+  }
+
+  getPlacementRejectReason(x, z, typeId = null) {
+    if (typeId === 'artillery' && this.isArtilleryPitCapReached()) {
+      return `Maximum ${TD_MAX_ARTILLERY_PITS} artillery pits`;
+    }
     if (!this.mapDef || !this._fl) return 'Frontline not ready';
     const half = this.mapDef.size * 0.5 - 5;
     if (Math.abs(x) > half || Math.abs(z) > half) return 'Outside the map';
@@ -150,14 +198,10 @@ export class DefenseStructureManager {
   _attachEntry(typeId, x, z) {
     const def = DEFENSE_TYPES[typeId];
     const y = sampleTerrainHeight(x, z, this.mapDef);
-    const mesh = createDefenseMesh(typeId, 0xc9a227);
+    const mesh = createDefenseMesh(typeId, this.factionAccent, this.factionId);
     mesh.position.set(x, y, z);
     mesh.userData.defenseEntry = null;
-    const faceX = this._fl.x - x;
-    const faceZ = this._fl.z - z;
-    if (faceX * faceX + faceZ * faceZ > 0.1) {
-      mesh.rotation.y = Math.atan2(faceX, faceZ);
-    }
+    mesh.rotation.y = this._placementFacingYaw();
     this.scene.add(mesh);
 
     const entry = {
@@ -194,6 +238,7 @@ export class DefenseStructureManager {
   tryPlace(typeId, x, z, spend) {
     const def = DEFENSE_TYPES[typeId];
     if (!def || typeof def.cost !== 'number' || def.cost <= 0) return false;
+    if (typeId === 'artillery' && this.isArtilleryPitCapReached()) return false;
     if (!this.canPlaceAt(x, z)) return false;
     if (!spend(def.cost)) return false;
 
@@ -222,12 +267,9 @@ export class DefenseStructureManager {
     if (entry.mesh?.parent) {
       const rot = entry.mesh.rotation.y;
       this.scene.remove(entry.mesh);
-      entry.mesh.traverse((c) => {
-        if (c.geometry) c.geometry.dispose();
-        if (c.material) c.material.dispose();
-      });
+      disposeMeshTree(entry.mesh);
       const y = sampleTerrainHeight(entry.x, entry.z, this.mapDef);
-      entry.mesh = createDefenseMesh(entry.typeId, 0xc9a227);
+      entry.mesh = createDefenseMesh(entry.typeId, this.factionAccent, this.factionId);
       entry.mesh.position.set(entry.x, y, entry.z);
       entry.mesh.rotation.y = rot;
       entry.mesh.userData.defenseEntry = entry;
@@ -264,7 +306,7 @@ export class DefenseStructureManager {
     addExplosionCrater(this.scene, this.mapDef, x, z, 'heavy', this.getTerrainMesh());
     sounds.playWeapon('howitzer_105', { x, z }, { rate: 0.8, volume: 0.9 });
     sounds.playImpact('shell', { x, z }, 0.35);
-    this.barrageCooldown = barrage.cooldown;
+    this.barrageCooldown = getBarrageCooldownForEntries(this.entries);
     this.barragePending = false;
     this.onChange?.();
     return true;
@@ -341,6 +383,10 @@ export class DefenseStructureManager {
     let damage = def.damage;
     if (def.antiArmor) {
       damage *= isArmor ? (def.antiArmorMult ?? 1.2) : (def.softMult ?? 0.35);
+    } else if (def.weaponType === 'mortar' && ARMOR_TYPES.has(target.def.type)) {
+      damage *= 0.55;
+    } else if (def.softMult && !ARMOR_TYPES.has(target.def.type)) {
+      damage *= def.softMult;
     }
     const falloff = Math.max(0.65, 1 - (bestD / def.range) * 0.28);
     damage *= falloff * (0.88 + Math.random() * 0.22);
@@ -358,13 +404,20 @@ export class DefenseStructureManager {
       const from = { x: entry.x, y: fromY, z: entry.z };
       const to = { x: target.position.x, y: toY, z: target.position.z };
       const wType = def.weaponType ?? (def.weaponSound === 'tank_75' ? 'tank' : 'machineGun');
-      spawnMuzzleFlash(scene, from, to, wType);
+      if (wType === 'mortar') {
+        spawnShellExplosion(scene, to, 'medium');
+      } else {
+        spawnMuzzleFlash(scene, from, to, wType);
+      }
     }
 
     if (def.weaponSound === 'mg') {
       sounds.playWeapon('mg', { x: entry.x, z: entry.z }, { volume: 0.62 });
     } else if (def.weaponSound === 'tank_75') {
       sounds.playWeapon('tank_75', { x: entry.x, z: entry.z }, { volume: 0.72 });
+    } else if (def.weaponType === 'mortar' || def.weaponSound === 'mortar') {
+      const profile = MORTAR_SOUND_BY_FACTION[this.factionId] ?? 'mortar_germany';
+      sounds.playWeapon(profile, { x: entry.x, z: entry.z }, { volume: 0.7 });
     }
   }
 

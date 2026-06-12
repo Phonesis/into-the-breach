@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Barbed wire">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#4a4035"><rect x="18" y="18" width="4" height="34"/><rect x="62" y="16" width="4" height="36"/><rect x="106" y="18" width="4" height="34"/></g>
+  <g fill="none" stroke="#5a5a52" stroke-width="1.5"><path d="M20 22 Q42 30 62 24 Q82 18 106 26"/><path d="M20 30 Q42 38 62 32 Q82 26 106 34"/><path d="M20 38 Q42 46 62 40 Q82 34 106 42"/></g>
+  <g fill="#6b7058"><rect x="8" y="50" width="112" height="4"/></g>
+</svg>

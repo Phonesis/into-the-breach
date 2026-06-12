@@ -88,6 +88,25 @@ export function getInfantryUniformTexture(factionId) {
   return cache.get(`infantry:${factionId}`) ?? null;
 }
 
+/** MeshStandardMaterial with optional tiled faction camo (clone texture per mesh). */
+export function createCamoMaterial(baseColor, camoTex, repeat = [2, 1.5], opts = {}) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: camoTex ? 0xffffff : baseColor,
+    roughness: opts.rough ?? 0.82,
+    metalness: opts.metal ?? 0,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+  });
+  if (camoTex) {
+    const tex = camoTex.clone();
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeat[0], repeat[1]);
+    mat.map = tex;
+  }
+  return mat;
+}
+
 export function getGhillieTexture() {
   return cache.get('ghillie') ?? null;
 }

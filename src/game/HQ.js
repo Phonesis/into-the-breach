@@ -1,24 +1,11 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { refreshHqDamageVisuals, removeHqBurn } from '../effects/HqBurnEffects.js';
-import { getInfantryUniformTexture, getVehicleCamoTexture } from '../units/UnitTextures.js';
-
-function camoMaterial(baseColor, camoTex, repeat) {
-  const mat = new THREE.MeshStandardMaterial({
-    color: camoTex ? 0xffffff : baseColor,
-    roughness: 0.82,
-    emissive: 0x000000,
-    emissiveIntensity: 0,
-  });
-  if (camoTex) {
-    const tex = camoTex.clone();
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(repeat[0], repeat[1]);
-    mat.map = tex;
-  }
-  return mat;
-}
+import {
+  createCamoMaterial,
+  getInfantryUniformTexture,
+  getVehicleCamoTexture,
+} from '../units/UnitTextures.js';
 
 export class HQ {
   constructor({ team, position, mapDef, scene, label, maxHp = 800, faction = null }) {
@@ -40,14 +27,14 @@ export class HQ {
     const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
 
     const group = new THREE.Group();
-    const wallMat = camoMaterial(wallColor, vehicleCamo, [3.2, 2.4]);
+    const wallMat = createCamoMaterial(wallColor, vehicleCamo, [3.2, 2.4]);
     const roofMat = new THREE.MeshStandardMaterial({
       color: roofColor,
       roughness: 0.9,
       emissive: 0x000000,
       emissiveIntensity: 0,
     });
-    const bagMat = camoMaterial(sandbag, infantryCamo ?? vehicleCamo, [2.4, 1.6]);
+    const bagMat = createCamoMaterial(sandbag, infantryCamo ?? vehicleCamo, [2.4, 1.6]);
 
     const base = new THREE.Mesh(new THREE.BoxGeometry(8, 2.2, 8), wallMat);
     base.position.y = 1.1;

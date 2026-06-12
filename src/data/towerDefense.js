@@ -84,6 +84,36 @@ export const DEFENSE_TYPES = {
     caliber: 12.7,
     tier: 2,
   },
+  mortarNest: {
+    id: 'mortarNest',
+    name: 'Mortar Pit',
+    subtitle: '81 mm mortar — high-angle HE vs infantry',
+    cost: 46,
+    hp: 95,
+    range: 84,
+    damage: 26,
+    attackSpeed: 0.4,
+    weaponSound: 'mortar',
+    weaponType: 'mortar',
+    caliber: 81,
+    softMult: 1.15,
+    tier: 1,
+  },
+  mortarNestMk2: {
+    id: 'mortarNestMk2',
+    name: 'Heavy Mortar Pit',
+    subtitle: '120 mm mortar — longer range, heavier shells',
+    cost: 0,
+    hp: 130,
+    range: 94,
+    damage: 40,
+    attackSpeed: 0.32,
+    weaponSound: 'mortar',
+    weaponType: 'mortar',
+    caliber: 120,
+    softMult: 1.2,
+    tier: 2,
+  },
   atGun: {
     id: 'atGun',
     name: 'AT Gun',
@@ -154,7 +184,7 @@ export const DEFENSE_TYPES = {
   artillery: {
     id: 'artillery',
     name: 'Artillery Pit',
-    subtitle: '105 mm — enables barrage strikes',
+    subtitle: '105 mm — barrage (max 3 pits; each shortens CD)',
     cost: 72,
     hp: 85,
     range: 0,
@@ -177,6 +207,7 @@ export const DEFENSE_TYPES = {
 export const DEFENSE_TYPE_LIST = [
   DEFENSE_TYPES.bunker,
   DEFENSE_TYPES.mgNest,
+  DEFENSE_TYPES.mortarNest,
   DEFENSE_TYPES.atGun,
   DEFENSE_TYPES.barbedWire,
   DEFENSE_TYPES.mine,
@@ -187,10 +218,18 @@ export const DEFENSE_TYPE_LIST = [
 export const DEFENSE_UPGRADES = {
   bunker: { next: 'bunkerHeavy', cost: 62 },
   mgNest: { next: 'mgNestMk2', cost: 48 },
+  mortarNest: { next: 'mortarNestMk2', cost: 52 },
   atGun: { next: 'atGun88', cost: 78 },
   barbedWire: { next: 'razorWire', cost: 22 },
   artillery: { next: 'artilleryHeavy', cost: 85 },
 };
+
+export const TD_MAX_ARTILLERY_PITS = 3;
+/** Seconds shaved off barrage cooldown for each artillery pit beyond the first. */
+export const TD_BARRAGE_COOLDOWN_REDUCTION_PER_PIT = 6;
+export const TD_MIN_BARRAGE_COOLDOWN = 10;
+
+export const ARTILLERY_PIT_TYPE_IDS = new Set(['artillery', 'artilleryHeavy']);
 
 export const TD_BARRAGE_BY_TIER = {
   1: { radius: 14, damage: 58, cooldown: 28 },
@@ -201,6 +240,15 @@ export function getBarrageDefForTier(tier) {
   return TD_BARRAGE_BY_TIER[tier] ?? TD_BARRAGE_BY_TIER[1];
 }
 
+export function getArtilleryPitCount(entries) {
+  let count = 0;
+  for (const e of entries) {
+    if (e.destroyed || !ARTILLERY_PIT_TYPE_IDS.has(e.typeId)) continue;
+    count += 1;
+  }
+  return count;
+}
+
 export function getMaxBarrageTier(entries) {
   let max = 1;
   for (const e of entries) {
@@ -208,6 +256,16 @@ export function getMaxBarrageTier(entries) {
     max = Math.max(max, e.def.barrageTier);
   }
   return max;
+}
+
+/** Barrage recharge time — base tier cooldown minus 6s per extra pit (min 10s). */
+export function getBarrageCooldownForEntries(entries) {
+  const pitCount = getArtilleryPitCount(entries);
+  if (pitCount <= 0) return TD_BARRAGE_BY_TIER[1].cooldown;
+  const tier = getMaxBarrageTier(entries);
+  const base = getBarrageDefForTier(tier).cooldown;
+  const reduction = (pitCount - 1) * TD_BARRAGE_COOLDOWN_REDUCTION_PER_PIT;
+  return Math.max(TD_MIN_BARRAGE_COOLDOWN, base - reduction);
 }
 
 export function canUpgradeType(typeId) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { spreadGroupMoveDestinations } from '../game/GroupMovement.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder } from './BattleCursor.js';
@@ -67,6 +68,9 @@ export class RTSController {
     this._modifierShift = false;
     this._lastHoverRayAt = 0;
     this._tabletMode = isTabletLikeDevice();
+    this._tabletTargetMode = false;
+    this._tabletFireMode = false;
+    this._tabletTargetConfirmKey = null;
     this._longPressTimer = null;
     this._longPressFired = false;
     this._longPressMs = 480;
@@ -115,6 +119,47 @@ export class RTSController {
 
   isShiftHeld() {
     return this._modifierShift || this.getShiftHeld();
+  }
+
+  isManualFireModifier() {
+    return this.isShiftHeld() || (this._tabletMode && this._tabletFireMode);
+  }
+
+  isTabletTargetMode() {
+    return this._tabletMode && this._tabletTargetMode;
+  }
+
+  setTabletTargetMode(on) {
+    this._tabletTargetMode = !!on;
+    if (!this._tabletTargetMode) this._tabletTargetConfirmKey = null;
+  }
+
+  setTabletFireMode(on) {
+    this._tabletFireMode = !!on;
+    this.onBattleCursorChange?.();
+  }
+
+  clearTabletTargetConfirm() {
+    this._tabletTargetConfirmKey = null;
+  }
+
+  isTabletFireMode() {
+    return this._tabletMode && this._tabletFireMode;
+  }
+
+  _targetKey(target) {
+    if (!target) return '';
+    if (target.isGround) {
+      const p = target.position ?? {};
+      return `g:${Math.round(p.x)}:${Math.round(p.z)}`;
+    }
+    if (target.isScenery) return `s:${target.entry?.id ?? target.id ?? ''}`;
+    return `${target.team ?? ''}:${target.id ?? target.name ?? target.label ?? ''}`;
+  }
+
+  _refreshHoverTargetNow() {
+    this._lastHoverRayAt = 0;
+    this.updateHoverTarget();
   }
 
   _unitPickMesh(unit) {
@@ -355,7 +400,7 @@ export class RTSController {
     const now = performance.now();
     if (now - this._lastHoverRayAt < 50) return;
     this._lastHoverRayAt = now;
-    if (this._modifierShift) {
+    if (this.isManualFireModifier()) {
       const pick = this._pickShiftFireTarget();
       if (pick?.kind === 'scenery') {
         this.setHoveredTarget(pick.target);
@@ -453,13 +498,18 @@ export class RTSController {
       this.getSelectedPlayerUnits().length > 0 &&
       !this.getPendingFireSupport?.() &&
       !this.getPendingDefensePlacement?.() &&
-      !this.getPendingLastStandDeploy?.()
+      !this.getPendingLastStandDeploy?.() &&
+      !this._tabletFireMode
     ) {
       this._longPressTimer = setTimeout(() => {
         this._longPressTimer = null;
         this._longPressFired = true;
         this.issueMoveOrAttack();
       }, this._longPressMs);
+    }
+
+    if (this._tabletMode && this.getSelectedPlayerUnits().length > 0) {
+      this._refreshHoverTargetNow();
     }
   }
 
@@ -569,7 +619,7 @@ export class RTSController {
       this._notifySelection(units, null);
     } else {
       const selectedBefore = units.filter((u) => u.selected && !u.dead);
-      const shiftHeld = e.shiftKey || this.isShiftHeld();
+      const shiftHeld = e.shiftKey || this.isManualFireModifier();
       const shiftManualFire =
         shiftHeld &&
         selectedBefore.length > 0 &&
@@ -577,13 +627,29 @@ export class RTSController {
 
       if (shiftManualFire) {
         this.issueShiftManualFire();
+        this._tabletTargetConfirmKey = null;
         this._notifySelection(units);
       } else {
         const enemyTarget = selectedBefore.length > 0 ? this.raycastAttackTarget() : null;
-        if (enemyTarget) {
+        const useTabletTargetPick =
+          this._tabletMode && this._tabletTargetMode && selectedBefore.length > 0;
+
+        if (enemyTarget && useTabletTargetPick) {
+          const key = this._targetKey(enemyTarget);
+          if (this._tabletTargetConfirmKey === key) {
+            this.issueAttackOn(enemyTarget);
+            this._tabletTargetConfirmKey = null;
+          } else {
+            this.setHoveredTarget(enemyTarget);
+            this._tabletTargetConfirmKey = key;
+          }
+          this._notifySelection(units);
+        } else if (enemyTarget) {
           this.issueAttackOn(enemyTarget);
+          this._tabletTargetConfirmKey = null;
           this._notifySelection(units);
         } else {
+          this._tabletTargetConfirmKey = null;
           const playerHq = this.raycastPlayerHQ();
           const hit = playerHq ? null : this.raycastUnit(team);
           const add = e.shiftKey;
@@ -651,9 +717,11 @@ export class RTSController {
     const clamped = this.clampDeployPoint(ground.x, ground.z);
 
     const mapDef = this.getMapDef();
-    for (const u of selected) {
-      u.clearAttackOrder();
-      u.moveTo(clamped.x, clamped.z, mapDef, true);
+    const destinations = spreadGroupMoveDestinations(selected, clamped.x, clamped.z);
+    for (const { unit, x, z } of destinations) {
+      unit.clearAttackOrder();
+      const pt = this.clampDeployPoint(x, z);
+      unit.moveTo(pt.x, pt.z, mapDef, true);
     }
     if (this.onOrder) this.onOrder('move', selected);
   }

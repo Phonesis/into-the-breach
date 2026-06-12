@@ -41,7 +41,7 @@ export function getWaveComposition(wave, waveMult = 1) {
   add('infantry', 2 + Math.floor(w * 1.1));
   if (w >= 2) add('machineGun', Math.floor((w - 1) / 2));
   if (w >= 3) add('sniper', w >= 5 ? 1 : 0);
-  if (w >= 4) add('mortar', Math.floor((w - 3) / 3));
+  if (w >= 3) add('mortar', Math.max(1, Math.floor((w - 2) / 2)));
   if (w >= 5) add('armoredCar', Math.floor((w - 4) / 2));
   if (w >= 6) add('tank', Math.floor((w - 5) / 2));
   if (w >= 9) add('superHeavyTank', w >= 11 ? 1 : 0);
@@ -75,6 +75,22 @@ export function startNextWave(td) {
   td.killsThisWave = 0;
 }
 
+function beginActiveWave(td) {
+  td.phase = 'active';
+  td.phaseTimer = 0;
+  td.spawnTimer = 0;
+  td.spawnInterval = Math.max(0.35, 2.8 - td.wave * 0.12);
+}
+
+/** End prepare phase early (player override). */
+export function skipTowerDefensePrepare(game) {
+  const td = game?.towerDefense;
+  if (!td || td.phase !== 'prepare' || td.phaseTimer <= 0) return false;
+  beginActiveWave(td);
+  game.ui?.updateTowerDefense?.(game);
+  return true;
+}
+
 export function updateTowerDefenseMode(game, dt) {
   const td = game.towerDefense;
   if (!td) return;
@@ -82,10 +98,10 @@ export function updateTowerDefenseMode(game, dt) {
   td.phaseTimer -= dt;
 
   if (td.phase === 'prepare') {
+    game.ui?.updateTowerDefense?.(game);
     if (td.phaseTimer <= 0) {
-      td.phase = 'active';
-      td.spawnTimer = 0;
-      td.spawnInterval = Math.max(0.35, 2.8 - td.wave * 0.12);
+      beginActiveWave(td);
+      game.ui?.updateTowerDefense?.(game);
     }
     return;
   }
@@ -257,15 +273,33 @@ export function checkTowerDefenseVictory(game) {
 
 export function formatTowerDefenseHud(td) {
   if (!td) return null;
+  const secondsLeft = Math.max(0, td.phaseTimer);
+  const prepareTotal =
+    td.wave <= 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
   const phaseLabel =
     td.phase === 'prepare'
-      ? `Prepare defenses — ${Math.ceil(td.phaseTimer)}s`
+      ? `Prepare defenses — ${Math.ceil(secondsLeft)}s`
       : `Wave ${td.wave} — ${td.spawned}/${td.totalToSpawn} deployed`;
+  const countdownTitle =
+    td.phase === 'prepare'
+      ? td.wave <= 1
+        ? 'Assault incoming'
+        : 'Next wave'
+      : '';
+  const countdownSubtitle =
+    td.phase === 'prepare'
+      ? `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline`
+      : '';
   return {
     wave: td.wave,
     maxWaves: TD_WAVES_TO_WIN,
     phase: td.phase,
     phaseLabel,
-    phaseTimer: Math.max(0, td.phaseTimer),
+    phaseTimer: secondsLeft,
+    secondsLeft,
+    prepareTotal,
+    prepareProgress: prepareTotal > 0 ? secondsLeft / prepareTotal : 0,
+    countdownTitle,
+    countdownSubtitle,
   };
 }

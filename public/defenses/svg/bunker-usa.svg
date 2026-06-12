@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="US field bunker">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#6b7058"><path d="M20 52 Q64 34 108 52 L108 56 L20 56 Z"/></g>
+  <g fill="#5a5d52"><rect x="22" y="44" width="84" height="8"/><rect x="30" y="38" width="12" height="6"/><rect x="50" y="36" width="14" height="7"/><rect x="72" y="38" width="12" height="6"/><rect x="90" y="40" width="10" height="5"/></g>
+  <g fill="#3d4038"><rect x="44" y="30" width="40" height="10" rx="1"/><rect x="58" y="34" width="12" height="3"/></g>
+  <g fill="#4a4035"><rect x="26" y="40" width="76" height="3"/></g>
+</svg>

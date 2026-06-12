@@ -35,6 +35,7 @@ import {
 import {
   createTowerDefenseState,
   startNextWave,
+  skipTowerDefensePrepare,
   updateTowerDefenseMode,
   updateTowerDefenseEnemyAI,
   checkTowerDefenseBreach,
@@ -70,7 +71,11 @@ import {
   updateAssaultTimers,
   checkAssaultVictory,
 } from './AssaultMode.js';
-import { buildFrontlineVisual, disposeFrontlineVisual } from '../world/Frontline.js';
+import {
+  buildFrontlineVisual,
+  disposeFrontlineVisual,
+  setFrontlineVisible as syncFrontlineVisual,
+} from '../world/Frontline.js';
 import {
   createCheatKeyBuffer,
   isCheatModeFromUrl,
@@ -197,6 +202,7 @@ export class Game {
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
     this.showUnitFieldIcons = true;
+    this.showFrontline = true;
     this.matchTime = 0;
     this.mapDef = null;
     this.units = [];
@@ -511,6 +517,7 @@ export class Game {
     this.production.setBuildTimeMult(this.campaign ? CAMPAIGN_BALANCE.buildTimeMult : 1);
     this.production.setCheatMode(this.cheatMode);
     this.battleStats.reset();
+    this._battleStatsFinalized = false;
     this.fireSupport.reset();
 
     setupSceneEnvironment(this.scene, this.mapDef);
@@ -521,7 +528,16 @@ export class Game {
     this.scenery.setCoverSystem(this.coverSystem);
     const terrain = buildTerrain(this.mapDef, this.scene, this.scenery);
     this._terrainMesh = terrain?.ground ?? null;
-    const coverZones = buildCoverSites(this.mapDef, this.scene, this.scenery);
+    const coverZones = buildCoverSites(
+      this.mapDef,
+      this.scene,
+      this.scenery,
+      {
+        player: this.playerFaction?.id,
+        enemy: this.enemyFaction?.id,
+      },
+      { towerDefense: this.towerDefense }
+    );
     for (const zone of coverZones) {
       this.coverSystem.addZone(zone.x, zone.z, zone.type);
     }
@@ -590,6 +606,7 @@ export class Game {
       for (const cp of this.capturePoints) {
         cp.owner = null;
         cp.progress = 0;
+        cp.group.visible = false;
       }
       this.towerDefense = createTowerDefenseState({
         mapDef: this.mapDef,
@@ -601,6 +618,8 @@ export class Game {
         mapDef: this.mapDef,
         getEnemyUnits: () => this._enemyAlive,
         getTerrainMesh: () => this._terrainMesh,
+        factionId: this.playerFaction?.id ?? 'germany',
+        factionAccent: this.playerFaction?.accent ?? 0xc9a227,
         onChange: () => {
           this.ui?.updateDefenses(this);
           this._syncPlacementCapture();
@@ -755,7 +774,12 @@ export class Game {
       towerDefense: this.towerDefense,
       lastStand: !!this.lastStand,
     });
+    if (isTabletLikeDevice()) {
+      this.setTabletTargetMode(true);
+    }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
+    this.showFrontline = this.ui.showFrontline;
+    syncFrontlineVisual(this.scene, this.showFrontline);
     preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
       if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
     });
@@ -868,7 +892,7 @@ export class Game {
     const shiftHeld =
       this.keys.ShiftLeft ||
       this.keys.ShiftRight ||
-      this.controller?.isShiftHeld?.();
+      this.controller?.isManualFireModifier?.();
     const selected = this._playerAlive.filter((u) => u.selected);
     const defensePending = !!this.defenses?.getPending();
     const deployPending = !!(this.lastStand?.pendingType && isLastStandDeployPhase(this));
@@ -893,6 +917,14 @@ export class Game {
       disposeDeployZoneRings(this._deployZoneRings, this.scene);
       this._deployZoneRings = [];
     }
+  }
+
+  /** End Tower Defence prepare countdown and start the current wave immediately. */
+  skipTowerDefenseWave() {
+    if (!this.running || this.gameOver || !this.towerDefense) return;
+    if (!skipTowerDefensePrepare(this)) return;
+    sounds.play('order');
+    this._syncBattleCursor();
   }
 
   /** End quiet sector / clearance ceasefire immediately (player override). */
@@ -972,6 +1004,11 @@ export class Game {
     syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
   }
 
+  setShowFrontlineEnabled(enabled) {
+    this.showFrontline = !!enabled;
+    syncFrontlineVisual(this.scene, this.showFrontline);
+  }
+
   selectPlayerUnitById(unitId, additive = false) {
     const unit = this.units.find(
       (u) => u.id === unitId && u.team === PLAYER_TEAM && !u.dead
@@ -1007,9 +1044,21 @@ export class Game {
   confirmTargetAttack() {
     const target = this.controller?.hoveredTarget;
     if (target && this.controller.issueAttackOn(target)) {
+      this.controller.clearTabletTargetConfirm();
       const sel = this.units.filter((u) => u.team === PLAYER_TEAM && u.selected && !u.dead);
       this.ui?.updateSelection(sel, target, this.selectedHq);
     }
+  }
+
+  setTabletTargetMode(on) {
+    this.controller?.setTabletTargetMode(on);
+    this.ui?.setTabletTargetMode(on);
+  }
+
+  setTabletFireMode(on) {
+    this.controller?.setTabletFireMode(on);
+    this.ui?.setTabletFireMode(on);
+    this._syncBattleCursor();
   }
 
   _countActiveFireMissions() {
@@ -1093,6 +1142,7 @@ export class Game {
     this.running = false;
     this.gameOver = false;
     this._endOverlayShown = false;
+    this._battleStatsFinalized = false;
     this._pendingEnd = null;
     this._teardownPending = false;
     this.ui?.hideEndOverlay();
@@ -1261,7 +1311,7 @@ export class Game {
         this._syncBattleCursor();
         return;
       }
-      const reason = this.defenses.getPlacementRejectReason(x, z);
+      const reason = this.defenses.getPlacementRejectReason(x, z, pending);
       if (reason) this.ui?.showDefensePlacementHint(reason, this);
       this.ui?.updateDefenses(this);
       return;
@@ -1286,7 +1336,15 @@ export class Game {
     if (!this.running || this.gameOver || !this.defenses) return;
     sounds.unlock();
     this.fireSupport?.cancel();
-    this.defenses.arm(typeId);
+    if (!this.defenses.arm(typeId)) {
+      if (typeId === 'artillery' && this.defenses.isArtilleryPitCapReached()) {
+        this.ui?.showDefensePlacementHint(
+          'Maximum 3 artillery pits — each extra pit shortens barrage cooldown.',
+          this
+        );
+      }
+      return;
+    }
     this.ui?.updateDefenses(this);
     this._syncPlacementCapture();
     this._syncBattleCursor();
@@ -1589,14 +1647,25 @@ export class Game {
       for (const h of this.hqs) {
         if (h.dead) this.battleStats.recordHq(h.team);
       }
-      this.ui?.updateEndStats(
-        this.battleStats.buildReport({
-          playerName: this.playerFaction.name,
-          enemyName: this.enemyFaction.name,
-          tutorial: this.tutorial,
-        })
-      );
+      this.ui?.updateEndStats(this._buildEndBattleReport());
       sounds.play(victory ? 'victory' : 'defeat');
+    });
+  }
+
+  _finalizeBattleStats() {
+    if (this._battleStatsFinalized) return;
+    this._battleStatsFinalized = true;
+    this.recordBattleLosses();
+    this.battleStats.recordDefenseFromEntries(this.defenses?.entries);
+  }
+
+  _buildEndBattleReport() {
+    this._finalizeBattleStats();
+    return this.battleStats.buildReport({
+      playerName: this.playerFaction.name,
+      enemyName: this.enemyFaction.name,
+      tutorial: this.tutorial,
+      towerDefense: !!this.towerDefense,
     });
   }
 
@@ -1674,13 +1743,7 @@ export class Game {
   _presentEndScreen(victory, detail) {
     this._pendingEnd = { victory, detail };
     this._showEndOverlayNow(victory, detail);
-    this.ui?.updateEndStats(
-      this.battleStats.buildReport({
-        playerName: this.playerFaction.name,
-        enemyName: this.enemyFaction.name,
-        tutorial: this.tutorial,
-      })
-    );
+    this.ui?.updateEndStats(this._buildEndBattleReport());
   }
 
   recordBattleLosses() {

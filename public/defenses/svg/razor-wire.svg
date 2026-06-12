@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Razor wire">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#4a4035"><rect x="14" y="14" width="4" height="38"/><rect x="48" y="12" width="4" height="40"/><rect x="82" y="12" width="4" height="40"/><rect x="110" y="14" width="4" height="38"/></g>
+  <g fill="none" stroke="#5a5a52" stroke-width="2"><ellipse cx="24" cy="28" rx="8" ry="5"/><ellipse cx="38" cy="34" rx="8" ry="5"/><ellipse cx="56" cy="26" rx="9" ry="6"/><ellipse cx="72" cy="34" rx="9" ry="6"/><ellipse cx="92" cy="26" rx="9" ry="6"/><ellipse cx="106" cy="34" rx="8" ry="5"/></g>
+  <g fill="#6b7058"><rect x="6" y="50" width="116" height="4"/></g>
+</svg>
