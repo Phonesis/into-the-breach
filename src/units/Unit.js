@@ -4,6 +4,7 @@ import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
 import { clearSurrender, removeSurrenderMarker } from '../game/SurrenderBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
+import { removeRankMarker } from '../game/EliteBehavior.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeDamageSmoke } from '../visual/DamageSmoke.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
@@ -43,6 +44,10 @@ export class Unit {
     this._liberationGrace = 0;
     this._captureExit = null;
     this.fieldIcon = null;
+    this.killCount = 0;
+    this.veteran = false;
+    this.elite = false;
+    this.rankMarker = null;
     this.healMarker = null;
     this.healMarkerKind = null;
     this.damageSmoke = null;
@@ -170,6 +175,7 @@ export class Unit {
       clearSurrender(this);
       removeCoverMarker(this);
       removeFieldIcon(this);
+      removeRankMarker(this);
       removeHealMarker(this);
       removeDamageSmoke(this);
       removeUnitHealthBar(this);
@@ -183,6 +189,7 @@ export class Unit {
     removeSurrenderMarker(this);
     removeCoverMarker(this);
     removeFieldIcon(this);
+    removeRankMarker(this);
     removeHealMarker(this);
     removeDamageSmoke(this);
     removeUnitHealthBar(this);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { distanceBetween } from './Targeting.js';
 import { clearRetreat } from './RetreatBehavior.js';
 import { getMedicRetreatMultiplier } from './MedicBehavior.js';
+import { getRankMoralePressure, removeRankMarker } from './EliteBehavior.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
@@ -177,7 +178,7 @@ export function liberateUnit(unit) {
   unit._liberationGrace = 3;
 }
 
-export function maybeTriggerSurrender(unit, units, options = {}) {
+export function maybeTriggerSurrender(unit, units, options = {}, attacker = null) {
   if (!canUnitSurrender(unit, options)) return false;
   if (!isIsolated(unit, units)) return false;
   if ((unit._underFireTimer ?? 0) <= 0) return false;
@@ -193,6 +194,7 @@ export function maybeTriggerSurrender(unit, units, options = {}) {
   if (unit.def.type === 'antiTankGun') chance *= 0.82;
 
   chance *= getMedicRetreatMultiplier(unit, units);
+  chance *= getRankMoralePressure(unit, units, attacker);
 
   if (Math.random() < chance) {
     startSurrender(unit);
@@ -252,6 +254,7 @@ export function finalizeCapture(game, unit) {
   game.battleStats?.recordUnit(unit);
   clearSurrender(unit);
   removeFieldIcon(unit);
+  removeRankMarker(unit);
   removeHealMarker(unit);
   removeUnitHealthBar(unit);
   removeCoverMarker(unit);

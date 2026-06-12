@@ -20,6 +20,7 @@ import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat } from './RetreatBehavior.js';
 import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
+import { getRankDamageMultiplier, recordEnemyKill } from './EliteBehavior.js';
 import { isSceneryTarget } from './SceneryTarget.js';
 import { isDefenseTarget } from './DefenseTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
@@ -270,6 +271,7 @@ function fire(
     if (rangeRatio > 0.45) damage *= 1.12 + (rangeRatio - 0.45) * 0.35;
   }
   if (attacker.team === 'enemy') damage *= enemyDamageMult;
+  damage *= getRankDamageMultiplier(attacker);
 
   if (attacker.def.antiArmor && !target.isGround && target.def) {
     const vsArmor = ARMOR_TARGET_TYPES.has(target.def.type);
@@ -297,10 +299,11 @@ function fire(
       markUnderFire(target);
       target.takeDamage(scalePracticeHqDamage(target, damage, options));
       if (!target.dead && !target.surrendered) {
-        if (!maybeTriggerSurrender(target, livingUnits, options) && hqs) {
-          maybeTriggerRetreat(target, hqs, livingUnits);
+        if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
+          maybeTriggerRetreat(target, hqs, livingUnits, attacker);
         }
       }
+      if (target.dead && target.def) recordEnemyKill(attacker, target);
     }
     if (scenery && !coax) {
       const ix = impact.x;
@@ -395,10 +398,11 @@ function applySplashDamage(
       markUnderFire(other);
       other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
       if (!other.dead && !other.surrendered) {
-        if (!maybeTriggerSurrender(other, units, options) && hqs) {
-          maybeTriggerRetreat(other, hqs, units);
+        if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
+          maybeTriggerRetreat(other, hqs, units, attacker);
         }
       }
+      if (other.dead && other.def) recordEnemyKill(attacker, other);
     }
   }
 }

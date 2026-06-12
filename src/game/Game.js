@@ -64,6 +64,7 @@ import { syncHealMarkers } from '../visual/HealMarkers.js';
 import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
 import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
 import { updateSurrenderState, syncSurrenderMarkers } from './SurrenderBehavior.js';
+import { syncRankMarkers, updateRankMarkers } from './EliteBehavior.js';
 import {
   createAssaultState,
   setupAssaultCapturePoints,
@@ -1884,6 +1885,8 @@ export class Game {
         syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
         updateSurrenderState(this, this.units, dt);
         syncSurrenderMarkers(this._aliveUnits);
+        syncRankMarkers(this._aliveUnits);
+        updateRankMarkers(this._aliveUnits);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
           updateLastStandEnemyDeploy(this, dt);
