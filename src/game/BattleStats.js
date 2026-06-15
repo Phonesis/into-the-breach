@@ -36,6 +36,8 @@ const DEFENSE_TYPE_ORDER = [
   'barbedWire',
   'razorWire',
   'mine',
+  'tankTrap',
+  'tankTrapHeavy',
   'artillery',
   'artilleryHeavy',
 ];

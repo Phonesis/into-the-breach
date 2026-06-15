@@ -14,8 +14,18 @@ import {
   DEFENSE_TYPES,
   TD_MAX_ARTILLERY_PITS,
   getArtilleryPitCount,
+  defenseNeedsAmmo,
+  getResupplyCost,
+  getAmmoRatio,
 } from '../data/towerDefense.js';
 import { formatTowerDefenseHud } from '../game/TowerDefenseMode.js';
+import {
+  CAMPAIGN_STYLE_LIST,
+  BASE_BUILDING_TYPE_LIST,
+  BASE_BUILDING_TYPES,
+  getSpawnBuildingForUnit,
+  getPlayerProductionUnitTypes,
+} from '../data/baseBuildings.js';
 import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
@@ -87,7 +97,9 @@ export class UIManager {
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
+    this.selectedCampaignStyle = 'classic';
     this._hudTowerDefense = false;
+    this._hudBaseBuilding = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.render();
@@ -122,7 +134,6 @@ export class UIManager {
       <div id="screen-mode" class="screen interactive hidden">
         <div class="title-block">
           <h1>Game Mode</h1>
-          <p>Campaign, Last Stand, Clear Defenses, Training Ground, or Assault & Defend.</p>
         </div>
         <div class="panel">
           <h2>Select Mode</h2>
@@ -152,7 +163,6 @@ export class UIManager {
       <div id="screen-faction" class="screen interactive hidden">
         <div class="title-block">
           <h1>Select Your Nation</h1>
-          <p>Infantry, MG teams, snipers, mortars, AT guns, armored cars, tanks, and artillery.</p>
         </div>
         <div class="panel">
           <h2>Choose Side</h2>
@@ -179,6 +189,10 @@ export class UIManager {
           <div class="difficulty-block" id="difficulty-block">
             <h2>AI Difficulty</h2>
             <div class="difficulty-grid" id="difficulty-grid"></div>
+          </div>
+          <div class="campaign-style-block hidden" id="campaign-style-block">
+            <h2>Campaign Style</h2>
+            <div class="campaign-style-grid" id="campaign-style-grid"></div>
           </div>
           <div class="actions">
             <button class="btn btn-secondary interactive" id="btn-back-faction">Back</button>
@@ -367,7 +381,17 @@ export class UIManager {
             <button type="button" class="btn btn-primary defense-upgrade-btn interactive hidden" id="btn-defense-upgrade">
               Upgrade emplacement
             </button>
+            <button type="button" class="btn btn-secondary defense-resupply-btn interactive hidden" id="btn-defense-resupply">
+              Resupply ammo
+            </button>
             <p class="defense-hint" id="defense-hint">Click a structure, then click behind the frontline to build.</p>
+          </div>
+          <div class="base-build-panel interactive hidden" id="base-build-panel">
+            <h3>Base Construction</h3>
+            <div class="base-build-btns" id="base-build-btns"></div>
+            <p class="base-build-hint" id="base-build-hint">
+              Build depots near HQ to unlock units. LMB place · Esc cancel.
+            </p>
           </div>
           <div class="firesupport-panel interactive" id="firesupport-panel">
             <h3>Fire Support</h3>
@@ -431,11 +455,28 @@ export class UIManager {
     ).join('');
   }
 
+  renderCampaignStyles() {
+    const grid = this.root.querySelector('#campaign-style-grid');
+    if (!grid) return;
+    grid.innerHTML = CAMPAIGN_STYLE_LIST.map(
+      (s) => `
+      <button type="button" class="card-btn interactive campaign-style-card${s.id === this.selectedCampaignStyle ? ' selected' : ''}" data-id="${s.id}">
+        <span class="name">${s.name}</span>
+        <span class="meta">${s.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
   updateDifficultyPanel() {
     const block = this.root.querySelector('#difficulty-block');
+    const styleBlock = this.root.querySelector('#campaign-style-block');
     const isTutorial = this.selectedGameMode === 'tutorial';
+    const isCampaign = this.selectedGameMode === 'campaign';
     if (block) block.classList.toggle('hidden', isTutorial);
+    if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
     this.renderDifficulties();
+    if (isCampaign) this.renderCampaignStyles();
   }
 
   renderAssaultRoles() {
@@ -608,6 +649,14 @@ export class UIManager {
       this.selectedDifficulty = btn.dataset.id;
     });
 
+    this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.campaign-style-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.campaign-style-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedCampaignStyle = btn.dataset.id;
+    });
+
     this.root.querySelectorAll('.map-card').forEach((btn) => {
       btn.onclick = () => {
         this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
@@ -625,6 +674,8 @@ export class UIManager {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
           mapSize: this.selectedMapSize ?? 'medium',
+          campaignStyle:
+            this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
         });
       }
     };
@@ -730,6 +781,9 @@ export class UIManager {
     const clearance = gameMode === 'clearance';
     const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
     const lastStand = gameMode === 'lastStand' || options.lastStand;
+    const baseBuilding =
+      gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
+    this._hudBaseBuilding = baseBuilding;
     this._hudLastStand = lastStand;
     this._hudLastStandDeploy = lastStand;
     const banner = this.root.querySelector('#tutorial-banner');
@@ -752,6 +806,7 @@ export class UIManager {
     this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense || lastStand);
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense);
+    this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
     this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
@@ -784,6 +839,9 @@ export class UIManager {
       } else if (lastStand) {
         this._defaultHudHint =
           'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
+      } else if (baseBuilding) {
+        this._defaultHudHint =
+          'Base Building: click HQ for infantry · click depots to train specialized units · Base Construction panel places new structures';
       } else if (tabletOn) {
         this._defaultHudHint =
           'Tap to select · Target: tap enemy twice or Engage · Fire: tap ground/cover · Long-press = move/attack';
@@ -812,30 +870,35 @@ export class UIManager {
       }
     }
 
-    const types = getProducibleUnits(faction);
     const btns = this.root.querySelector('#produce-btns');
-    btns.innerHTML = types
-      .map((type) => {
-        const def = faction.units[type];
-        const short = PRODUCE_LABELS[type] ?? type;
-        return `
+    if (baseBuilding) {
+      btns.innerHTML = '';
+    } else {
+      const types = getProducibleUnits(faction);
+      btns.innerHTML = types
+        .map((type) => {
+          const def = faction.units[type];
+          const short = PRODUCE_LABELS[type] ?? type;
+          return `
         <button class="produce-btn interactive" data-type="${type}" title="${def.name} — ${def.designation}">
           <span class="produce-icon" aria-hidden="true">${getUnitIconMarkup(type)}</span>
           <span class="produce-name">${short}</span>
           <span class="produce-cost">${def.cost}</span>
         </button>
       `;
-      })
-      .join('');
+        })
+        .join('');
 
-    btns.querySelectorAll('.produce-btn').forEach((btn) => {
-      btn.onclick = () => {
-        if (this.callbacks.onProduce) this.callbacks.onProduce(btn.dataset.type);
-      };
-    });
+      btns.querySelectorAll('.produce-btn').forEach((btn) => {
+        btn.onclick = () => {
+          if (this.callbacks.onProduce) this.callbacks.onProduce(btn.dataset.type);
+        };
+      });
+    }
 
     this.renderFireSupportButtons();
     this.renderDefenseButtons();
+    if (baseBuilding) this.renderBaseBuildButtons();
     this._bindUnitRoster();
     this._syncFieldIconToggle();
   }
@@ -909,6 +972,77 @@ export class UIManager {
 
     const upgradeBtn = this.root.querySelector('#btn-defense-upgrade');
     upgradeBtn?.addEventListener('click', () => this.callbacks.onUpgradeDefense?.());
+    const resupplyBtn = this.root.querySelector('#btn-defense-resupply');
+    resupplyBtn?.addEventListener('click', () => this.callbacks.onResupplyDefense?.());
+  }
+
+  renderBaseBuildButtons() {
+    const wrap = this.root.querySelector('#base-build-btns');
+    if (!wrap) return;
+    wrap.innerHTML = BASE_BUILDING_TYPE_LIST.map(
+      (d) => `
+      <button type="button" class="base-build-btn interactive" data-id="${d.id}" title="${d.subtitle}">
+        <span class="base-build-name">${d.name}</span>
+        <span class="base-build-cost">${d.cost}</span>
+      </button>
+    `
+    ).join('');
+    wrap.querySelectorAll('.base-build-btn').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.callbacks.onArmBaseBuilding?.(btn.dataset.id);
+      };
+    });
+  }
+
+  showBaseBuildHint(message) {
+    const hint = this.root.querySelector('#base-build-hint');
+    if (!hint || !message) return;
+    hint.textContent = message;
+    hint.classList.add('base-build-hint-error');
+    clearTimeout(this._baseBuildHintTimer);
+    this._baseBuildHintTimer = setTimeout(() => {
+      hint.classList.remove('base-build-hint-error');
+      if (this._hudBaseBuilding) {
+        hint.textContent =
+          'Build depots near HQ to unlock units. LMB place · Esc cancel.';
+      }
+    }, 2800);
+  }
+
+  updateBaseBuild(game) {
+    if (!this._hudBaseBuilding || !game?.baseBuildings?.active) return;
+    const supplies = Math.floor(game.resources.player);
+    const pending = game.baseBuildings.getPending();
+    const hint = this.root.querySelector('#base-build-hint');
+    const deployActive = game._isPlayerDeployZoneActive?.() ?? false;
+
+    if (hint && !hint.classList.contains('base-build-hint-error')) {
+      if (deployActive) {
+        hint.textContent = 'Quiet sector — launch battle before expanding the base.';
+      } else if (pending) {
+        const def = BASE_BUILDING_TYPES[pending];
+        hint.textContent = `Placing ${def?.name ?? pending} — click the ring around HQ. Esc to cancel.`;
+      } else {
+        hint.textContent =
+          'Build depots near HQ to unlock units. LMB place · Esc cancel.';
+      }
+    }
+
+    this.root.querySelectorAll('.base-build-btn').forEach((btn) => {
+      const id = btn.dataset.id;
+      const def = BASE_BUILDING_TYPES[id];
+      if (!def) return;
+      const count = game.baseBuildings.countType('player', id);
+      const atMax = count >= (def.maxPerTeam ?? 99);
+      const canAfford = game.cheatMode || supplies >= def.cost;
+      btn.disabled = deployActive || atMax || (!canAfford && pending !== id);
+      btn.classList.toggle('selected', pending === id);
+      btn.title = atMax
+        ? `Maximum ${def.maxPerTeam} per base`
+        : `${def.subtitle} — ${def.cost} supplies`;
+    });
   }
 
   setPlacementCapture(active) {
@@ -931,16 +1065,23 @@ export class UIManager {
     const selected = game.defenses.getSelected();
     const selEl = this.root.querySelector('#defense-selected');
     const upgradeBtn = this.root.querySelector('#btn-defense-upgrade');
+    const resupplyBtn = this.root.querySelector('#btn-defense-resupply');
     const path = selected ? DEFENSE_UPGRADES[selected.typeId] : null;
     const nextDef = path ? DEFENSE_TYPES[path.next] : null;
+    const outOfAmmo = game.defenses.countOutOfAmmo();
 
     if (selEl) {
       if (selected) {
         const cal = selected.def.caliber ? ` · ${selected.def.caliber} mm` : '';
         const hpPct = Math.round((selected.hp / selected.maxHp) * 100);
-        selEl.textContent = `${selected.def.name}${cal} — ${hpPct}% HP (${selected.hp}/${selected.maxHp})`;
+        let ammoLine = '';
+        if (selected.maxAmmo) {
+          const ammoPct = Math.round(getAmmoRatio(selected) * 100);
+          ammoLine = ` · Ammo ${selected.ammo ?? 0}/${selected.maxAmmo} (${ammoPct}%)`;
+        }
+        selEl.textContent = `${selected.def.name}${cal} — ${hpPct}% HP (${selected.hp}/${selected.maxHp})${ammoLine}`;
       } else {
-        selEl.textContent = '';
+        selEl.textContent = outOfAmmo > 0 ? `${outOfAmmo} emplacement${outOfAmmo === 1 ? '' : 's'} out of ammo` : '';
       }
     }
 
@@ -953,6 +1094,17 @@ export class UIManager {
       }
     }
 
+    if (resupplyBtn) {
+      const canResupply = selected && game.defenses.canResupply(selected);
+      const show = selected && defenseNeedsAmmo(selected.def);
+      resupplyBtn.classList.toggle('hidden', !show);
+      if (show) {
+        const cost = getResupplyCost(selected);
+        resupplyBtn.textContent = canResupply ? `Resupply ammo (${cost} pts)` : 'Ammo full';
+        resupplyBtn.disabled = !canResupply || pts < cost;
+      }
+    }
+
     const pending = game.defenses.getPending();
     const hint = this.root.querySelector('#defense-hint');
     if (hint) {
@@ -962,26 +1114,32 @@ export class UIManager {
         const def = DEFENSE_TYPE_LIST.find((d) => d.id === pending);
         hint.textContent = `Placing ${def?.name ?? pending} — click your side of the frontline. Esc to cancel.`;
       } else if (selected && path) {
-        hint.textContent = 'Selected emplacement — use Upgrade or click elsewhere to deselect.';
+        hint.textContent =
+          'Selected emplacement — Upgrade or Resupply ammo (costs defense pts). Click elsewhere to deselect.';
+      } else if (selected && defenseNeedsAmmo(selected.def)) {
+        hint.textContent =
+          'Selected gun — Resupply ammo with defense points when magazines run low. Guns stop firing when empty.';
       } else {
         hint.textContent =
-          'LMB place on your side of the frontline · LMB emplacement to select & upgrade · Guns auto-fire.';
+          'LMB place on your side of the frontline · LMB emplacement to select · Guns auto-fire but need ammo resupply.';
       }
     }
 
     this.root.querySelectorAll('.defense-btn').forEach((btn) => {
       const id = btn.dataset.id;
       if (id === 'barrage') {
-        const ready =
-          game.defenses.hasArtillery() && game.defenses.barrageCooldown <= 0;
+        const hasPits = game.defenses.hasArtillery();
+        const hasAmmo = game.defenses.hasBarrageAmmo();
+        const ready = hasPits && hasAmmo && game.defenses.barrageCooldown <= 0;
         const cdMax = game.defenses.getEffectiveBarrageCooldown();
         btn.disabled = !ready && pending !== 'barrage';
         btn.classList.toggle('selected', pending === 'barrage');
         const pitCount = getArtilleryPitCount(game.defenses.entries);
-        btn.title =
-          pitCount > 0
-            ? `Artillery barrage — ${cdMax}s cooldown (${pitCount} pit${pitCount === 1 ? '' : 's'})`
-            : 'Requires Artillery Pit — click map to strike';
+        btn.title = !hasPits
+          ? 'Requires Artillery Pit — click map to strike'
+          : !hasAmmo
+            ? 'Artillery pits need shell resupply — select a pit and Resupply ammo'
+            : `Artillery barrage — ${cdMax}s cooldown (${pitCount} pit${pitCount === 1 ? '' : 's'}, uses pit ammo)`;
         const costEl = btn.querySelector('.defense-cost');
         if (costEl) {
           costEl.textContent =
@@ -1523,12 +1681,61 @@ export class UIManager {
     if (timer) timer.textContent = hud.timer;
   }
 
+  syncProductionPanel(game) {
+    if (!game?.playerFaction || game.lastStand) return;
+
+    const panel = this.root.querySelector('#production-panel');
+    const title = panel?.querySelector('h3');
+    const btns = this.root.querySelector('#produce-btns');
+    if (!panel || !btns) return;
+
+    if (!this._hudBaseBuilding) {
+      if (title) title.textContent = 'Reinforcements';
+      return;
+    }
+
+    const types = getPlayerProductionUnitTypes(game);
+    const entry = game.selectedBaseBuilding;
+    const hqSel = game.selectedHq?.team === 'player' && !game.selectedHq.dead;
+    const showPanel = hqSel || (entry?.def?.spawns?.length ?? 0) > 0;
+
+    this._setProductionPanelVisible(showPanel);
+    if (!showPanel) return;
+
+    if (title) {
+      title.textContent = hqSel ? 'Headquarters' : (entry?.def?.name ?? 'Depot');
+    }
+
+    const faction = game.playerFaction;
+    btns.innerHTML = types
+      .map((type) => {
+        const def = faction.units[type];
+        if (!def) return '';
+        const short = PRODUCE_LABELS[type] ?? type;
+        return `
+        <button class="produce-btn interactive" data-type="${type}" title="${def.name} — ${def.designation}">
+          <span class="produce-icon" aria-hidden="true">${getUnitIconMarkup(type)}</span>
+          <span class="produce-name">${short}</span>
+          <span class="produce-cost">${def.cost}</span>
+        </button>
+      `;
+      })
+      .join('');
+
+    btns.querySelectorAll('.produce-btn').forEach((btn) => {
+      btn.onclick = () => {
+        if (this.callbacks.onProduce) this.callbacks.onProduce(btn.dataset.type);
+      };
+    });
+  }
+
   updateProduction(game) {
     if (!game?.playerFaction) return;
     if (game.lastStand) {
       this.updateLastStandDeploy(game);
       return;
     }
+    if (this._hudBaseBuilding) this.syncProductionPanel(game);
     const resources = Math.floor(game.resources.player);
     const progress = game.production.getQueueProgress('player');
     const queue = game.production.getQueue('player');
@@ -1551,14 +1758,32 @@ export class UIManager {
       }
     }
 
+    const unlocked =
+      !this._hudBaseBuilding && game.baseBuildings?.active
+        ? game.baseBuildings.getUnlockedUnits('player')
+        : null;
+
     this.root.querySelectorAll('.produce-btn').forEach((btn) => {
       const type = btn.dataset.type;
       const def = game.playerFaction.units[type];
       if (!def) return;
+      const locked = unlocked && !unlocked.has(type);
       const can =
-        game.production.canEnqueue('player', type, game.resources.player) && game.running;
+        !locked &&
+        game.production.canEnqueue('player', type, game.resources.player) &&
+        game.running;
       btn.disabled = !can;
+      btn.classList.toggle('locked', !!locked);
       btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
+      if (locked) {
+        const buildingId = getSpawnBuildingForUnit(type);
+        const buildingName = buildingId ? BASE_BUILDING_TYPES[buildingId]?.name : null;
+        btn.title = buildingName
+          ? `Requires ${buildingName} — click that structure on the map`
+          : `${def.name} — locked until required structure is built`;
+      } else {
+        btn.title = `${def.name} — ${def.designation}`;
+      }
     });
   }
 
@@ -1577,10 +1802,12 @@ export class UIManager {
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
 
-    const showProduction =
-      (this._hudLastStand && this._hudLastStandDeploy) ||
-      (hq && !hq.dead && hq.team === 'player');
-    this._setProductionPanelVisible(showProduction);
+    const showProduction = this._hudBaseBuilding
+      ? (hq && !hq.dead && hq.team === 'player') ||
+        (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
+      : (this._hudLastStand && this._hudLastStandDeploy) ||
+        (hq && !hq.dead && hq.team === 'player');
+    if (!this._hudBaseBuilding) this._setProductionPanelVisible(showProduction);
 
     const targetName = hoverTarget && !hoverTarget.dead ? TargetIndicators.getTargetLabel(hoverTarget) : null;
     const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
@@ -1598,18 +1825,47 @@ export class UIManager {
     if (hq && !hq.dead) {
       this._renderCoverBanner([]);
       const teamLabel = hq.team === 'player' ? 'Your headquarters' : 'Enemy headquarters';
+      const trainHint =
+        this._hudBaseBuilding && hq.team === 'player'
+          ? '<p class="hq-selected-hint">Train <strong>infantry squads</strong> from the panel — click completed depots on the map for other unit types.</p>'
+          : '<p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>';
       body.innerHTML = `
         <h3 class="hq-selected-title">${hq.name ?? 'Headquarters'}</h3>
         <p class="hq-selected-meta">${teamLabel}</p>
         ${hpBarMarkup(hq.hp, hq.maxHp)}
-        <p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>
+        ${trainHint}
+      `;
+      this.updateEngineerBuild(game);
+      return;
+    }
+
+    const baseEntry = game?.selectedBaseBuilding;
+    if (baseEntry && units.length === 0) {
+      this._renderCoverBanner([]);
+      const hpPct = Math.round((baseEntry.hp / Math.max(baseEntry.maxHp, 1)) * 100);
+      const garrisonN = baseEntry.garrison?.length ?? 0;
+      const cap = baseEntry.def.garrisonCapacity ?? 0;
+      let detail = baseEntry.def.subtitle ?? '';
+      if (baseEntry.typeId === 'bunker') {
+        detail = `Garrison ${garrisonN}/${cap} — move foot troops onto the bunker to enter heavy cover.`;
+      } else if ((baseEntry.def.spawns?.length ?? 0) > 0) {
+        detail = `Train units from this depot using the panel on the right.`;
+      }
+      body.innerHTML = `
+        <h3 class="hq-selected-title">${baseEntry.def.name}</h3>
+        <p class="hq-selected-meta">Your structure · ${hpPct}% HP</p>
+        ${hpBarMarkup(baseEntry.hp, baseEntry.maxHp)}
+        <p class="hq-selected-hint">${detail}</p>
       `;
       this.updateEngineerBuild(game);
       return;
     }
 
     if (units.length === 0) {
-      body.innerHTML = `<h3>No selection</h3><p>Click or drag to select units. Click your HQ for status.</p>`;
+      const emptyHint = this._hudBaseBuilding
+        ? 'Click your HQ to train infantry, or click a completed depot to train specialized units.'
+        : 'Click or drag to select units. Click your HQ for status.';
+      body.innerHTML = `<h3>No selection</h3><p>${emptyHint}</p>`;
       this._renderCoverBanner([]);
       this.updateEngineerBuild(game);
       return;

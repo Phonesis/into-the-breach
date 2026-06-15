@@ -2,6 +2,7 @@ import { sampleTerrainHeight } from '../world/Terrain.js';
 import {
   createDefenseMesh,
   setDefenseHpVisual,
+  setDefenseAmmoVisual,
   setDefenseSelected,
 } from '../visual/DefenseMeshes.js';
 import { wrapDefenseTarget } from './DefenseTarget.js';
@@ -14,6 +15,10 @@ import {
   getArtilleryPitCount,
   getBarrageCooldownForEntries,
   TD_MAX_ARTILLERY_PITS,
+  defenseNeedsAmmo,
+  getAmmoRatio,
+  getResupplyCost,
+  pickBarrageAmmoPit,
 } from '../data/towerDefense.js';
 import { spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
@@ -127,9 +132,7 @@ export class DefenseStructureManager {
   }
 
   armBarrage() {
-    const hasArtillery = this.entries.some(
-      (e) => !e.destroyed && (e.typeId === 'artillery' || e.typeId === 'artilleryHeavy')
-    );
+    const hasArtillery = !!pickBarrageAmmoPit(this.entries);
     if (!hasArtillery || this.barrageCooldown > 0) return false;
     if (this.barragePending) {
       this.barragePending = false;
@@ -218,21 +221,61 @@ export class DefenseStructureManager {
       radius:
         typeId === 'mine'
           ? def.triggerRadius
-          : typeId === 'barbedWire' || typeId === 'razorWire'
-            ? def.slowRadius
-            : 3.2,
+          : typeId === 'tankTrap' || typeId === 'tankTrapHeavy'
+            ? def.trapRadius
+            : typeId === 'barbedWire' || typeId === 'razorWire'
+              ? def.slowRadius
+              : 3.2,
       minSpacing:
         typeId === 'mine'
           ? 2.8
           : typeId === 'barbedWire' || typeId === 'razorWire'
             ? 3.5
-            : 5.5,
+            : typeId === 'tankTrap' || typeId === 'tankTrapHeavy'
+              ? 4.2
+              : 5.5,
       manager: this,
       _attackTarget: null,
     };
     mesh.userData.defenseEntry = entry;
+    if (defenseNeedsAmmo(def)) {
+      entry.maxAmmo = def.maxAmmo;
+      entry.ammo = def.maxAmmo;
+      setDefenseAmmoVisual(mesh, 1);
+    }
     this.entries.push(entry);
     return entry;
+  }
+
+  _syncAmmoVisual(entry) {
+    if (!entry?.mesh || !entry.maxAmmo) return;
+    setDefenseAmmoVisual(entry.mesh, getAmmoRatio(entry));
+  }
+
+  canResupply(entry = this.getSelected()) {
+    if (!entry || entry.destroyed || !entry.maxAmmo) return false;
+    return (entry.ammo ?? 0) < entry.maxAmmo;
+  }
+
+  tryResupply(spend) {
+    const entry = this.getSelected();
+    if (!this.canResupply(entry)) return false;
+    const cost = getResupplyCost(entry);
+    if (!spend(cost)) return false;
+    entry.ammo = entry.maxAmmo;
+    this._syncAmmoVisual(entry);
+    this.onChange?.();
+    sounds.play('produce');
+    return true;
+  }
+
+  countOutOfAmmo() {
+    let n = 0;
+    for (const e of this.entries) {
+      if (e.destroyed || !e.maxAmmo) continue;
+      if ((e.ammo ?? 0) <= 0) n += 1;
+    }
+    return n;
   }
 
   tryPlace(typeId, x, z, spend) {
@@ -258,10 +301,18 @@ export class DefenseStructureManager {
     if (!nextDef || !spend(path.cost)) return false;
 
     const hpRatio = entry.hp / entry.maxHp;
+    const ammoRatio = entry.maxAmmo ? getAmmoRatio(entry) : 1;
     entry.typeId = path.next;
     entry.def = { ...nextDef };
     entry.maxHp = nextDef.hp;
     entry.hp = Math.max(1, Math.floor(nextDef.hp * Math.max(0.35, hpRatio)));
+    if (defenseNeedsAmmo(nextDef)) {
+      entry.maxAmmo = nextDef.maxAmmo;
+      entry.ammo = Math.max(0, Math.ceil(nextDef.maxAmmo * ammoRatio));
+    } else {
+      entry.maxAmmo = 0;
+      entry.ammo = 0;
+    }
     entry._attackTarget = null;
 
     if (entry.mesh?.parent) {
@@ -278,6 +329,7 @@ export class DefenseStructureManager {
     }
 
     setDefenseHpVisual(entry.mesh, entry.hp / entry.maxHp);
+    this._syncAmmoVisual(entry);
     this.onChange?.();
     sounds.play('capture');
     return true;
@@ -285,6 +337,8 @@ export class DefenseStructureManager {
 
   tryBarrage(x, z) {
     if (!this.barragePending || this.barrageCooldown > 0) return false;
+    const ammoPit = pickBarrageAmmoPit(this.entries);
+    if (!ammoPit) return false;
     const half = this.mapDef.size * 0.5 - 4;
     if (Math.abs(x) > half || Math.abs(z) > half) return false;
     const toFl = (x - this._fl.x) * this._front.x + (z - this._fl.z) * this._front.z;
@@ -306,6 +360,9 @@ export class DefenseStructureManager {
     addExplosionCrater(this.scene, this.mapDef, x, z, 'heavy', this.getTerrainMesh());
     sounds.playWeapon('howitzer_105', { x, z }, { rate: 0.8, volume: 0.9 });
     sounds.playImpact('shell', { x, z }, 0.35);
+    const barrageAmmoCost = ammoPit.def.barrageAmmoCost ?? 6;
+    ammoPit.ammo = Math.max(0, (ammoPit.ammo ?? 0) - barrageAmmoCost);
+    this._syncAmmoVisual(ammoPit);
     this.barrageCooldown = getBarrageCooldownForEntries(this.entries);
     this.barragePending = false;
     this.onChange?.();
@@ -330,6 +387,27 @@ export class DefenseStructureManager {
       if (d <= e.def.slowRadius) {
         mult = Math.min(mult, e.def.slowMult);
       }
+    }
+    return mult;
+  }
+
+  getTankTrapSlowAt(x, z) {
+    let mult = 1;
+    for (const e of this.entries) {
+      if (e.destroyed || (e.typeId !== 'tankTrap' && e.typeId !== 'tankTrapHeavy')) continue;
+      const d = Math.hypot(x - e.x, z - e.z);
+      if (d <= e.def.trapRadius) {
+        mult = Math.min(mult, e.def.slowMult);
+      }
+    }
+    return mult;
+  }
+
+  /** Combined movement slow for enemy units (wire for all; tank traps for vehicles only). */
+  getMoveSlowMult(x, z, unit) {
+    let mult = this.getWireSlowAt(x, z);
+    if (unit && MINE_VEHICLE_TYPES.has(unit.def?.type)) {
+      mult = Math.min(mult, this.getTankTrapSlowAt(x, z));
     }
     return mult;
   }
@@ -359,6 +437,21 @@ export class DefenseStructureManager {
     this.onChange?.();
   }
 
+  _updateTankTraps(dt, enemies) {
+    for (const entry of this.entries) {
+      if (entry.destroyed || (entry.typeId !== 'tankTrap' && entry.typeId !== 'tankTrapHeavy')) continue;
+      const dps = entry.def.trapDamagePerSec ?? 0;
+      if (dps <= 0) continue;
+      for (const u of enemies) {
+        if (!MINE_VEHICLE_TYPES.has(u.def.type)) continue;
+        const d = Math.hypot(u.position.x - entry.x, u.position.z - entry.z);
+        if (d <= entry.def.trapRadius) {
+          u.takeDamage(dps * dt);
+        }
+      }
+    }
+  }
+
   _updateMines(dt, enemies) {
     for (const entry of this.entries) {
       if (entry.destroyed || entry.typeId !== 'mine') continue;
@@ -379,6 +472,9 @@ export class DefenseStructureManager {
 
   _fireWeapon(entry, target, bestD, scene, mapDef) {
     const def = entry.def;
+    const perShot = def.ammoPerShot ?? 1;
+    if (entry.maxAmmo && (entry.ammo ?? 0) < perShot) return;
+
     const isArmor = ARMOR_TYPES.has(target.def.type);
     let damage = def.damage;
     if (def.antiArmor) {
@@ -393,6 +489,12 @@ export class DefenseStructureManager {
 
     target.takeDamage(damage);
     entry.attackCooldown = 1 / def.attackSpeed;
+
+    if (entry.maxAmmo) {
+      entry.ammo = Math.max(0, (entry.ammo ?? 0) - perShot);
+      this._syncAmmoVisual(entry);
+      if (entry.ammo <= 0) this.onChange?.();
+    }
 
     const dx = target.position.x - entry.x;
     const dz = target.position.z - entry.z;
@@ -425,10 +527,12 @@ export class DefenseStructureManager {
     if (this.barrageCooldown > 0) this.barrageCooldown = Math.max(0, this.barrageCooldown - dt);
 
     const enemies = this.getEnemyUnits().filter((u) => !u.dead);
+    this._updateTankTraps(dt, enemies);
     this._updateMines(dt, enemies);
 
     for (const entry of this.entries) {
       if (entry.destroyed || !entry.def.damage) continue;
+      if (entry.maxAmmo && (entry.ammo ?? 0) < (entry.def.ammoPerShot ?? 1)) continue;
       entry.attackCooldown -= dt;
       if (entry.attackCooldown > 0) continue;
 
@@ -482,6 +586,10 @@ export class DefenseStructureManager {
     return this.entries.some(
       (e) => !e.destroyed && (e.typeId === 'artillery' || e.typeId === 'artilleryHeavy')
     );
+  }
+
+  hasBarrageAmmo() {
+    return !!pickBarrageAmmoPit(this.entries);
   }
 }
 

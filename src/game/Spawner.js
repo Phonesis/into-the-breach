@@ -1,5 +1,6 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { BASE_BUILDING_STARTING_ARMY } from '../data/baseBuildings.js';
 
 const PLAYER_ARMY = [
   { type: 'infantry', count: 3, spread: 6 },
@@ -83,11 +84,12 @@ const CAMPAIGN_ENEMY_ARMY = [
   { type: 'artillery', count: 1, spread: 4 },
 ];
 
-function resolveLayout({ roster, tutorial, team, campaign }) {
+function resolveLayout({ roster, tutorial, team, campaign, baseBuilding }) {
   if (Array.isArray(roster)) return roster;
   if (roster === 'assaultAttack') return ASSAULT_ATTACKER_ARMY;
   if (roster === 'assaultDefend') return ASSAULT_DEFENDER_ARMY;
   if (tutorial) return TUTORIAL_ARMY;
+  if (baseBuilding) return BASE_BUILDING_STARTING_ARMY;
   if (campaign) return team === 'enemy' ? CAMPAIGN_ENEMY_ARMY : CAMPAIGN_PLAYER_ARMY;
   return team === 'enemy' ? ENEMY_ARMY : PLAYER_ARMY;
 }
@@ -114,8 +116,9 @@ export function spawnArmy({
   clearanceSpawn = false,
   mapDef = null,
   campaign = false,
+  baseBuilding = false,
 }) {
-  let layout = resolveLayout({ roster, tutorial, team, campaign });
+  let layout = resolveLayout({ roster, tutorial, team, campaign, baseBuilding });
   if (team === 'enemy' && !tutorial) {
     layout = scaleEnemyLayout(layout, enemyArmyMult);
   }
@@ -187,6 +190,7 @@ export function spawnUnitAt({ def, faction, team, x, z, scene, mapDef = null }) 
     scene,
   });
   if (mapDef) {
+    unit._mapDef = mapDef;
     unit.position.y = sampleTerrainHeight(x, z, mapDef);
   }
   return unit;

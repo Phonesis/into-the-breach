@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { createSandbagEmplacementGroup } from '../world/SandbagEmplacement.js';
 import { distanceBetween } from './Targeting.js';
+import { isBaseBuildingCampaign } from '../data/baseBuildings.js';
 
 export const SANDBAG_BUILD_TIME = 11;
 export const SANDBAG_PLACE_RANGE = 24;
@@ -30,7 +31,7 @@ export class EngineerSandbagManager {
 
   canUse() {
     const g = this.game;
-    if (!g?.running || g.gameOver || g.towerDefense) return false;
+    if (!g?.running || g.gameOver || g.towerDefense || isBaseBuildingCampaign(g)) return false;
     return true;
   }
 

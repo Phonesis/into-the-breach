@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { applyUnitDeathVisual, createUnitMesh, setSelectionRing } from './UnitMeshes.js';
+import {
+  applyUnitDeathVisual,
+  createUnitMesh,
+  setSelectionRing,
+  updateSquadCasualtyVisual,
+} from './UnitMeshes.js';
 import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
 import { clearSurrender, removeSurrenderMarker } from '../game/SurrenderBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
@@ -168,6 +173,7 @@ export class Unit {
   takeDamage(amount) {
     if (this.dead || this.surrendered || this._captureExit) return;
     this.hp -= amount;
+    updateSquadCasualtyVisual(this);
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;

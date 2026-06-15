@@ -2,7 +2,8 @@ export const GAME_MODES = {
   campaign: {
     id: 'campaign',
     name: 'Campaign',
-    subtitle: 'Full battle vs AI — capture points, economy, and enemy HQ.',
+    subtitle:
+      'Full battle vs AI — Classic (all units from HQ) or Base Building (construct depots to unlock armor & artillery).',
   },
   tutorial: {
     id: 'tutorial',

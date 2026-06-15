@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { distanceBetween } from '../game/Targeting.js';
 import { MEDIC_AURA_RANGE } from '../game/MedicBehavior.js';
 import { ENGINEER_AURA_RANGE } from '../game/EngineerBehavior.js';
+import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
 
 const _tex = { cross: null, spanner: null };
@@ -109,7 +110,7 @@ function canReceiveEngineerHeal(ally) {
   return isVehicleUnit(ally.def?.type);
 }
 
-function getHealKind(unit, units) {
+function getHealKind(unit, units, baseBuildings) {
   if (!unit || unit.dead) return null;
 
   for (const medic of units) {
@@ -117,6 +118,9 @@ function getHealKind(unit, units) {
     if (!canReceiveMedicHeal(unit)) continue;
     if (distanceBetween(unit, medic) <= MEDIC_AURA_RANGE) return 'medic';
   }
+
+  const hospitals = getActiveHospitals(baseBuildings);
+  if (isUnitNearHospital(unit, hospitals)) return 'medic';
 
   for (const engineer of units) {
     if (engineer.dead || engineer.team !== unit.team || engineer.def?.type !== 'engineer') continue;
@@ -166,14 +170,14 @@ export function removeHealMarker(unit) {
   unit.healMarkerKind = null;
 }
 
-export function syncHealMarkers(units) {
+export function syncHealMarkers(units, baseBuildings = null) {
   for (const unit of units) {
     if (unit.dead || !unit.mesh) {
       removeHealMarker(unit);
       continue;
     }
 
-    const kind = getHealKind(unit, units);
+    const kind = getHealKind(unit, units, baseBuildings);
     if (!kind) {
       removeHealMarker(unit);
       continue;

@@ -5,10 +5,22 @@ const MAX_QUEUE = 4;
 const SPAWN_RING_DIST = 11;
 
 export class ProductionManager {
-  constructor({ getFaction, getTeam, getSpawnPos, getScene, getMapDef, onSpawn, onQueueChange }) {
+  constructor({
+    getFaction,
+    getTeam,
+    getSpawnPos,
+    getScene,
+    getMapDef,
+    onSpawn,
+    onQueueChange,
+    getUnlockedUnits = null,
+    getPlayerProductionUnits = null,
+  }) {
     this.getFaction = getFaction;
     this.getTeam = getTeam;
     this.getSpawnPos = getSpawnPos;
+    this.getUnlockedUnits = getUnlockedUnits;
+    this.getPlayerProductionUnits = getPlayerProductionUnits;
     this.getScene = getScene;
     this.getMapDef = getMapDef;
     this.onSpawn = onSpawn;
@@ -42,6 +54,13 @@ export class ProductionManager {
     if (!faction) return false;
     const def = faction.units[unitType];
     if (!def) return false;
+    if (team === 'player' && this.getPlayerProductionUnits) {
+      const allowed = this.getPlayerProductionUnits(team);
+      if (allowed && !allowed.includes(unitType)) return false;
+    } else {
+      const unlocked = this.getUnlockedUnits?.(team);
+      if (unlocked && !unlocked.has(unitType)) return false;
+    }
     const q = this.queues[team];
     if (q.length >= MAX_QUEUE) return false;
     if (this.cheatMode && team === 'player') return true;
@@ -55,7 +74,17 @@ export class ProductionManager {
     }
     const faction = this.getFaction(team);
     if (!faction?.units) return false;
-    for (const unitType of Object.keys(faction.units)) {
+    let types;
+    if (team === 'player' && this.getPlayerProductionUnits) {
+      const allowed = this.getPlayerProductionUnits(team);
+      types = allowed?.length ? allowed.filter((t) => faction.units[t]) : [];
+    } else {
+      const unlocked = this.getUnlockedUnits?.(team);
+      types = unlocked
+        ? [...unlocked].filter((t) => faction.units[t])
+        : Object.keys(faction.units);
+    }
+    for (const unitType of types) {
       if (this.canEnqueue(team, unitType, resources)) return true;
     }
     return false;
@@ -90,7 +119,7 @@ export class ProductionManager {
 
       if (job.remaining <= 0) {
         q.shift();
-        const unit = this._spawn(team, job.def);
+        const unit = this._spawn(team, job.def, job.unitType);
         if (unit) {
           unitsArray.push(unit);
           if (this.onSpawn) this.onSpawn(team, job.unitType, unit);
@@ -100,9 +129,9 @@ export class ProductionManager {
     }
   }
 
-  _spawn(team, def) {
+  _spawn(team, def, unitType = def?.type) {
     const faction = this.getFaction(team);
-    const base = this.getSpawnPos(team);
+    const base = this.getSpawnPos(team, unitType);
     const mapDef = this.getMapDef();
     const scene = this.getScene();
     if (!faction || !base || !mapDef || !scene) {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { removeCoverMarker, syncCoverMarker } from '../visual/CoverMarkers.js';
+import { getGarrisonCoverMultiplier } from './BunkerGarrison.js';
 
 /** Infantry / MG cover — reduces incoming damage while near cover sites. */
 
@@ -140,8 +141,10 @@ export class CoverSystem {
 export function getIncomingDamageMultiplier(target, coverSystem) {
   if (!coverSystem || !target?.def) return 1;
   if (!COVER_UNIT_TYPES.has(target.def.type)) return 1;
-  if (target.coverMult != null) return target.coverMult;
-  return coverSystem.getCoverForUnit(target).mult;
+  const garrisonMult = getGarrisonCoverMultiplier(target);
+  let mult = target.coverMult != null ? target.coverMult : coverSystem.getCoverForUnit(target).mult;
+  if (garrisonMult < mult) mult = garrisonMult;
+  return mult;
 }
 
 const COVER_RING_COLORS = {

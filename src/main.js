@@ -77,11 +77,17 @@ const ui = new UIManager(uiRoot, {
   onUpgradeDefense() {
     game?.tryUpgradeDefense();
   },
+  onResupplyDefense() {
+    game?.tryResupplyDefense();
+  },
   onFireSupport(type) {
     game?.armFireSupport(type);
   },
   onArmSandbags() {
     game?.armSandbagBuild();
+  },
+  onArmBaseBuilding(typeId) {
+    game?.armBaseBuilding(typeId);
   },
   onSelectUnit(unitId, additive) {
     game?.selectPlayerUnitById(unitId, additive);

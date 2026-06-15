@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { setTargetHighlight } from '../units/UnitMeshes.js';
 import { getSceneryTargetLabel, isSceneryTarget } from '../game/SceneryTarget.js';
+import { getBaseBuildingTargetLabel, isBaseBuildingTarget } from '../game/BaseBuildingTarget.js';
 
 const MAX_LINES = 48;
 
@@ -8,6 +9,7 @@ function targetLabel(target) {
   if (!target) return '';
   if (target.isGround) return 'ground';
   if (isSceneryTarget(target)) return getSceneryTargetLabel(target);
+  if (isBaseBuildingTarget(target)) return getBaseBuildingTargetLabel(target);
   if (target.def) return target.name ?? target.def.name;
   return target.name ?? target.label ?? 'Enemy HQ';
 }

@@ -471,6 +471,74 @@ export function buildWireObstacle(group, mats, design, razor = false) {
   group.userData.hitRadius = design.hitRadius;
 }
 
+function addHedgehogSpike(group, mat, x, z, height, width, rotY) {
+  const spike = new THREE.Group();
+  const beamA = new THREE.Mesh(new THREE.BoxGeometry(width, height, width * 0.85), mat);
+  beamA.rotation.z = 0.72;
+  beamA.rotation.y = rotY;
+  beamA.position.y = height * 0.38;
+  spike.add(beamA);
+  const beamB = beamA.clone();
+  beamB.rotation.z = -0.72;
+  spike.add(beamB);
+  const beamC = new THREE.Mesh(new THREE.BoxGeometry(width * 0.9, height * 0.92, width * 0.9), mat);
+  beamC.rotation.x = 0.55;
+  beamC.rotation.y = rotY + Math.PI / 3;
+  beamC.position.y = height * 0.34;
+  spike.add(beamC);
+  spike.position.set(x, 0, z);
+  group.add(spike);
+}
+
+export function buildTankTrapEmplacement(group, mats, design, heavy = false) {
+  const { concrete, concreteDark, earth } = mats;
+  const pad = new THREE.Mesh(
+    new THREE.BoxGeometry(design.span * 1.05, 0.08, design.span * 0.55),
+    earth
+  );
+  pad.position.y = 0.04;
+  pad.receiveShadow = true;
+  group.add(pad);
+
+  const spikes = design.spikes ?? 7;
+  const step = design.span / Math.max(spikes - 1, 1);
+  for (let i = 0; i < spikes; i++) {
+    const x = -design.span / 2 + i * step;
+    const z = (i % 2 === 0 ? -0.22 : 0.22) + ((i % 5) - 2) * 0.03;
+    addHedgehogSpike(
+      group,
+      i % 3 === 0 ? concreteDark : concrete,
+      x,
+      z,
+      design.spikeH,
+      design.spikeW ?? 0.22,
+      (i / spikes) * Math.PI * 0.35
+    );
+  }
+
+  if (heavy) {
+    const teeth = design.teeth ?? 5;
+    const toothStep = design.span / (teeth + 1);
+    for (let t = 0; t < teeth; t++) {
+      const tx = -design.span / 2 + (t + 1) * toothStep;
+      const tooth = new THREE.Mesh(
+        new THREE.ConeGeometry(0.32, 0.55, 4),
+        concreteDark
+      );
+      tooth.rotation.y = Math.PI / 4;
+      tooth.position.set(tx, 0.28, 0.45);
+      tooth.castShadow = true;
+      group.add(tooth);
+      const tooth2 = tooth.clone();
+      tooth2.position.set(tx + 0.18, 0.24, -0.42);
+      tooth2.rotation.y = -Math.PI / 6;
+      group.add(tooth2);
+    }
+  }
+
+  group.userData.hitRadius = design.hitRadius;
+}
+
 export function buildMineEmplacement(group, mats, design) {
   const { mine: mineMat, earth, wood } = mats;
   const pad = new THREE.Mesh(

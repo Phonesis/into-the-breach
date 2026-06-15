@@ -11,11 +11,12 @@ import {
   buildMgNestFromDesign,
   buildMortarNestFromDesign,
   buildMineEmplacement,
+  buildTankTrapEmplacement,
   buildWireObstacle,
   resolveDefenseDesign,
 } from './DefenseMeshKit.js';
 
-function buildDefenseMaterials(factionId) {
+export function buildDefenseMaterials(factionId) {
   const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
   const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
   const fabricCamo = infantryCamo ?? vehicleCamo;
@@ -91,6 +92,14 @@ export function createDefenseMesh(typeId, _accent = 0xc9a227, factionId = null) 
       buildMineEmplacement(g, MAT, design);
       addPickCollider(g, design.hitRadius ?? 1.8);
       break;
+    case 'tankTrap':
+      buildTankTrapEmplacement(g, MAT, design, false);
+      addPickCollider(g, design.hitRadius ?? 3.2);
+      break;
+    case 'tankTrapHeavy':
+      buildTankTrapEmplacement(g, MAT, design, true);
+      addPickCollider(g, design.hitRadius ?? 3.8);
+      break;
     case 'artillery':
     case 'artilleryHeavy':
       buildArtilleryPit(g, MAT, fid, design);
@@ -128,6 +137,36 @@ export function setDefenseHpVisual(mesh, hpRatio) {
   }
   s.visible = true;
   s.scale.setScalar(1 + (1 - hpRatio) * 0.9);
+}
+
+export function setDefenseAmmoVisual(mesh, ammoRatio) {
+  if (!mesh) return;
+  let marker = mesh.getObjectByName('defenseAmmoMarker');
+  const show = ammoRatio < 0.4;
+  if (!show) {
+    if (marker) marker.visible = false;
+    return;
+  }
+  if (!marker) {
+    const geo = new THREE.RingGeometry(2.2, 2.55, 20);
+    geo.rotateX(-Math.PI / 2);
+    marker = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({
+        color: 0xffaa44,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      })
+    );
+    marker.name = 'defenseAmmoMarker';
+    marker.position.y = 0.55;
+    marker.renderOrder = 8;
+    mesh.add(marker);
+  }
+  marker.visible = true;
+  marker.material.color.setHex(ammoRatio <= 0.02 ? 0xff4444 : 0xffaa44);
+  marker.material.opacity = ammoRatio <= 0.02 ? 0.95 : 0.75 + ammoRatio * 0.2;
 }
 
 export function setDefenseSelected(mesh, selected) {

@@ -25,6 +25,8 @@ export const DEFENSE_SVG = {
   barbedWire: 'defenses/svg/wire.svg',
   razorWire: 'defenses/svg/razor-wire.svg',
   mine: 'defenses/svg/mine.svg',
+  tankTrap: 'defenses/svg/tank-trap.svg',
+  tankTrapHeavy: 'defenses/svg/tank-trap-heavy.svg',
   artillery: 'defenses/svg/artillery-pit.svg',
   artilleryHeavy: 'defenses/svg/artillery-pit-heavy.svg',
 };
@@ -159,6 +161,24 @@ const MINE = {
   hitRadius: 1.8,
 };
 
+const TANK_TRAP = {
+  tankTrap: {
+    span: 4.4,
+    spikes: 7,
+    spikeH: 0.92,
+    spikeW: 0.22,
+    hitRadius: 3.2,
+  },
+  tankTrapHeavy: {
+    span: 5.6,
+    spikes: 9,
+    spikeH: 1.15,
+    spikeW: 0.28,
+    teeth: 5,
+    hitRadius: 3.8,
+  },
+};
+
 const MORTAR_NEST = {
   mortarNest: {
     parapet: { segments: 10, radius: 2.5, height: 0.58, frontBoost: 0.28 },
@@ -218,6 +238,10 @@ export function getDefenseDesign(factionId, typeId) {
       return WIRE.razorWire;
     case 'mine':
       return MINE;
+    case 'tankTrap':
+      return TANK_TRAP.tankTrap;
+    case 'tankTrapHeavy':
+      return TANK_TRAP.tankTrapHeavy;
     case 'artillery':
       return ARTY_PIT.artillery;
     case 'artilleryHeavy':

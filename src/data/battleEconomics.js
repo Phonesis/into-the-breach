@@ -31,6 +31,8 @@ export const DEFENSE_MATERIEL_COST_USD_1944 = {
   barbedWire: 1_800,
   razorWire: 3_200,
   mine: 85,
+  tankTrap: 4_200,
+  tankTrapHeavy: 7_800,
   artillery: 95_000,
   artilleryHeavy: 145_000,
 };

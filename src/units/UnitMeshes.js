@@ -10,7 +10,13 @@ import {
   buildFactionSniper,
 } from './FactionMeshes.js';
 import { isTankType } from './VehicleTypes.js';
-import { getBodyTexture, getGhillieTexture } from './UnitTextures.js';
+import {
+  getBodyTexture,
+  getGhillieTexture,
+  getInfantryUniformTexture,
+  createCamoMaterial,
+} from './UnitTextures.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
 
 export { mat };
 
@@ -179,7 +185,8 @@ function toScorchedMaterial(src, preset = {}) {
 
   const wreckMat = src.clone();
   if (wreckMat.map) {
-    wreckMat.color.setRGB(colorScale, colorScale, colorScale);
+    wreckMat.color.setHex(0xffffff);
+    wreckMat.color.multiplyScalar(colorScale);
   } else if (wreckMat.color) {
     wreckMat.color.multiplyScalar(colorScale);
   }
@@ -216,61 +223,335 @@ function darkenCorpseMesh(child, factor = 0.34) {
   });
 }
 
-function addGroundStain(mesh, spread = 2.4) {
-  const stainMat = new THREE.MeshBasicMaterial({
-    color: 0x1a0806,
+const SQUAD_SIZES = {
+  infantry: 5,
+  machineGun: 2,
+  medic: 2,
+  engineer: 2,
+  mortar: 2,
+  sniper: 1,
+};
+
+function createBloodPoolMesh(radius, { color = 0x5c1212, opacity = 0.78, lobes = 5 } = {}) {
+  const shape = new THREE.Shape();
+  const phase = Math.random() * Math.PI * 2;
+  const segs = 28;
+  for (let i = 0; i <= segs; i++) {
+    const t = (i / segs) * Math.PI * 2;
+    const wobble =
+      0.68 +
+      Math.sin(t * lobes + phase) * 0.2 +
+      Math.sin(t * 2.3 + phase * 1.7) * 0.08 +
+      Math.cos(t * 4.1) * 0.06;
+    const r = radius * Math.max(0.42, wobble);
+    const x = Math.cos(t) * r;
+    const y = Math.sin(t) * r;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+
+  const mat = new THREE.MeshBasicMaterial({
+    color,
     transparent: true,
-    opacity: 0.55,
+    opacity,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    side: THREE.DoubleSide,
   });
-  const stain = new THREE.Mesh(new THREE.PlaneGeometry(spread, spread * 0.85), stainMat);
-  stain.rotation.x = -Math.PI / 2;
-  stain.position.y = 0.04;
-  stain.renderOrder = 1;
-  stain.name = 'corpseStain';
-  mesh.add(stain);
+  const pool = new THREE.Mesh(new THREE.ShapeGeometry(shape, 1), mat);
+  pool.rotation.x = -Math.PI / 2;
+  return pool;
 }
 
-function isWeaponMesh(child) {
-  const p = child.geometry?.parameters;
-  if (!p || p.height == null) return false;
-  return p.height < 0.12 && (p.width ?? 0) > 0.2;
+function disposeMeshObject(obj) {
+  if (!obj) return;
+  obj.traverse?.((child) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+      else child.material.dispose();
+    }
+  });
 }
 
-/** Fallen squad / soldier — bodies on the ground, weapons dropped. */
-export function applyInfantryCorpseLook(mesh) {
+function addBloodPoolAt(parent, x, z, radius, squadIndex = null) {
+  const pool = createBloodPoolMesh(radius, { color: 0x5c1212, opacity: 0.76, lobes: 5 });
+  pool.position.set(x, 0.05, z);
+  pool.renderOrder = 1;
+  pool.name = 'bloodPool';
+  if (squadIndex != null) pool.userData.squadIndex = squadIndex;
+  parent.add(pool);
+
+  const inner = createBloodPoolMesh(radius * 0.42, { color: 0x9a2020, opacity: 0.62, lobes: 4 });
+  inner.position.set(
+    x + (Math.random() - 0.5) * radius * 0.22,
+    0.06,
+    z + (Math.random() - 0.5) * radius * 0.22
+  );
+  inner.renderOrder = 2;
+  inner.name = 'bloodPool';
+  if (squadIndex != null) inner.userData.squadIndex = squadIndex;
+  parent.add(inner);
+}
+
+function addGroundStain(mesh, spread = 2.4) {
+  const group = new THREE.Group();
+  group.name = 'corpseStain';
+  group.renderOrder = 1;
+
+  addBloodPoolAt(group, 0, 0, spread * 0.42);
+  addBloodPoolAt(
+    group,
+    (Math.random() - 0.5) * spread * 0.28,
+    (Math.random() - 0.5) * spread * 0.24,
+    spread * 0.22
+  );
+
+  mesh.add(group);
+}
+
+function squadLivingCount(hp, maxHp, squadSize) {
+  if (hp <= 0) return 0;
+  if (squadSize <= 1) return 1;
+  return Math.max(1, Math.ceil((hp / Math.max(maxHp, 1)) * squadSize));
+}
+
+function getSquadMembers(mesh) {
+  const members = [];
+  mesh.traverse((child) => {
+    if (child.name === 'squadMember' && child.userData?.squadIndex != null) {
+      members.push(child);
+    }
+  });
+  members.sort((a, b) => a.userData.squadIndex - b.userData.squadIndex);
+  return members;
+}
+
+function spawnCasualtyAtMember(mesh, member, factionId, unitType) {
+  const squadIndex = member.userData.squadIndex;
+  const body = buildFallenSoldierBody(factionId, { ghillie: unitType === 'sniper' });
+  body.position.copy(member.position);
+  body.position.y = 0;
+  body.rotation.y = (member.rotation?.y ?? 0) + (Math.random() - 0.5) * 1.2;
+  body.rotation.z = (Math.random() - 0.5) * 0.15;
+  body.userData.squadIndex = squadIndex;
+  mesh.add(body);
+  addBloodPoolAt(
+    mesh,
+    member.position.x,
+    member.position.z,
+    0.5 + Math.random() * 0.28,
+    squadIndex
+  );
+  member.visible = false;
+}
+
+function restoreSquadMember(mesh, member) {
+  const squadIndex = member.userData.squadIndex;
+  member.visible = true;
+  const toRemove = [];
+  for (const child of mesh.children) {
+    if (child.userData?.squadIndex === squadIndex && (child.name === 'fallenBody' || child.name === 'bloodPool')) {
+      toRemove.push(child);
+    }
+  }
+  for (const obj of toRemove) {
+    mesh.remove(obj);
+    disposeMeshObject(obj);
+  }
+}
+
+export function updateSquadCasualtyVisual(unit) {
+  const type = unit?.def?.type;
+  const squadSize = SQUAD_SIZES[type];
+  if (!squadSize || !unit?.mesh || unit.dead || unit.mesh.userData?.deathVisualApplied) return;
+
+  const living = squadLivingCount(unit.hp, unit.maxHp, squadSize);
+  const prevLiving = unit._squadLiving ?? squadSize;
+  if (prevLiving === living) return;
+
+  const members = getSquadMembers(unit.mesh);
+  if (!members.length) {
+    unit._squadLiving = living;
+    return;
+  }
+
+  const factionId = unit.mesh.userData.factionId ?? unit.faction?.id ?? 'germany';
+
+  if (living < prevLiving) {
+    for (let i = living; i < members.length; i++) {
+      if (members[i].visible) spawnCasualtyAtMember(unit.mesh, members[i], factionId, type);
+    }
+  } else if (living > prevLiving) {
+    for (let i = prevLiving; i < living && i < members.length; i++) {
+      restoreSquadMember(unit.mesh, members[i]);
+    }
+  }
+
+  unit._squadLiving = living;
+}
+
+function snapCorpseToTerrain(mesh, mapDef) {
+  if (!mesh || !mapDef) return;
+  mesh.position.y = sampleTerrainHeight(mesh.position.x, mesh.position.z, mapDef);
+}
+
+/** How long fallen infantry bodies stay on the battlefield (seconds). */
+export const INFANTRY_CORPSE_LINGER_SEC = 90;
+
+function corpseBodyCount(unitType) {
+  switch (unitType) {
+    case 'infantry':
+      return 2 + Math.floor(Math.random() * 2);
+    case 'machineGun':
+      return 2;
+    case 'mortar':
+      return 1 + Math.floor(Math.random() * 2);
+    default:
+      return 1;
+  }
+}
+
+function addFallenHelmet(group, uniformMat, factionId) {
+  let helmet;
+  if (factionId === 'germany') {
+    helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      uniformMat
+    );
+    helmet.rotation.x = Math.PI / 2;
+    helmet.position.set(0.05, 0.07, 0.18);
+  } else if (factionId === 'usa') {
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), uniformMat);
+    helmet.scale.set(1.05, 0.55, 1.05);
+    helmet.rotation.x = Math.PI / 2;
+    helmet.position.set(0.04, 0.07, 0.17);
+  } else if (factionId === 'russia') {
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), uniformMat);
+    helmet.scale.set(1.08, 0.5, 1.08);
+    helmet.rotation.x = Math.PI / 2;
+    helmet.position.set(0.04, 0.07, 0.16);
+  } else {
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), uniformMat);
+    helmet.scale.set(1.1, 0.48, 1.1);
+    helmet.rotation.x = Math.PI / 2;
+    helmet.position.set(0.04, 0.07, 0.16);
+  }
+  group.add(helmet);
+}
+
+/** Single prone soldier with faction uniform camo. */
+function buildFallenSoldierBody(factionId, { ghillie = false } = {}) {
+  const group = new THREE.Group();
+  group.name = 'fallenBody';
+
+  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
+  const uniformMat = createCamoMaterial(0xffffff, uniformTex, ghillie ? [1.4, 1] : [1.1, 0.75], {
+    rough: 0.94,
+  });
+  uniformMat.color.multiplyScalar(0.72);
+
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0x8a6e58, roughness: 0.88 });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.16, 0.3), uniformMat);
+  torso.position.set(0, 0.08, 0);
+  torso.castShadow = true;
+  torso.receiveShadow = true;
+  group.add(torso);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), skinMat);
+  head.scale.set(1, 0.85, 1);
+  head.position.set(0.34, 0.07, 0.04);
+  head.castShadow = true;
+  group.add(head);
+
+  if (ghillie) {
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.2), uniformMat);
+    hood.position.set(0.34, 0.09, 0.04);
+    group.add(hood);
+  } else {
+    addFallenHelmet(group, uniformMat, factionId);
+  }
+
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.14), uniformMat);
+  legL.position.set(-0.22, 0.06, 0.08);
+  legL.rotation.z = 0.35;
+  group.add(legL);
+
+  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.14), uniformMat);
+  legR.position.set(-0.18, 0.06, -0.1);
+  legR.rotation.z = -0.25;
+  group.add(legR);
+
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.1), uniformMat);
+  pack.position.set(-0.08, 0.1, -0.02);
+  pack.rotation.z = 0.15;
+  group.add(pack);
+
+  return group;
+}
+
+function hideLivingUnitMesh(mesh) {
+  for (const child of mesh.children) {
+    if (child.name === 'corpseStain' || child.name === 'fallenBody' || child.name === 'bloodPool') {
+      continue;
+    }
+    child.visible = false;
+  }
+  mesh.traverse((child) => {
+    if (child.name === 'squadMember') child.visible = false;
+  });
+}
+
+/** Fallen squad / soldier — prone bodies on the ground with faction camo. */
+export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
   if (!mesh || mesh.userData.corpseApplied) return;
   mesh.userData.corpseApplied = true;
   hideUnitChrome(mesh);
+  hideLivingUnitMesh(mesh);
 
-  const yaw = (Math.random() - 0.5) * 0.55;
-  mesh.rotation.y += yaw;
-  mesh.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.12;
-  mesh.rotation.z = (Math.random() - 0.5) * 0.2;
-  mesh.position.y = 0.1;
+  mesh.rotation.x = 0;
+  mesh.rotation.z = 0;
 
-  for (const child of mesh.children) {
-    if (!(child instanceof THREE.Group)) continue;
-    child.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.35;
-    child.rotation.z += (Math.random() - 0.5) * 0.45;
-    child.position.y = 0.04 + Math.random() * 0.06;
-    child.traverse((part) => {
-      if (!part.isMesh) return;
-      if (isWeaponMesh(part)) {
-        part.visible = false;
-        return;
-      }
-      darkenCorpseMesh(part, 0.38);
-    });
+  const factionId = mesh.userData.factionId ?? 'germany';
+  const members = getSquadMembers(mesh);
+
+  if (members.length) {
+    for (const member of members) {
+      if (member.visible) spawnCasualtyAtMember(mesh, member, factionId, unitType);
+    }
+  } else {
+    const count = corpseBodyCount(unitType);
+    const spread = unitType === 'infantry' ? 1.35 : 1.05;
+    const ghillie = unitType === 'sniper';
+    for (let i = 0; i < count; i++) {
+      const body = buildFallenSoldierBody(factionId, { ghillie });
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * spread * 0.55;
+      body.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+      body.rotation.y = angle + (Math.random() - 0.5) * 0.8;
+      body.rotation.z = (Math.random() - 0.5) * 0.12;
+      mesh.add(body);
+    }
   }
 
-  mesh.traverse((child) => {
-    if (!child.isMesh || WRECK_SKIP_MESHES.has(child.name) || child.name === 'corpseStain') return;
-    if (isWeaponMesh(child)) child.visible = false;
-    else darkenCorpseMesh(child, 0.36);
-  });
+  if (unitType === 'machineGun') {
+    const gun = new THREE.Mesh(
+      new THREE.BoxGeometry(0.65, 0.07, 0.07),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a28, roughness: 0.7, metalness: 0.35 })
+    );
+    gun.position.set(0.35, 0.05, -0.25);
+    gun.rotation.y = Math.random() * 0.6;
+    gun.name = 'fallenBody';
+    mesh.add(gun);
+  }
 
-  addGroundStain(mesh, mesh.userData.type === 'infantry' ? 2.6 : 1.8);
+  if (!mesh.children.some((c) => c.name === 'corpseStain')) {
+    addGroundStain(mesh, unitType === 'infantry' ? 2.8 : 2.1);
+  }
 }
 
 /** Knocked-out vehicles (armored car, artillery, mortar) — no live unit chrome. */
@@ -307,6 +588,7 @@ export function applyUnitDeathVisual(unit) {
   mesh.userData.deathVisualApplied = true;
 
   hideUnitChrome(mesh);
+  snapCorpseToTerrain(mesh, unit._mapDef);
 
   if (isTankType(type)) {
     unit.wreckTimeLeft = VEHICLE_WRECK_LINGER_SEC;
@@ -322,8 +604,8 @@ export function applyUnitDeathVisual(unit) {
     type === 'medic' ||
     type === 'engineer'
   ) {
-    unit.corpseTimeLeft = type === 'infantry' ? 14 : 11;
-    applyInfantryCorpseLook(mesh);
+    unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
+    applyInfantryCorpseLook(mesh, type);
     return;
   }
 

@@ -24,7 +24,11 @@ export class RTSController {
     getPendingDefensePlacement,
     getPendingLastStandDeploy,
     getPendingSandbagPlacement,
+    getPendingBaseBuildingPlacement,
+    getBaseBuildingAttackTargets,
     getIsTowerDefense,
+    getIsBaseBuildingMode,
+    pickPlayerBaseBuilding,
     getDeployZoneActive,
     getShiftHeld,
     clampDeployPoint,
@@ -32,6 +36,7 @@ export class RTSController {
     onDefensePlacement,
     onLastStandPlacement,
     onSandbagPlacement,
+    onBaseBuildingPlacement,
     onSelectionChange,
     onHoverTarget,
     onOrder,
@@ -50,7 +55,12 @@ export class RTSController {
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
     this.getPendingSandbagPlacement = getPendingSandbagPlacement ?? (() => null);
+    this.getPendingBaseBuildingPlacement =
+      getPendingBaseBuildingPlacement ?? (() => null);
+    this.getBaseBuildingAttackTargets = getBaseBuildingAttackTargets ?? (() => []);
     this.getIsTowerDefense = getIsTowerDefense ?? (() => false);
+    this.getIsBaseBuildingMode = getIsBaseBuildingMode ?? (() => false);
+    this.pickPlayerBaseBuilding = pickPlayerBaseBuilding ?? (() => null);
     this.getDeployZoneActive = getDeployZoneActive ?? (() => false);
     this.getShiftHeld = getShiftHeld ?? (() => this._modifierShift);
     this.clampDeployPoint = clampDeployPoint ?? ((x, z) => ({ x, z }));
@@ -58,6 +68,7 @@ export class RTSController {
     this.onDefensePlacement = onDefensePlacement;
     this.onLastStandPlacement = onLastStandPlacement;
     this.onSandbagPlacement = onSandbagPlacement;
+    this.onBaseBuildingPlacement = onBaseBuildingPlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
@@ -349,14 +360,48 @@ export class RTSController {
     return this._raycastSceneryHit()?.target ?? null;
   }
 
+  raycastEnemyBaseBuilding() {
+    const targets = this.getBaseBuildingAttackTargets?.() ?? [];
+    if (!targets.length) return null;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const meshes = targets.map((t) => t.mesh).filter(Boolean);
+    if (!meshes.length) return null;
+    const hits = this.raycaster.intersectObjects(meshes, true);
+    let best = null;
+    let bestDist = Infinity;
+    for (const hit of hits) {
+      for (const t of targets) {
+        if (t.dead || !t.mesh) continue;
+        let obj = hit.object;
+        while (obj) {
+          if (obj === t.mesh) {
+            if (hit.distance < bestDist) {
+              bestDist = hit.distance;
+              best = t;
+            }
+            break;
+          }
+          obj = obj.parent;
+        }
+      }
+    }
+    return best;
+  }
+
   /** Enemy unit or HQ under cursor (cover/scenery uses Shift+LMB manual fire). */
   raycastAttackTarget() {
     const unit = this.raycastEnemyUnit();
     const hq = this.raycastEnemyHQ();
+    const structure = this.raycastEnemyBaseBuilding();
 
     const combat = [];
     if (unit) combat.push({ target: unit, dist: this._raycastHitDistance(this._unitPickMesh(unit)) });
     if (hq) combat.push({ target: hq, dist: this._raycastHitDistance(this._hqPickMesh(hq)) });
+    if (structure) {
+      this.raycaster.setFromCamera(this.pointer, this.camera);
+      const hits = this.raycaster.intersectObject(structure.mesh, true);
+      combat.push({ target: structure, dist: hits[0]?.distance ?? Infinity });
+    }
 
     if (combat.length) {
       combat.sort((a, b) => a.dist - b.dist);
@@ -393,7 +438,8 @@ export class RTSController {
       this.getPendingFireSupport?.() ||
       this.getPendingDefensePlacement?.() ||
       this.getPendingLastStandDeploy?.() ||
-      this.getPendingSandbagPlacement?.()
+      this.getPendingSandbagPlacement?.() ||
+      this.getPendingBaseBuildingPlacement?.()
     ) {
       this.setHoveredTarget(null);
       return;
@@ -490,7 +536,8 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
+    const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
       return;
     }
 
@@ -506,6 +553,7 @@ export class RTSController {
       !this.getPendingDefensePlacement?.() &&
       !this.getPendingLastStandDeploy?.() &&
       !this.getPendingSandbagPlacement?.() &&
+      !this.getPendingBaseBuildingPlacement?.() &&
       !this._tabletFireMode
     ) {
       this._longPressTimer = setTimeout(() => {
@@ -527,7 +575,8 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
+    const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -535,6 +584,9 @@ export class RTSController {
         }
         if (pendingDef && this.onDefensePlacement) {
           this.onDefensePlacement('preview', ground.x, ground.z);
+        }
+        if (pendingBaseBuild && this.onBaseBuildingPlacement) {
+          this.onBaseBuildingPlacement('preview', ground.x, ground.z);
         }
       }
       this.setHoveredTarget(null);
@@ -573,7 +625,8 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
+    const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -587,6 +640,9 @@ export class RTSController {
         }
         if (pendingSandbags && this.onSandbagPlacement) {
           this.onSandbagPlacement('place', ground.x, ground.z);
+        }
+        if (pendingBaseBuild && this.onBaseBuildingPlacement) {
+          this.onBaseBuildingPlacement('place', ground.x, ground.z);
         }
       }
       this.dragStart = null;
@@ -628,7 +684,7 @@ export class RTSController {
         u.setSelected(inside);
       }
       this.getHqs().forEach((h) => h.setSelected(false));
-      this._notifySelection(units, null);
+      this._notifySelection(units, null, null);
     } else {
       const selectedBefore = units.filter((u) => u.selected && !u.dead);
       const shiftHeld = e.shiftKey || this.isManualFireModifier();
@@ -663,7 +719,11 @@ export class RTSController {
         } else {
           this._tabletTargetConfirmKey = null;
           const playerHq = this.raycastPlayerHQ();
-          const hit = playerHq ? null : this.raycastUnit(team);
+          const playerBuilding =
+            !playerHq && this.getIsBaseBuildingMode?.()
+              ? this.pickPlayerBaseBuilding?.(this.raycaster, this.pointer, this.camera)
+              : null;
+          const hit = playerHq || playerBuilding ? null : this.raycastUnit(team);
           const add = e.shiftKey;
           if (!add) {
             units.forEach((u) => u.setSelected(false));
@@ -671,12 +731,15 @@ export class RTSController {
           }
           if (playerHq) {
             playerHq.setSelected(true);
-            this._notifySelection(units, playerHq);
+            this._notifySelection(units, playerHq, null);
+          } else if (playerBuilding) {
+            this.getHqs().forEach((h) => h.setSelected(false));
+            this._notifySelection(units, null, playerBuilding);
           } else if (hit) {
             hit.setSelected(true);
-            this._notifySelection(units, null);
+            this._notifySelection(units, null, null);
           } else {
-            this._notifySelection(units, null);
+            this._notifySelection(units, null, null);
           }
         }
       }
@@ -687,9 +750,9 @@ export class RTSController {
     this.updateHoverTarget();
   }
 
-  _notifySelection(units, hq = null) {
+  _notifySelection(units, hq = null, baseBuilding = null) {
     const sel = units.filter((u) => u.selected);
-    if (this.onSelectionChange) this.onSelectionChange(sel, hq);
+    if (this.onSelectionChange) this.onSelectionChange(sel, hq, baseBuilding);
   }
 
   onPointerDownRmb(e) {

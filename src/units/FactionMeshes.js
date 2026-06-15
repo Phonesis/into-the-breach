@@ -172,6 +172,9 @@ function addMgCrewman(group, body, dark, factionId, x, z, { gunner = false } = {
 
   soldier.add(torso, head, helmet);
   soldier.position.set(x, 0.12, z);
+  soldier.name = 'squadMember';
+  soldier.userData.squadIndex = group.userData.nextSquadIndex ?? 0;
+  group.userData.nextSquadIndex = (group.userData.nextSquadIndex ?? 0) + 1;
   group.add(soldier);
 }
 
@@ -362,6 +365,9 @@ export function buildFactionMedic(group, body, dark, factionId) {
 
     soldier.add(torso, head, helmet);
     soldier.position.set(x, 0.14, z);
+    soldier.name = 'squadMember';
+    soldier.userData.squadIndex = group.userData.nextSquadIndex ?? 0;
+    group.userData.nextSquadIndex = (group.userData.nextSquadIndex ?? 0) + 1;
     group.add(soldier);
   }
 
@@ -429,6 +435,9 @@ export function buildFactionEngineer(group, body, dark, factionId) {
 
     soldier.add(torso, head, helmet);
     soldier.position.set(x, 0.14, z);
+    soldier.name = 'squadMember';
+    soldier.userData.squadIndex = group.userData.nextSquadIndex ?? 0;
+    group.userData.nextSquadIndex = (group.userData.nextSquadIndex ?? 0) + 1;
     group.add(soldier);
   }
 
@@ -462,7 +471,16 @@ export function buildFactionMortar(group, body, detail, dark, factionId) {
 
   const crew = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.32, 4, 6), body);
   crew.position.set(-0.55, 0.38, -0.2);
+  crew.name = 'squadMember';
+  crew.userData.squadIndex = 0;
   group.add(crew);
+
+  const crew2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.28, 4, 6), body);
+  crew2.position.set(0.42, 0.36, -0.55);
+  crew2.name = 'squadMember';
+  crew2.userData.squadIndex = 1;
+  group.add(crew2);
+
   group.userData.hitRadius = 2;
 }
 
@@ -480,7 +498,8 @@ export function buildFactionInfantry(group, body, dark, factionId) {
     [-0.4, 0, -0.45],
   ];
 
-  for (const [px, , pz] of positions) {
+  for (let i = 0; i < positions.length; i++) {
+    const [px, , pz] = positions[i];
     const soldier = new THREE.Group();
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.38, 0.16), body);
     torso.position.y = 0.42;
@@ -516,8 +535,11 @@ export function buildFactionInfantry(group, body, dark, factionId) {
 
     soldier.add(torso, head, helmet, gun);
     soldier.position.set(px, 0.15, pz);
+    soldier.name = 'squadMember';
+    soldier.userData.squadIndex = i;
     group.add(soldier);
   }
+  group.userData.squadSize = positions.length;
   group.userData.hitRadius = 1.2;
 }
 
@@ -550,6 +572,8 @@ export function buildFactionSniper(group, body, detail, dark, factionId, ghillie
 
   soldier.add(torso, head, helmet, rifle, scope);
   soldier.position.set(0, 0.12, 0);
+  soldier.name = 'squadMember';
+  soldier.userData.squadIndex = 0;
   group.add(soldier);
 
   const ghillie = new THREE.Mesh(

@@ -23,6 +23,7 @@ import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
 import { getRankDamageMultiplier, recordEnemyKill } from './EliteBehavior.js';
 import { isSceneryTarget } from './SceneryTarget.js';
 import { isDefenseTarget } from './DefenseTarget.js';
+import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
@@ -76,7 +77,8 @@ export function updateCombat(
   });
   const sceneryTargets = scenery?.getAttackTargets?.() ?? [];
   const defenseTargets = options.defenseTargets ?? [];
-  const targets = [...aliveUnits, ...hqsInPlay, ...sceneryTargets, ...defenseTargets];
+  const baseBuildingTargets = options.baseBuildingTargets ?? [];
+  const targets = [...aliveUnits, ...hqsInPlay, ...sceneryTargets, ...defenseTargets, ...baseBuildingTargets];
   const playerAlive = [];
   const enemyAlive = [];
   const playerHqs = [];
@@ -92,7 +94,7 @@ export function updateCombat(
   /** Auto-acquire lists — enemies only scan opposing forces (not every unit on the map). */
   const playerAutoAcquire = [...enemyAlive];
   if (!tutorialPassiveNoHq) playerAutoAcquire.push(...enemyHqs);
-  const enemyAutoAcquire = [...playerAlive, ...playerHqs, ...defenseTargets];
+  const enemyAutoAcquire = [...playerAlive, ...playerHqs, ...defenseTargets, ...baseBuildingTargets];
   const lx = listener?.x ?? 0;
   const lz = listener?.z ?? 0;
 
@@ -205,6 +207,7 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
       if (
         !isSceneryTarget(attacker.attackOrder) &&
         !isDefenseTarget(attacker.attackOrder) &&
+        !isBaseBuildingTarget(attacker.attackOrder) &&
         (attacker.attackOrder.team === attacker.team ||
           attacker.attackOrder.surrendered ||
           attacker.attackOrder._captureExit)
@@ -288,10 +291,13 @@ function fire(
   if (isDefenseTarget(target)) {
     damage *= getDefenseDamageMultForAttacker(attackerType);
   }
+  if (isBaseBuildingTarget(target)) {
+    damage *= getStructureDamageMultiplier(attackerType);
+  }
 
   if (target.isGround) {
     applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options, livingUnits);
-  } else if (isSceneryTarget(target) || isDefenseTarget(target)) {
+  } else if (isSceneryTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target)) {
     target.takeDamage(damage);
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
@@ -350,7 +356,8 @@ function fire(
       coaxFire: coax,
       killed: !target.isGround && target.dead,
       targetIsHQ: !target.isGround && !target.def && !isSceneryTarget(target),
-      targetIsScenery: isSceneryTarget(target) || isDefenseTarget(target),
+      targetIsScenery:
+        isSceneryTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target),
       groundImpact: target.isGround,
       from: attacker.position,
       to: impact,
@@ -448,7 +455,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       } else {
         const dist = distanceBetween(unit, unit.attackOrder);
         const rangeSlack =
-          unit.attackOrder.isScenery || isDefenseTarget(unit.attackOrder) ? 1.05 : 0.88;
+          unit.attackOrder.isScenery ||
+          isDefenseTarget(unit.attackOrder) ||
+          isBaseBuildingTarget(unit.attackOrder)
+            ? 1.05
+            : 0.88;
         const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
           ? unit.def.coaxMG.range * rangeSlack
           : unit.def.range * rangeSlack;
@@ -486,7 +497,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
 
     let moveDt = dt;
     if (options.getWireSlowMult && unit.team === 'enemy') {
-      moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z);
+      moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
     }
     advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
     advanceMovePath(unit, mapDef);

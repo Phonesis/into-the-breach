@@ -41,6 +41,9 @@ export const DEFENSE_TYPES = {
     weaponType: 'machineGun',
     caliber: 7.92,
     tier: 1,
+    maxAmmo: 180,
+    ammoPerShot: 1,
+    resupplyCost: 10,
   },
   bunkerHeavy: {
     id: 'bunkerHeavy',
@@ -55,6 +58,9 @@ export const DEFENSE_TYPES = {
     weaponType: 'tank',
     caliber: 75,
     tier: 2,
+    maxAmmo: 90,
+    ammoPerShot: 1,
+    resupplyCost: 14,
   },
   mgNest: {
     id: 'mgNest',
@@ -69,6 +75,9 @@ export const DEFENSE_TYPES = {
     weaponType: 'machineGun',
     caliber: 7.62,
     tier: 1,
+    maxAmmo: 240,
+    ammoPerShot: 1,
+    resupplyCost: 8,
   },
   mgNestMk2: {
     id: 'mgNestMk2',
@@ -83,6 +92,9 @@ export const DEFENSE_TYPES = {
     weaponType: 'machineGun',
     caliber: 12.7,
     tier: 2,
+    maxAmmo: 200,
+    ammoPerShot: 1,
+    resupplyCost: 12,
   },
   mortarNest: {
     id: 'mortarNest',
@@ -98,6 +110,9 @@ export const DEFENSE_TYPES = {
     caliber: 81,
     softMult: 1.15,
     tier: 1,
+    maxAmmo: 48,
+    ammoPerShot: 1,
+    resupplyCost: 12,
   },
   mortarNestMk2: {
     id: 'mortarNestMk2',
@@ -113,6 +128,9 @@ export const DEFENSE_TYPES = {
     caliber: 120,
     softMult: 1.2,
     tier: 2,
+    maxAmmo: 36,
+    ammoPerShot: 1,
+    resupplyCost: 16,
   },
   atGun: {
     id: 'atGun',
@@ -130,6 +148,9 @@ export const DEFENSE_TYPES = {
     antiArmorMult: 1.35,
     softMult: 0.35,
     tier: 1,
+    maxAmmo: 32,
+    ammoPerShot: 1,
+    resupplyCost: 14,
   },
   atGun88: {
     id: 'atGun88',
@@ -147,6 +168,9 @@ export const DEFENSE_TYPES = {
     antiArmorMult: 1.5,
     softMult: 0.45,
     tier: 2,
+    maxAmmo: 24,
+    ammoPerShot: 1,
+    resupplyCost: 18,
   },
   barbedWire: {
     id: 'barbedWire',
@@ -181,6 +205,30 @@ export const DEFENSE_TYPES = {
     damage: 110,
     tier: 1,
   },
+  tankTrap: {
+    id: 'tankTrap',
+    name: 'Tank Traps',
+    subtitle: 'Czech hedgehog — slows and wrecks vehicle tracks',
+    cost: 22,
+    hp: 110,
+    range: 0,
+    trapRadius: 4.2,
+    slowMult: 0.38,
+    trapDamagePerSec: 12,
+    tier: 1,
+  },
+  tankTrapHeavy: {
+    id: 'tankTrapHeavy',
+    name: 'Heavy Tank Traps',
+    subtitle: 'Concrete dragon\'s teeth — tougher barrier',
+    cost: 0,
+    hp: 175,
+    range: 0,
+    trapRadius: 5.2,
+    slowMult: 0.25,
+    trapDamagePerSec: 18,
+    tier: 2,
+  },
   artillery: {
     id: 'artillery',
     name: 'Artillery Pit',
@@ -190,6 +238,9 @@ export const DEFENSE_TYPES = {
     range: 0,
     barrageTier: 1,
     tier: 1,
+    maxAmmo: 24,
+    barrageAmmoCost: 6,
+    resupplyCost: 20,
   },
   artilleryHeavy: {
     id: 'artilleryHeavy',
@@ -200,6 +251,9 @@ export const DEFENSE_TYPES = {
     range: 0,
     barrageTier: 2,
     tier: 2,
+    maxAmmo: 18,
+    barrageAmmoCost: 8,
+    resupplyCost: 26,
   },
 };
 
@@ -211,6 +265,7 @@ export const DEFENSE_TYPE_LIST = [
   DEFENSE_TYPES.atGun,
   DEFENSE_TYPES.barbedWire,
   DEFENSE_TYPES.mine,
+  DEFENSE_TYPES.tankTrap,
   DEFENSE_TYPES.artillery,
 ];
 
@@ -221,6 +276,7 @@ export const DEFENSE_UPGRADES = {
   mortarNest: { next: 'mortarNestMk2', cost: 52 },
   atGun: { next: 'atGun88', cost: 78 },
   barbedWire: { next: 'razorWire', cost: 22 },
+  tankTrap: { next: 'tankTrapHeavy', cost: 28 },
   artillery: { next: 'artilleryHeavy', cost: 85 },
 };
 
@@ -270,4 +326,35 @@ export function getBarrageCooldownForEntries(entries) {
 
 export function canUpgradeType(typeId) {
   return !!DEFENSE_UPGRADES[typeId];
+}
+
+/** Gun pits and artillery stores that must be resupplied with defense points. */
+export function defenseNeedsAmmo(def) {
+  return (def?.maxAmmo ?? 0) > 0;
+}
+
+export function getAmmoRatio(entry) {
+  if (!entry?.maxAmmo) return 1;
+  return Math.max(0, Math.min(1, (entry.ammo ?? 0) / entry.maxAmmo));
+}
+
+export function getResupplyCost(entry) {
+  return entry?.def?.resupplyCost ?? 10;
+}
+
+/** Highest-tier artillery pit with enough shells for a barrage. */
+export function pickBarrageAmmoPit(entries) {
+  let best = null;
+  let bestTier = -1;
+  for (const e of entries) {
+    if (e.destroyed || !e.def?.barrageTier) continue;
+    const cost = e.def.barrageAmmoCost ?? 6;
+    if ((e.ammo ?? 0) < cost) continue;
+    const tier = e.def.barrageTier ?? 1;
+    if (tier > bestTier) {
+      bestTier = tier;
+      best = e;
+    }
+  }
+  return best;
 }

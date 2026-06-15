@@ -1,5 +1,6 @@
 import { distanceBetween } from './Targeting.js';
 import { isFootSoldier } from '../units/VehicleTypes.js';
+import { updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
 
 /** Game meters — aura in which medics heal and steady nearby infantry. */
 export const MEDIC_AURA_RANGE = 14;
@@ -36,8 +37,10 @@ export function updateMedicHealing(units, dt) {
       const dist = distanceBetween(medic, ally);
       if (dist > MEDIC_AURA_RANGE) continue;
 
+      const before = ally.hp;
       const proximity = 1 - (dist / MEDIC_AURA_RANGE) * 0.55;
       ally.hp = Math.min(ally.maxHp, ally.hp + MEDIC_HEAL_PER_SEC * proximity * dt);
+      if (ally.hp > before) updateSquadCasualtyVisual(ally);
     }
   }
 }
