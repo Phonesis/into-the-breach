@@ -23,6 +23,7 @@ export class RTSController {
     getPendingFireSupport,
     getPendingDefensePlacement,
     getPendingLastStandDeploy,
+    getPendingSandbagPlacement,
     getIsTowerDefense,
     getDeployZoneActive,
     getShiftHeld,
@@ -30,6 +31,7 @@ export class RTSController {
     onFireSupportTarget,
     onDefensePlacement,
     onLastStandPlacement,
+    onSandbagPlacement,
     onSelectionChange,
     onHoverTarget,
     onOrder,
@@ -47,6 +49,7 @@ export class RTSController {
     this.getPendingFireSupport = getPendingFireSupport;
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
+    this.getPendingSandbagPlacement = getPendingSandbagPlacement ?? (() => null);
     this.getIsTowerDefense = getIsTowerDefense ?? (() => false);
     this.getDeployZoneActive = getDeployZoneActive ?? (() => false);
     this.getShiftHeld = getShiftHeld ?? (() => this._modifierShift);
@@ -54,6 +57,7 @@ export class RTSController {
     this.onFireSupportTarget = onFireSupportTarget;
     this.onDefensePlacement = onDefensePlacement;
     this.onLastStandPlacement = onLastStandPlacement;
+    this.onSandbagPlacement = onSandbagPlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
@@ -388,7 +392,8 @@ export class RTSController {
       !this.enabled ||
       this.getPendingFireSupport?.() ||
       this.getPendingDefensePlacement?.() ||
-      this.getPendingLastStandDeploy?.()
+      this.getPendingLastStandDeploy?.() ||
+      this.getPendingSandbagPlacement?.()
     ) {
       this.setHoveredTarget(null);
       return;
@@ -484,7 +489,8 @@ export class RTSController {
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
-    if (pendingFs || pendingDef || pendingDeploy) {
+    const pendingSandbags = this.getPendingSandbagPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
       return;
     }
 
@@ -499,6 +505,7 @@ export class RTSController {
       !this.getPendingFireSupport?.() &&
       !this.getPendingDefensePlacement?.() &&
       !this.getPendingLastStandDeploy?.() &&
+      !this.getPendingSandbagPlacement?.() &&
       !this._tabletFireMode
     ) {
       this._longPressTimer = setTimeout(() => {
@@ -519,7 +526,8 @@ export class RTSController {
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
-    if (pendingFs || pendingDef || pendingDeploy) {
+    const pendingSandbags = this.getPendingSandbagPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -564,7 +572,8 @@ export class RTSController {
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
-    if (pendingFs || pendingDef || pendingDeploy) {
+    const pendingSandbags = this.getPendingSandbagPlacement?.();
+    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -575,6 +584,9 @@ export class RTSController {
         }
         if (pendingDeploy && this.onLastStandPlacement) {
           this.onLastStandPlacement('place', ground.x, ground.z);
+        }
+        if (pendingSandbags && this.onSandbagPlacement) {
+          this.onSandbagPlacement('place', ground.x, ground.z);
         }
       }
       this.dragStart = null;

@@ -80,6 +80,9 @@ const ui = new UIManager(uiRoot, {
   onFireSupport(type) {
     game?.armFireSupport(type);
   },
+  onArmSandbags() {
+    game?.armSandbagBuild();
+  },
   onSelectUnit(unitId, additive) {
     game?.selectPlayerUnitById(unitId, additive);
   },

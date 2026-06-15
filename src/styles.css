@@ -787,6 +787,36 @@ body,
   display: none;
 }
 
+.engineer-build-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(201, 168, 74, 0.25);
+}
+
+.engineer-build-actions.hidden {
+  display: none;
+}
+
+.engineer-build-actions .btn {
+  width: 100%;
+}
+
+.engineer-build-actions .btn.btn-armed {
+  background: linear-gradient(180deg, #9a7a28 0%, #6a5018 100%);
+  border-color: #e8c860;
+}
+
+.engineer-build-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(220, 210, 190, 0.82);
+}
+
+.engineer-build-hint-error {
+  color: #ffb4a0;
+}
+
 .btn-cancel-fire {
   width: 100%;
   padding: 0.4rem 0.75rem;

@@ -54,6 +54,7 @@ import {
 import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateEngineerHealing } from './EngineerBehavior.js';
+import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import {
   preloadUnitFieldIcons,
@@ -266,6 +267,7 @@ export class Game {
     this.targetIndicators = new TargetIndicators(this.scene);
 
     this.fireSupport = new FireSupportManager(this);
+    this.engineerSandbags = new EngineerSandbagManager(this);
 
     this.controller = new RTSController({
       camera: this.camera,
@@ -285,6 +287,7 @@ export class Game {
         this.running && !this.gameOver && isLastStandDeployPhase(this)
           ? this.lastStand?.pendingType ?? null
           : null,
+      getPendingSandbagPlacement: () => this.engineerSandbags?.getPending() ?? null,
       getIsTowerDefense: () =>
         isTowerDefenseMode(this.gameMode) && this.running && !this.gameOver,
       getDeployZoneActive: () => this._isPlayerDeployZoneActive(),
@@ -293,10 +296,11 @@ export class Game {
       onFireSupportTarget: (mode, x, z) => this.handleFireSupportTarget(mode, x, z),
       onDefensePlacement: (mode, x, z) => this.handleDefensePlacement(mode, x, z),
       onLastStandPlacement: (mode, x, z) => this.handleLastStandPlacement(mode, x, z),
+      onSandbagPlacement: (mode, x, z) => this.handleSandbagPlacement(mode, x, z),
       onSelectionChange: (sel, hq = null) => {
         this.selectedHq = hq;
         if (sel.length > 0 || hq) sounds.play('select');
-        this.ui?.updateSelection(sel, this.controller.hoveredTarget, hq);
+        this.ui?.updateSelection(sel, this.controller.hoveredTarget, hq, this);
         this._syncUnitRoster();
         this._syncBattleCursor();
       },
@@ -310,12 +314,12 @@ export class Game {
         if (hoverId === this._hoverUiId) return;
         this._hoverUiId = hoverId;
         this._selectionUiKey = '';
-        this.ui?.updateSelection(sel, target, this.selectedHq);
+        this.ui?.updateSelection(sel, target, this.selectedHq, this);
       },
       onOrder: (type, selected) => {
         sounds.play('order');
         if ((type === 'attack' || type === 'fire') && selected?.length) {
-          this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq);
+          this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq, this);
         }
         if (type === 'fire') {
           this._selectionUiKey = '';
@@ -331,6 +335,10 @@ export class Game {
       if (e.button !== 0) return;
       if (this.defenses?.getPending()) {
         this.placeDefenseAtScreen(e.clientX, e.clientY);
+        return;
+      }
+      if (this.engineerSandbags?.getPending()) {
+        this.placeSandbagAtScreen(e.clientX, e.clientY);
         return;
       }
       if (isLastStandDeployPhase(this) && this.lastStand?.pendingType) {
@@ -369,6 +377,12 @@ export class Game {
       if (e.code === 'Escape' && this.lastStand?.pendingType) {
         this.lastStand.pendingType = null;
         this.ui?.updateLastStandDeploy(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+      }
+      if (e.code === 'Escape' && this.engineerSandbags?.getPending()) {
+        this.engineerSandbags.cancel();
+        this.ui?.updateEngineerBuild(this);
         this._syncPlacementCapture();
         this._syncBattleCursor();
       }
@@ -520,6 +534,7 @@ export class Game {
     this.battleStats.reset();
     this._battleStatsFinalized = false;
     this.fireSupport.reset();
+    this.engineerSandbags.reset();
 
     setupSceneEnvironment(this.scene, this.mapDef);
     this.lights = setupLighting(this.scene);
@@ -840,7 +855,7 @@ export class Game {
     if (key === this._selectionUiKey && this._selectionUiAccum < 0.2) return;
     this._selectionUiKey = key;
     this._selectionUiAccum = 0;
-    this.ui.updateSelection(selected, hover, this.selectedHq);
+    this.ui.updateSelection(selected, hover, this.selectedHq, this);
   }
 
   _getDeployZoneTeamsAt(time = this.matchTime) {
@@ -897,8 +912,10 @@ export class Game {
     const selected = this._playerAlive.filter((u) => u.selected);
     const defensePending = !!this.defenses?.getPending();
     const deployPending = !!(this.lastStand?.pendingType && isLastStandDeployPhase(this));
+    const sandbagPending = !!this.engineerSandbags?.getPending();
     this.canvas.style.cursor = resolveBattleCursor({
-      fireSupportPending: !!this.fireSupport?.pending || defensePending || deployPending,
+      fireSupportPending:
+        !!this.fireSupport?.pending || defensePending || deployPending || sandbagPending,
       shiftHeld,
       hasManualFireSelection: selected.some(canManualFireOrder),
     });
@@ -1047,7 +1064,7 @@ export class Game {
     if (target && this.controller.issueAttackOn(target)) {
       this.controller.clearTabletTargetConfirm();
       const sel = this.units.filter((u) => u.team === PLAYER_TEAM && u.selected && !u.dead);
-      this.ui?.updateSelection(sel, target, this.selectedHq);
+      this.ui?.updateSelection(sel, target, this.selectedHq, this);
     }
   }
 
@@ -1127,7 +1144,7 @@ export class Game {
     sounds.play('order');
     const sel = this._playerAlive.filter((u) => u.selected);
     this._selectionUiKey = '';
-    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq);
+    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
     this.ui?.updateFireMissionControls(this._countActiveFireMissions());
     this.targetIndicators?.update(sel, this._playerAlive);
     return true;
@@ -1272,11 +1289,46 @@ export class Game {
   _syncPlacementCapture() {
     const active =
       (this.running && !this.gameOver && !!this.defenses?.getPending()) ||
+      (this.running && !this.gameOver && !!this.engineerSandbags?.getPending()) ||
       (this.running &&
         !this.gameOver &&
         isLastStandDeployPhase(this) &&
         !!this.lastStand?.pendingType);
     this.ui?.setPlacementCapture(active);
+  }
+
+  armSandbagBuild() {
+    if (!this.running || this.gameOver || !this.engineerSandbags?.canUse()) return;
+    if (this._isPlayerDeployZoneActive()) return;
+    const hasEngineer = this._playerAlive.some(
+      (u) => u.selected && u.def?.type === 'engineer' && !u.dead && !u._sandbagSite
+    );
+    if (!hasEngineer) return;
+    sounds.unlock();
+    if (!this.engineerSandbags.arm()) return;
+    this.ui?.updateEngineerBuild(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  handleSandbagPlacement(mode, x, z) {
+    if (!this.running || this.gameOver || !this.engineerSandbags?.getPending()) return;
+    if (mode === 'preview') return;
+    const placed = this.engineerSandbags.tryPlace(x, z, PLAYER_TEAM);
+    if (placed) sounds.play('select');
+    else {
+      const reason = this.engineerSandbags.getPlacementRejectReason(x, z, PLAYER_TEAM);
+      if (reason) this.ui?.showEngineerBuildHint(reason);
+    }
+    this.ui?.updateEngineerBuild(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  placeSandbagAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !this.engineerSandbags?.getPending()) return;
+    const ground = this._screenToGround(clientX, clientY);
+    if (ground) this.handleSandbagPlacement('place', ground.x, ground.z);
   }
 
   handleDefensePlacement(mode, x, z) {
@@ -1879,6 +1931,10 @@ export class Game {
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
+        this.engineerSandbags?.update(dt);
+        if (this.engineerSandbags?.sites?.length) {
+          this.ui?.updateEngineerBuild(this);
+        }
         syncHealMarkers(this._aliveUnits);
         syncDamageSmoke(this._aliveUnits);
         updateDamageSmoke(this._aliveUnits, dt);

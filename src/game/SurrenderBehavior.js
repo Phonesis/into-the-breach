@@ -212,6 +212,7 @@ function beginCaptureExit(unit, captor) {
     timer: CAPTURE_EXIT_SEC,
     dirX: dx / len,
     dirZ: dz / len,
+    captorTeam: captor.team,
   };
   unit.clearAttackOrder();
   unit.moveTarget = null;
@@ -251,6 +252,8 @@ export function finalizeCapture(game, unit) {
   if (!unit || unit._captureFinalized) return;
   unit._captureFinalized = true;
 
+  const captorTeam = unit._captureExit?.captorTeam;
+  if (captorTeam) game.battleStats?.recordCapture(captorTeam, unit);
   game.battleStats?.recordUnit(unit);
   clearSurrender(unit);
   removeFieldIcon(unit);

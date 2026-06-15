@@ -1,6 +1,5 @@
-import * as THREE from 'three';
 import { sampleTerrainHeight } from './Terrain.js';
-import { createCamoMaterial, getInfantryUniformTexture, getVehicleCamoTexture } from '../units/UnitTextures.js';
+import { createSandbagEmplacementGroup } from './SandbagEmplacement.js';
 
 function factionForPosition(x, z, mapDef, factions) {
   if (!factions?.player) return null;
@@ -13,49 +12,18 @@ function factionForPosition(x, z, mapDef, factions) {
   return along >= 0 ? factions.player : factions.enemy;
 }
 
-function buildBunkerMaterials(factionId) {
-  const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
-  const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
-  const fabricCamo = infantryCamo ?? vehicleCamo;
-  return {
-    bag: createCamoMaterial(0x8a7a5a, fabricCamo, [1.8, 1.4], { rough: 0.92 }),
-    bagAlt: createCamoMaterial(0x6a5a48, fabricCamo, [1.6, 1.3], { rough: 0.95 }),
-    pit: createCamoMaterial(0x3a3428, fabricCamo, [1.4, 1.1], { rough: 1 }),
-  };
-}
-
 /** Place sandbag fighting positions and return cover zone data. */
 export function buildCoverSites(mapDef, scene, scenery = null, factions = null, options = {}) {
   const zones = [];
 
   const addBunker = (x, z, type = 'medium') => {
     const y = sampleTerrainHeight(x, z, mapDef);
-    const g = new THREE.Group();
-    g.position.set(x, y, z);
     const sideFaction = factionForPosition(x, z, mapDef, factions);
-    const MAT = buildBunkerMaterials(sideFaction);
-
-    for (const [ox, oz, rot] of [
-      [0, 0, 0],
-      [1.4, 0.5, 0.4],
-      [-1.3, 0.4, -0.3],
-      [0.5, -1.2, 1.2],
-    ]) {
-      const bag = new THREE.Mesh(
-        new THREE.BoxGeometry(1.6, 0.55, 0.85),
-        Math.random() > 0.5 ? MAT.bag : MAT.bagAlt
-      );
-      bag.position.set(ox, 0.28, oz);
-      bag.rotation.y = rot;
-      bag.castShadow = true;
-      bag.receiveShadow = true;
-      g.add(bag);
-    }
-
-    const pit = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.15, 2.4), MAT.pit);
-    pit.position.y = 0.05;
-    pit.receiveShadow = true;
-    g.add(pit);
+    const g = createSandbagEmplacementGroup({
+      factionId: sideFaction?.id ?? null,
+      seed: x * 0.13 + z * 0.19,
+    });
+    g.position.set(x, y, z);
 
     if (scenery) {
       scenery.register(g, { x, z, kind: 'bunker', coverType: type });

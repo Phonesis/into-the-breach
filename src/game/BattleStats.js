@@ -47,6 +47,7 @@ export class BattleStats {
 
   reset() {
     this.losses = { player: {}, enemy: {} };
+    this.prisonersTaken = { player: {}, enemy: {} };
     this.defenseLosses = { player: {} };
     this.hqLost = { player: false, enemy: false };
     this._hqRecorded = {};
@@ -57,6 +58,15 @@ export class BattleStats {
     unit._lossRecorded = true;
     const type = unit.def?.type ?? 'infantry';
     const bucket = this.losses[unit.team];
+    bucket[type] = (bucket[type] ?? 0) + 1;
+  }
+
+  /** Prisoners marched off the map by this team (captor side). */
+  recordCapture(captorTeam, unit) {
+    if (captorTeam !== 'player' && captorTeam !== 'enemy') return;
+    if (!unit?.def) return;
+    const type = unit.def.type ?? 'infantry';
+    const bucket = this.prisonersTaken[captorTeam];
     bucket[type] = (bucket[type] ?? 0) + 1;
   }
 
@@ -88,6 +98,28 @@ export class BattleStats {
 
   totalDefenseLosses(team = 'player') {
     return Object.values(this.defenseLosses[team]).reduce((n, c) => n + c, 0);
+  }
+
+  totalCaptures(team) {
+    return Object.values(this.prisonersTaken[team]).reduce((n, c) => n + c, 0);
+  }
+
+  formatTeamCaptures(team) {
+    const bucket = this.prisonersTaken[team];
+    const lines = [];
+
+    for (const type of UNIT_TYPE_ORDER) {
+      const n = bucket[type];
+      if (n) lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+    }
+
+    for (const [type, n] of Object.entries(bucket)) {
+      if (!UNIT_TYPE_ORDER.includes(type)) {
+        lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+      }
+    }
+
+    return lines;
   }
 
   formatTeamLosses(team) {
@@ -133,6 +165,10 @@ export class BattleStats {
     const playerTotal = this.totalLosses('player');
     const enemyTotal = this.totalLosses('enemy');
     const playerDefenseTotal = this.totalDefenseLosses('player');
+    const playerCaptureLines = this.formatTeamCaptures('player');
+    const enemyCaptureLines = this.formatTeamCaptures('enemy');
+    const playerCaptureTotal = this.totalCaptures('player');
+    const enemyCaptureTotal = this.totalCaptures('enemy');
 
     const playerMateriel = computeTeamMaterielCost({
       unitLines: playerLines,
@@ -154,6 +190,10 @@ export class BattleStats {
       enemyTotal,
       playerDefenseLines,
       playerDefenseTotal,
+      playerCaptureLines,
+      enemyCaptureLines,
+      playerCaptureTotal,
+      enemyCaptureTotal,
       playerHqLost: this.hqLost.player,
       enemyHqLost: this.hqLost.enemy,
       playerMateriel,

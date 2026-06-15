@@ -346,6 +346,14 @@ export class UIManager {
                 Cancel fire missions
               </button>
             </div>
+            <div class="engineer-build-actions hidden" id="engineer-build-actions">
+              <button type="button" class="btn btn-primary interactive" id="btn-build-sandbags">
+                Build sandbags
+              </button>
+              <p class="engineer-build-hint" id="engineer-build-hint">
+                Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.
+              </p>
+            </div>
           </div>
           <div class="production-panel interactive hidden" id="production-panel">
             <h3>Reinforcements</h3>
@@ -643,6 +651,10 @@ export class UIManager {
     this.root.querySelector('#btn-engage-target').onclick = () => {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
+
+    this.root.querySelector('#btn-build-sandbags')?.addEventListener('click', () => {
+      this.callbacks.onArmSandbags?.();
+    });
 
     const tabletTargetBtn = this.root.querySelector('#btn-tablet-target');
     const tabletFireBtn = this.root.querySelector('#btn-tablet-fire');
@@ -1026,6 +1038,60 @@ export class UIManager {
     card?.classList.toggle('td-wave-countdown-urgent', s <= 5);
     if (skipBtn) {
       skipBtn.disabled = !this.callbacks.onSkipTowerDefenseWave;
+    }
+  }
+
+  showEngineerBuildHint(message) {
+    const hint = this.root.querySelector('#engineer-build-hint');
+    if (!hint || !message) return;
+    hint.textContent = message;
+    hint.classList.add('engineer-build-hint-error');
+    clearTimeout(this._engineerBuildHintTimer);
+    this._engineerBuildHintTimer = setTimeout(() => {
+      hint.classList.remove('engineer-build-hint-error');
+      const actions = this.root.querySelector('#engineer-build-actions');
+      if (actions && !actions.classList.contains('hidden')) {
+        hint.textContent =
+          'Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.';
+      }
+    }, 3200);
+  }
+
+  updateEngineerBuild(game) {
+    const panel = this.root.querySelector('#engineer-build-actions');
+    const btn = this.root.querySelector('#btn-build-sandbags');
+    const hint = this.root.querySelector('#engineer-build-hint');
+    if (!panel || !btn) return;
+
+    const canUse = game?.engineerSandbags?.canUse?.() ?? false;
+    const selectedEngineers =
+      game?.units?.filter(
+        (u) =>
+          u.selected &&
+          u.team === 'player' &&
+          !u.dead &&
+          !u.surrendered &&
+          u.def?.type === 'engineer'
+      ) ?? [];
+    const freeEngineers = selectedEngineers.filter((u) => !u._sandbagSite);
+    const show = canUse && selectedEngineers.length > 0;
+
+    panel.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    const pending = !!game.engineerSandbags.getPending();
+    btn.classList.toggle('btn-armed', pending);
+    btn.textContent = pending ? 'Placing sandbags…' : 'Build sandbags';
+
+    if (hint && !hint.classList.contains('engineer-build-hint-error')) {
+      if (pending) {
+        hint.textContent = 'Click the map within ~24 m of your engineer. Esc to cancel.';
+      } else if (freeEngineers.length === 0) {
+        hint.textContent = 'Selected engineer is already building sandbags.';
+      } else {
+        hint.textContent =
+          'Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.';
+      }
     }
   }
 
@@ -1505,7 +1571,7 @@ export class UIManager {
     btn.textContent = n === 1 ? 'Cancel fire mission' : `Cancel fire missions (${n})`;
   }
 
-  updateSelection(units, hoverTarget = null, hq = null) {
+  updateSelection(units, hoverTarget = null, hq = null, game = null) {
     const body = this.root.querySelector('#selection-body');
     const offer = this.root.querySelector('#target-offer');
     const offerLabel = this.root.querySelector('#target-offer-label');
@@ -1538,12 +1604,14 @@ export class UIManager {
         ${hpBarMarkup(hq.hp, hq.maxHp)}
         <p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>
       `;
+      this.updateEngineerBuild(game);
       return;
     }
 
     if (units.length === 0) {
       body.innerHTML = `<h3>No selection</h3><p>Click or drag to select units. Click your HQ for status.</p>`;
       this._renderCoverBanner([]);
+      this.updateEngineerBuild(game);
       return;
     }
 
@@ -1565,8 +1633,11 @@ export class UIManager {
       if (cover.inCover) {
         coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
       } else if (u.def?.type === 'engineer') {
-        coverBlock =
-          '<p class="unit-support-status">Support — repairs vehicles within ~16 m; nearby armor retreats less often.</p>';
+        const build = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
+        const buildLine = build
+          ? `<p class="unit-support-status"><strong>Building sandbags</strong> — ${build.pct}%</p>`
+          : '';
+        coverBlock = `${buildLine}<p class="unit-support-status">Support — repairs vehicles within ~16 m; can erect <strong>heavy-cover</strong> sandbag positions (Build sandbags).</p>`;
       } else if (u.def?.type === 'medic') {
         coverBlock =
           '<p class="unit-support-status">Support — heals infantry within ~14 m; nearby troops retreat less often.</p>';
@@ -1588,8 +1659,11 @@ export class UIManager {
         ${surrenderBlock}
         ${coverBlock}
       `;
+      this.updateEngineerBuild(game);
       return;
     }
+
+    this.updateEngineerBuild(game);
 
     const types = {};
     for (const u of units) types[u.type] = (types[u.type] || 0) + 1;
@@ -1657,7 +1731,18 @@ export class UIManager {
 
     const col = (
       side,
-      { unitLines, unitTotal, defenseLines, defenseTotal, hqLost, hqLabel, materielLabel, showDefenses = false }
+      {
+        unitLines,
+        unitTotal,
+        defenseLines,
+        defenseTotal,
+        captureLines,
+        captureTotal,
+        hqLost,
+        hqLabel,
+        materielLabel,
+        showDefenses = false,
+      }
     ) => {
       const unitRows = listRows(unitLines, 'No unit losses');
       const hqRow = hqLost
@@ -1670,12 +1755,21 @@ export class UIManager {
           <ul class="end-stats-list">${listRows(defenseLines, 'No emplacement losses')}</ul>
         `
         : '';
+      const captureBlock =
+        captureTotal > 0
+          ? `
+          <p class="end-stats-subheading">Prisoners taken</p>
+          <p class="end-stats-total">${captureTotal} prisoner${captureTotal === 1 ? '' : 's'} captured</p>
+          <ul class="end-stats-list">${listRows(captureLines, 'No prisoners taken')}</ul>
+        `
+          : '';
       return `
         <div class="end-stats-col">
           <h3>${side}</h3>
           <p class="end-stats-subheading">Units lost</p>
           <p class="end-stats-total">${unitTotal} unit${unitTotal === 1 ? '' : 's'} lost</p>
           <ul class="end-stats-list">${unitRows}${hqRow}</ul>
+          ${captureBlock}
           ${defenseBlock}
           <p class="end-stats-materiel">
             <span class="end-stats-materiel-label">Est. materiel cost</span>
@@ -1696,6 +1790,8 @@ export class UIManager {
           unitTotal: report.playerTotal,
           defenseLines: report.playerDefenseLines ?? [],
           defenseTotal: report.playerDefenseTotal ?? 0,
+          captureLines: report.playerCaptureLines ?? [],
+          captureTotal: report.playerCaptureTotal ?? 0,
           hqLost: report.playerHqLost,
           hqLabel: 'Headquarters',
           materielLabel: report.playerMaterielLabel,
@@ -1706,6 +1802,8 @@ export class UIManager {
           unitTotal: report.enemyTotal,
           defenseLines: [],
           defenseTotal: 0,
+          captureLines: report.enemyCaptureLines ?? [],
+          captureTotal: report.enemyCaptureTotal ?? 0,
           hqLost: report.enemyHqLost,
           hqLabel: report.tutorial ? 'Practice HQ' : 'Headquarters',
           materielLabel: report.enemyMaterielLabel,
