@@ -26,6 +26,8 @@ const CAPTURE_EXIT_SPEED = 13;
 const UNDER_FIRE_DECAY = 4.5;
 
 const _surrenderTex = { tex: null };
+const _statusTex = new Map();
+const LIBERATED_BANNER_SEC = 2.6;
 
 function getSurrenderTexture() {
   if (_surrenderTex.tex) return _surrenderTex.tex;
@@ -87,6 +89,58 @@ export function removeSurrenderMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   marker.material?.dispose();
   unit.surrenderMarker = null;
+}
+
+function getStatusTexture(label) {
+  if (_statusTex.has(label)) return _statusTex.get(label);
+  const canvas = document.createElement('canvas');
+  canvas.width = 140;
+  canvas.height = 52;
+  const ctx = canvas.getContext('2d');
+  const captured = label === 'CAPTURED';
+  ctx.fillStyle = captured ? 'rgba(48, 14, 14, 0.94)' : 'rgba(12, 42, 28, 0.94)';
+  ctx.beginPath();
+  ctx.roundRect(6, 8, 128, 36, 8);
+  ctx.fill();
+  ctx.strokeStyle = captured ? '#f87171' : '#6ee7a8';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.fillStyle = captured ? '#ffe4e4' : '#e8fff0';
+  ctx.font = 'bold 17px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 70, 26);
+  const tex = new THREE.CanvasTexture(canvas);
+  _statusTex.set(label, tex);
+  return tex;
+}
+
+export function attachStatusBanner(unit, label) {
+  if (!unit?.mesh) return;
+  removeStatusBanner(unit);
+  const mat = new THREE.SpriteMaterial({
+    map: getStatusTexture(label),
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.name = 'statusBanner';
+  sprite.scale.set(label === 'LIBERATED' ? 4.6 : 4.9, 2.15, 1);
+  sprite.position.y = markerHeight(unit) + 0.35;
+  sprite.renderOrder = 28;
+  unit.mesh.add(sprite);
+  unit.statusBanner = sprite;
+  unit.statusBannerLabel = label;
+}
+
+export function removeStatusBanner(unit) {
+  const marker = unit.statusBanner;
+  if (!marker) return;
+  if (marker.parent) marker.parent.remove(marker);
+  marker.material?.dispose();
+  unit.statusBanner = null;
+  unit.statusBannerLabel = null;
 }
 
 export function isSurrenderEligible(unit) {
@@ -176,6 +230,8 @@ export function liberateUnit(unit) {
   clearSurrender(unit);
   unit._underFireTimer = 0;
   unit._liberationGrace = 3;
+  attachStatusBanner(unit, 'LIBERATED');
+  unit._liberatedBannerUntil = performance.now() * 0.001 + LIBERATED_BANNER_SEC;
 }
 
 export function maybeTriggerSurrender(unit, units, options = {}, attacker = null) {
@@ -219,6 +275,7 @@ function beginCaptureExit(unit, captor) {
   unit._movePath = null;
   unit._userMoveOrder = false;
   if (unit.selected) unit.setSelected(false);
+  attachStatusBanner(unit, 'CAPTURED');
 }
 
 function restoreMeshOpacity(unit) {
@@ -245,6 +302,12 @@ function updateCaptureExit(unit, dt) {
     child.material.opacity = opacity;
   });
 
+  if (unit.statusBanner) {
+    unit.statusBanner.position.y =
+      markerHeight(unit) + 0.35 + Math.sin(performance.now() * 0.005) * 0.1;
+    unit.statusBanner.material.opacity = Math.max(0.35, opacity);
+  }
+
   return ex.timer <= 0;
 }
 
@@ -256,6 +319,7 @@ export function finalizeCapture(game, unit) {
   if (captorTeam) game.battleStats?.recordCapture(captorTeam, unit);
   game.battleStats?.recordUnit(unit);
   clearSurrender(unit);
+  removeStatusBanner(unit);
   removeFieldIcon(unit);
   removeRankMarker(unit);
   removeHealMarker(unit);
@@ -295,6 +359,17 @@ export function updateSurrenderState(game, units, dt) {
 
     if (unit._underFireTimer > 0) unit._underFireTimer -= dt;
     if (unit._liberationGrace > 0) unit._liberationGrace -= dt;
+
+    if (unit._liberatedBannerUntil) {
+      const now = performance.now() * 0.001;
+      if (now >= unit._liberatedBannerUntil) {
+        removeStatusBanner(unit);
+        unit._liberatedBannerUntil = 0;
+      } else if (unit.statusBanner) {
+        unit.statusBanner.position.y =
+          markerHeight(unit) + 0.35 + Math.sin(performance.now() * 0.005) * 0.1;
+      }
+    }
 
     if (unit._captureExit) {
       if (updateCaptureExit(unit, dt)) toFinalize.push(unit);

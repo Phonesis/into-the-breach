@@ -50,12 +50,13 @@ export function estimateDefenseLossCost(typeId) {
   return DEFENSE_MATERIEL_COST_USD_1944[typeId] ?? 8_000;
 }
 
-/** @param {{ type: string, count: number }[]} unitLines */
+/** @param {{ type: string, count: number, unitCount?: number }[]} unitLines */
 /** @param {{ type: string, count: number }[]} [defenseLines] */
 export function computeTeamMaterielCost({ unitLines, defenseLines = [], hqLost = false }) {
   let total = 0;
   for (const line of unitLines) {
-    total += estimateUnitLossCost(line.type) * line.count;
+    const units = line.unitCount ?? line.count;
+    total += estimateUnitLossCost(line.type) * units;
   }
   for (const line of defenseLines) {
     total += estimateDefenseLossCost(line.type) * line.count;

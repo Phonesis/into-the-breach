@@ -156,6 +156,7 @@ export class HQ {
 
   takeDamage(amount) {
     if (this.dead) return;
+    this._lastDamageAtPerf = performance.now();
     this.hp -= amount;
     if (this.hp <= 0) {
       this.hp = 0;

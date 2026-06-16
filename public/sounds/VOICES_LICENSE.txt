@@ -2,8 +2,11 @@ Infantry death sounds
 ====================
 
 Slots 1,2,4,6,8 — spoken lines via Microsoft Edge neural TTS (edge-tts).
+  default (USA/UK) — English voices
+  germany — de-DE-ConradNeural / de-DE-KillianNeural
+  russia — ru-RU-DmitryNeural / ru-RU-SvetlanaNeural
 
-Slots 3,5,7 — short clips from Freesound.org preview audio:
+Slots 3,5,7 — short clips from Freesound.org preview audio (shared, language-neutral):
   tonsil5 — https://freesound.org/people/tonsil5/sounds/416838/
   martian — https://freesound.org/people/martian/sounds/530471/
 

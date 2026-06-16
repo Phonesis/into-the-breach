@@ -1,5 +1,6 @@
 import { UNIT_TYPE_ORDER } from '../data/gameModes.js';
 import { DEFENSE_TYPES } from '../data/towerDefense.js';
+import { personnelPerUnit } from '../data/squadSizes.js';
 import {
   computeTeamMaterielCost,
   formatUsd1944,
@@ -7,12 +8,12 @@ import {
 } from '../data/battleEconomics.js';
 
 export const UNIT_LOSS_LABELS = {
-  infantry: 'Infantry',
+  infantry: 'Riflemen',
   medic: 'Medics',
   engineer: 'Engineers',
-  machineGun: 'MG teams',
+  machineGun: 'MG gunners',
   sniper: 'Snipers',
-  mortar: 'Mortars',
+  mortar: 'Mortar crew',
   antiTankGun: 'AT guns',
   armoredCar: 'Armored cars',
   tank: 'Tanks',
@@ -95,7 +96,12 @@ export class BattleStats {
   }
 
   totalLosses(team) {
-    return Object.values(this.losses[team]).reduce((n, c) => n + c, 0);
+    const bucket = this.losses[team];
+    let total = 0;
+    for (const [type, unitCount] of Object.entries(bucket)) {
+      total += unitCount * personnelPerUnit(type);
+    }
+    return total;
   }
 
   totalDefenseLosses(team = 'player') {
@@ -103,7 +109,12 @@ export class BattleStats {
   }
 
   totalCaptures(team) {
-    return Object.values(this.prisonersTaken[team]).reduce((n, c) => n + c, 0);
+    const bucket = this.prisonersTaken[team];
+    let total = 0;
+    for (const [type, unitCount] of Object.entries(bucket)) {
+      total += unitCount * personnelPerUnit(type);
+    }
+    return total;
   }
 
   formatTeamCaptures(team) {
@@ -111,13 +122,15 @@ export class BattleStats {
     const lines = [];
 
     for (const type of UNIT_TYPE_ORDER) {
-      const n = bucket[type];
-      if (n) lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+      const unitCount = bucket[type];
+      if (unitCount) {
+        lines.push(this._formatLossLine(type, unitCount));
+      }
     }
 
-    for (const [type, n] of Object.entries(bucket)) {
+    for (const [type, unitCount] of Object.entries(bucket)) {
       if (!UNIT_TYPE_ORDER.includes(type)) {
-        lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+        lines.push(this._formatLossLine(type, unitCount));
       }
     }
 
@@ -129,17 +142,26 @@ export class BattleStats {
     const lines = [];
 
     for (const type of UNIT_TYPE_ORDER) {
-      const n = bucket[type];
-      if (n) lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+      const unitCount = bucket[type];
+      if (unitCount) lines.push(this._formatLossLine(type, unitCount));
     }
 
-    for (const [type, n] of Object.entries(bucket)) {
+    for (const [type, unitCount] of Object.entries(bucket)) {
       if (!UNIT_TYPE_ORDER.includes(type)) {
-        lines.push({ type, label: UNIT_LOSS_LABELS[type] ?? type, count: n });
+        lines.push(this._formatLossLine(type, unitCount));
       }
     }
 
     return lines;
+  }
+
+  _formatLossLine(type, unitCount) {
+    return {
+      type,
+      label: UNIT_LOSS_LABELS[type] ?? type,
+      count: unitCount * personnelPerUnit(type),
+      unitCount,
+    };
   }
 
   formatDefenseLosses(team = 'player') {

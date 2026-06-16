@@ -17,6 +17,7 @@ import {
   createCamoMaterial,
 } from './UnitTextures.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { SQUAD_SIZES } from '../data/squadSizes.js';
 
 export { mat };
 
@@ -222,15 +223,6 @@ function darkenCorpseMesh(child, factor = 0.34) {
     roughness: 0.98,
   });
 }
-
-const SQUAD_SIZES = {
-  infantry: 5,
-  machineGun: 2,
-  medic: 2,
-  engineer: 2,
-  mortar: 2,
-  sniper: 1,
-};
 
 function createBloodPoolMesh(radius, { color = 0x5c1212, opacity = 0.78, lobes = 5 } = {}) {
   const shape = new THREE.Shape();

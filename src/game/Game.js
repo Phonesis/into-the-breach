@@ -73,6 +73,7 @@ import { syncHealMarkers } from '../visual/HealMarkers.js';
 import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
 import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
 import { updateSurrenderState, syncSurrenderMarkers } from './SurrenderBehavior.js';
+import { updatePlayerHqThreat } from './HqThreatBehavior.js';
 import { syncRankMarkers, updateRankMarkers } from './EliteBehavior.js';
 import {
   createAssaultState,
@@ -215,6 +216,8 @@ export class Game {
     this.showUnitFieldIcons = true;
     this.showFrontline = true;
     this.matchTime = 0;
+    this._hqThreat = null;
+    this._hqAlertPlayed = false;
     this.mapDef = null;
     this.units = [];
     this.hqs = [];
@@ -414,7 +417,9 @@ export class Game {
         (e.code === 'ArrowUp' ||
           e.code === 'ArrowDown' ||
           e.code === 'ArrowLeft' ||
-          e.code === 'ArrowRight')
+          e.code === 'ArrowRight' ||
+          ((e.code === 'KeyA' || e.code === 'KeyD') &&
+            (this.keys['ShiftLeft'] || this.keys['ShiftRight'])))
       ) {
         e.preventDefault();
       }
@@ -851,6 +856,8 @@ export class Game {
     this._rosterUiAccum = 0;
     this._emptyFieldHandled = false;
     this.matchTime = 0;
+    this._hqThreat = null;
+    this._hqAlertPlayed = false;
     this.controller.enable();
     this._syncBattleCursor();
     this.ui.hideEndOverlay();
@@ -1622,12 +1629,19 @@ export class Game {
     if (this.keys['ArrowLeft'] || pad?.rotateLeft) this.cameraYaw += rotateSpeed;
     if (this.keys['ArrowRight'] || pad?.rotateRight) this.cameraYaw -= rotateSpeed;
 
+    const shiftHeld = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+
     let panForward = 0;
     let panRight = 0;
     if (this.keys['KeyW'] || pad?.panForward) panForward += 1;
     if (this.keys['KeyS'] || pad?.panBack) panForward -= 1;
-    if (this.keys['KeyA'] || pad?.panLeft) panRight -= 1;
-    if (this.keys['KeyD'] || pad?.panRight) panRight += 1;
+    if (shiftHeld) {
+      if (this.keys['KeyA']) this.cameraYaw += rotateSpeed;
+      if (this.keys['KeyD']) this.cameraYaw -= rotateSpeed;
+    } else {
+      if (this.keys['KeyA'] || pad?.panLeft) panRight -= 1;
+      if (this.keys['KeyD'] || pad?.panRight) panRight += 1;
+    }
 
     const viewForward = new THREE.Vector3();
     this.camera.getWorldDirection(viewForward);
@@ -1692,6 +1706,7 @@ export class Game {
     }
     if (this.assault) this.ui.updateAssaultHUD(this.assault);
     this.ui.updateFireMissionControls(this._countActiveFireMissions());
+    this.ui.updateHqThreat(this._hqThreat);
   }
 
   checkVictory() {
@@ -1957,7 +1972,7 @@ export class Game {
         volume: 0.82,
       });
       if (killed && target?.def && isInfantryUnitType(target.def.type)) {
-        sounds.playInfantryDeath({ x: to.x, z: to.z });
+        sounds.playInfantryDeath({ x: to.x, z: to.z }, target.faction?.id);
       } else if (killed) {
         sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 320);
       }
@@ -1994,7 +2009,7 @@ export class Game {
       sounds.playImpact('tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
-        sounds.playInfantryDeath({ x: to.x, z: to.z });
+        sounds.playInfantryDeath({ x: to.x, z: to.z }, target.faction?.id);
       } else {
         sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 350);
       }
@@ -2038,6 +2053,7 @@ export class Game {
         if (targetIsHQ || targetIsScenery) sounds.play('explosion');
       }
     }
+
   }
 
   animate() {
@@ -2149,6 +2165,16 @@ export class Game {
         this._maybeUpdateSelectionPanel(playerSelected, dt);
         this._combatAccum += dt;
         const combatStep = this._aliveUnits.length > 55 ? 0.14 : 0.09;
+        const hqThreat = updatePlayerHqThreat(this, dt);
+        if (hqThreat?.level === 'siege' || hqThreat?.level === 'critical') {
+          if (!this._hqAlertPlayed) {
+            this._hqAlertPlayed = true;
+            sounds.play('hq_alert');
+          }
+        } else if (hqThreat?.level === 'none') {
+          this._hqAlertPlayed = false;
+        }
+
         if (this._aliveUnits.length > 0 && this._combatAccum >= combatStep) {
           const cdt = this._combatAccum;
           this._combatAccum = 0;

@@ -29,7 +29,18 @@ const SAMPLE_URLS = {
 };
 
 const INFANTRY_DEATH_COUNT = 8;
+const INFANTRY_DEATH_FACTIONS = {
+  default: { prefix: 'infantry-death', factions: new Set(['usa', 'uk']) },
+  germany: { prefix: 'infantry-death-germany', factions: new Set(['germany']) },
+  russia: { prefix: 'infantry-death-russia', factions: new Set(['russia']) },
+};
 const INFANTRY_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer', 'mortar']);
+
+function infantryDeathVoiceKey(factionId) {
+  if (factionId === 'germany') return 'germany';
+  if (factionId === 'russia') return 'russia';
+  return 'default';
+}
 
 /** Per-type gain on top of distance falloff (explosion buffer). */
 const EXPLOSION_IMPACT_GAIN = {
@@ -59,7 +70,8 @@ export class SoundManager {
     this.menuMusic = null;
     this.menuMusicVisible = false;
     this.inBattle = false;
-    this.infantryDeathBuffers = [];
+    /** @type {Record<string, AudioBuffer[]>} */
+    this.infantryDeathBuffers = { default: [], germany: [], russia: [] };
   }
 
   unlock() {
@@ -144,21 +156,23 @@ export class SoundManager {
     );
 
     const deathLoads = [];
-    for (let i = 1; i <= INFANTRY_DEATH_COUNT; i++) {
-      const num = String(i).padStart(2, '0');
-      deathLoads.push(
-        (async () => {
-          try {
-            const res = await fetch(publicUrl(`sounds/infantry-death-${num}.wav`));
-            if (!res.ok) return;
-            const ab = await res.arrayBuffer();
-            const buf = await this.ctx.decodeAudioData(ab);
-            this.infantryDeathBuffers.push(buf);
-          } catch {
-            /* missing */
-          }
-        })()
-      );
+    for (const [voiceKey, { prefix }] of Object.entries(INFANTRY_DEATH_FACTIONS)) {
+      for (let i = 1; i <= INFANTRY_DEATH_COUNT; i++) {
+        const num = String(i).padStart(2, '0');
+        deathLoads.push(
+          (async () => {
+            try {
+              const res = await fetch(publicUrl(`sounds/${prefix}-${num}.wav`));
+              if (!res.ok) return;
+              const ab = await res.arrayBuffer();
+              const buf = await this.ctx.decodeAudioData(ab);
+              this.infantryDeathBuffers[voiceKey].push(buf);
+            } catch {
+              /* missing */
+            }
+          })()
+        );
+      }
     }
     await Promise.all(deathLoads);
   }
@@ -242,13 +256,15 @@ export class SoundManager {
     this._playBuffer(buf, { pan, vol, rate, wet });
   }
 
-  /** Infantry / MG / sniper casualty — random field yell. */
-  playInfantryDeath(worldPos = null) {
+  /** Infantry / MG / sniper casualty — random field yell in the unit's language. */
+  playInfantryDeath(worldPos = null, factionId = null) {
     if (!this.unlocked || !this.ctx || this.muted) return;
     if (this.ctx.state === 'suspended') this.ctx.resume();
 
-    const bufs = this.infantryDeathBuffers;
-    if (!bufs.length) return;
+    const voiceKey = infantryDeathVoiceKey(factionId);
+    let bufs = this.infantryDeathBuffers[voiceKey];
+    if (!bufs?.length) bufs = this.infantryDeathBuffers.default;
+    if (!bufs?.length) return;
 
     const now = performance.now();
     if (now - (this._lastByType._infDeath ?? 0) < 140) return;
@@ -330,6 +346,11 @@ export class SoundManager {
         break;
       case 'defeat':
         [392, 349, 294, 262].forEach((f, i) => this._beep(f, 0.11, 0.07, i * 0.11));
+        break;
+      case 'hq_alert':
+        this._beep(880, 0.09, 0.1);
+        this._beep(660, 0.11, 0.09, 0.1);
+        this._beep(880, 0.12, 0.08, 0.22);
         break;
       default:
         break;

@@ -32,16 +32,41 @@ const SCREAM_SOURCES = [
   },
 ];
 
-/** Shouted lines — Microsoft Edge neural voices. */
-const SHOUT_LINES = [
-  { slot: 1, voice: 'en-US-GuyNeural', text: 'Medic!', rate: '+28%', pitch: '-18Hz' },
-  { slot: 2, voice: 'en-US-RogerNeural', text: 'Man down!', rate: '+22%', pitch: '-12Hz' },
-  { slot: 4, voice: 'en-US-ChristopherNeural', text: 'Fall back!', rate: '+26%', pitch: '-10Hz' },
-  { slot: 6, voice: 'en-GB-RyanNeural', text: "I'm hit!", rate: '+24%', pitch: '-14Hz' },
-  { slot: 8, voice: 'en-US-GuyNeural', text: 'Help!', rate: '+30%', pitch: '-16Hz' },
-];
-
 const GRUNT_SLOTS = [3, 5, 7];
+
+/** Spoken slots — faction-specific neural TTS lines. */
+const FACTION_SHOUTS = {
+  default: {
+    prefix: 'infantry-death',
+    lines: [
+      { slot: 1, voice: 'en-US-GuyNeural', text: 'Medic!', rate: '+28%', pitch: '-18Hz' },
+      { slot: 2, voice: 'en-US-RogerNeural', text: 'Man down!', rate: '+22%', pitch: '-12Hz' },
+      { slot: 4, voice: 'en-US-ChristopherNeural', text: 'Fall back!', rate: '+26%', pitch: '-10Hz' },
+      { slot: 6, voice: 'en-GB-RyanNeural', text: "I'm hit!", rate: '+24%', pitch: '-14Hz' },
+      { slot: 8, voice: 'en-US-GuyNeural', text: 'Help!', rate: '+30%', pitch: '-16Hz' },
+    ],
+  },
+  germany: {
+    prefix: 'infantry-death-germany',
+    lines: [
+      { slot: 1, voice: 'de-DE-ConradNeural', text: 'Sanitäter!', rate: '+28%', pitch: '-18Hz' },
+      { slot: 2, voice: 'de-DE-KillianNeural', text: 'Mann am Boden!', rate: '+22%', pitch: '-12Hz' },
+      { slot: 4, voice: 'de-DE-ConradNeural', text: 'Rückzug!', rate: '+26%', pitch: '-10Hz' },
+      { slot: 6, voice: 'de-DE-KillianNeural', text: 'Ich bin getroffen!', rate: '+24%', pitch: '-14Hz' },
+      { slot: 8, voice: 'de-DE-ConradNeural', text: 'Hilfe!', rate: '+30%', pitch: '-16Hz' },
+    ],
+  },
+  russia: {
+    prefix: 'infantry-death-russia',
+    lines: [
+      { slot: 1, voice: 'ru-RU-DmitryNeural', text: 'Санитар!', rate: '+28%', pitch: '-18Hz' },
+      { slot: 2, voice: 'ru-RU-DmitryNeural', text: 'Раненый!', rate: '+22%', pitch: '-12Hz' },
+      { slot: 4, voice: 'ru-RU-DmitryNeural', text: 'Отходите!', rate: '+26%', pitch: '-10Hz' },
+      { slot: 6, voice: 'ru-RU-SvetlanaNeural', text: 'Я ранен!', rate: '+24%', pitch: '-14Hz' },
+      { slot: 8, voice: 'ru-RU-DmitryNeural', text: 'Помогите!', rate: '+30%', pitch: '-16Hz' },
+    ],
+  },
+};
 
 const COMBAT_AF =
   'highpass=f=200,lowpass=f=4200,afftdn=nr=10:nf=-28,acompressor=threshold=-20dB:ratio=5.5:attack=4:release=70,alimiter=limit=0.92,volume=1.2';
@@ -121,8 +146,11 @@ function writeLicense() {
 ====================
 
 Slots 1,2,4,6,8 — spoken lines via Microsoft Edge neural TTS (edge-tts).
+  default (USA/UK) — English voices
+  germany — de-DE-ConradNeural / de-DE-KillianNeural
+  russia — ru-RU-DmitryNeural / ru-RU-SvetlanaNeural
 
-Slots 3,5,7 — short clips from Freesound.org preview audio:
+Slots 3,5,7 — short clips from Freesound.org preview audio (shared, language-neutral):
   tonsil5 — https://freesound.org/people/tonsil5/sounds/416838/
   martian — https://freesound.org/people/martian/sounds/530471/
 
@@ -130,6 +158,27 @@ Verify licenses on Freesound before commercial release.
 Regenerate: npm run bake-infantry-death
 `
   );
+}
+
+async function bakeFactionSet(factionKey, gruntClips, edge) {
+  const { prefix, lines } = FACTION_SHOUTS[factionKey];
+  console.log(`\n=== ${factionKey} ===`);
+
+  for (const line of lines) {
+    const num = String(line.slot).padStart(2, '0');
+    const out = join(OUT, `${prefix}-${num}.wav`);
+    console.log(`TTS ${num}: ${line.text}`);
+    bakeTts(edge, line, out);
+  }
+
+  for (let i = 0; i < GRUNT_SLOTS.length; i++) {
+    const slot = GRUNT_SLOTS[i];
+    const clip = gruntClips[i % gruntClips.length];
+    const num = String(slot).padStart(2, '0');
+    const out = join(OUT, `${prefix}-${num}.wav`);
+    console.log(`Grunt ${num} from recording`);
+    processCombat(clip, out, GRUNT_AF);
+  }
 }
 
 async function main() {
@@ -148,25 +197,13 @@ async function main() {
   console.log('Using', edge);
   const gruntClips = await bakeScreamClips();
 
-  for (const line of SHOUT_LINES) {
-    const num = String(line.slot).padStart(2, '0');
-    const out = join(OUT, `infantry-death-${num}.wav`);
-    console.log(`TTS ${num}: ${line.text}`);
-    bakeTts(edge, line, out);
-  }
-
-  for (let i = 0; i < GRUNT_SLOTS.length; i++) {
-    const slot = GRUNT_SLOTS[i];
-    const clip = gruntClips[i % gruntClips.length];
-    const num = String(slot).padStart(2, '0');
-    const out = join(OUT, `infantry-death-${num}.wav`);
-    console.log(`Grunt ${num} from recording`);
-    processCombat(clip, out, GRUNT_AF);
+  for (const factionKey of Object.keys(FACTION_SHOUTS)) {
+    await bakeFactionSet(factionKey, gruntClips, edge);
   }
 
   writeLicense();
   rmSync(TMP, { recursive: true, force: true });
-  console.log('Done — 8 infantry death WAVs in public/sounds/');
+  console.log('\nDone — infantry death WAVs in public/sounds/ (default, germany, russia)');
 }
 
 main().catch((e) => {

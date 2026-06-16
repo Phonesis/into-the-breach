@@ -99,6 +99,7 @@ export class UIManager {
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
     this._hudTowerDefense = false;
+    this._productionPanelKey = '';
     this._hudBaseBuilding = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
@@ -248,6 +249,14 @@ export class UIManager {
               <span class="hud-cheat-badge hidden" id="hud-cheat-badge" title="Cheat mode (iddqd or ?cheat=1)">CHEAT</span>
             </div>
             <div class="hud-stats" id="hud-army">Army: —</div>
+          </div>
+        </div>
+
+        <div id="hq-threat-alert" class="hq-threat-alert hidden" aria-live="assertive">
+          <div class="hq-threat-alert-card" id="hq-threat-alert-card">
+            <p class="hq-threat-alert-title" id="hq-threat-alert-title">Headquarters under attack</p>
+            <p class="hq-threat-alert-detail" id="hq-threat-alert-detail">—</p>
+            <div class="hq-threat-alert-hp" id="hq-threat-alert-hp"></div>
           </div>
         </div>
 
@@ -707,6 +716,14 @@ export class UIManager {
       this.callbacks.onArmSandbags?.();
     });
 
+    this.root.querySelector('#produce-btns')?.addEventListener('pointerdown', (e) => {
+      const btn = e.target.closest?.('.produce-btn');
+      if (!btn?.dataset?.type || btn.disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.callbacks.onProduce?.(btn.dataset.type);
+    });
+
     const tabletTargetBtn = this.root.querySelector('#btn-tablet-target');
     const tabletFireBtn = this.root.querySelector('#btn-tablet-fire');
     const stopTabletPointer = (e) => e.stopPropagation();
@@ -889,11 +906,6 @@ export class UIManager {
         })
         .join('');
 
-      btns.querySelectorAll('.produce-btn').forEach((btn) => {
-        btn.onclick = () => {
-          if (this.callbacks.onProduce) this.callbacks.onProduce(btn.dataset.type);
-        };
-      });
     }
 
     this.renderFireSupportButtons();
@@ -1408,9 +1420,54 @@ export class UIManager {
     this.tabletCamera?.setVisible(false);
     this.callbacks.onTabletTargetMode?.(false);
     this.callbacks.onTabletFireMode?.(false);
+    this.updateHqThreat(null);
     this.root.querySelector('#hud').classList.add('hidden');
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
+  }
+
+  updateHqThreat(threat) {
+    const banner = this.root.querySelector('#hq-threat-alert');
+    const card = this.root.querySelector('#hq-threat-alert-card');
+    const title = this.root.querySelector('#hq-threat-alert-title');
+    const detail = this.root.querySelector('#hq-threat-alert-detail');
+    const hpEl = this.root.querySelector('#hq-threat-alert-hp');
+    const app = document.querySelector('#app');
+    if (!banner || !title || !detail || !hpEl) return;
+
+    const active = threat && threat.level !== 'none';
+    banner.classList.toggle('hidden', !active);
+    app?.classList.toggle('hq-under-attack', threat?.level === 'critical' || threat?.level === 'siege');
+
+    if (!active) return;
+
+    card?.classList.toggle('hq-threat-alert-card--critical', threat.level === 'critical');
+    card?.classList.toggle('hq-threat-alert-card--warn', threat.level === 'warn');
+
+    if (threat.level === 'critical') {
+      title.textContent = 'Headquarters critical';
+    } else if (threat.level === 'siege') {
+      title.textContent = 'Headquarters under siege';
+    } else {
+      title.textContent = 'Enemy forces near headquarters';
+    }
+
+    const parts = [];
+    if (threat.sieging > 0) {
+      parts.push(
+        `${threat.sieging} enemy unit${threat.sieging === 1 ? '' : 's'} at your HQ`
+      );
+      if (threat.siegeDps > 0.5) {
+        parts.push(`~${Math.round(threat.siegeDps)} HP/s from enemy presence`);
+      }
+    } else if (threat.nearby > 0) {
+      parts.push(`${threat.nearby} hostile unit${threat.nearby === 1 ? '' : 's'} approaching`);
+    }
+    if (threat.directFire) parts.push('taking direct fire');
+    else if (threat.recentlyDamaged && threat.sieging === 0) parts.push('recent hits on HQ');
+
+    detail.textContent = parts.length ? parts.join(' · ') : 'Defend your headquarters';
+    hpEl.innerHTML = hpBarMarkup(threat.hp, threat.maxHp, { compact: true });
   }
 
   updateArmyStats(playerAlive, enemyAlive, opts = {}) {
@@ -1681,6 +1738,14 @@ export class UIManager {
     if (timer) timer.textContent = hud.timer;
   }
 
+  _productionPanelKeyFor(game) {
+    if (!this._hudBaseBuilding) return 'classic';
+    const types = getPlayerProductionUnitTypes(game) ?? [];
+    const entry = game.selectedBaseBuilding;
+    const hqSel = game.selectedHq?.team === 'player' && !game.selectedHq.dead;
+    return `${hqSel ? 'hq' : entry?.id ?? 'none'}|${types.join(',')}`;
+  }
+
   syncProductionPanel(game) {
     if (!game?.playerFaction || game.lastStand) return;
 
@@ -1694,17 +1759,24 @@ export class UIManager {
       return;
     }
 
-    const types = getPlayerProductionUnitTypes(game);
+    const types = getPlayerProductionUnitTypes(game) ?? [];
     const entry = game.selectedBaseBuilding;
     const hqSel = game.selectedHq?.team === 'player' && !game.selectedHq.dead;
     const showPanel = hqSel || (entry?.def?.spawns?.length ?? 0) > 0;
 
     this._setProductionPanelVisible(showPanel);
-    if (!showPanel) return;
+    if (!showPanel) {
+      this._productionPanelKey = '';
+      return;
+    }
 
     if (title) {
       title.textContent = hqSel ? 'Headquarters' : (entry?.def?.name ?? 'Depot');
     }
+
+    const panelKey = this._productionPanelKeyFor(game);
+    if (panelKey === this._productionPanelKey) return;
+    this._productionPanelKey = panelKey;
 
     const faction = game.playerFaction;
     btns.innerHTML = types
@@ -1721,12 +1793,6 @@ export class UIManager {
       `;
       })
       .join('');
-
-    btns.querySelectorAll('.produce-btn').forEach((btn) => {
-      btn.onclick = () => {
-        if (this.callbacks.onProduce) this.callbacks.onProduce(btn.dataset.type);
-      };
-    });
   }
 
   updateProduction(game) {
@@ -1735,7 +1801,11 @@ export class UIManager {
       this.updateLastStandDeploy(game);
       return;
     }
-    if (this._hudBaseBuilding) this.syncProductionPanel(game);
+    if (this._hudBaseBuilding) {
+      this.syncProductionPanel(game);
+    } else {
+      this._productionPanelKey = 'classic';
+    }
     const resources = Math.floor(game.resources.player);
     const progress = game.production.getQueueProgress('player');
     const queue = game.production.getQueue('player');
@@ -2022,8 +2092,8 @@ export class UIManager {
       return `
         <div class="end-stats-col">
           <h3>${side}</h3>
-          <p class="end-stats-subheading">Units lost</p>
-          <p class="end-stats-total">${unitTotal} unit${unitTotal === 1 ? '' : 's'} lost</p>
+          <p class="end-stats-subheading">Casualties</p>
+          <p class="end-stats-total">${unitTotal} casualty${unitTotal === 1 ? '' : 'ies'}</p>
           <ul class="end-stats-list">${unitRows}${hqRow}</ul>
           ${captureBlock}
           ${defenseBlock}
