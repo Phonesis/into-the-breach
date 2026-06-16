@@ -11,28 +11,72 @@ export function addBox(group, geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, r
   return m;
 }
 
+function addCylinder(group, geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, part = null }) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
+  if (part) m.userData.tankPart = part;
+  group.add(m);
+  return m;
+}
+
 export function trackRun(group, dark, side, spec) {
   const x = side * spec.spread;
+  const roadWheelCount = spec.wheels ?? 8;
+  const trackW = spec.width ?? 0.44;
+  const trackY = spec.height * 0.7;
+
   addBox(
     group,
-    new THREE.BoxGeometry(0.44, spec.height, spec.length),
+    new THREE.BoxGeometry(trackW, spec.height, spec.length),
     dark,
-    { x, y: spec.height * 0.72, z: 0, part: 'track' }
+    { x, y: trackY, z: 0, part: 'track' }
   );
-  const count = spec.wheels ?? 8;
-  for (let i = 0; i < count; i++) {
-    const wheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.17, 0.17, 0.22, 10),
-      dark
-    );
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(
-      x,
-      spec.height * 0.68,
-      -spec.length * 0.42 + i * (spec.length / Math.max(count - 1, 1)) * 0.82
-    );
+  addBox(group, new THREE.BoxGeometry(trackW * 0.78, spec.height * 0.18, spec.length * 0.95), dark, {
+    x,
+    y: spec.height * 1.12,
+    z: 0,
+    part: 'track',
+  });
+
+  const wheelR = spec.wheelR ?? Math.min(0.24, spec.height * 0.38);
+  const wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, trackW * 0.54, 14);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const hubGeo = new THREE.CylinderGeometry(wheelR * 0.34, wheelR * 0.34, trackW * 0.6, 10);
+  hubGeo.rotateZ(Math.PI / 2);
+  for (let i = 0; i < roadWheelCount; i++) {
+    const z = -spec.length * 0.39 + i * (spec.length / Math.max(roadWheelCount - 1, 1)) * 0.78;
+    const wheel = new THREE.Mesh(wheelGeo, dark);
+    wheel.position.set(x, spec.height * 0.66, z);
     wheel.userData.tankPart = 'track';
     group.add(wheel);
+
+    const hub = new THREE.Mesh(hubGeo, dark);
+    hub.position.set(x + side * trackW * 0.03, spec.height * 0.66, z);
+    hub.userData.tankPart = 'track';
+    group.add(hub);
+  }
+
+  for (const z of [-spec.length * 0.43, spec.length * 0.43]) {
+    const endWheel = new THREE.Mesh(
+      new THREE.CylinderGeometry(wheelR * 1.1, wheelR * 1.1, trackW * 0.58, 16),
+      dark
+    );
+    endWheel.rotation.z = Math.PI / 2;
+    endWheel.position.set(x, spec.height * 0.7, z);
+    endWheel.userData.tankPart = 'track';
+    group.add(endWheel);
+  }
+
+  const linkCount = spec.links ?? 12;
+  for (let i = 0; i < linkCount; i++) {
+    const z = -spec.length * 0.46 + i * (spec.length * 0.92) / Math.max(linkCount - 1, 1);
+    addBox(group, new THREE.BoxGeometry(trackW * 0.9, 0.035, 0.09), dark, {
+      x: x + side * 0.01,
+      y: spec.height * 1.02,
+      z,
+      part: 'track',
+    });
   }
   if (spec.skirt) {
     addBox(
@@ -41,6 +85,13 @@ export function trackRun(group, dark, side, spec) {
       dark,
       { x: side * (spec.spread + 0.14), y: spec.height * 0.62, z: 0 }
     );
+  }
+  if (spec.fender) {
+    addBox(group, new THREE.BoxGeometry(0.24, 0.08, spec.length * 1.02), dark, {
+      x: side * (spec.spread + 0.02),
+      y: spec.height * 1.12,
+      z: spec.fenderZ ?? 0,
+    });
   }
   if (spec.rollers) {
     for (let i = 0; i < 3; i++) {
@@ -53,6 +104,97 @@ export function trackRun(group, dark, side, spec) {
       roller.userData.tankPart = 'track';
       group.add(roller);
     }
+  }
+}
+
+function addTankExternalDetails(group, turretPivot, body, detail, dark, d) {
+  const h = d.hull;
+  const t = d.turret;
+
+  addCylinder(turretPivot, new THREE.CylinderGeometry(t.w * 0.46, t.w * 0.5, 0.12, 16), dark, {
+    y: t.y - t.h * 0.55,
+    z: t.z,
+    part: 'turret',
+  });
+
+  const cupola = d.cupola ?? {};
+  addCylinder(turretPivot, new THREE.CylinderGeometry(cupola.r ?? 0.14, cupola.rTop ?? 0.12, cupola.h ?? 0.14, 10), body, {
+    x: cupola.x ?? 0,
+    y: cupola.y ?? t.y + t.h * 0.58,
+    z: cupola.z ?? t.z - t.d * 0.2,
+    part: 'turret',
+  });
+
+  const hatchGeo = new THREE.BoxGeometry(0.36, 0.04, 0.28);
+  for (const hatch of d.hatches ?? []) {
+    addBox(hatch.turret ? turretPivot : group, hatchGeo, dark, {
+      x: hatch.x ?? 0,
+      y: hatch.y,
+      z: hatch.z,
+      ry: hatch.ry ?? 0,
+      part: hatch.turret ? 'turret' : 'hull',
+    });
+  }
+
+  if (d.bowMg) {
+    const mg = d.bowMg;
+    addCylinder(group, new THREE.CylinderGeometry(0.035, 0.04, mg.len ?? 0.48, 8), dark, {
+      x: mg.x ?? -0.36,
+      y: mg.y ?? h.y + h.h * 0.14,
+      z: mg.z ?? h.z + h.d * 0.48,
+      rx: Math.PI / 2,
+      part: 'barrel',
+    });
+  }
+
+  for (const side of [-1, 1]) {
+    if (d.fenders !== false) {
+      addBox(group, new THREE.BoxGeometry(0.22, 0.07, h.d * 0.95), dark, {
+        x: side * (d.track.spread - 0.08),
+        y: d.track.height * 1.22,
+        z: h.z,
+      });
+    }
+
+    for (const bin of d.stowageBins ?? []) {
+      addBox(group, new THREE.BoxGeometry(bin.w, bin.h, bin.d), detail, {
+        x: side * (h.w * 0.5 + bin.x),
+        y: bin.y,
+        z: bin.z,
+      });
+    }
+  }
+
+  if (d.engineDeck !== false) {
+    addBox(group, new THREE.BoxGeometry(h.w * 0.72, 0.045, h.d * 0.24), dark, {
+      y: h.y + h.h * 0.54,
+      z: h.z - h.d * 0.28,
+    });
+    for (let i = -1; i <= 1; i++) {
+      addBox(group, new THREE.BoxGeometry(h.w * 0.18, 0.05, 0.06), detail, {
+        x: i * h.w * 0.22,
+        y: h.y + h.h * 0.58,
+        z: h.z - h.d * 0.34,
+      });
+    }
+  }
+
+  for (const ex of d.exhausts ?? []) {
+    addCylinder(group, new THREE.CylinderGeometry(ex.r ?? 0.07, ex.r ?? 0.07, ex.h ?? 0.42, 8), dark, {
+      x: ex.x,
+      y: ex.y,
+      z: ex.z,
+      rx: ex.rx ?? 0,
+    });
+  }
+
+  for (const plate of d.spareTrack ?? []) {
+    addBox(group, new THREE.BoxGeometry(plate.w, plate.h, plate.d), dark, {
+      x: plate.x ?? 0,
+      y: plate.y,
+      z: plate.z,
+      rx: plate.rx ?? 0,
+    });
   }
 }
 
@@ -84,9 +226,10 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   const t = d.turret;
   if (t.style === 'cylinder') {
     const tur = new THREE.Mesh(
-      new THREE.CylinderGeometry(t.w * 0.95, t.w, t.h, 8),
+      new THREE.CylinderGeometry(t.w * 0.45, t.w * 0.52, t.h, 14),
       body
     );
+    tur.scale.z = t.d / Math.max(t.w, 0.01);
     tur.position.set(0, t.y, t.z);
     tur.userData.tankPart = 'turret';
     turretPivot.add(tur);
@@ -151,9 +294,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     turretPivot.add(mb);
   }
 
-  const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.12, 8), body);
-  cupola.position.set(0, t.y + t.h * 0.55, t.z - t.d * 0.15);
-  turretPivot.add(cupola);
+  addTankExternalDetails(group, turretPivot, body, detail, dark, d);
 
   if (d.coax) {
     const c = d.coax;
