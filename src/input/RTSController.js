@@ -30,6 +30,7 @@ export class RTSController {
     getIsBaseBuildingMode,
     pickPlayerBaseBuilding,
     getDeployZoneActive,
+    getPaused,
     getShiftHeld,
     clampDeployPoint,
     onFireSupportTarget,
@@ -62,6 +63,7 @@ export class RTSController {
     this.getIsBaseBuildingMode = getIsBaseBuildingMode ?? (() => false);
     this.pickPlayerBaseBuilding = pickPlayerBaseBuilding ?? (() => null);
     this.getDeployZoneActive = getDeployZoneActive ?? (() => false);
+    this.getPaused = getPaused ?? (() => false);
     this.getShiftHeld = getShiftHeld ?? (() => this._modifierShift);
     this.clampDeployPoint = clampDeployPoint ?? ((x, z) => ({ x, z }));
     this.onFireSupportTarget = onFireSupportTarget;
@@ -435,6 +437,7 @@ export class RTSController {
   updateHoverTarget() {
     if (
       !this.enabled ||
+      this.getPaused?.() ||
       this.getPendingFireSupport?.() ||
       this.getPendingDefensePlacement?.() ||
       this.getPendingLastStandDeploy?.() ||
@@ -462,7 +465,7 @@ export class RTSController {
   }
 
   issueAttackOn(target, { inRangeOnly = false } = {}) {
-    if (!this.enabled || !target || target.dead) return false;
+    if (this._inputBlocked() || !target || target.dead) return false;
     if (this.getDeployZoneActive()) return false;
 
     const selected = this.getSelectedPlayerUnits();
@@ -485,7 +488,7 @@ export class RTSController {
 
   /** Shift+LMB ground fire — units move into range if needed; cleared on RMB move. */
   issueGroundFireAt(point) {
-    if (!this.enabled) return false;
+    if (this._inputBlocked()) return false;
 
     const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
     if (selected.length === 0) return false;
@@ -500,7 +503,7 @@ export class RTSController {
 
   /** Shift+LMB — attack cover under cursor, otherwise fire at open ground. */
   issueShiftManualFire() {
-    if (!this.enabled) return false;
+    if (this._inputBlocked()) return false;
 
     const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
     if (selected.length === 0) return false;
@@ -528,8 +531,12 @@ export class RTSController {
     return this.getUnits().filter((u) => u.team === this.getPlayerTeam() && u.selected && !u.dead);
   }
 
+  _inputBlocked() {
+    return !this.enabled || this.getPaused?.();
+  }
+
   onPointerDown(e) {
-    if (!this.enabled || e.button !== 0) return;
+    if (this._inputBlocked() || e.button !== 0) return;
     this.setPointerFromEvent(e);
 
     const pendingFs = this.getPendingFireSupport?.();
@@ -569,7 +576,7 @@ export class RTSController {
   }
 
   onPointerMove(e) {
-    if (!this.enabled) return;
+    if (this._inputBlocked()) return;
     this.setPointerFromEvent(e);
     const pendingFs = this.getPendingFireSupport?.();
     const pendingDef = this.getPendingDefensePlacement?.();
@@ -610,7 +617,7 @@ export class RTSController {
   }
 
   onPointerUp(e) {
-    if (!this.enabled || e.button !== 0) return;
+    if (this._inputBlocked() || e.button !== 0) return;
     this.setPointerFromEvent(e);
     this._clearLongPressTimer();
 
@@ -756,7 +763,7 @@ export class RTSController {
   }
 
   onPointerDownRmb(e) {
-    if (!this.enabled || e.button !== 2) return;
+    if (this._inputBlocked() || e.button !== 2) return;
     e.preventDefault();
     this.setPointerFromEvent(e);
     this.issueMoveOrAttack();
@@ -764,14 +771,14 @@ export class RTSController {
 
   onContextMenu(e) {
     e.preventDefault();
-    if (!this.enabled) return;
+    if (this._inputBlocked()) return;
     if (Date.now() - this._lastOrderAt < 80) return;
     this.setPointerFromEvent(e);
     this.issueMoveOrAttack();
   }
 
   issueMoveOrAttack() {
-    if (!this.enabled) return;
+    if (this._inputBlocked()) return;
 
     const selected = this.getSelectedPlayerUnits();
     if (selected.length === 0) return;

@@ -2303,6 +2303,56 @@ body,
   }
 }
 
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(4, 8, 14, 0.38);
+}
+
+.pause-overlay.hidden {
+  display: none;
+}
+
+.pause-overlay-card {
+  text-align: center;
+  padding: 1rem 1.6rem;
+  border-radius: 10px;
+  border: 2px solid rgba(200, 220, 255, 0.45);
+  background: linear-gradient(180deg, rgba(12, 18, 28, 0.94) 0%, rgba(24, 32, 48, 0.92) 100%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+.pause-overlay-title {
+  margin: 0;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.14em;
+  color: #e8f0ff;
+}
+
+.pause-overlay-sub {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: #b8c8dc;
+}
+
+.pause-overlay-sub kbd {
+  display: inline-block;
+  min-width: 1.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid rgba(200, 220, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  font-family: inherit;
+  font-size: 0.82rem;
+  color: #f0f4ff;
+}
+
 .opening-countdown {
   position: absolute;
   top: 5.5rem;

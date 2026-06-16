@@ -286,6 +286,13 @@ export class UIManager {
           </div>
         </div>
 
+        <div id="pause-overlay" class="pause-overlay hidden" aria-hidden="true">
+          <div class="pause-overlay-card">
+            <p class="pause-overlay-title">Paused</p>
+            <p class="pause-overlay-sub">Press <kbd>P</kbd> to resume</p>
+          </div>
+        </div>
+
         <div id="td-wave-countdown" class="td-wave-countdown hidden" aria-live="polite">
           <div class="td-wave-countdown-card" id="td-wave-countdown-card">
             <p class="td-wave-countdown-title" id="td-wave-countdown-title">Prepare defenses</p>
@@ -828,6 +835,16 @@ export class UIManager {
 
   clearMinimap() {
     this.minimap?.clear();
+  }
+
+  setGamePaused(paused) {
+    const overlay = this.root.querySelector('#pause-overlay');
+    const hud = this.root.querySelector('#hud');
+    if (overlay) {
+      overlay.classList.toggle('hidden', !paused);
+      overlay.setAttribute('aria-hidden', paused ? 'false' : 'true');
+    }
+    hud?.classList.toggle('game-paused', !!paused);
   }
 
   showHUD(faction, mapDef, gameMode = 'campaign', options = {}) {
@@ -1464,6 +1481,7 @@ export class UIManager {
   }
 
   hideHUD() {
+    this.setGamePaused(false);
     this.closeGuide();
     this.tabletCamera?.setVisible(false);
     this.callbacks.onTabletTargetMode?.(false);

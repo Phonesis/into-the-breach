@@ -191,6 +191,7 @@ export class Game {
     this.clock = new THREE.Clock();
     this.running = false;
     this.gameOver = false;
+    this.paused = false;
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._teardownPending = false;
@@ -345,6 +346,7 @@ export class Game {
       pickPlayerBaseBuilding: (raycaster, pointer, camera) =>
         this.baseBuildings?.raycastPlayerEntry(raycaster, pointer, camera) ?? null,
       getDeployZoneActive: () => this._isPlayerDeployZoneActive(),
+      getPaused: () => this.paused,
       getShiftHeld: () => !!(this.keys.ShiftLeft || this.keys.ShiftRight),
       clampDeployPoint: (x, z) => this._clampPlayerDeployPoint(x, z),
       onFireSupportTarget: (mode, x, z) => this.handleFireSupportTarget(mode, x, z),
@@ -389,7 +391,7 @@ export class Game {
 
     this._placementLayer = document.getElementById('placement-layer');
     this._onPlacementLayerUp = (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || this.paused) return;
       if (this.defenses?.getPending()) {
         this.placeDefenseAtScreen(e.clientX, e.clientY);
         return;
@@ -456,6 +458,14 @@ export class Game {
         this._syncBattleCursor();
       }
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._syncBattleCursor();
+      if (
+        e.code === 'KeyP' &&
+        !e.repeat &&
+        !this._isTextInputFocused(e.target)
+      ) {
+        e.preventDefault();
+        this.togglePause();
+      }
     });
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
@@ -843,6 +853,8 @@ export class Game {
     resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
     this.running = true;
     this.gameOver = false;
+    this.paused = false;
+    this.ui?.setGamePaused(false);
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._teardownPending = false;
@@ -1044,7 +1056,7 @@ export class Game {
 
   /** End quiet sector / clearance ceasefire immediately (player override). */
   launchBattleNow() {
-    if (!this.running || this.gameOver || this.tutorial) return;
+    if (!this.running || this.gameOver || this.paused || this.tutorial) return;
     if (this.lastStand) {
       this.launchLastStandBattle();
       return;
@@ -1130,6 +1142,20 @@ export class Game {
     const half = this.mapDef.size / 2 - 5;
     this.cameraTarget.x = THREE.MathUtils.clamp(x, -half, half);
     this.cameraTarget.z = THREE.MathUtils.clamp(z, -half, half);
+  }
+
+  _isTextInputFocused(target) {
+    if (!target || typeof target !== 'object') return false;
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+  }
+
+  togglePause() {
+    if (!this.running || this.gameOver) return;
+    this.paused = !this.paused;
+    this.ui?.setGamePaused(this.paused);
+    if (this.paused) sounds.clearVehicleEngines();
+    this._syncBattleCursor();
   }
 
   _updateMinimap() {
@@ -1280,6 +1306,8 @@ export class Game {
     this.zoomMax = 100;
     this.running = false;
     this.gameOver = false;
+    this.paused = false;
+    this.ui?.setGamePaused(false);
     this._endOverlayShown = false;
     this._battleStatsFinalized = false;
     this._pendingEnd = null;
@@ -1372,7 +1400,7 @@ export class Game {
   }
 
   armFireSupport(type) {
-    if (!this.running || this.gameOver || this._isPlayerDeployZoneActive()) return;
+    if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
     if (!this.fireSupport.isReady(type) && this.fireSupport.pending !== type) return;
     this.fireSupport.arm(type);
     this._syncBattleCursor();
@@ -1586,6 +1614,8 @@ export class Game {
 
   tryProduce(unitType) {
     if (!this.running || this.gameOver || this.towerDefense) return false;
+
+    if (this.paused) return false;
 
     if (this.lastStand) {
       if (this.lastStand.phase !== 'deploy') return false;
@@ -2092,7 +2122,8 @@ export class Game {
     requestAnimationFrame(this.animate);
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
-    const simActive = this.running && !this.gameOver;
+    const viewActive = this.running && !this.gameOver;
+    const simActive = viewActive && !this.paused;
     const fieldHasUnits = this._aliveUnits.length > 0;
     const hasCorpses = this.units.some((u) => u.dead && u.mesh?.parent);
 
@@ -2154,8 +2185,6 @@ export class Game {
         }
 
         if (isLastStandDeployPhase(this)) {
-          this.updateCamera(dt);
-          this._renderFrame();
           return;
         }
 
@@ -2354,7 +2383,7 @@ export class Game {
         }
       }
 
-    if (simActive) {
+    if (viewActive) {
       this.updateCamera(dt);
       updateLightingForTarget(this.lights, this.cameraTarget.x, this.cameraTarget.z);
       this._renderFrame();
