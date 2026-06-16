@@ -1911,6 +1911,105 @@ body,
 }
 
 /* —— Tablet camera pad (touch devices without keyboard) —— */
+.battle-minimap {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 6.5rem;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 11.5rem;
+  padding: 0.45rem 0.5rem 0.4rem;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: 6px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.battle-minimap.hidden {
+  display: none;
+}
+
+.battle-minimap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.battle-minimap-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  color: #c9a227;
+  line-height: 1;
+}
+
+.battle-minimap-toggle {
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ec8e8;
+  background: rgba(24, 36, 48, 0.75);
+  border: 1px solid rgba(90, 159, 212, 0.35);
+  border-radius: 4px;
+  padding: 0.18rem 0.4rem;
+  cursor: pointer;
+}
+
+.battle-minimap-toggle:hover {
+  border-color: rgba(90, 159, 212, 0.7);
+  background: rgba(32, 48, 64, 0.9);
+}
+
+#battle-minimap-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: crosshair;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.battle-minimap-hint {
+  margin: 0;
+  font-size: 0.58rem;
+  line-height: 1.3;
+  color: rgba(200, 208, 220, 0.62);
+  text-align: center;
+}
+
+.battle-minimap-show {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 6.5rem;
+  z-index: 15;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  color: #c9a227;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.battle-minimap-show:hover {
+  border-color: rgba(201, 162, 39, 0.75);
+  background: rgba(18, 24, 32, 0.96);
+}
+
+.battle-minimap-show.hidden {
+  display: none;
+}
+
 .tablet-camera {
   position: absolute;
   right: 0.75rem;
@@ -2034,6 +2133,13 @@ body,
 }
 
 @media (max-width: 720px) {
+  .battle-minimap,
+  .battle-minimap-show {
+    right: 0.45rem;
+    bottom: 11.5rem;
+    width: 9.5rem;
+  }
+
   .tablet-camera {
     right: 0.45rem;
     bottom: 4.75rem;

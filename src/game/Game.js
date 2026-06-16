@@ -214,6 +214,7 @@ export class Game {
     this._postMatchRenderAccum = 0;
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
+    this._minimapUiAccum = 0;
     this.showUnitFieldIcons = true;
     this.showFrontline = true;
     this.matchTime = 0;
@@ -850,6 +851,7 @@ export class Game {
     this._captureUiAccum = 0;
     this._coverUiAccum = 0;
     this._fieldIconUiAccum = 0;
+    this._minimapUiAccum = 0;
     this._selectionUiKey = '';
     this._hoverUiId = '';
     this._combatAccum = 0;
@@ -902,6 +904,7 @@ export class Game {
     this._syncPlacementCapture();
     this._rebuildUnitCaches();
     this._syncUnitRoster();
+    this._updateMinimap();
     this._startRenderLoop();
   }
 
@@ -1122,6 +1125,28 @@ export class Game {
     syncFrontlineVisual(this.scene, this.showFrontline);
   }
 
+  panCameraTo(x, z) {
+    if (!this.mapDef) return;
+    const half = this.mapDef.size / 2 - 5;
+    this.cameraTarget.x = THREE.MathUtils.clamp(x, -half, half);
+    this.cameraTarget.z = THREE.MathUtils.clamp(z, -half, half);
+  }
+
+  _updateMinimap() {
+    if (!this.ui || !this.mapDef || !this.running) return;
+    this.ui.updateMinimap({
+      mapDef: this.mapDef,
+      playerUnits: this._playerAlive,
+      enemyUnits: this._enemyAlive,
+      hqs: this.hqs,
+      camera: {
+        x: this.cameraTarget.x,
+        z: this.cameraTarget.z,
+        zoom: this.zoom,
+      },
+    });
+  }
+
   selectPlayerUnitById(unitId, additive = false) {
     const unit = this.units.find(
       (u) => u.id === unitId && u.team === PLAYER_TEAM && !u.dead
@@ -1281,6 +1306,7 @@ export class Game {
     this.lastStand = null;
     this.defenses?.clear();
     this.defenses = null;
+    this.ui?.clearMinimap();
     this.ui?.setPlacementCapture(false);
     this.clearance = false;
     this.campaign = false;
@@ -2083,6 +2109,12 @@ export class Game {
     }
 
     if (simActive) {
+        this._minimapUiAccum += dt;
+        if (this._minimapUiAccum >= 0.1) {
+          this._minimapUiAccum = 0;
+          this._updateMinimap();
+        }
+
         this.matchTime += dt;
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
@@ -2299,7 +2331,7 @@ export class Game {
           }
 
           this._deployUiAccum += dt;
-          if (this._deployUiAccum >= 0.12) {
+          if (this._deployUiAccum >= 0.12 && !this.lastStand) {
             this._deployUiAccum = 0;
             const deployPhase = this._getDeployPhase();
             this.ui?.updateDeployCountdown(deployPhase);

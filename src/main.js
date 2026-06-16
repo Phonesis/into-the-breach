@@ -107,6 +107,9 @@ const ui = new UIManager(uiRoot, {
   onToggleFrontline(enabled) {
     game?.setShowFrontlineEnabled(enabled);
   },
+  onMinimapPan(x, z) {
+    game?.panCameraTo(x, z);
+  },
 });
 
 

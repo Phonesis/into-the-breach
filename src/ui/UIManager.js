@@ -29,6 +29,7 @@ import {
 import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { BattleMinimap } from './Minimap.js';
 
 const PRODUCE_LABELS = {
   infantry: 'Inf',
@@ -105,6 +106,13 @@ export class UIManager {
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.render();
     this.tabletCamera = new TabletCameraControls(this.root);
+    this.minimap = new BattleMinimap(this.root, {
+      onPanTo: (x, z) => this.callbacks.onMinimapPan?.(x, z),
+      onToggleMinimap: (visible) => {
+        this.showMinimap = visible;
+      },
+    });
+    this.showMinimap = this.minimap.visible;
     this._syncFieldIconToggle();
     this._syncFrontlineToggle();
   }
@@ -336,6 +344,32 @@ export class UIManager {
             <button type="button" class="tablet-cam-btn" data-cam="zoomOut" aria-label="Move camera out">－</button>
           </div>
         </div>
+
+        <div id="battle-minimap" class="battle-minimap interactive" aria-label="Tactical map">
+          <div class="battle-minimap-header">
+            <span class="battle-minimap-title">Tactical Map</span>
+            <button
+              type="button"
+              class="battle-minimap-toggle interactive"
+              id="btn-toggle-minimap"
+              title="Hide tactical map"
+              aria-pressed="true"
+            >
+              Hide
+            </button>
+          </div>
+          <canvas id="battle-minimap-canvas" width="168" height="168" aria-label="Battlefield overview"></canvas>
+          <p class="battle-minimap-hint">Green — friendly · Red — enemy · Click to pan</p>
+        </div>
+        <button
+          type="button"
+          class="battle-minimap-show interactive hidden"
+          id="btn-show-minimap"
+          title="Show tactical map"
+          aria-pressed="false"
+        >
+          Map
+        </button>
 
         <aside class="unit-roster interactive" id="unit-roster" aria-label="Your forces">
           <h3 class="unit-roster-title">Forces</h3>
@@ -784,6 +818,18 @@ export class UIManager {
     this.guideFromMenu = false;
   }
 
+  setMinimapMap(mapDef) {
+    this.minimap?.setMapDef(mapDef);
+  }
+
+  updateMinimap(state) {
+    this.minimap?.update(state);
+  }
+
+  clearMinimap() {
+    this.minimap?.clear();
+  }
+
   showHUD(faction, mapDef, gameMode = 'campaign', options = {}) {
     this.closeGuide();
     if (this.callbacks.onMenuVisible) this.callbacks.onMenuVisible(false);
@@ -838,6 +884,8 @@ export class UIManager {
 
     const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
     this.tabletCamera?.setVisible(tabletOn);
+    this.setMinimapMap(mapDef);
+    this.minimap?.setVisible(this.showMinimap);
 
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
@@ -1540,6 +1588,9 @@ export class UIManager {
   updateLastStandDeploy(game) {
     if (!game?.lastStand) return;
 
+    const LAST_STAND_BATTLE_HINT =
+      'Last Stand — no reinforcements · wipe out all enemy units to win';
+
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
     const value = this.root.querySelector('#opening-countdown-value');
@@ -1556,9 +1607,12 @@ export class UIManager {
       launchBtn?.classList.add('hidden');
       this._hudLastStandDeploy = false;
       this._setProductionPanelVisible(false);
+      this._defaultHudHint = LAST_STAND_BATTLE_HINT;
       const hint = this.root.querySelector('#hud-hint');
       if (hint) {
-        hint.textContent = 'Last Stand — no reinforcements · wipe out all enemy units to win';
+        if (hint.textContent !== LAST_STAND_BATTLE_HINT) {
+          hint.textContent = LAST_STAND_BATTLE_HINT;
+        }
         hint.classList.remove('hud-hint-opening');
       }
       return;
@@ -1603,12 +1657,14 @@ export class UIManager {
 
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
-      hint.textContent = this._defaultHudHint ?? hint.textContent;
+      const deployHint = this._defaultHudHint ?? hint.textContent;
+      if (hint.textContent !== deployHint) hint.textContent = deployHint;
       hint.classList.add('hud-hint-opening');
     }
   }
 
   updateDeployCountdown(phase) {
+    if (this._hudLastStand) return;
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
     const value = this.root.querySelector('#opening-countdown-value');
@@ -1638,6 +1694,7 @@ export class UIManager {
   }
 
   updateBattleOpening(secondsLeft) {
+    if (this._hudLastStand) return;
     const hint = this.root.querySelector('#hud-hint');
     if (!hint || !this._defaultHudHint) return;
     if (secondsLeft > 0.5) {
@@ -1875,8 +1932,9 @@ export class UIManager {
     const showProduction = this._hudBaseBuilding
       ? (hq && !hq.dead && hq.team === 'player') ||
         (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
-      : (this._hudLastStand && this._hudLastStandDeploy) ||
-        (hq && !hq.dead && hq.team === 'player');
+      : this._hudLastStand
+        ? this._hudLastStandDeploy
+        : hq && !hq.dead && hq.team === 'player';
     if (!this._hudBaseBuilding) this._setProductionPanelVisible(showProduction);
 
     const targetName = hoverTarget && !hoverTarget.dead ? TargetIndicators.getTargetLabel(hoverTarget) : null;
