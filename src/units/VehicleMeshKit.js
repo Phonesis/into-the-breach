@@ -226,7 +226,12 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   const t = d.turret;
   if (t.style === 'cylinder') {
     const tur = new THREE.Mesh(
-      new THREE.CylinderGeometry(t.w * 0.45, t.w * 0.52, t.h, 14),
+      new THREE.CylinderGeometry(
+        t.w * (t.radiusTopScale ?? 0.56),
+        t.w * (t.radiusBottomScale ?? 0.66),
+        t.h,
+        16
+      ),
       body
     );
     tur.scale.z = t.d / Math.max(t.w, 0.01);
