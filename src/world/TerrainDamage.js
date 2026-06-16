@@ -4,8 +4,13 @@ import { sampleTerrainHeight } from './Terrain.js';
 const craters = [];
 const MAX_CRATERS = 32;
 const texCache = new Map();
+const _pit = new THREE.Color();
+const _rim = new THREE.Color();
+const _outer = new THREE.Color();
+const _vertex = new THREE.Color();
 
 let lastCraterAt = 0;
+const terrainNormalsDirty = new WeakMap();
 
 const CRATER_TIERS = {
   heavy: { radius: 4.8, depth: 0.62, heavy: true, minGap: 70 },
@@ -206,6 +211,32 @@ function getCraterTexture(mapDef, x, z, heavy) {
   return texCache.get(key);
 }
 
+function deformVertexAt(pos, colors, i, x, z, r, r2, depth, style) {
+  const vx = pos.getX(i);
+  const vz = pos.getZ(i);
+  const dx = vx - x;
+  const dz = vz - z;
+  const d2 = dx * dx + dz * dz;
+  if (d2 > r2) return false;
+
+  const f = Math.sqrt(d2) / r;
+  pos.setY(i, pos.getY(i) + craterHeightOffset(f, depth));
+
+  if (colors) {
+    _vertex.setRGB(colors.getX(i), colors.getY(i), colors.getZ(i));
+    if (f < 0.35) {
+      _vertex.lerp(_pit.set(style.pit), 0.55 * (1 - f / 0.35));
+    } else if (f < 0.62) {
+      _vertex.lerp(_rim.set(style.rim), 0.28 * (1 - (f - 0.35) / 0.27));
+    } else if (f < 0.9 && style.kind !== 'desert') {
+      _vertex.lerp(_outer.set(style.grass ?? style.outer), 0.12 * (1 - (f - 0.62) / 0.28));
+    }
+    colors.setXYZ(i, _vertex.r, _vertex.g, _vertex.b);
+  }
+
+  return true;
+}
+
 function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   if (!terrainMesh?.geometry || depth <= 0) return;
   const geo = terrainMesh.geometry;
@@ -214,42 +245,50 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   const r = radius * 1.05;
   const r2 = r * r;
   const style = craterStyle(mapDef);
-  const pit = new THREE.Color(style.pit);
-  const rim = new THREE.Color(style.rim);
-  const outer = new THREE.Color(style.grass ?? style.outer);
   let changed = false;
 
-  for (let i = 0; i < pos.count; i++) {
-    const vx = pos.getX(i);
-    const vz = pos.getZ(i);
-    const dx = vx - x;
-    const dz = vz - z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 > r2) continue;
+  const params = geo.parameters;
+  if (params?.width != null && params.widthSegments != null) {
+    const wSeg = params.widthSegments;
+    const hSeg = params.heightSegments;
+    const cols = wSeg + 1;
+    const halfW = params.width * 0.5;
+    const halfH = params.height * 0.5;
+    const segW = params.width / wSeg;
+    const segH = params.height / hSeg;
+    const ixMin = Math.max(0, Math.floor((x - r + halfW) / segW) - 1);
+    const ixMax = Math.min(wSeg, Math.ceil((x + r + halfW) / segW) + 1);
+    const iyMin = Math.max(0, Math.floor((-z - r + halfH) / segH) - 1);
+    const iyMax = Math.min(hSeg, Math.ceil((-z + r + halfH) / segH) + 1);
 
-    const f = Math.sqrt(d2) / r;
-    pos.setY(i, pos.getY(i) + craterHeightOffset(f, depth));
-
-    if (colors) {
-      const c = new THREE.Color(colors.getX(i), colors.getY(i), colors.getZ(i));
-      if (f < 0.35) {
-        c.lerp(pit, 0.55 * (1 - f / 0.35));
-      } else if (f < 0.62) {
-        c.lerp(rim, 0.28 * (1 - (f - 0.35) / 0.27));
-      } else if (f < 0.9 && style.kind !== 'desert') {
-        c.lerp(outer, 0.12 * (1 - (f - 0.62) / 0.28));
+    for (let iy = iyMin; iy <= iyMax; iy++) {
+      const base = iy * cols;
+      for (let ix = ixMin; ix <= ixMax; ix++) {
+        if (deformVertexAt(pos, colors, base + ix, x, z, r, r2, depth, style)) {
+          changed = true;
+        }
       }
-      colors.setXYZ(i, c.r, c.g, c.b);
     }
-
-    changed = true;
+  } else {
+    for (let i = 0; i < pos.count; i++) {
+      if (deformVertexAt(pos, colors, i, x, z, r, r2, depth, style)) {
+        changed = true;
+      }
+    }
   }
 
   if (changed) {
     pos.needsUpdate = true;
     if (colors) colors.needsUpdate = true;
-    geo.computeVertexNormals();
+    terrainNormalsDirty.set(terrainMesh, true);
   }
+}
+
+/** Recompute terrain normals at most once per frame after batched crater deformations. */
+export function flushTerrainNormals(terrainMesh) {
+  if (!terrainMesh?.geometry || !terrainNormalsDirty.get(terrainMesh)) return;
+  terrainMesh.geometry.computeVertexNormals();
+  terrainNormalsDirty.delete(terrainMesh);
 }
 
 function addCraterDecal(scene, mapDef, x, z, y, radius, heavy) {
@@ -298,16 +337,31 @@ export function addTerrainCrater(scene, mapDef, x, z, opts = {}) {
   return entry;
 }
 
-/** Crater + terrain mesh depression for explosions. */
-export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrainMesh = null) {
+/** Crater + optional terrain mesh depression for explosions. */
+export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrainMesh = null, opts = {}) {
   const profile = CRATER_TIERS[tier] ?? CRATER_TIERS.medium;
-  if (terrainMesh) deformTerrainAt(terrainMesh, mapDef, x, z, profile.radius, profile.depth);
-  return addTerrainCrater(scene, mapDef, x, z, {
-    radius: profile.radius,
-    heavy: profile.heavy,
-    minGap: profile.minGap,
-    tier,
-  });
+  const minGap = opts.minGap ?? profile.minGap;
+  const now = performance.now();
+  if (now - lastCraterAt < minGap) return null;
+  lastCraterAt = now;
+
+  if (terrainMesh && opts.deformTerrain !== false) {
+    deformTerrainAt(terrainMesh, mapDef, x, z, profile.radius, profile.depth);
+  }
+
+  const radius = opts.radius ?? profile.radius;
+  const heavy = opts.heavy ?? profile.heavy;
+  const y = sampleTerrainHeight(x, z, mapDef);
+  const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
+
+  const entry = { meshes, scene };
+  craters.push(entry);
+
+  while (craters.length > MAX_CRATERS) {
+    disposeCrater(craters.shift());
+  }
+
+  return entry;
 }
 
 function disposeCrater(entry) {
@@ -320,7 +374,7 @@ function disposeCrater(entry) {
   }
 }
 
-export function clearTerrainDamage(scene) {
+export function clearTerrainDamage() {
   while (craters.length) {
     disposeCrater(craters.shift());
   }

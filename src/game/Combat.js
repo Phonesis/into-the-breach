@@ -27,6 +27,7 @@ import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
+import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
 
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar']);
@@ -140,7 +141,7 @@ export function updateCombat(
       }
     }
 
-    faceTarget(attacker, target);
+    faceUnitTowardTarget(attacker, target, dt);
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
       fire(
@@ -221,14 +222,6 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
   }
 
   return findNearestEnemyInRange(attacker, acquireTargets, 1);
-}
-
-function faceTarget(unit, target) {
-  const tx = target.position?.x ?? target.mesh.position.x;
-  const tz = target.position?.z ?? target.mesh.position.z;
-  const dx = tx - unit.position.x;
-  const dz = tz - unit.position.z;
-  unit.mesh.rotation.y = Math.atan2(dx, dz);
 }
 
 function fire(

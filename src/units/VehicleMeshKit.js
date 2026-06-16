@@ -76,6 +76,11 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   trackRun(group, dark, -1, d.track);
   trackRun(group, dark, 1, d.track);
 
+  const turretPivot = new THREE.Group();
+  turretPivot.name = 'turretPivot';
+  group.add(turretPivot);
+  group.userData.turretPivot = turretPivot;
+
   const t = d.turret;
   if (t.style === 'cylinder') {
     const tur = new THREE.Mesh(
@@ -84,10 +89,10 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     tur.position.set(0, t.y, t.z);
     tur.userData.tankPart = 'turret';
-    group.add(tur);
+    turretPivot.add(tur);
   } else {
     addBox(
-      group,
+      turretPivot,
       new THREE.BoxGeometry(t.w, t.h, t.d),
       body,
       { y: t.y, z: t.z, part: 'turret' }
@@ -95,7 +100,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   }
   if (t.bustle) {
     addBox(
-      group,
+      turretPivot,
       new THREE.BoxGeometry(t.w * 0.32, t.h * 0.72, t.d * 0.38),
       body,
       { y: t.y - 0.02, z: t.z - t.d * 0.42, part: 'turret' }
@@ -103,7 +108,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   }
   if (t.style === 'forward') {
     addBox(
-      group,
+      turretPivot,
       new THREE.BoxGeometry(t.w * 0.85, t.h * 0.35, t.d * 0.55),
       body,
       { y: t.y + 0.22, z: t.z + t.d * 0.15, part: 'turret' }
@@ -111,7 +116,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   }
   if (t.cheek) {
     const [cw, ch, cd] = t.cheek;
-    addBox(group, new THREE.BoxGeometry(cw, ch, cd), body, {
+    addBox(turretPivot, new THREE.BoxGeometry(cw, ch, cd), body, {
       y: t.y - 0.03,
       z: t.z,
       part: 'turret',
@@ -126,11 +131,11 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   barrel.rotation.x = Math.PI / 2;
   barrel.position.set(b.offsetX ?? 0, b.y, b.z);
   barrel.userData.tankPart = 'barrel';
-  group.add(barrel);
+  turretPivot.add(barrel);
 
   if (b.mantlet) {
     const [mw, mh, md] = b.mantletSize ?? [0.44, 0.3, 0.36];
-    addBox(group, new THREE.BoxGeometry(mw, mh, md), body, {
+    addBox(turretPivot, new THREE.BoxGeometry(mw, mh, md), body, {
       y: b.y - 0.02,
       z: b.z - b.len * 0.32,
       part: 'mantlet',
@@ -143,12 +148,12 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     mb.rotation.x = Math.PI / 2;
     mb.position.set(0, b.y, b.z + b.len * 0.48);
-    group.add(mb);
+    turretPivot.add(mb);
   }
 
   const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.12, 8), body);
   cupola.position.set(0, t.y + t.h * 0.55, t.z - t.d * 0.15);
-  group.add(cupola);
+  turretPivot.add(cupola);
 
   if (d.coax) {
     const c = d.coax;
@@ -158,7 +163,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     coax.position.set(0.12, c.y, c.z);
     coax.userData.tankPart = 'barrel';
-    group.add(coax);
+    turretPivot.add(coax);
   }
   if (d.antenna) {
     const a = d.antenna;

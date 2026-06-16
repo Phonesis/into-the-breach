@@ -2093,7 +2093,7 @@ export class UIManager {
         <div class="end-stats-col">
           <h3>${side}</h3>
           <p class="end-stats-subheading">Casualties</p>
-          <p class="end-stats-total">${unitTotal} casualty${unitTotal === 1 ? '' : 'ies'}</p>
+          <p class="end-stats-total">${unitTotal} ${unitTotal === 1 ? 'casualty' : 'casualties'}</p>
           <ul class="end-stats-list">${unitRows}${hqRow}</ul>
           ${captureBlock}
           ${defenseBlock}

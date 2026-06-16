@@ -20,12 +20,14 @@ export class FireSupportManager {
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
+    this._sceneryStrikeCount = 0;
   }
 
   reset() {
     this.pending = null;
     this.cooldowns = { strafe: 0, barrage: 0 };
     this.events = [];
+    this._sceneryStrikeCount = 0;
     this.clearPreview();
   }
 
@@ -157,9 +159,8 @@ export class FireSupportManager {
         this.events.push({
           at: t,
           fn: () => {
-            spawnStrikeImpact(scene, mapDef, ix, iz, false, this.game._terrainMesh);
+            spawnStrikeImpact(scene, mapDef, ix, iz, 'strafe', this.game._terrainMesh);
             this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15);
-            sounds.playImpact('bullet', { x: ix, z: iz }, 0.02);
           },
         });
       }
@@ -180,7 +181,7 @@ export class FireSupportManager {
         this.events.push({
           at: t,
           fn: () => {
-            spawnStrikeImpact(scene, mapDef, ix, iz, true, this.game._terrainMesh);
+            spawnStrikeImpact(scene, mapDef, ix, iz, 'barrage', this.game._terrainMesh);
             this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2);
             sounds.playImpact('shell', { x: ix, z: iz }, 0.05);
           },
@@ -191,11 +192,16 @@ export class FireSupportManager {
 
   applyDamage(x, z, radius, unitDamage, hqDamage) {
     const cover = this.game.coverSystem;
+    const radiusSq = radius * radius;
+    const hqRadius = radius * 1.2;
+    const hqRadiusSq = hqRadius * hqRadius;
 
-    for (const u of this.game.units) {
-      if (u.dead || u.team === PLAYER) continue;
-      const d = Math.hypot(u.position.x - x, u.position.z - z);
-      if (d > radius) continue;
+    for (const u of this.game._enemyAlive ?? []) {
+      const dx = u.position.x - x;
+      const dz = u.position.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > radiusSq) continue;
+      const d = Math.sqrt(d2);
       const t = 1 - d / radius;
       let dmg = unitDamage * t * t;
       dmg *= getIncomingDamageMultiplier(u, cover);
@@ -204,15 +210,21 @@ export class FireSupportManager {
 
     for (const h of this.game.hqs) {
       if (h.dead || h.team === PLAYER) continue;
-      const d = Math.hypot(h.position.x - x, h.position.z - z);
-      if (d > radius * 1.2) continue;
-      const t = 1 - d / (radius * 1.2);
+      const dx = h.position.x - x;
+      const dz = h.position.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > hqRadiusSq) continue;
+      const d = Math.sqrt(d2);
+      const t = 1 - d / hqRadius;
       let dmg = hqDamage * t;
       if (this.game.tutorial) dmg *= PRACTICE_TARGET_HQ_DAMAGE_MULT;
       h.takeDamage(dmg);
     }
 
-    this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * 1.1);
+    this._sceneryStrikeCount++;
+    if (this._sceneryStrikeCount % 4 === 0) {
+      this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * 1.1);
+    }
   }
 
   update(dt) {

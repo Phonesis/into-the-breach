@@ -137,7 +137,7 @@ import {
 } from '../effects/CombatEffects.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
-import { addExplosionCrater, clearTerrainDamage } from '../world/TerrainDamage.js';
+import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
 import { spawnArmy } from './Spawner.js';
 import { updateCombat, updateMovement, tickUnitCooldowns } from './Combat.js';
 import { updateAI, resetAI } from './AI.js';
@@ -156,6 +156,7 @@ import {
   isInfantryUnitType,
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
+import { snapUnitYaw } from '../units/VehicleRotation.js';
 import {
   applyUnitDeathVisual,
   unitHasCorpseLinger,
@@ -1091,7 +1092,7 @@ export class Game {
       const dx = target.x - u.position.x;
       const dz = target.z - u.position.z;
       if (dx * dx + dz * dz > 0.04) {
-        u.mesh.rotation.y = Math.atan2(dx, dz);
+        snapUnitYaw(u, Math.atan2(dx, dz));
       }
     }
   }
@@ -2253,6 +2254,7 @@ export class Game {
 
         this.fireSupport.update(dt);
         updateFireSupportEffects(dt, this.scene);
+        flushTerrainNormals(this._terrainMesh);
 
         if (fieldHasUnits || hasCorpses) {
           updateWreckEffects(dt, this.camera);

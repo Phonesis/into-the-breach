@@ -573,3 +573,87 @@ export function spawnShellExplosion(scene, pos, tier = 'heavy') {
     maxLife: life,
   });
 }
+
+/** Cheaper burst for rapid fire-support hits — no dynamic light, fewer particles. */
+export function spawnShellExplosionLite(scene, pos, tier = 'medium') {
+  if (!canSpawnEffect()) return;
+
+  const p = toVec3(pos);
+  const group = new THREE.Group();
+  group.position.copy(p);
+
+  const geos = [];
+  const mats = [];
+  const heavy = tier === 'heavy';
+  const partCount = heavy ? 6 : 4;
+  const spread = heavy ? 2.4 : 1.8;
+  const baseSize = heavy ? 0.55 : 0.42;
+
+  for (let i = 0; i < partCount; i++) {
+    const geo = new THREE.SphereGeometry(baseSize + Math.random() * 0.45, 5, 5);
+    const mat = new THREE.MeshBasicMaterial({
+      color: i % 2 ? 0xff5500 : 0x333333,
+      transparent: true,
+      opacity: heavy ? 0.82 : 0.72,
+    });
+    const part = new THREE.Mesh(geo, mat);
+    part.position.set(
+      (Math.random() - 0.5) * spread,
+      Math.random() * (heavy ? 1.1 : 0.8),
+      (Math.random() - 0.5) * spread
+    );
+    group.add(part);
+    geos.push(geo);
+    mats.push(mat);
+  }
+
+  const flashMat = new THREE.SpriteMaterial({
+    map: getFlashTexture(heavy ? 0xff7722 : 0xff9944),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    opacity: 1,
+  });
+  const flashSprite = new THREE.Sprite(flashMat);
+  const flashScale = heavy ? 5.5 : 4.2;
+  flashSprite.scale.set(flashScale, flashScale, 1);
+  flashSprite.position.y = heavy ? 0.9 : 0.65;
+  flashSprite.renderOrder = 14;
+  group.add(flashSprite);
+  mats.push(flashMat);
+
+  const smokePuffs = [];
+  const puffCount = heavy ? 2 : 1;
+  for (let i = 0; i < puffCount; i++) {
+    const sGeo = new THREE.SphereGeometry(0.55 + Math.random() * 0.25, 5, 5);
+    const sMat = new THREE.MeshBasicMaterial({
+      color: 0x444444,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+    });
+    const puff = new THREE.Mesh(sGeo, sMat);
+    puff.position.set((Math.random() - 0.5) * 1.2, 0.15 + Math.random() * 0.35, (Math.random() - 0.5) * 1.2);
+    group.add(puff);
+    geos.push(sGeo);
+    mats.push(sMat);
+    smokePuffs.push({ mesh: puff, mat: sMat });
+  }
+
+  scene.add(group);
+
+  const life = heavy ? 0.72 : 0.58;
+  registerEffect({
+    type: 'shellExplosion',
+    tier: heavy ? 'heavy' : 'medium',
+    group,
+    flashSprite,
+    flashMat,
+    smokePuffs,
+    geometries: geos,
+    materials: mats,
+    life,
+    maxLife: life,
+  });
+}

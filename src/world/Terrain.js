@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMoveReachConfig } from '../units/VehicleTypes.js';
+import { faceUnitTowardMovement } from '../units/VehicleRotation.js';
 import {
   createAOMap,
   createGroundTexture,
@@ -271,6 +272,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
         unit.position.x += (dx / horiz) * creep;
         unit.position.z += (dz / horiz) * creep;
         unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+        faceUnitTowardMovement(unit, dx / horiz, dz / horiz, subDt);
       }
       continue;
     }
@@ -287,7 +289,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     unit.position.x += nx * step;
     unit.position.z += nz * step;
     unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
-    unit.mesh.rotation.y = Math.atan2(nx, nz);
+    faceUnitTowardMovement(unit, nx, nz, subDt);
   }
 
   return true;

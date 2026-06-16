@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
-import { spawnShellExplosion } from './CombatEffects.js';
+import { spawnShellExplosionLite } from './CombatEffects.js';
 
 const active = [];
+const MAX_ACTIVE_WARNINGS = 2;
 
 export function clearFireSupportEffects() {
   while (active.length) {
@@ -41,8 +42,11 @@ export function updateFireSupportEffects(dt, scene) {
 }
 
 export function spawnStrikeWarning(scene, mapDef, x, z, radius, isBarrage) {
+  const warningCount = active.filter((fx) => fx.type === 'warning').length;
+  if (warningCount >= MAX_ACTIVE_WARNINGS) return;
+
   const y = sampleTerrainHeight(x, z, mapDef) + 0.2;
-  const geo = new THREE.RingGeometry(radius * 0.85, radius, 48);
+  const geo = new THREE.RingGeometry(radius * 0.85, radius, 32);
   geo.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({
     color: isBarrage ? 0xff4422 : 0xffaa44,
@@ -95,8 +99,23 @@ export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5) {
   });
 }
 
-export function spawnStrikeImpact(scene, mapDef, x, z, heavy = false, terrainMesh = null) {
+/**
+ * @param {'strafe'|'barrage'} kind
+ */
+export function spawnStrikeImpact(scene, mapDef, x, z, kind = 'barrage', terrainMesh = null) {
   const y = sampleTerrainHeight(x, z, mapDef);
-  spawnShellExplosion(scene, { x, y: y + 0.5, z }, heavy ? 'heavy' : 'medium');
-  addExplosionCrater(scene, mapDef, x, z, heavy ? 'heavy' : 'medium', terrainMesh);
+  const pos = { x, y: y + 0.5, z };
+
+  if (kind === 'strafe') {
+    spawnShellExplosionLite(scene, pos, 'medium');
+    return;
+  }
+
+  spawnShellExplosionLite(scene, pos, 'heavy');
+  addExplosionCrater(scene, mapDef, x, z, 'medium', terrainMesh, {
+    deformTerrain: false,
+    heavy: false,
+    radius: 3.1,
+    minGap: 90,
+  });
 }
