@@ -13,6 +13,7 @@ import {
   DEFENSE_UPGRADES,
   DEFENSE_TYPES,
   TD_MAX_ARTILLERY_PITS,
+  TD_WAVE_MODE_LIST,
   getArtilleryPitCount,
   defenseNeedsAmmo,
   getResupplyCost,
@@ -99,6 +100,7 @@ export class UIManager {
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
+    this.selectedTdWaveMode = 'standard';
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
     this._hudBaseBuilding = false;
@@ -202,6 +204,10 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="campaign-style-block">
             <h2>Campaign Style</h2>
             <div class="campaign-style-grid" id="campaign-style-grid"></div>
+          </div>
+          <div class="campaign-style-block hidden" id="td-wave-mode-block">
+            <h2>Wave Mode</h2>
+            <div class="campaign-style-grid" id="td-wave-mode-grid"></div>
           </div>
           <div class="actions">
             <button class="btn btn-secondary interactive" id="btn-back-faction">Back</button>
@@ -518,15 +524,32 @@ export class UIManager {
     ).join('');
   }
 
+  renderTdWaveModes() {
+    const grid = this.root.querySelector('#td-wave-mode-grid');
+    if (!grid) return;
+    grid.innerHTML = TD_WAVE_MODE_LIST.map(
+      (m) => `
+      <button type="button" class="card-btn interactive campaign-style-card td-wave-mode-card${m.id === this.selectedTdWaveMode ? ' selected' : ''}" data-id="${m.id}">
+        <span class="name">${m.name}</span>
+        <span class="meta">${m.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
   updateDifficultyPanel() {
     const block = this.root.querySelector('#difficulty-block');
     const styleBlock = this.root.querySelector('#campaign-style-block');
+    const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
     const isTutorial = this.selectedGameMode === 'tutorial';
     const isCampaign = this.selectedGameMode === 'campaign';
+    const isTowerDefense = this.selectedGameMode === 'towerDefense';
     if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
+    if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
     this.renderDifficulties();
     if (isCampaign) this.renderCampaignStyles();
+    if (isTowerDefense) this.renderTdWaveModes();
   }
 
   renderAssaultRoles() {
@@ -701,10 +724,20 @@ export class UIManager {
 
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
-      if (!btn) return;
-      this.root.querySelectorAll('.campaign-style-card').forEach((b) => b.classList.remove('selected'));
+      if (!btn || btn.classList.contains('td-wave-mode-card')) return;
+      this.root.querySelectorAll('.campaign-style-card').forEach((b) => {
+        if (!b.classList.contains('td-wave-mode-card')) b.classList.remove('selected');
+      });
       btn.classList.add('selected');
       this.selectedCampaignStyle = btn.dataset.id;
+    });
+
+    this.root.querySelector('#td-wave-mode-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.td-wave-mode-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.td-wave-mode-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedTdWaveMode = btn.dataset.id;
     });
 
     this.root.querySelectorAll('.map-card').forEach((btn) => {
@@ -726,6 +759,8 @@ export class UIManager {
           mapSize: this.selectedMapSize ?? 'medium',
           campaignStyle:
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
+          tdWaveMode:
+            this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
         });
       }
     };
@@ -876,6 +911,7 @@ export class UIManager {
     if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
+    this._hudTdEndless = !!(towerDefense && options.tdEndless);
     this.root.querySelector('#td-wave-countdown')?.classList.add('hidden');
     this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
     this._hudTowerDefense = towerDefense;
@@ -916,8 +952,9 @@ export class UIManager {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
       } else if (towerDefense) {
-        this._defaultHudHint =
-          'Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves';
+        this._defaultHudHint = options.tdEndless
+          ? 'Tower Defence (Endless): build behind the frontline · survive escalating waves · see how long you last'
+          : 'Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves';
       } else if (lastStand) {
         this._defaultHudHint =
           'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
@@ -1244,7 +1281,11 @@ export class UIManager {
     if (!hud) return;
     const waveEl = this.root.querySelector('#td-wave-label');
     const phaseEl = this.root.querySelector('#td-phase-label');
-    if (waveEl) waveEl.textContent = `Wave ${hud.wave} / ${hud.maxWaves}`;
+    if (waveEl) {
+      waveEl.textContent = hud.endless
+        ? `Wave ${hud.wave} · Endless`
+        : `Wave ${hud.wave} / ${hud.maxWaves}`;
+    }
     if (phaseEl) phaseEl.textContent = hud.phaseLabel;
 
     const countdown = this.root.querySelector('#td-wave-countdown');
@@ -2183,8 +2224,13 @@ export class UIManager {
 
     const showPlayerDefenses =
       report.towerDefense || (report.playerDefenseTotal ?? 0) > 0;
+    const tdEndlessBanner =
+      report.tdEndless
+        ? `<p class="end-stats-td-endless">Endless Tower Defence — <strong>${report.tdWavesCleared ?? 0}</strong> wave${(report.tdWavesCleared ?? 0) === 1 ? '' : 's'} cleared</p>`
+        : '';
 
     return `
+      ${tdEndlessBanner}
       <h3 class="end-stats-heading">Battle casualties</h3>
       <div class="end-stats-grid">
         ${col(report.playerName, {

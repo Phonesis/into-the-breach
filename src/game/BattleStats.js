@@ -182,7 +182,14 @@ export class BattleStats {
     return lines;
   }
 
-  buildReport({ playerName, enemyName, tutorial, towerDefense = false }) {
+  buildReport({
+    playerName,
+    enemyName,
+    tutorial,
+    towerDefense = false,
+    tdEndless = false,
+    tdWavesCleared = 0,
+  }) {
     const playerLines = this.formatTeamLosses('player');
     const enemyLines = this.formatTeamLosses('enemy');
     const playerDefenseLines = this.formatDefenseLosses('player');
@@ -227,6 +234,8 @@ export class BattleStats {
       materielNote: MATERIEL_COST_NOTE,
       tutorial,
       towerDefense,
+      tdEndless,
+      tdWavesCleared,
     };
   }
 }

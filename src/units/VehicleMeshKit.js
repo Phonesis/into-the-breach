@@ -208,11 +208,13 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
   );
   if (d.glacis) {
     const g = d.glacis;
+    const hullTop = h.y + h.h / 2;
+    const deckH = Math.min(g.h * 0.14, 0.1);
     addBox(
       group,
-      new THREE.BoxGeometry(g.w, g.h, g.d),
+      new THREE.BoxGeometry(g.w, deckH, g.d),
       body,
-      { y: g.y, z: g.z, rx: g.tilt ?? 0, part: 'hull' }
+      { y: hullTop - deckH / 2, z: g.z, part: 'hull' }
     );
   }
   trackRun(group, dark, -1, d.track);

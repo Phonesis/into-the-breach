@@ -42,7 +42,7 @@ function skyRadiusForMap(mapSize) {
   return Math.max(420, (mapSize ?? 140) * 2.2);
 }
 
-export function setupSceneEnvironment(scene, mapDef) {
+export function setupSceneEnvironment(scene, mapDef, renderer) {
   const sky = new THREE.Color(mapDef.skyColor ?? 0x6b7d8f);
   const fog = new THREE.Color(mapDef.fogColor ?? 0x8a9aaa);
   const horizon = sky.clone().lerp(fog, 0.55);
@@ -52,6 +52,7 @@ export function setupSceneEnvironment(scene, mapDef) {
 
   scene.background = horizon.clone();
   scene.fog = new THREE.FogExp2(fog.getHex(), mapDef.fogDensity ?? 0.0052);
+  if (renderer) renderer.setClearColor(horizon, 1);
 
   disposeSceneEnvironment(scene);
 
@@ -60,7 +61,7 @@ export function setupSceneEnvironment(scene, mapDef) {
   skyGroup.userData.skyRadius = skyRadius;
   scene.add(skyGroup);
 
-  addHorizonSkirt(skyGroup, horizon, fog, mapDef.groundColor ?? fog.getHex(), mapSize, skyRadius);
+  addMapSkyBorder(scene, horizon, fog, sky, mapDef.groundColor ?? fog.getHex(), mapSize);
   addCloudLayers(skyGroup, sky, fog, mapSize, skyRadius);
 
   return { skyGroup, fogColor: fog, sunDir: new THREE.Vector3(-0.55, 0.62, 0.42).normalize() };
@@ -73,13 +74,14 @@ export function updateSkyForCamera(scene, x, z) {
 }
 
 export function disposeSceneEnvironment(scene) {
-  const sky = scene.getObjectByName('sky');
-  if (sky) {
-    sky.traverse((c) => {
+  for (const name of ['sky', 'mapBorder']) {
+    const group = scene.getObjectByName(name);
+    if (!group) continue;
+    group.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) c.material.dispose();
     });
-    scene.remove(sky);
+    scene.remove(group);
   }
   for (let i = scene.children.length - 1; i >= 0; i--) {
     const c = scene.children[i];
@@ -132,20 +134,27 @@ function createSkyDome(topColor, horizonColor, radius) {
   return group;
 }
 
-function addHorizonSkirt(skyGroup, horizonColor, fogColor, groundHex, mapSize, skyRadius) {
-  const inner = mapSize * 0.42;
-  const outer = skyRadius * 0.82;
-  const geo = new THREE.RingGeometry(inner, outer, 96, 1);
-  geo.rotateX(-Math.PI / 2);
+/** Map-anchored backdrop beyond the playable terrain — fades ground into sky at the theater edge. */
+function addMapSkyBorder(scene, horizonColor, fogColor, skyColor, groundHex, mapSize) {
+  const group = new THREE.Group();
+  group.name = 'mapBorder';
 
+  const half = mapSize * 0.5;
+  const inner = Math.max(half - 10, half * 0.92);
+  const outer = half + Math.max(180, mapSize * 0.85);
   const groundColor = new THREE.Color(groundHex);
-  const mat = new THREE.ShaderMaterial({
+  const skyTint = skyColor.clone().lerp(new THREE.Color(0x9ec8e8), 0.42);
+
+  const ringGeo = new THREE.RingGeometry(inner, outer, 128, 1);
+  ringGeo.rotateX(-Math.PI / 2);
+  const ringMat = new THREE.ShaderMaterial({
     uniforms: {
       uInner: { value: inner },
       uOuter: { value: outer },
       uGround: { value: groundColor },
-      uHorizon: { value: horizonColor },
       uFog: { value: fogColor },
+      uHorizon: { value: horizonColor },
+      uSky: { value: skyTint },
     },
     vertexShader: `
       varying vec2 vXZ;
@@ -159,15 +168,18 @@ function addHorizonSkirt(skyGroup, horizonColor, fogColor, groundHex, mapSize, s
       uniform float uInner;
       uniform float uOuter;
       uniform vec3 uGround;
-      uniform vec3 uHorizon;
       uniform vec3 uFog;
+      uniform vec3 uHorizon;
+      uniform vec3 uSky;
       varying vec2 vXZ;
       void main() {
         float r = length(vXZ);
         float t = clamp((r - uInner) / (uOuter - uInner), 0.0, 1.0);
-        vec3 col = mix(uGround, mix(uFog, uHorizon, pow(t, 0.65)), smoothstep(0.0, 0.35, t));
-        float alpha = smoothstep(uInner, uInner + 8.0, r) * (1.0 - smoothstep(uOuter - 24.0, uOuter, r));
-        gl_FragColor = vec4(col, alpha * 0.92);
+        vec3 nearCol = mix(uGround, uFog, 0.35);
+        vec3 midCol = mix(nearCol, uHorizon, smoothstep(0.0, 0.42, t));
+        vec3 col = mix(midCol, uSky, smoothstep(0.38, 1.0, pow(t, 0.82)));
+        float edgeSoft = smoothstep(uInner, uInner + 6.0, r);
+        gl_FragColor = vec4(col, edgeSoft);
       }
     `,
     transparent: true,
@@ -175,12 +187,58 @@ function addHorizonSkirt(skyGroup, horizonColor, fogColor, groundHex, mapSize, s
     side: THREE.DoubleSide,
     fog: false,
   });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.y = -0.9;
+  ring.renderOrder = -2;
+  ring.name = 'horizonRing';
+  group.add(ring);
 
-  const skirt = new THREE.Mesh(geo, mat);
-  skirt.position.y = -0.35;
-  skirt.renderOrder = -2;
-  skirt.name = 'horizonSkirt';
-  skyGroup.add(skirt);
+  addMapEdgeVeils(group, groundColor, fogColor, horizonColor, skyTint, mapSize, half, outer);
+
+  scene.add(group);
+}
+
+function addMapEdgeVeils(group, groundColor, fogColor, horizonColor, skyTint, mapSize, half, extent) {
+  const veilW = mapSize + (extent - half) * 2 + 48;
+  const veilH = 148;
+  const geo = new THREE.PlaneGeometry(veilW, veilH, 1, 10);
+  const colors = [];
+  for (let i = 0; i < geo.attributes.position.count; i++) {
+    const y = geo.attributes.position.getY(i);
+    const t = THREE.MathUtils.clamp((y + veilH * 0.5) / veilH, 0, 1);
+    const c = groundColor
+      .clone()
+      .lerp(fogColor, Math.pow(t, 0.45) * 0.55)
+      .lerp(horizonColor, Math.pow(t, 0.72))
+      .lerp(skyTint, Math.pow(t, 2.1));
+    colors.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    fog: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.96,
+  });
+
+  const inset = 0.6;
+  const placements = [
+    { x: 0, z: half + inset, ry: Math.PI },
+    { x: 0, z: -half - inset, ry: 0 },
+    { x: half + inset, z: 0, ry: -Math.PI / 2 },
+    { x: -half - inset, z: 0, ry: Math.PI / 2 },
+  ];
+
+  for (const p of placements) {
+    const veil = new THREE.Mesh(geo.clone(), mat.clone());
+    veil.position.set(p.x, veilH * 0.46, p.z);
+    veil.rotation.y = p.ry;
+    veil.renderOrder = -2;
+    group.add(veil);
+  }
 }
 
 function addCloudLayers(skyGroup, skyColor, fogColor, mapSize, skyRadius) {

@@ -25,7 +25,7 @@ export const GAME_MODES = {
     id: 'towerDefense',
     name: 'Tower Defence',
     subtitle:
-      'Hold the frontline against escalating waves. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.',
+      'Hold the frontline against escalating waves — 12-wave victory or endless survival. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.',
   },
   lastStand: {
     id: 'lastStand',

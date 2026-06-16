@@ -620,7 +620,7 @@ export class Game {
       this.baseBuildings.enable();
     }
 
-    setupSceneEnvironment(this.scene, this.mapDef);
+    setupSceneEnvironment(this.scene, this.mapDef, this.renderer);
     this.lights = setupLighting(this.scene);
 
     this.scenery = new DestructibleScenery(this.scene, this.mapDef, () => this._terrainMesh);
@@ -711,6 +711,7 @@ export class Game {
       this.towerDefense = createTowerDefenseState({
         mapDef: this.mapDef,
         difficulty: this.difficulty,
+        waveMode: options.tdWaveMode ?? 'standard',
       });
       startNextWave(this.towerDefense);
       this.defenses = new DefenseStructureManager({
@@ -880,6 +881,7 @@ export class Game {
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
       towerDefense: this.towerDefense,
+      tdEndless: !!this.towerDefense?.endless,
       lastStand: !!this.lastStand,
       campaignStyle: this.campaignStyle,
     });
@@ -889,9 +891,6 @@ export class Game {
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
-    preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
-      if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
-    });
     if (isBaseBuildingCampaign(this)) {
       const playerHq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
       if (playerHq) {
@@ -917,6 +916,9 @@ export class Game {
     this._rebuildUnitCaches();
     this._syncUnitRoster();
     this._updateMinimap();
+    preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
+      if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+    });
     this._startRenderLoop();
   }
 
@@ -1930,6 +1932,8 @@ export class Game {
       enemyName: this.enemyFaction.name,
       tutorial: this.tutorial,
       towerDefense: !!this.towerDefense,
+      tdEndless: !!this.towerDefense?.endless,
+      tdWavesCleared: this.towerDefense?.wavesCleared ?? 0,
     });
   }
 
@@ -2184,7 +2188,16 @@ export class Game {
           updateTowerDefenseMode(this, dt);
         }
 
+        this._fieldIconUiAccum += dt;
+        if (this._fieldIconUiAccum >= 0.12) {
+          this._fieldIconUiAccum = 0;
+          syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+        }
+
         if (isLastStandDeployPhase(this)) {
+          this.updateCamera(dt);
+          updateLightingForTarget(this.lights, this.cameraTarget.x, this.cameraTarget.z);
+          this._renderFrame();
           return;
         }
 
@@ -2217,11 +2230,6 @@ export class Game {
         if (this.coverSystem && this._coverUiAccum >= 0.12) {
           this._coverUiAccum = 0;
           this.coverSystem.updateUnits(this._aliveUnits);
-        }
-        this._fieldIconUiAccum += dt;
-        if (this._fieldIconUiAccum >= 0.12) {
-          this._fieldIconUiAccum = 0;
-          syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
         }
         const playerSelected = this._playerAlive.filter((u) => u.selected);
         this._maybeUpdateSelectionPanel(playerSelected, dt);

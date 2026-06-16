@@ -14,8 +14,9 @@ const PLAYER = 'player';
 const ENEMY = 'enemy';
 
 /** @returns {{ wave, phase: 'prepare'|'active', phaseTimer, spawnQueue, spawned, totalToSpawn }} */
-export function createTowerDefenseState({ mapDef, difficulty }) {
+export function createTowerDefenseState({ mapDef, difficulty, waveMode = 'standard' }) {
   const waveMult = difficulty?.enemyArmyMult ?? 1;
+  const endless = waveMode === 'endless';
   return {
     wave: 0,
     phase: 'prepare',
@@ -24,14 +25,20 @@ export function createTowerDefenseState({ mapDef, difficulty }) {
     spawned: 0,
     totalToSpawn: 0,
     waveMult,
+    waveMode,
+    endless,
+    wavesCleared: 0,
     killsThisWave: 0,
     breached: false,
   };
 }
 
-export function getWaveComposition(wave, waveMult = 1) {
+export function getWaveComposition(wave, waveMult = 1, endless = false) {
   const w = wave;
-  const m = Math.max(1, waveMult);
+  let m = Math.max(1, waveMult);
+  if (endless && w > TD_WAVES_TO_WIN) {
+    m *= 1 + (w - TD_WAVES_TO_WIN) * 0.06;
+  }
   const slots = [];
   const add = (type, count) => {
     const n = Math.max(0, Math.round(count * m));
@@ -50,8 +57,8 @@ export function getWaveComposition(wave, waveMult = 1) {
   return slots;
 }
 
-function buildSpawnQueue(wave, waveMult) {
-  const slots = getWaveComposition(wave, waveMult);
+function buildSpawnQueue(wave, waveMult, endless = false) {
+  const slots = getWaveComposition(wave, waveMult, endless);
   const queue = [];
   for (const slot of slots) {
     for (let i = 0; i < slot.count; i++) {
@@ -69,7 +76,7 @@ export function startNextWave(td) {
   td.wave += 1;
   td.phase = 'prepare';
   td.phaseTimer = td.wave === 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
-  td.spawnQueue = buildSpawnQueue(td.wave, td.waveMult);
+  td.spawnQueue = buildSpawnQueue(td.wave, td.waveMult, td.endless);
   td.spawned = 0;
   td.totalToSpawn = td.spawnQueue.length;
   td.killsThisWave = 0;
@@ -148,9 +155,10 @@ function spawnWaveUnit(game, type) {
 
 function onWaveCleared(game, td) {
   game.resources.player += TD_WAVE_CLEAR_BONUS + td.wave * 12;
+  td.wavesCleared = td.wave;
   game.ui?.updateTowerDefense?.(game);
 
-  if (td.wave >= TD_WAVES_TO_WIN) {
+  if (!td.endless && td.wave >= TD_WAVES_TO_WIN) {
     game.endGame(
       true,
       `All ${TD_WAVES_TO_WIN} assault waves repelled — the frontline holds!`
@@ -160,6 +168,15 @@ function onWaveCleared(game, td) {
 
   startNextWave(td);
   game.ui?.updateTowerDefense?.(game);
+}
+
+function formatEndlessDefeatDetail(td, reason) {
+  const n = td?.wavesCleared ?? 0;
+  const waveLabel = `${n} wave${n === 1 ? '' : 's'} cleared`;
+  if (reason === 'hq') {
+    return `Endless mode — ${waveLabel}. Your headquarters was overrun.`;
+  }
+  return `Endless mode — ${waveLabel}. The frontline was breached.`;
 }
 
 export function rewardTowerDefenseKill(game, unit) {
@@ -255,13 +272,22 @@ export function checkTowerDefenseBreach(game) {
 }
 
 export function checkTowerDefenseVictory(game) {
+  const td = game.towerDefense;
   const breach = checkTowerDefenseBreach(game);
-  if (breach) return breach;
+  if (breach) {
+    if (td?.endless) {
+      return { victory: false, detail: formatEndlessDefeatDetail(td, 'breach') };
+    }
+    return breach;
+  }
 
   if (game.matchTime < 2) return null;
 
   const playerHQ = game.hqs.find((h) => h.team === PLAYER);
   if (playerHQ?.dead) {
+    if (td?.endless) {
+      return { victory: false, detail: formatEndlessDefeatDetail(td, 'hq') };
+    }
     return {
       victory: false,
       detail: 'Your headquarters was overrun.',
@@ -288,11 +314,15 @@ export function formatTowerDefenseHud(td) {
       : '';
   const countdownSubtitle =
     td.phase === 'prepare'
-      ? `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline`
+      ? td.endless
+        ? `Wave ${td.wave} — endless assault`
+        : `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline`
       : '';
   return {
     wave: td.wave,
-    maxWaves: TD_WAVES_TO_WIN,
+    maxWaves: td.endless ? null : TD_WAVES_TO_WIN,
+    endless: !!td.endless,
+    wavesCleared: td.wavesCleared ?? 0,
     phase: td.phase,
     phaseLabel,
     phaseTimer: secondsLeft,

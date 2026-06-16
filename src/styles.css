@@ -2515,6 +2515,17 @@ body,
   display: none;
 }
 
+.end-stats-td-endless {
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.75rem;
+  text-align: center;
+  font-size: 0.92rem;
+  color: #e8e4dc;
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.28);
+  border-radius: 6px;
+}
+
 .end-stats-heading {
   font-family: 'Source Sans 3', system-ui, sans-serif;
   font-size: 0.75rem;

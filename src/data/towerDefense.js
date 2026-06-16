@@ -4,6 +4,22 @@ export const TD_STARTING_POINTS = 200;
 export const TD_PREPARE_TIME = 38;
 export const TD_PREPARE_TIME_BETWEEN = 30;
 export const TD_WAVES_TO_WIN = 12;
+
+/** Tower Defence wave rules — standard clears 12 waves; endless escalates until defeat. */
+export const TD_WAVE_MODES = {
+  standard: {
+    id: 'standard',
+    name: '12 Waves',
+    subtitle: 'Repel 12 assault waves to win.',
+  },
+  endless: {
+    id: 'endless',
+    name: 'Endless',
+    subtitle: 'Escalating waves — survive as long as you can.',
+  },
+};
+
+export const TD_WAVE_MODE_LIST = Object.values(TD_WAVE_MODES);
 /** Enemy dot past frontline toward HQ above this = sector lost. */
 export const TD_BREACH_MARGIN = 2;
 export const TD_KILL_REWARD = {

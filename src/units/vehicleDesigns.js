@@ -61,7 +61,7 @@ const DESIGNS = {
         { x: -0.58, y: 0.76, z: -1.74, h: 0.42 },
         { x: 0.58, y: 0.76, z: -1.74, h: 0.42 },
       ],
-      spareTrack: [{ w: 1.05, h: 0.08, d: 0.22, y: 0.98, z: 1.84, rx: -0.24 }],
+      spareTrack: [{ w: 1.05, h: 0.08, d: 0.22, y: 0.98, z: 1.84 }],
       hitRadius: 2.28,
     },
     superHeavyTank: {
@@ -82,7 +82,7 @@ const DESIGNS = {
         { x: -0.72, y: 0.9, z: -2.18, h: 0.48 },
         { x: 0.72, y: 0.9, z: -2.18, h: 0.48 },
       ],
-      spareTrack: [{ w: 1.22, h: 0.09, d: 0.24, y: 1.12, z: 2.28, rx: -0.2 }],
+      spareTrack: [{ w: 1.22, h: 0.09, d: 0.24, y: 1.12, z: 2.28 }],
       hitRadius: 2.78,
     },
     armoredCar: {
@@ -135,7 +135,7 @@ const DESIGNS = {
       bowMg: { x: -0.46, y: 0.74, z: 1.56, len: 0.42 },
       stowageBins: [{ w: 0.16, h: 0.2, d: 0.58, x: 0.08, y: 0.78, z: -0.7 }],
       exhausts: [{ x: 0.55, y: 0.76, z: -1.62, h: 0.36 }],
-      spareTrack: [{ w: 0.82, h: 0.08, d: 0.2, y: 0.94, z: 1.62, rx: -0.32 }],
+      spareTrack: [{ w: 0.82, h: 0.08, d: 0.2, y: 0.94, z: 1.62 }],
       hitRadius: 2.22,
     },
     superHeavyTank: {
@@ -153,7 +153,7 @@ const DESIGNS = {
       bowMg: { x: -0.5, y: 0.82, z: 1.92, len: 0.44 },
       stowageBins: [{ w: 0.18, h: 0.24, d: 0.75, x: 0.09, y: 0.9, z: -0.84 }],
       exhausts: [{ x: 0.66, y: 0.84, z: -2.02, h: 0.42 }],
-      spareTrack: [{ w: 1.05, h: 0.08, d: 0.22, y: 1.04, z: 2.0, rx: -0.26 }],
+      spareTrack: [{ w: 1.05, h: 0.08, d: 0.22, y: 1.04, z: 2.0 }],
       hitRadius: 2.72,
     },
     armoredCar: {
@@ -300,7 +300,7 @@ const DESIGNS = {
         { x: -0.62, y: 0.86, z: -2.1, h: 0.42 },
         { x: 0.62, y: 0.86, z: -2.1, h: 0.42 },
       ],
-      spareTrack: [{ w: 1.0, h: 0.08, d: 0.22, y: 1.02, z: 2.14, rx: -0.26 }],
+      spareTrack: [{ w: 1.0, h: 0.08, d: 0.22, y: 1.02, z: 2.14 }],
       hitRadius: 2.75,
     },
     armoredCar: {
