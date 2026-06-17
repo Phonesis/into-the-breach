@@ -17,17 +17,58 @@ export function getGarrisonCoverMultiplier(unit) {
   return isUnitGarrisoned(unit) ? BUNKER_GARRISON_COVER_MULT : 1;
 }
 
-export function releaseFromBunker(unit, baseBuildings) {
+/** Collect managers that own garrison-capable bunkers (HQ builds + engineer field bunkers). */
+export function getGarrisonBunkerSources(game) {
+  const sources = [];
+  if (game?.baseBuildings?.active) sources.push(game.baseBuildings);
+  if (game?.engineerSandbags?.hasGarrisonBunkers?.()) sources.push(game.engineerSandbags);
+  return sources;
+}
+
+function normalizeGarrisonSources(sources) {
+  if (!sources) return [];
+  if (Array.isArray(sources)) return sources.filter(Boolean);
+  if (sources.baseBuildings || sources.engineerSandbags) {
+    return getGarrisonBunkerSources(sources);
+  }
+  return [sources];
+}
+
+function findBunkerEntry(id, sources) {
+  for (const src of sources) {
+    const entry = src.getEntryById?.(id);
+    if (entry && !entry.destroyed) return { entry, manager: src };
+  }
+  return null;
+}
+
+function pickBunkerAtAny(x, z, team, sources, maxDist = 4.5) {
+  let best = null;
+  let bestD = maxDist;
+  for (const src of sources) {
+    const bunker = src.pickBunkerAt?.(x, z, team, maxDist);
+    if (!bunker) continue;
+    const d = Math.hypot(x - bunker.x, z - bunker.z);
+    if (d < bestD) {
+      bestD = d;
+      best = bunker;
+    }
+  }
+  return best;
+}
+
+export function releaseFromBunker(unit, sources) {
   if (!unit?._garrisonBunkerId) return;
-  const entry = baseBuildings?.getEntryById?.(unit._garrisonBunkerId);
-  if (entry?.garrison) {
-    entry.garrison = entry.garrison.filter((id) => id !== unit.id);
+  const list = normalizeGarrisonSources(sources);
+  const found = findBunkerEntry(unit._garrisonBunkerId, list);
+  if (found?.entry?.garrison) {
+    found.entry.garrison = found.entry.garrison.filter((id) => id !== unit.id);
   }
   unit._garrisonBunkerId = null;
   if (unit.mesh) unit.mesh.visible = true;
 }
 
-export function tryEnterBunker(unit, bunker, baseBuildings) {
+export function tryEnterBunker(unit, bunker, sources) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
   if (!bunker || bunker.destroyed || bunker.building || !bunker.def?.garrison) return false;
   if (!canGarrisonType(unit.def?.type)) return false;
@@ -39,7 +80,7 @@ export function tryEnterBunker(unit, bunker, baseBuildings) {
     return false;
   }
 
-  releaseFromBunker(unit, baseBuildings);
+  releaseFromBunker(unit, sources);
   bunker.garrison = bunker.garrison ?? [];
   bunker.garrison.push(unit.id);
   unit._garrisonBunkerId = bunker.id;
@@ -53,20 +94,22 @@ export function tryEnterBunker(unit, bunker, baseBuildings) {
   return true;
 }
 
-export function updateBunkerGarrison(units, baseBuildings) {
-  if (!baseBuildings?.active) return;
+export function updateBunkerGarrison(units, sources) {
+  const list = normalizeGarrisonSources(sources);
+  if (!list.length) return;
 
   for (const unit of units) {
     if (unit.dead) continue;
 
     if (unit._garrisonBunkerId) {
-      const bunker = baseBuildings.getEntryById(unit._garrisonBunkerId);
+      const found = findBunkerEntry(unit._garrisonBunkerId, list);
+      const bunker = found?.entry;
       if (!bunker || bunker.destroyed || bunker.building) {
-        releaseFromBunker(unit, baseBuildings);
+        releaseFromBunker(unit, list);
         continue;
       }
       if (unit.moveTarget) {
-        releaseFromBunker(unit, baseBuildings);
+        releaseFromBunker(unit, list);
         continue;
       }
       const idx = bunker.garrison.indexOf(unit.id);
@@ -77,10 +120,10 @@ export function updateBunkerGarrison(units, baseBuildings) {
 
     if (!unit.moveTarget || unit.retreating || unit.surrendered) continue;
     const dest = unit.moveTarget;
-    const bunker = baseBuildings.pickBunkerAt(dest.x, dest.z, unit.team, 4.5);
+    const bunker = pickBunkerAtAny(dest.x, dest.z, unit.team, list, 4.5);
     if (!bunker) continue;
     if (distanceBetween(unit, { position: dest }) <= BUNKER_ENTER_RANGE + 0.5) {
-      if (tryEnterBunker(unit, bunker, baseBuildings)) {
+      if (tryEnterBunker(unit, bunker, list)) {
         unit.moveTarget = null;
         unit._movePath = null;
       }

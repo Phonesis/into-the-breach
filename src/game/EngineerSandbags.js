@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { createSandbagEmplacementGroup } from '../world/SandbagEmplacement.js';
-import { createCampaignBunkerMesh } from '../visual/BaseBuildingMeshes.js';
+import {
+  createCampaignBunkerMesh,
+  setBaseBuildingHpVisual,
+} from '../visual/BaseBuildingMeshes.js';
 import { BASE_BUILDING_TYPES, isBaseBuildingCampaign } from '../data/baseBuildings.js';
+import { spawnExplosion } from '../effects/CombatEffects.js';
+import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
+import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
 import { distanceBetween } from './Targeting.js';
 
 export const SANDBAG_BUILD_TIME = 11;
@@ -54,13 +60,125 @@ export class EngineerSandbagManager {
     this.pendingType = null;
     this.sites = [];
     this._builtPositions = [];
+    this.fieldBunkers = [];
   }
 
   reset() {
     this.pendingType = null;
     this._clearSiteMarkers();
+    this._clearFieldBunkers();
     this.sites = [];
     this._builtPositions = [];
+    this.fieldBunkers = [];
+  }
+
+  _clearFieldBunkers() {
+    for (const entry of this.fieldBunkers) {
+      if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
+      this._disposeMesh(entry.mesh);
+      entry.mesh = null;
+    }
+  }
+
+  _disposeMesh(mesh) {
+    if (!mesh) return;
+    mesh.traverse((c) => {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) {
+        if (c.material.map) c.material.map.dispose();
+        c.material.dispose();
+      }
+    });
+  }
+
+  _factionId(team) {
+    return team === 'player' ? this.game.playerFaction?.id : this.game.enemyFaction?.id;
+  }
+
+  hasGarrisonBunkers() {
+    return this.fieldBunkers.some((e) => !e.destroyed);
+  }
+
+  getEntryById(id) {
+    return this.fieldBunkers.find((e) => e.id === id && !e.destroyed) ?? null;
+  }
+
+  pickBunkerAt(x, z, team, maxDist = 4.5) {
+    let best = null;
+    let bestD = maxDist;
+    for (const e of this.fieldBunkers) {
+      if (e.destroyed || e.team !== team) continue;
+      const d = Math.hypot(x - e.x, z - e.z);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  getAttackTargets() {
+    const out = [];
+    for (const entry of this.fieldBunkers) {
+      if (entry.destroyed) continue;
+      const t = wrapBaseBuildingTarget(entry, this);
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  onDamaged(entry) {
+    if (!entry?.mesh) return;
+    const ratio = entry.maxHp > 0 ? entry.hp / entry.maxHp : 0;
+    const accent = entry.team === 'player' ? 0x5a9fd4 : 0xf87171;
+    setBaseBuildingHpVisual(entry.mesh, ratio, accent);
+  }
+
+  destroyEntry(entry) {
+    if (!entry || entry.destroyed) return;
+    entry.destroyed = true;
+
+    for (const unit of this.game.units) {
+      if (unit._garrisonBunkerId === entry.id) {
+        releaseFromBunker(unit, getGarrisonBunkerSources(this.game));
+      }
+    }
+
+    if (entry._attackTarget) entry._attackTarget.dead = true;
+    spawnExplosion(this.game.scene, { x: entry.x, y: entry.y + 1, z: entry.z });
+    if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
+    this._disposeMesh(entry.mesh);
+    entry.mesh = null;
+    this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
+  }
+
+  _addFieldBunker(site) {
+    const def = BASE_BUILDING_TYPES.bunker;
+    const entry = {
+      id: site.id,
+      typeId: 'bunker',
+      def,
+      team: site.team,
+      x: site.x,
+      z: site.z,
+      y: site.y,
+      hp: BUNKER_HP,
+      maxHp: BUNKER_HP,
+      destroyed: false,
+      building: false,
+      garrison: [],
+      mesh: null,
+      manager: this,
+      engineerBuilt: true,
+    };
+
+    const mesh = createCampaignBunkerMesh(this._factionId(site.team));
+    mesh.position.set(site.x, site.y, site.z);
+    mesh.rotation.y = this._facingYaw(site.team, site.x, site.z);
+    this.game.scene.add(mesh);
+    entry.mesh = mesh;
+    this.fieldBunkers.push(entry);
+    return entry;
   }
 
   canUse() {
@@ -315,16 +433,22 @@ export class EngineerSandbagManager {
       return;
     }
 
-    let group;
     if (site.buildType === 'bunker') {
-      group = createCampaignBunkerMesh(factionId);
-      group.rotation.y = this._facingYaw(site.team, site.x, site.z);
-    } else {
-      group = createSandbagEmplacementGroup({
-        factionId,
-        seed: site.x * 0.17 + site.z * 0.23,
+      this._addFieldBunker(site);
+      this._builtPositions.push({
+        x: site.x,
+        z: site.z,
+        team: site.team,
+        buildType: site.buildType,
       });
+      this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
+      return;
     }
+
+    const group = createSandbagEmplacementGroup({
+      factionId,
+      seed: site.x * 0.17 + site.z * 0.23,
+    });
     group.position.set(site.x, site.y, site.z);
 
     if (this.game.scenery) {

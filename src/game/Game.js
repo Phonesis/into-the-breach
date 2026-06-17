@@ -57,7 +57,7 @@ import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateEngineerHealing } from './EngineerBehavior.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
-import { updateBunkerGarrison, releaseFromBunker } from './BunkerGarrison.js';
+import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
 import {
   isBaseBuildingCampaign,
   getPlayerProductionUnitTypes,
@@ -2193,8 +2193,8 @@ export class Game {
           this.ui?.updateEngineerBuild(this);
         }
         this.baseBuildings?.update(dt);
-        if (isBaseBuildingCampaign(this)) {
-          updateBunkerGarrison(this._aliveUnits, this.baseBuildings);
+        if (getGarrisonBunkerSources(this).length > 0) {
+          updateBunkerGarrison(this._aliveUnits, this);
         }
         syncHealMarkers(this._aliveUnits, this.baseBuildings);
         syncDamageSmoke(this._aliveUnits);
@@ -2308,7 +2308,10 @@ export class Game {
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
-              baseBuildingTargets: this.baseBuildings?.getAttackTargets() ?? [],
+              baseBuildingTargets: [
+                ...(this.baseBuildings?.getAttackTargets() ?? []),
+                ...(this.engineerSandbags?.getAttackTargets() ?? []),
+              ],
               clearance: this.clearance,
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,

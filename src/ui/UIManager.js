@@ -2117,7 +2117,7 @@ export class UIManager {
           : '';
         const fieldWorks = game?.baseBuildings?.active
           ? 'can erect <strong>garrison bunkers</strong> in the field (Build bunker).'
-          : 'can erect <strong>sandbags</strong> or sturdier <strong>bunkers</strong> for heavy cover.';
+          : 'can erect <strong>sandbags</strong> or <strong>bunkers</strong> — move infantry onto a bunker to garrison inside.';
         coverBlock = `${buildLine}<p class="unit-support-status">Support — repairs vehicles within ~16 m; ${fieldWorks}</p>`;
       } else if (u.def?.type === 'medic') {
         coverBlock =

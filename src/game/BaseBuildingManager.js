@@ -15,7 +15,7 @@ import {
   disposeBaseBuildingConstructionVisual,
 } from '../visual/BaseBuildingConstruction.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
-import { releaseFromBunker } from './BunkerGarrison.js';
+import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
 
 let nextId = 1;
@@ -287,7 +287,9 @@ export class BaseBuildingManager {
     entry.destroyed = true;
 
     for (const unit of this.game.units) {
-      if (unit._garrisonBunkerId === entry.id) releaseFromBunker(unit, this);
+      if (unit._garrisonBunkerId === entry.id) {
+        releaseFromBunker(unit, getGarrisonBunkerSources(this.game));
+      }
     }
 
     if (entry._attackTarget) entry._attackTarget.dead = true;
