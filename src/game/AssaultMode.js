@@ -14,6 +14,28 @@ export function getFrontlineDef(mapDef) {
   );
 }
 
+/** Axis from player HQ → enemy HQ; perpendicular spans the frontline. */
+export function getFrontlineBasis(mapDef) {
+  const fl = getFrontlineDef(mapDef);
+  const pb = mapDef.playerBase;
+  const eb = mapDef.enemyBase;
+  const axisX = eb.x - pb.x;
+  const axisZ = eb.z - pb.z;
+  const len = Math.hypot(axisX, axisZ) || 1;
+  const enemyDirX = axisX / len;
+  const enemyDirZ = axisZ / len;
+  return {
+    fl,
+    pb,
+    eb,
+    enemyDirX,
+    enemyDirZ,
+    perpX: -enemyDirZ,
+    perpZ: enemyDirX,
+    lineLen: mapDef.size * 0.72,
+  };
+}
+
 export function findFrontlineCapturePoint(capturePoints, mapDef) {
   const fl = getFrontlineDef(mapDef);
   return (

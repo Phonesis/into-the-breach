@@ -53,6 +53,7 @@ export class DefenseStructureManager {
     getEnemyUnits,
     getTerrainMesh,
     onChange,
+    onFireTrace,
     factionId = 'germany',
     factionAccent = 0xc9a227,
   }) {
@@ -61,6 +62,7 @@ export class DefenseStructureManager {
     this.getEnemyUnits = getEnemyUnits;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.onChange = onChange;
+    this.onFireTrace = onFireTrace ?? null;
     this.factionId = factionId;
     this.factionAccent = factionAccent;
     this.entries = [];
@@ -512,6 +514,15 @@ export class DefenseStructureManager {
         spawnMuzzleFlash(scene, from, to, wType);
       }
     }
+
+    this.onFireTrace?.({
+      fromX: entry.x,
+      fromZ: entry.z,
+      toX: target.position.x,
+      toZ: target.position.z,
+      team: 'player',
+      weaponType: wType,
+    });
 
     if (def.weaponSound === 'mg') {
       sounds.playWeapon('mg', { x: entry.x, z: entry.z }, { volume: 0.62 });

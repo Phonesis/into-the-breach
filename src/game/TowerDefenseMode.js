@@ -1,6 +1,6 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { getFrontlineDef } from './AssaultMode.js';
+import { getFrontlineBasis, getFrontlineDef } from './AssaultMode.js';
 import {
   TD_PREPARE_TIME,
   TD_PREPARE_TIME_BETWEEN,
@@ -12,6 +12,146 @@ import {
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
+
+const SECTOR_LABELS = ['Left flank', 'Left sector', 'Center', 'Right sector', 'Right flank'];
+
+/** How wide and multi-pronged assaults become as waves climb (ramps up after ~wave 10). */
+export function getWaveAssaultProfile(wave) {
+  if (wave <= 2) {
+    return {
+      sectorCount: 1,
+      sectionSpread: 0.14,
+      flankSpread: 5,
+      depthBase: 22,
+      depthVar: 8,
+      maxFlankAngle: 0.18,
+    };
+  }
+  if (wave <= 5) {
+    return {
+      sectorCount: 2,
+      sectionSpread: 0.3,
+      flankSpread: 12,
+      depthBase: 25,
+      depthVar: 10,
+      maxFlankAngle: 0.38,
+    };
+  }
+  if (wave <= 8) {
+    return {
+      sectorCount: 3,
+      sectionSpread: 0.5,
+      flankSpread: 20,
+      depthBase: 28,
+      depthVar: 12,
+      maxFlankAngle: 0.58,
+    };
+  }
+  if (wave <= 11) {
+    return {
+      sectorCount: 4,
+      sectionSpread: 0.7,
+      flankSpread: 28,
+      depthBase: 32,
+      depthVar: 14,
+      maxFlankAngle: 0.78,
+    };
+  }
+
+  const extra = Math.min(wave - 12, 10);
+  return {
+    sectorCount: 5,
+    sectionSpread: 0.9,
+    flankSpread: 34 + extra * 2.5,
+    depthBase: 36 + extra * 1.2,
+    depthVar: 16 + extra * 0.8,
+    maxFlankAngle: 1.05 + extra * 0.05,
+  };
+}
+
+function pickWaveAssaultSectors(wave) {
+  const profile = getWaveAssaultProfile(wave);
+  const sectors = [];
+  for (let i = 0; i < profile.sectorCount; i++) {
+    const along =
+      profile.sectorCount === 1 ? 0 : (i / (profile.sectorCount - 1) - 0.5) * 2;
+    const labelIdx =
+      profile.sectorCount === 1
+        ? 2
+        : Math.round((i / Math.max(1, profile.sectorCount - 1)) * (SECTOR_LABELS.length - 1));
+    sectors.push({
+      id: i,
+      label: SECTOR_LABELS[labelIdx],
+      along,
+      flankSign: i % 2 === 0 ? -1 : 1,
+    });
+  }
+
+  for (let i = sectors.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [sectors[i], sectors[j]] = [sectors[j], sectors[i]];
+  }
+
+  return { profile, sectors };
+}
+
+function formatAssaultBrief({ sectors }) {
+  if (!sectors?.length) return null;
+  if (sectors.length === 1) return 'Assault axis: center of the frontline';
+  const names = [...new Set(sectors.map((s) => s.label))];
+  if (names.length <= 2) return `Assault sectors: ${names.join(' · ')}`;
+  return `Multi-sector assault — ${names.join(' · ')}`;
+}
+
+function alongFront(x, z, basis) {
+  return (x - basis.fl.x) * basis.enemyDirX + (z - basis.fl.z) * basis.enemyDirZ;
+}
+
+function clampToMap(x, z, mapDef) {
+  const half = mapDef.size * 0.46;
+  return {
+    x: Math.max(-half, Math.min(half, x)),
+    z: Math.max(-half, Math.min(half, z)),
+  };
+}
+
+function computeSpawnForSector(mapDef, sector, profile) {
+  const basis = getFrontlineBasis(mapDef);
+  const { fl, perpX, perpZ, lineLen, enemyDirX, enemyDirZ } = basis;
+
+  const alongT =
+    sector.along * profile.sectionSpread * 0.5 * lineLen +
+    (Math.random() - 0.5) * profile.sectionSpread * 0.2 * lineLen;
+  const targetX = fl.x + perpX * alongT;
+  const targetZ = fl.z + perpZ * alongT;
+
+  const flankAngle =
+    profile.maxFlankAngle * sector.flankSign * (0.5 + Math.random() * 0.5) +
+    (Math.random() - 0.5) * 0.22;
+  const depth = profile.depthBase + Math.random() * profile.depthVar;
+  const cos = Math.cos(flankAngle);
+  const sin = Math.sin(flankAngle);
+  const dirX = enemyDirX * cos - enemyDirZ * sin;
+  const dirZ = enemyDirX * sin + enemyDirZ * cos;
+  const lateral = (Math.random() - 0.5) * profile.flankSpread;
+
+  let x = targetX + dirX * depth + perpX * lateral;
+  let z = targetZ + dirZ * depth + perpZ * lateral;
+
+  if (alongFront(x, z, basis) < 14) {
+    x = targetX + enemyDirX * (depth * 0.85);
+    z = targetZ + enemyDirZ * (depth * 0.85);
+  }
+
+  const clamped = clampToMap(x, z, mapDef);
+  return {
+    x: clamped.x,
+    z: clamped.z,
+    targetX,
+    targetZ,
+    sectorLabel: sector.label,
+  };
+}
 
 /** @returns {{ wave, phase: 'prepare'|'active', phaseTimer, spawnQueue, spawned, totalToSpawn }} */
 export function createTowerDefenseState({ mapDef, difficulty, waveMode = 'standard' }) {
@@ -30,6 +170,9 @@ export function createTowerDefenseState({ mapDef, difficulty, waveMode = 'standa
     wavesCleared: 0,
     killsThisWave: 0,
     breached: false,
+    assaultProfile: null,
+    assaultSectors: [],
+    assaultBrief: null,
   };
 }
 
@@ -80,6 +223,11 @@ export function startNextWave(td) {
   td.spawned = 0;
   td.totalToSpawn = td.spawnQueue.length;
   td.killsThisWave = 0;
+
+  const assault = pickWaveAssaultSectors(td.wave);
+  td.assaultProfile = assault.profile;
+  td.assaultSectors = assault.sectors;
+  td.assaultBrief = formatAssaultBrief(assault);
 }
 
 function beginActiveWave(td) {
@@ -132,23 +280,25 @@ export function updateTowerDefenseMode(game, dt) {
 function spawnWaveUnit(game, type) {
   const def = game.enemyFaction.units[type];
   if (!def) return;
-  const base = game.mapDef.enemyBase;
-  const fl = getFrontlineDef(game.mapDef);
-  const spread = 14 + Math.random() * 10;
-  const angle = (Math.random() - 0.5) * 0.8;
-  const x = base.x + Math.cos(angle) * spread * 0.3;
-  const z = base.z + Math.sin(angle) * spread;
+
+  const td = game.towerDefense;
+  const sectors = td?.assaultSectors?.length ? td.assaultSectors : pickWaveAssaultSectors(td?.wave ?? 1).sectors;
+  const profile = td?.assaultProfile ?? getWaveAssaultProfile(td?.wave ?? 1);
+  const sector = sectors[td?.spawned % sectors.length];
+  const spawn = computeSpawnForSector(game.mapDef, sector, profile);
 
   const unit = new Unit({
     def,
     faction: game.enemyFaction,
     team: ENEMY,
-    position: { x, z },
+    position: { x: spawn.x, z: spawn.z },
     scene: game.scene,
   });
   unit._mapDef = game.mapDef;
   unit._tdAttacker = true;
-  unit.position.y = sampleTerrainHeight(x, z, game.mapDef);
+  unit._tdFrontlineTarget = { x: spawn.targetX, z: spawn.targetZ };
+  unit._tdSpawnSector = spawn.sectorLabel;
+  unit.position.y = sampleTerrainHeight(spawn.x, spawn.z, game.mapDef);
   game.units.push(unit);
   game._rebuildUnitCaches();
 }
@@ -219,9 +369,12 @@ export function updateTowerDefenseEnemyAI(enemyUnits, mapDef, td, defenses, dt) 
       unit.moveTarget = { x: pb.x + (Math.random() - 0.5) * 6, z: pb.z + (Math.random() - 0.5) * 6 };
     } else {
       unit.clearAttackOrder();
+      const target = unit._tdFrontlineTarget;
+      const goalX = target?.x ?? fl.x;
+      const goalZ = target?.z ?? fl.z;
       unit.moveTarget = {
-        x: fl.x + ax * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 10,
-        z: fl.z + az * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 10,
+        x: goalX + ax * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 8,
+        z: goalZ + az * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 8,
       };
     }
   }
@@ -312,11 +465,12 @@ export function formatTowerDefenseHud(td) {
         ? 'Assault incoming'
         : 'Next wave'
       : '';
+  const assaultLine = td.assaultBrief ? `${td.assaultBrief}.` : '';
   const countdownSubtitle =
     td.phase === 'prepare'
       ? td.endless
-        ? `Wave ${td.wave} — endless assault`
-        : `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline`
+        ? `Wave ${td.wave} — endless assault${assaultLine ? ` · ${assaultLine}` : ''}`
+        : `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline${assaultLine ? ` · ${assaultLine}` : ''}`
       : '';
   return {
     wave: td.wave,
@@ -331,5 +485,6 @@ export function formatTowerDefenseHud(td) {
     prepareProgress: prepareTotal > 0 ? secondsLeft / prepareTotal : 0,
     countdownTitle,
     countdownSubtitle,
+    assaultBrief: td.assaultBrief ?? null,
   };
 }

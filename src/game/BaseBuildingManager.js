@@ -222,6 +222,37 @@ export class BaseBuildingManager {
     updateBaseBuildingConstructionVisual(visual, site.progress ?? 0, 0);
   }
 
+  /** Engineer-erected bunker — no supply cost; counts toward bunker cap. */
+  addEngineerBunker({ x, z, y, team, id }) {
+    if (!this.active) return null;
+    const def = BASE_BUILDING_TYPES.bunker;
+    const entry = {
+      id: id ?? nextId++,
+      typeId: 'bunker',
+      def,
+      team,
+      x,
+      z,
+      y,
+      hp: def.hp,
+      maxHp: def.hp,
+      destroyed: false,
+      building: false,
+      garrison: [],
+      mesh: null,
+      manager: this,
+      engineerBuilt: true,
+    };
+
+    const mesh = createBaseBuildingMesh('bunker', this.getFactionId(team));
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = this._facingYaw(team, x, z);
+    this.game.scene.add(mesh);
+    entry.mesh = mesh;
+    this.entries.push(entry);
+    return entry;
+  }
+
   _completeSite(site) {
     disposeBaseBuildingConstructionVisual(site.marker);
     site.marker = null;

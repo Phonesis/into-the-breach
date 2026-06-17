@@ -372,7 +372,7 @@ export class UIManager {
             </button>
           </div>
           <canvas id="battle-minimap-canvas" width="168" height="168" aria-label="Battlefield overview"></canvas>
-          <p class="battle-minimap-hint">Green — friendly · Red — enemy · Click to pan</p>
+          <p class="battle-minimap-hint">Green — friendly · Red — enemy · Traces show live fire · Click to pan</p>
         </div>
         <button
           type="button"
@@ -417,9 +417,14 @@ export class UIManager {
               </button>
             </div>
             <div class="engineer-build-actions hidden" id="engineer-build-actions">
-              <button type="button" class="btn btn-primary interactive" id="btn-build-sandbags">
-                Build sandbags
-              </button>
+              <div class="engineer-build-btns" id="engineer-build-btns">
+                <button type="button" class="btn btn-primary interactive" id="btn-build-sandbags">
+                  Build sandbags
+                </button>
+                <button type="button" class="btn btn-secondary interactive" id="btn-build-bunker">
+                  Build bunker
+                </button>
+              </div>
               <p class="engineer-build-hint" id="engineer-build-hint">
                 Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.
               </p>
@@ -791,6 +796,9 @@ export class UIManager {
     this.root.querySelector('#btn-build-sandbags')?.addEventListener('click', () => {
       this.callbacks.onArmSandbags?.();
     });
+    this.root.querySelector('#btn-build-bunker')?.addEventListener('click', () => {
+      this.callbacks.onArmBunker?.();
+    });
 
     this.root.querySelector('#produce-btns')?.addEventListener('pointerdown', (e) => {
       const btn = e.target.closest?.('.produce-btn');
@@ -866,6 +874,18 @@ export class UIManager {
 
   updateMinimap(state) {
     this.minimap?.update(state);
+  }
+
+  recordMinimapFire(shot) {
+    this.minimap?.recordFireTrace(shot);
+  }
+
+  tickMinimapFireTraces(dt) {
+    return this.minimap?.tickFireTraces(dt) ?? false;
+  }
+
+  minimapHasFireTraces() {
+    return this.minimap?.hasFireTraces?.() ?? false;
   }
 
   clearMinimap() {
@@ -1317,6 +1337,14 @@ export class UIManager {
     }
   }
 
+  _defaultEngineerBuildHint(game) {
+    const baseBuilding = game?.baseBuildings?.active ?? false;
+    if (baseBuilding) {
+      return 'Garrison bunker — engineer erects on site (~28 s). Move troops onto it to enter. Esc to cancel.';
+    }
+    return 'Sandbags (~11 s) or bunkers (~28 s) — engineer must be within ~24 m. Esc to cancel.';
+  }
+
   showEngineerBuildHint(message) {
     const hint = this.root.querySelector('#engineer-build-hint');
     if (!hint || !message) return;
@@ -1327,19 +1355,22 @@ export class UIManager {
       hint.classList.remove('engineer-build-hint-error');
       const actions = this.root.querySelector('#engineer-build-actions');
       if (actions && !actions.classList.contains('hidden')) {
-        hint.textContent =
-          'Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.';
+        hint.textContent = this._defaultEngineerBuildHint(this._lastEngineerBuildGame);
       }
     }, 3200);
   }
 
   updateEngineerBuild(game) {
     const panel = this.root.querySelector('#engineer-build-actions');
-    const btn = this.root.querySelector('#btn-build-sandbags');
+    const sandbagBtn = this.root.querySelector('#btn-build-sandbags');
+    const bunkerBtn = this.root.querySelector('#btn-build-bunker');
     const hint = this.root.querySelector('#engineer-build-hint');
-    if (!panel || !btn) return;
+    if (!panel || !sandbagBtn || !bunkerBtn) return;
 
-    const canUse = game?.engineerSandbags?.canUse?.() ?? false;
+    this._lastEngineerBuildGame = game;
+    const mgr = game?.engineerSandbags;
+    const canSandbags = mgr?.canBuildSandbags?.() ?? false;
+    const canBunker = mgr?.canBuildBunker?.() ?? false;
     const selectedEngineers =
       game?.units?.filter(
         (u) =>
@@ -1350,23 +1381,27 @@ export class UIManager {
           u.def?.type === 'engineer'
       ) ?? [];
     const freeEngineers = selectedEngineers.filter((u) => !u._sandbagSite);
-    const show = canUse && selectedEngineers.length > 0;
+    const show = (canSandbags || canBunker) && selectedEngineers.length > 0;
 
     panel.classList.toggle('hidden', !show);
+    sandbagBtn.classList.toggle('hidden', !canSandbags);
+    bunkerBtn.classList.toggle('hidden', !canBunker);
     if (!show) return;
 
-    const pending = !!game.engineerSandbags.getPending();
-    btn.classList.toggle('btn-armed', pending);
-    btn.textContent = pending ? 'Placing sandbags…' : 'Build sandbags';
+    const pending = mgr?.getPending?.() ?? null;
+    sandbagBtn.classList.toggle('btn-armed', pending === 'sandbags');
+    bunkerBtn.classList.toggle('btn-armed', pending === 'bunker');
+    sandbagBtn.textContent = pending === 'sandbags' ? 'Placing sandbags…' : 'Build sandbags';
+    bunkerBtn.textContent = pending === 'bunker' ? 'Placing bunker…' : 'Build bunker';
 
     if (hint && !hint.classList.contains('engineer-build-hint-error')) {
       if (pending) {
-        hint.textContent = 'Click the map within ~24 m of your engineer. Esc to cancel.';
+        const label = pending === 'bunker' ? 'bunker' : 'sandbag position';
+        hint.textContent = `Click the map within ~24 m of your engineer to place the ${label}. Esc to cancel.`;
       } else if (freeEngineers.length === 0) {
-        hint.textContent = 'Selected engineer is already building sandbags.';
+        hint.textContent = 'Selected engineer is already building field works.';
       } else {
-        hint.textContent =
-          'Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.';
+        hint.textContent = this._defaultEngineerBuildHint(game);
       }
     }
   }
@@ -2078,9 +2113,12 @@ export class UIManager {
       } else if (u.def?.type === 'engineer') {
         const build = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
         const buildLine = build
-          ? `<p class="unit-support-status"><strong>Building sandbags</strong> — ${build.pct}%</p>`
+          ? `<p class="unit-support-status"><strong>Building ${build.label}</strong> — ${build.pct}%</p>`
           : '';
-        coverBlock = `${buildLine}<p class="unit-support-status">Support — repairs vehicles within ~16 m; can erect <strong>heavy-cover</strong> sandbag positions (Build sandbags).</p>`;
+        const fieldWorks = game?.baseBuildings?.active
+          ? 'can erect <strong>garrison bunkers</strong> in the field (Build bunker).'
+          : 'can erect <strong>sandbags</strong> or sturdier <strong>bunkers</strong> for heavy cover.';
+        coverBlock = `${buildLine}<p class="unit-support-status">Support — repairs vehicles within ~16 m; ${fieldWorks}</p>`;
       } else if (u.def?.type === 'medic') {
         coverBlock =
           '<p class="unit-support-status">Support — heals infantry within ~14 m; nearby troops retreat less often.</p>';

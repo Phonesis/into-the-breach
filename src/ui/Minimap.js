@@ -15,6 +15,26 @@ const VEHICLE_TYPES = new Set([
   'mortar',
 ]);
 
+const MAX_FIRE_TRACES = 88;
+const TRACE_LIFE_DEFAULT = 1.05;
+
+const HEAVY_WEAPONS = new Set(['tank', 'superHeavyTank', 'antiTankGun', 'artillery', 'mortar']);
+
+function traceLifetime(weaponType) {
+  if (weaponType === 'artillery') return 1.75;
+  if (weaponType === 'mortar' || weaponType === 'antiTankGun') return 1.45;
+  if (weaponType === 'tank' || weaponType === 'superHeavyTank') return 1.25;
+  if (weaponType === 'machineGun' || weaponType === 'armoredCar') return 0.95;
+  return TRACE_LIFE_DEFAULT;
+}
+
+function traceLineWidth(weaponType) {
+  if (weaponType === 'artillery' || weaponType === 'mortar') return 1.65;
+  if (HEAVY_WEAPONS.has(weaponType)) return 1.35;
+  if (weaponType === 'machineGun') return 0.75;
+  return 0.55;
+}
+
 function hexRgb(hex) {
   return {
     r: (hex >> 16) & 255,
@@ -70,6 +90,7 @@ export class BattleMinimap {
     this.mapDef = null;
     this.terrainBitmap = null;
     this._terrainKey = '';
+    this.fireTraces = [];
 
     this.wrap = root.querySelector('#battle-minimap');
     this.canvas = root.querySelector('#battle-minimap-canvas');
@@ -119,9 +140,54 @@ export class BattleMinimap {
     this.mapDef = null;
     this.terrainBitmap = null;
     this._terrainKey = '';
+    this.fireTraces = [];
     if (this.ctx && this.canvas) {
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
+  }
+
+  /**
+   * @param {{ fromX: number, fromZ: number, toX: number, toZ: number, team?: string, weaponType?: string }} shot
+   */
+  recordFireTrace(shot) {
+    if (
+      shot.fromX == null ||
+      shot.fromZ == null ||
+      shot.toX == null ||
+      shot.toZ == null ||
+      !this.mapDef
+    ) {
+      return;
+    }
+    const weaponType = shot.weaponType ?? 'infantry';
+    this.fireTraces.push({
+      x1: shot.fromX,
+      z1: shot.fromZ,
+      x2: shot.toX,
+      z2: shot.toZ,
+      team: shot.team ?? 'enemy',
+      weaponType,
+      age: 0,
+      life: traceLifetime(weaponType),
+    });
+    if (this.fireTraces.length > MAX_FIRE_TRACES) {
+      this.fireTraces.splice(0, this.fireTraces.length - MAX_FIRE_TRACES);
+    }
+  }
+
+  tickFireTraces(dt) {
+    if (!this.fireTraces.length) return false;
+    for (let i = this.fireTraces.length - 1; i >= 0; i--) {
+      this.fireTraces[i].age += dt;
+      if (this.fireTraces[i].age >= this.fireTraces[i].life) {
+        this.fireTraces.splice(i, 1);
+      }
+    }
+    return this.fireTraces.length > 0;
+  }
+
+  hasFireTraces() {
+    return this.fireTraces.length > 0;
   }
 
   worldToCanvas(x, z) {
@@ -170,10 +236,56 @@ export class BattleMinimap {
     this.ctx.drawImage(this.terrainBitmap, 0, 0, width, height);
 
     this._drawBorder();
+    this._drawFireTraces();
     this._drawCameraViewport(state.camera);
     this._drawHqs(state.hqs ?? []);
     this._drawUnits(state.playerUnits ?? [], '#4ade80', '#166534');
     this._drawUnits(state.enemyUnits ?? [], '#f87171', '#7f1d1d');
+  }
+
+  _drawFireTraces() {
+    if (!this.fireTraces.length) return;
+    const ctx = this.ctx;
+
+    for (const trace of this.fireTraces) {
+      const fade = 1 - trace.age / trace.life;
+      if (fade <= 0.02) continue;
+
+      const p1 = this.worldToCanvas(trace.x1, trace.z1);
+      const p2 = this.worldToCanvas(trace.x2, trace.z2);
+      const friendly = trace.team === PLAYER_TEAM;
+      const width = traceLineWidth(trace.weaponType) * (0.55 + fade * 0.45);
+
+      const glowRgb = friendly ? '250, 204, 21' : '248, 113, 113';
+      const coreRgb = friendly ? '253, 224, 71' : '252, 165, 165';
+      const headRgb = friendly ? '254, 240, 138' : '254, 202, 202';
+
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(${glowRgb}, ${fade * 0.32})`;
+      ctx.lineWidth = width * 3.2;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+      grad.addColorStop(0, `rgba(${glowRgb}, 0)`);
+      grad.addColorStop(0.4, `rgba(${coreRgb}, ${fade * 0.5})`);
+      grad.addColorStop(1, `rgba(${headRgb}, ${fade * 0.92})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(${headRgb}, ${fade * 0.88})`;
+      ctx.beginPath();
+      ctx.arc(p2.x, p2.y, 1 + fade * 2.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   _drawBorder() {

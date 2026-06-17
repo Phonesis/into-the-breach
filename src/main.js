@@ -86,6 +86,9 @@ const ui = new UIManager(uiRoot, {
   onArmSandbags() {
     game?.armSandbagBuild();
   },
+  onArmBunker() {
+    game?.armBunkerBuild();
+  },
   onArmBaseBuilding(typeId) {
     game?.armBaseBuilding(typeId);
   },

@@ -725,6 +725,7 @@ export class Game {
           this.ui?.updateDefenses(this);
           this._syncPlacementCapture();
         },
+        onFireTrace: (shot) => this.ui?.recordMinimapFire?.(shot),
       });
       this.defenses.setFrontlineAxis(
         getFrontlineDef(this.mapDef),
@@ -1450,18 +1451,35 @@ export class Game {
     this.ui?.setPlacementCapture(active);
   }
 
-  armSandbagBuild() {
-    if (!this.running || this.gameOver || !this.engineerSandbags?.canUse()) return;
+  armEngineerBuild(buildType) {
+    if (!this.running || this.gameOver) return;
+    const mgr = this.engineerSandbags;
+    if (!mgr) return;
+    if (buildType === 'sandbags' && !mgr.canBuildSandbags()) return;
+    if (buildType === 'bunker' && !mgr.canBuildBunker()) return;
     if (this._isPlayerDeployZoneActive()) return;
     const hasEngineer = this._playerAlive.some(
       (u) => u.selected && u.def?.type === 'engineer' && !u.dead && !u._sandbagSite
     );
     if (!hasEngineer) return;
     sounds.unlock();
-    if (!this.engineerSandbags.arm()) return;
+    if (!mgr.arm(buildType)) {
+      this.ui?.updateEngineerBuild(this);
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+      return;
+    }
     this.ui?.updateEngineerBuild(this);
     this._syncPlacementCapture();
     this._syncBattleCursor();
+  }
+
+  armSandbagBuild() {
+    this.armEngineerBuild('sandbags');
+  }
+
+  armBunkerBuild() {
+    this.armEngineerBuild('bunker');
   }
 
   handleSandbagPlacement(mode, x, z) {
@@ -2023,7 +2041,20 @@ export class Game {
     }
   }
 
+  _recordMinimapCombatFire({ attacker, def, from, to, coaxFire }) {
+    if (!this.running || this.gameOver || !from || !to) return;
+    this.ui?.recordMinimapFire?.({
+      fromX: from.x,
+      fromZ: from.z,
+      toX: to.x,
+      toZ: to.z,
+      team: attacker?.team,
+      weaponType: coaxFire ? 'machineGun' : def?.type ?? 'infantry',
+    });
+  }
+
   onCombatFire({ attacker, target, def, dist, killed, targetIsHQ, targetIsScenery, groundImpact, from, to, coaxFire }) {
+    this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire });
     const pos = { x: from.x, z: from.z };
     const factionId = attacker.faction?.id;
 
@@ -2144,8 +2175,10 @@ export class Game {
     }
 
     if (simActive) {
+        this.ui?.tickMinimapFireTraces(dt);
         this._minimapUiAccum += dt;
-        if (this._minimapUiAccum >= 0.1) {
+        const minimapInterval = this.ui?.minimapHasFireTraces?.() ? 0.033 : 0.1;
+        if (this._minimapUiAccum >= minimapInterval) {
           this._minimapUiAccum = 0;
           this._updateMinimap();
         }
@@ -2186,6 +2219,10 @@ export class Game {
           this.production.update(dt, this.units);
         } else {
           updateTowerDefenseMode(this, dt);
+        }
+
+        if (this.assault) {
+          updateAssaultTimers(this.assault, dt);
         }
 
         this._fieldIconUiAccum += dt;

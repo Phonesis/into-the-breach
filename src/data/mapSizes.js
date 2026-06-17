@@ -4,19 +4,19 @@ export const MAP_SIZE_PRESETS = {
   small: {
     id: 'small',
     name: 'Small',
-    subtitle: 'Standard battlefield (current size)',
+    subtitle: 'Tight engagement zone — fast contact and short flanks',
     scale: 1,
   },
   medium: {
     id: 'medium',
     name: 'Medium',
-    subtitle: '1.75× wider — expanded maneuver room',
+    subtitle: 'Expanded theater — extra maneuver room (default)',
     scale: 1.75,
   },
   large: {
     id: 'large',
     name: 'Large',
-    subtitle: '2.5× wider — grand theater',
+    subtitle: 'Grand theater — long advances and sweeping flanks',
     scale: 2.5,
   },
 };

@@ -849,8 +849,18 @@ body,
   display: none;
 }
 
+.engineer-build-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
 .engineer-build-actions .btn {
   width: 100%;
+}
+
+.engineer-build-actions .btn.hidden {
+  display: none;
 }
 
 .engineer-build-actions .btn.btn-armed {
