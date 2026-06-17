@@ -241,15 +241,28 @@ function addMapEdgeVeils(group, groundColor, fogColor, horizonColor, skyTint, ma
   }
 }
 
+function placeCloudPuffXZ(spread, clearRadius) {
+  for (let attempt = 0; attempt < 14; attempt++) {
+    const x = (Math.random() - 0.5) * spread * 2;
+    const z = (Math.random() - 0.5) * spread * 2;
+    if (Math.hypot(x, z) >= clearRadius) return { x, z };
+  }
+  const angle = Math.random() * Math.PI * 2;
+  const dist = clearRadius * (1.05 + Math.random() * 0.55);
+  return { x: Math.cos(angle) * dist, z: Math.sin(angle) * dist };
+}
+
 function addCloudLayers(skyGroup, skyColor, fogColor, mapSize, skyRadius) {
   const cloudColor = new THREE.Color(skyColor).lerp(new THREE.Color(0xffffff), 0.62);
   const mistColor = fogColor.clone().lerp(cloudColor, 0.4);
-  const spread = Math.max(130, mapSize * 0.55);
+  const spread = Math.max(150, mapSize * 0.62);
   const heightScale = skyRadius / 420;
+  /** Keep the central battlefield cone clear — sky follows the camera. */
+  const clearRadius = Math.max(58, mapSize * 0.22);
 
   const layers = [
-    { count: 6, y: 52 * heightScale, scale: 1.4, opacity: 0.28, color: cloudColor },
-    { count: 5, y: 38 * heightScale, scale: 1.8, opacity: 0.18, color: mistColor },
+    { count: 6, y: 92 * heightScale, scale: 1.35, opacity: 0.24, color: cloudColor },
+    { count: 4, y: 74 * heightScale, scale: 1.55, opacity: 0.11, color: mistColor },
   ];
 
   for (const layer of layers) {
@@ -258,6 +271,7 @@ function addCloudLayers(skyGroup, skyColor, fogColor, mapSize, skyRadius) {
       transparent: true,
       opacity: layer.opacity,
       depthWrite: false,
+      depthTest: true,
       fog: false,
       roughness: 1,
       metalness: 0,
@@ -271,16 +285,14 @@ function addCloudLayers(skyGroup, skyColor, fogColor, mapSize, skyRadius) {
       const w = 14 + Math.random() * 16;
       for (let p = 0; p < 4; p++) {
         const blob = new THREE.Mesh(new THREE.SphereGeometry(w * (0.35 + Math.random() * 0.25), 10, 8), cloudMat);
-        blob.position.set((Math.random() - 0.5) * w, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * w * 0.6);
-        blob.scale.set(1.4 + Math.random(), 0.28 + Math.random() * 0.15, 1 + Math.random() * 0.4);
+        blob.position.set((Math.random() - 0.5) * w, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * w * 0.6);
+        blob.scale.set(1.4 + Math.random(), 0.22 + Math.random() * 0.1, 1 + Math.random() * 0.4);
         puff.add(blob);
       }
-      puff.position.set(
-        (Math.random() - 0.5) * spread * 2,
-        layer.y + Math.random() * 12 * heightScale,
-        (Math.random() - 0.5) * spread * 2
-      );
+      const { x, z } = placeCloudPuffXZ(spread, clearRadius);
+      puff.position.set(x, layer.y + Math.random() * 10 * heightScale, z);
       puff.scale.setScalar(layer.scale);
+      puff.renderOrder = -1;
       skyGroup.add(puff);
     }
   }
