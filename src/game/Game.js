@@ -841,6 +841,7 @@ export class Game {
         ? this.mapDef.enemyBase
         : enemyBasePos;
     this._setupBattleCamera(camFocus, enemyFocus);
+    updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this._faceUnitsToward(this.units.filter((u) => u.team === PLAYER_TEAM), enemyFocus);
     this._faceUnitsToward(this.units.filter((u) => u.team === ENEMY_TEAM), camFocus);
     this._rosterKey = '';
