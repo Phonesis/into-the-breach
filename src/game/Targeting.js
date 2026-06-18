@@ -63,6 +63,12 @@ export function tankCanEngageTarget(attacker, target) {
   return isInCoaxRange(attacker, target);
 }
 
+/** True when the unit is executing a player-issued Shift+LMB fire mission. */
+export function isActiveManualFireMission(unit) {
+  if (!unit || unit.dead || !unit.attackOrder || unit.attackOrder.dead) return false;
+  return unit.attackOrder.isGround || !!unit._manualFireMission;
+}
+
 /** True when a player-issued attack order is in weapon range (ground, cover, or unit). */
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;

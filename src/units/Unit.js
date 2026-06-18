@@ -95,11 +95,12 @@ export class Unit {
     setSelectionRing(this.mesh, on);
   }
 
-  setAttackOrder(target) {
+  setAttackOrder(target, { manualFire = false } = {}) {
     if (this.surrendered || this._captureExit) return;
     clearRetreat(this);
     this.attackOrder = target;
     this.target = target;
+    this._manualFireMission = manualFire;
     this._chasingAttack = true;
     if (target && !target.dead) {
       this.moveTarget = getStandoffPosition(this, target);
@@ -110,15 +111,21 @@ export class Unit {
     this.attackOrder = null;
     this.target = null;
     this._chasingAttack = false;
+    this._manualFireMission = false;
   }
 
-  cancelGroundFire() {
-    if (!this.attackOrder?.isGround) return false;
+  cancelManualFireMission() {
+    if (!this.attackOrder?.isGround && !this._manualFireMission) return false;
     this.clearAttackOrder();
     this.moveTarget = null;
     this._movePath = null;
     this._userMoveOrder = false;
     return true;
+  }
+
+  /** @deprecated use cancelManualFireMission */
+  cancelGroundFire() {
+    return this.cancelManualFireMission();
   }
 
   setGroundAttack(groundTarget) {

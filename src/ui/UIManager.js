@@ -2277,8 +2277,10 @@ export class UIManager {
         ? ` · Coax ${u.def.coaxMG.rangeMeters ?? u.def.coaxMG.range * 10} m / ${u.def.coaxMG.damage} dmg`
         : '';
       const orderLine = u.attackOrder
-        ? u.attackOrder.isGround
-          ? ' · Fire mission'
+        ? u.attackOrder.isGround || u._manualFireMission
+          ? u.attackOrder.isGround
+            ? ' · Fire mission'
+            : ` · Fire mission on <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
           : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
         : '';
       const cover = getCoverStatus(u);

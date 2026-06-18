@@ -150,6 +150,7 @@ import { containTeamsToDeployZone, clampPointToHqZone } from './OpeningDeployZon
 import { createDeployZoneRings, disposeDeployZoneRings } from '../visual/DeployZoneRing.js';
 import { RTSController } from '../input/RTSController.js';
 import { canManualFireOrder, resolveBattleCursor } from '../input/BattleCursor.js';
+import { isActiveManualFireMission } from './Targeting.js';
 import { HQ } from './HQ.js';
 import { createCapturePoints } from './CapturePoint.js';
 import { ProductionManager } from './Production.js';
@@ -393,7 +394,7 @@ export class Game {
         if ((type === 'attack' || type === 'fire') && selected?.length) {
           this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq, this);
         }
-        if (type === 'fire') {
+        if (type === 'fire' || type === 'attack' || type === 'move') {
           this._selectionUiKey = '';
           this.ui?.updateFireMissionControls(this._countActiveFireMissions());
         }
@@ -443,7 +444,8 @@ export class Game {
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
         this.ui?.updateFireSupport(this.fireSupport);
-      } else if (e.code === 'Escape' && this._countActiveFireMissions() > 0) {
+      }
+      if (e.code === 'Escape' && this._countActiveFireMissions() > 0) {
         this.cancelAllFireMissions();
       }
       if (e.code === 'Escape' && this.defenses?.getPending()) {
@@ -577,6 +579,7 @@ export class Game {
     const startOptions = { ...options };
     delete startOptions.restoreSnapshot;
     this.stopGame();
+    if (!restoreSnapshot) this.activeSaveId = null;
     this.lastSession = {
       factionId,
       mapId,
@@ -1306,7 +1309,7 @@ export class Game {
   }
 
   _countActiveFireMissions() {
-    return this._playerAlive.filter((u) => !u.dead && u.attackOrder?.isGround).length;
+    return this._playerAlive.filter((u) => isActiveManualFireMission(u)).length;
   }
 
   launchLastStandBattle() {
@@ -1367,17 +1370,18 @@ export class Game {
     let cleared = 0;
     for (const u of this.units) {
       if (u.dead || u.team !== PLAYER_TEAM) continue;
-      if (u.cancelGroundFire()) cleared++;
+      if (u.cancelManualFireMission()) cleared++;
     }
-    if (cleared === 0) return false;
 
-    sounds.play('order');
     const sel = this._playerAlive.filter((u) => u.selected);
     this._selectionUiKey = '';
-    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
     this.ui?.updateFireMissionControls(this._countActiveFireMissions());
-    this.targetIndicators?.update(sel, this._playerAlive);
-    return true;
+    if (cleared > 0) {
+      sounds.play('order');
+      this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
+      this.targetIndicators?.update(sel, this._playerAlive);
+    }
+    return cleared > 0;
   }
 
   _spawnExplosionCrater(x, z, tier = 'medium') {

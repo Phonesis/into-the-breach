@@ -201,6 +201,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       _movePath: u._movePath?.map((p) => ({ x: p.x, z: p.z })) ?? null,
       _userMoveOrder: !!u._userMoveOrder,
       _chasingAttack: !!u._chasingAttack,
+      manualFireMission: !!u._manualFireMission,
       attackOrderRef: serializeTargetRef(u.attackOrder),
       targetRef: serializeTargetRef(u.target),
       defensiveHold: u.defensiveHold ? { ...u.defensiveHold } : null,
@@ -795,6 +796,7 @@ export function applyBattleSave(game, snapshot) {
     if (attackOrder) {
       unit.attackOrder = attackOrder;
       unit.target = target ?? attackOrder;
+      unit._manualFireMission = !!uData.manualFireMission;
     }
     if (uData.moveTarget) {
       unit.moveTarget = { x: uData.moveTarget.x, z: uData.moveTarget.z };

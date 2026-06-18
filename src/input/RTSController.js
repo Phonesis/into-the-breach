@@ -514,7 +514,7 @@ export class RTSController {
     this._lastOrderAt = Date.now();
     if (pick.kind === 'scenery') {
       for (const u of selected) {
-        u.setAttackOrder(pick.target);
+        u.setAttackOrder(pick.target, { manualFire: true });
       }
       if (this.onOrder) this.onOrder('attack', selected);
       return true;
