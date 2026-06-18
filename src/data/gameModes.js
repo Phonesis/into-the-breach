@@ -31,7 +31,7 @@ export const GAME_MODES = {
     id: 'lastStand',
     name: 'Last Stand',
     subtitle:
-      'Deploy your entire army anywhere on the map (2,000 supplies). No HQ or reinforcements — fight to the last unit.',
+      'Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Fight to the last unit.',
   },
 };
 

@@ -1,5 +1,5 @@
 import { getStandoffPosition, findNearestEnemy, isInRange } from './Targeting.js';
-import { isTankType } from '../units/VehicleTypes.js';
+import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
@@ -83,7 +83,11 @@ export function updateAI({
     }
 
     if (lastStand) {
-      updateLastStandUnit(unit, alivePlayers, mapDef, d);
+      if (unit.lastStandRole) {
+        updateLastStandPresetUnit(unit, alivePlayers, aliveEnemies, mapDef, d);
+      } else {
+        updateLastStandUnit(unit, alivePlayers, mapDef, d);
+      }
       continue;
     }
 
@@ -218,6 +222,116 @@ function enemyNeedsCapture(points, assault) {
     return true;
   }
   return points.some((p) => !p.isFrontline && p.owner !== 'enemy');
+}
+
+function pickPresetAttackTarget(unit, players) {
+  if (unit.def?.type === 'antiTankGun' || unit.def?.type === 'tank' || unit.def?.type === 'superHeavyTank') {
+    let best = null;
+    let bestScore = Infinity;
+    for (const foe of players) {
+      if (foe.dead || foe.team === unit.team) continue;
+      const d = unit.distanceTo(foe);
+      if (d > unit.def.range * 1.25) continue;
+      const vehicle = isVehicleUnit(foe.def?.type);
+      const tank = isTankType(foe.def?.type);
+      const score = d - (tank ? 100 : vehicle ? 55 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = foe;
+      }
+    }
+    if (best) return best;
+  }
+  return pickAttackTarget(unit, players);
+}
+
+function countAlliesInRole(allies, role, nearUnit, radius) {
+  let n = 0;
+  for (const a of allies) {
+    if (a.dead || a.id === nearUnit.id || a.lastStandRole !== role) continue;
+    if (nearUnit.distanceTo(a) <= radius) n++;
+  }
+  return n;
+}
+
+/** Preset Last Stand — combined arms: hold fires, armor probes, infantry supports armor pushes. */
+function updateLastStandPresetUnit(unit, players, allies, mapDef, difficulty) {
+  const d = difficulty ?? { attackAggressionMult: 1 };
+  const role = unit.lastStandRole ?? 'line';
+  const hold = unit.defensiveHold;
+  const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
+  const focus = pickPresetAttackTarget(unit, players);
+
+  if (role === 'armor' || role === 'recon') {
+    const playerCluster = averagePosition(players);
+    if (focus) {
+      unit.setAttackOrder(focus);
+      if (!isInRange(unit, focus)) {
+        unit.moveTarget = getStandoffPosition(unit, focus);
+      }
+      return;
+    }
+    unit.clearAttackOrder();
+    const flank = role === 'recon' ? 22 : 12;
+    unit.moveTarget = {
+      x: playerCluster.x + (Math.random() - 0.5) * flank,
+      z: playerCluster.z + (Math.random() - 0.5) * flank,
+    };
+    const half = mapDef.size / 2 - 8;
+    unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
+    unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
+    return;
+  }
+
+  if (role === 'line' && isDefensive && countAlliesInRole(allies, 'armor', unit, 42) > 0) {
+    const armorLead = allies.find(
+      (a) =>
+        !a.dead &&
+        a.lastStandRole === 'armor' &&
+        a.lastStandStance === 'attack' &&
+        unit.distanceTo(a) < 42
+    );
+    if (armorLead && (armorLead.attackOrder || armorLead.moveTarget) && Math.random() < 0.28 * d.attackAggressionMult) {
+      unit.lastStandStance = 'attack';
+      unit.defensiveHold = null;
+      if (armorLead.attackOrder && !armorLead.attackOrder.dead) {
+        unit.setAttackOrder(armorLead.attackOrder);
+        unit.moveTarget = getStandoffPosition(unit, armorLead.attackOrder);
+      } else if (armorLead.moveTarget) {
+        unit.moveTarget = {
+          x: armorLead.moveTarget.x + (Math.random() - 0.5) * 8,
+          z: armorLead.moveTarget.z + (Math.random() - 0.5) * 8,
+        };
+      }
+      return;
+    }
+  }
+
+  if (role === 'arty' || role === 'support') {
+    if (focus) {
+      unit.setAttackOrder(focus);
+      if (!isInRange(unit, focus)) {
+        const distToHold = hold ? Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z) : Infinity;
+        if (hold && distToHold < hold.radius * 1.8) {
+          unit.moveTarget = getStandoffPosition(unit, focus);
+        }
+      }
+      return;
+    }
+    if (hold) {
+      const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+      if (dist > hold.radius) {
+        unit.clearAttackOrder();
+        unit.moveTarget = { x: hold.x, z: hold.z };
+      } else {
+        unit.clearAttackOrder();
+        unit.moveTarget = null;
+      }
+    }
+    return;
+  }
+
+  updateLastStandUnit(unit, players, mapDef, difficulty);
 }
 
 function updateLastStandUnit(unit, players, mapDef, difficulty) {

@@ -3,6 +3,7 @@ import { distanceBetween } from '../game/Targeting.js';
 import { MEDIC_AURA_RANGE } from '../game/MedicBehavior.js';
 import { ENGINEER_AURA_RANGE } from '../game/EngineerBehavior.js';
 import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior.js';
+import { getActiveMotorPools, isUnitNearMotorPool } from '../game/MotorPoolBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
 
 const _tex = { cross: null, spanner: null };
@@ -121,6 +122,9 @@ function getHealKind(unit, units, baseBuildings) {
 
   const hospitals = getActiveHospitals(baseBuildings);
   if (isUnitNearHospital(unit, hospitals)) return 'medic';
+
+  const motorPools = getActiveMotorPools(baseBuildings);
+  if (isUnitNearMotorPool(unit, motorPools)) return 'engineer';
 
   for (const engineer of units) {
     if (engineer.dead || engineer.team !== unit.team || engineer.def?.type !== 'engineer') continue;

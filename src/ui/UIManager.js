@@ -32,6 +32,11 @@ import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 import { BattleMinimap } from './Minimap.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
+import {
+  LAST_STAND_DEPLOY_MODE_LIST,
+  LAST_STAND_PRESET_MIN_MAP_SIZE,
+  isLastStandPresetDeployMode,
+} from '../data/lastStandForces.js';
 
 const PRODUCE_LABELS = {
   infantry: 'Inf',
@@ -102,6 +107,7 @@ export class UIManager {
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
     this.selectedTdWaveMode = 'standard';
+    this.selectedLastStandDeployMode = 'manual';
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
     this._hudBaseBuilding = false;
@@ -225,6 +231,13 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
             <h2>Wave Mode</h2>
             <div class="campaign-style-grid" id="td-wave-mode-grid"></div>
+          </div>
+          <div class="campaign-style-block hidden" id="laststand-deploy-block">
+            <h2>Deployment Style</h2>
+            <div class="campaign-style-grid" id="laststand-deploy-grid"></div>
+            <p class="laststand-deploy-note hidden" id="laststand-deploy-note">
+              Preset battle groups require a <strong>Large</strong> map.
+            </p>
           </div>
           <div class="actions">
             <button class="btn btn-secondary interactive" id="btn-back-faction">Back</button>
@@ -569,19 +582,51 @@ export class UIManager {
     ).join('');
   }
 
+  renderLastStandDeployModes() {
+    const grid = this.root.querySelector('#laststand-deploy-grid');
+    if (!grid) return;
+    grid.innerHTML = LAST_STAND_DEPLOY_MODE_LIST.map(
+      (m) => `
+      <button type="button" class="card-btn interactive campaign-style-card laststand-deploy-card${m.id === this.selectedLastStandDeployMode ? ' selected' : ''}" data-id="${m.id}">
+        <span class="name">${m.name}</span>
+        <span class="meta">${m.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
+  updateLastStandMapSizeLock() {
+    const preset = this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
+    const note = this.root.querySelector('#laststand-deploy-note');
+    if (note) note.classList.toggle('hidden', !preset);
+    if (preset && this.selectedMapSize !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
+      this.selectedMapSize = LAST_STAND_PRESET_MIN_MAP_SIZE;
+    }
+    this.renderMapSizes();
+  }
+
   updateDifficultyPanel() {
     const block = this.root.querySelector('#difficulty-block');
     const styleBlock = this.root.querySelector('#campaign-style-block');
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
+    const lastStandBlock = this.root.querySelector('#laststand-deploy-block');
     const isTutorial = this.selectedGameMode === 'tutorial';
     const isCampaign = this.selectedGameMode === 'campaign';
     const isTowerDefense = this.selectedGameMode === 'towerDefense';
+    const isLastStand = this.selectedGameMode === 'lastStand';
     if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
+    if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
     this.renderDifficulties();
     if (isCampaign) this.renderCampaignStyles();
     if (isTowerDefense) this.renderTdWaveModes();
+    if (isLastStand) {
+      this.renderLastStandDeployModes();
+      this.updateLastStandMapSizeLock();
+    } else {
+      this.renderMapSizes();
+    }
   }
 
   renderAssaultRoles() {
@@ -647,12 +692,15 @@ export class UIManager {
   renderMapSizes() {
     const grid = this.root.querySelector('#map-size-grid');
     if (!grid) return;
+    const lockPreset =
+      this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
     grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
       const selected = preset.id === this.selectedMapSize;
+      const disabled = lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE;
       return `
-      <button type="button" class="card-btn interactive map-size-card${selected ? ' selected' : ''}" data-id="${preset.id}">
+      <button type="button" class="card-btn interactive map-size-card${selected ? ' selected' : ''}${disabled ? ' map-size-card--disabled' : ''}" data-id="${preset.id}"${disabled ? ' disabled' : ''}>
         <span class="name">${preset.name}</span>
-        <span class="meta">${preset.subtitle}</span>
+        <span class="meta">${disabled ? 'Preset battle groups need a large theater' : preset.subtitle}</span>
       </button>
     `;
     }).join('');
@@ -745,7 +793,7 @@ export class UIManager {
 
     this.root.querySelector('#map-size-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.map-size-card');
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       this.root.querySelectorAll('.map-size-card').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
       this.selectedMapSize = btn.dataset.id;
@@ -777,6 +825,15 @@ export class UIManager {
       this.selectedTdWaveMode = btn.dataset.id;
     });
 
+    this.root.querySelector('#laststand-deploy-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.laststand-deploy-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.laststand-deploy-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedLastStandDeployMode = btn.dataset.id;
+      this.updateLastStandMapSizeLock();
+    });
+
     this.root.querySelectorAll('.map-card').forEach((btn) => {
       btn.onclick = () => {
         this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
@@ -798,6 +855,8 @@ export class UIManager {
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
           tdWaveMode:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
+          lastStandDeployMode:
+            this.selectedGameMode === 'lastStand' ? this.selectedLastStandDeployMode : undefined,
         });
       }
     };
@@ -1035,7 +1094,7 @@ export class UIManager {
     this._hudHasFrontline = assault || towerDefense;
     this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
     this._syncFrontlineToggle();
-    this._setProductionPanelVisible(lastStand);
+    this._setProductionPanelVisible(lastStand && !options.lastStandPreset);
     this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense || lastStand);
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense);
@@ -1072,6 +1131,9 @@ export class UIManager {
         this._defaultHudHint = options.tdEndless
           ? 'Tower Defence (Endless): build behind the frontline · survive escalating waves · see how long you last'
           : 'Tower Defence: build behind the frontline · LMB place · Barrage needs an Artillery Pit · hold 12 waves';
+      } else if (lastStand && options.lastStandPreset) {
+        this._defaultHudHint =
+          'Preset battle group: full combined-arms forces deployed · Begin Battle when ready · destroy every enemy unit';
       } else if (lastStand) {
         this._defaultHudHint =
           'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
@@ -1089,6 +1151,9 @@ export class UIManager {
       if (tabletOn && tutorial) {
         hint.textContent =
           'Tutorial: tap to select · Target/Fire buttons (camera pad) · long-press map to move/attack';
+      } else if (tabletOn && lastStand && options.lastStandPreset) {
+        hint.textContent =
+          'Preset battle group deployed · Begin Battle when ready · camera pad (right)';
       } else if (tabletOn && lastStand) {
         hint.textContent =
           'Last Stand: tap unit, tap map to place · camera pad (right) · Begin Battle when ready';
@@ -1780,8 +1845,10 @@ export class UIManager {
   updateLastStandDeploy(game) {
     if (!game?.lastStand) return;
 
-    const LAST_STAND_BATTLE_HINT =
-      'Last Stand — no reinforcements · wipe out all enemy units to win';
+    const preset = isLastStandPresetDeployMode(game.lastStand.deployMode);
+    const LAST_STAND_BATTLE_HINT = preset
+      ? 'Preset battle group — combined arms clash · destroy all enemy forces to win'
+      : 'Last Stand — no reinforcements · wipe out all enemy units to win';
 
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
@@ -1811,12 +1878,16 @@ export class UIManager {
     }
 
     this._hudLastStandDeploy = true;
-    this._setProductionPanelVisible(true);
+    this._setProductionPanelVisible(!preset);
     banner?.classList.remove('hidden');
-    if (title) title.textContent = 'Deploy your forces';
+    if (title) {
+      title.textContent = preset ? 'Battle groups deployed' : 'Deploy your forces';
+    }
     if (value) value.textContent = String(playerCount);
     if (sub) {
-      sub.textContent = `${supplies} supplies left · ${enemyCount} enemy units placed · Esc cancels selection`;
+      sub.textContent = preset
+        ? `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations on a large theater`
+        : `${supplies} supplies left · ${enemyCount} enemy units placed · Esc cancels selection`;
     }
     if (fill) fill.style.width = '100%';
     if (launchBtn) {
@@ -1825,27 +1896,33 @@ export class UIManager {
       launchBtn.disabled = playerCount === 0 || !this.callbacks.onLaunchBattleNow;
     }
     if (qEl) {
-      const pending = game.lastStand.pendingType;
-      qEl.textContent = pending
-        ? `Placing ${game.playerFaction.units[pending]?.name ?? pending} — click the map`
-        : 'Select a unit type, then click the map to deploy';
+      if (preset) {
+        qEl.textContent = 'Preset force — rifle line, support weapons, and armor echelons are in position';
+      } else {
+        const pending = game.lastStand.pendingType;
+        qEl.textContent = pending
+          ? `Placing ${game.playerFaction.units[pending]?.name ?? pending} — click the map`
+          : 'Select a unit type, then click the map to deploy';
+      }
     }
 
-    const resources = game.cheatMode ? '∞' : Math.floor(game.lastStand.supplies.player);
+    const resources = preset ? '—' : game.cheatMode ? '∞' : Math.floor(game.lastStand.supplies.player);
     const resEl = this.root.querySelector('#hud-resources');
     if (resEl) resEl.textContent = String(resources);
 
-    this.root.querySelectorAll('.produce-btn').forEach((btn) => {
-      const type = btn.dataset.type;
-      const def = game.playerFaction?.units?.[type];
-      if (!def) return;
-      const can =
-        game.cheatMode ||
-        game.lastStand.supplies.player >= def.cost;
-      btn.disabled = !can;
-      btn.classList.toggle('armed', game.lastStand.pendingType === type);
-      btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
-    });
+    if (!preset) {
+      this.root.querySelectorAll('.produce-btn').forEach((btn) => {
+        const type = btn.dataset.type;
+        const def = game.playerFaction?.units?.[type];
+        if (!def) return;
+        const can =
+          game.cheatMode ||
+          game.lastStand.supplies.player >= def.cost;
+        btn.disabled = !can;
+        btn.classList.toggle('armed', game.lastStand.pendingType === type);
+        btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
+      });
+    }
 
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {

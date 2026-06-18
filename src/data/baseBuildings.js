@@ -60,7 +60,7 @@ export const BASE_BUILDING_TYPES = {
   motorPool: {
     id: 'motorPool',
     name: 'Motor Pool',
-    subtitle: 'Click to train engineers, scouts, armor',
+    subtitle: 'Click to train engineers, scouts, armor — repairs vehicles nearby',
     cost: 260,
     buildTime: 55,
     hp: 400,
@@ -72,6 +72,8 @@ export const BASE_BUILDING_TYPES = {
     placementMinFromHq: 14,
     placementMaxFromHq: 52,
     minSpacing: 11,
+    healRange: 14,
+    healPerSec: 5.2,
   },
   bunker: {
     id: 'bunker',

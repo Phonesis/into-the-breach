@@ -28,10 +28,14 @@ import {
   updateLastStandEnemyDeploy,
   flushEnemyDeployment,
   assignLastStandEnemyStances,
+  assignLastStandPresetStances,
+  deployLastStandPresetForces,
+  isLastStandPresetForce,
   checkLastStandVictory,
   isLastStandDeployPhase,
   tryPlacePlayerUnit,
 } from './LastStandMode.js';
+import { isLastStandPresetDeployMode } from '../data/lastStandForces.js';
 import {
   createTowerDefenseState,
   startNextWave,
@@ -54,6 +58,7 @@ import {
 import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
+import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing } from './EngineerBehavior.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
@@ -582,7 +587,9 @@ export class Game {
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
     this.towerDefense = isTowerDefenseMode(gameMode);
-    this.lastStand = isLastStandMode(gameMode) ? createLastStandState() : null;
+    this.lastStand = isLastStandMode(gameMode)
+      ? createLastStandState(startOptions.lastStandDeployMode ?? 'manual')
+      : null;
     this.campaign = isCampaignMode(gameMode);
     this.campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
     this.assaultRole = startOptions.assaultRole ?? 'defend';
@@ -591,14 +598,20 @@ export class Game {
     );
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
-    this.mapDef = buildMapDef(MAPS[mapId], startOptions.mapSize ?? 'medium');
+    const mapSizeId =
+      this.lastStand && isLastStandPresetDeployMode(this.lastStand.deployMode)
+        ? 'large'
+        : (startOptions.mapSize ?? 'medium');
+    this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
     const assault = isAssaultMode(gameMode);
     const enemyBaseRes = assault ? ASSAULT_ENEMY_RESOURCES : ENEMY_STARTING_RESOURCES;
     this.resources = {
       player: this.lastStand
-        ? LAST_STAND_SUPPLIES
+        ? isLastStandPresetDeployMode(this.lastStand.deployMode)
+          ? 0
+          : LAST_STAND_SUPPLIES
         : this.tutorial
           ? TUTORIAL_STARTING_RESOURCES
           : this.towerDefense
@@ -611,7 +624,9 @@ export class Game {
                   ? CAMPAIGN_BALANCE.playerStartingResources
                   : STARTING_RESOURCES,
       enemy: this.lastStand
-        ? LAST_STAND_SUPPLIES
+        ? isLastStandPresetDeployMode(this.lastStand.deployMode)
+          ? 0
+          : LAST_STAND_SUPPLIES
         : this.tutorial || this.clearance || this.towerDefense
           ? 0
           : Math.floor(
@@ -842,9 +857,17 @@ export class Game {
 
     if (this.campaign) applyCampaignUnitHp(this.units);
 
+    if (this.lastStand && isLastStandPresetForce(this) && !restoreSnapshot) {
+      deployLastStandPresetForces(this);
+    }
+
     for (const u of this.units) {
       u._mapDef = this.mapDef;
       u.position.y = sampleTerrainHeight(u.position.x, u.position.z, this.mapDef);
+    }
+
+    if (this.lastStand && isLastStandPresetForce(this) && !restoreSnapshot) {
+      this._rebuildUnitCaches();
     }
 
     const camFocus = clearanceSpawnBase ?? playerBasePos;
@@ -910,6 +933,7 @@ export class Game {
       towerDefense: this.towerDefense,
       tdEndless: !!this.towerDefense?.endless,
       lastStand: !!this.lastStand,
+      lastStandPreset: isLastStandPresetForce(this),
       campaignStyle: this.campaignStyle,
     });
     if (isTabletLikeDevice()) {
@@ -1289,8 +1313,12 @@ export class Game {
     if (!this.lastStand || this.lastStand.phase !== 'deploy') return false;
     if (this._playerAlive.length === 0) return false;
 
-    flushEnemyDeployment(this);
-    assignLastStandEnemyStances(this);
+    if (isLastStandPresetForce(this)) {
+      assignLastStandPresetStances(this);
+    } else {
+      flushEnemyDeployment(this);
+      assignLastStandEnemyStances(this);
+    }
     this._rebuildUnitCaches();
     this.lastStand.phase = 'battle';
     this.lastStand.pendingType = null;
@@ -1690,6 +1718,7 @@ export class Game {
     if (this.paused) return false;
 
     if (this.lastStand) {
+      if (isLastStandPresetDeployMode(this.lastStand.deployMode)) return false;
       if (this.lastStand.phase !== 'deploy') return false;
       const def = this.playerFaction?.units?.[unitType];
       if (!def) return false;
@@ -2244,6 +2273,7 @@ export class Game {
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
         updateHospitalHealing(this.baseBuildings, this._aliveUnits, dt);
+        updateMotorPoolHealing(this.baseBuildings, this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
         this.engineerSandbags?.update(dt);
         if (this.engineerSandbags?.sites?.length) {

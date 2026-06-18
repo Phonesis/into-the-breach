@@ -204,6 +204,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       attackOrderRef: serializeTargetRef(u.attackOrder),
       targetRef: serializeTargetRef(u.target),
       defensiveHold: u.defensiveHold ? { ...u.defensiveHold } : null,
+      lastStandRole: u.lastStandRole ?? null,
+      lastStandEchelon: u.lastStandEchelon ?? null,
+      lastStandStance: u.lastStandStance ?? null,
     });
   }
 
@@ -769,6 +772,9 @@ export function applyBattleSave(game, snapshot) {
     unit._userMoveOrder = !!uData._userMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;
+    unit.lastStandRole = uData.lastStandRole ?? null;
+    unit.lastStandEchelon = uData.lastStandEchelon ?? null;
+    unit.lastStandStance = uData.lastStandStance ?? null;
     unit.position.y = uData.y ?? sampleTerrainHeight(uData.x, uData.z, game.mapDef);
     if (unit.mesh) unit.mesh.rotation.y = uData.yaw ?? 0;
     updateSquadCasualtyVisual(unit);

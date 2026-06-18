@@ -1,4 +1,8 @@
 import { getProducibleUnits, isLastStandMode, LAST_STAND_SUPPLIES } from '../data/gameModes.js';
+import {
+  isLastStandPresetDeployMode,
+  LAST_STAND_PRESET_ROSTER,
+} from '../data/lastStandForces.js';
 
 export { isLastStandMode, LAST_STAND_SUPPLIES };
 import { spawnUnitAt } from './Spawner.js';
@@ -24,10 +28,34 @@ const ENEMY_TYPE_WEIGHTS = {
   artillery: 2,
 };
 
-export function createLastStandState() {
+const PRESET_ECHELON_DEPTH = {
+  front: 0.34,
+  support: 0.2,
+  reserve: 0.1,
+};
+
+const PRESET_ROLE_BY_TYPE = {
+  infantry: 'line',
+  machineGun: 'line',
+  sniper: 'support',
+  medic: 'support',
+  engineer: 'support',
+  mortar: 'arty',
+  antiTankGun: 'support',
+  artillery: 'arty',
+  armoredCar: 'recon',
+  tank: 'armor',
+  superHeavyTank: 'armor',
+};
+
+export function createLastStandState(deployMode = 'manual') {
+  const preset = isLastStandPresetDeployMode(deployMode);
   return {
     phase: 'deploy',
-    supplies: { player: LAST_STAND_SUPPLIES, enemy: LAST_STAND_SUPPLIES },
+    deployMode,
+    supplies: preset
+      ? { player: 0, enemy: 0 }
+      : { player: LAST_STAND_SUPPLIES, enemy: LAST_STAND_SUPPLIES },
     pendingType: null,
     enemyDeployTimer: ENEMY_DEPLOY_INTERVAL * 0.4,
   };
@@ -57,6 +85,104 @@ function pickDeployPosition(mapDef, units, biasBase) {
     if (canPlaceUnitAt(x, z, mapDef, units)) return { x, z };
   }
   return null;
+}
+
+function findFormationPosition(mapDef, units, x, z) {
+  if (canPlaceUnitAt(x, z, mapDef, units)) return { x, z };
+
+  for (let ring = 1; ring <= 6; ring++) {
+    const step = LAST_STAND_MIN_SPACING * 0.85;
+    for (let a = 0; a < 12; a++) {
+      const angle = (a / 12) * Math.PI * 2;
+      const tx = x + Math.cos(angle) * step * ring;
+      const tz = z + Math.sin(angle) * step * ring;
+      if (canPlaceUnitAt(tx, tz, mapDef, units)) return { x: tx, z: tz };
+    }
+  }
+  return null;
+}
+
+function getFormationBasis(mapDef, team) {
+  const ownBase = team === 'player' ? mapDef.playerBase : mapDef.enemyBase;
+  const foeBase = team === 'player' ? mapDef.enemyBase : mapDef.playerBase;
+  const axisX = foeBase.x - ownBase.x;
+  const axisZ = foeBase.z - ownBase.z;
+  const len = Math.hypot(axisX, axisZ) || 1;
+  return {
+    base: ownBase,
+    axisX: axisX / len,
+    axisZ: axisZ / len,
+    perpX: -axisZ / len,
+    perpZ: axisX / len,
+    deployDepth: (mapDef.size ?? 120) * 0.38,
+    lineWidth: (mapDef.size ?? 120) * 0.42,
+  };
+}
+
+function spawnPresetUnit(game, { faction, team, unitType, echelon, index, count, basis }) {
+  const def = faction?.units?.[unitType];
+  if (!def) return false;
+
+  const depthFrac = PRESET_ECHELON_DEPTH[echelon] ?? 0.2;
+  const along = basis.deployDepth * depthFrac;
+  const lateralSpan = basis.lineWidth * (echelon === 'reserve' ? 0.55 : echelon === 'support' ? 0.72 : 0.88);
+  const t = count <= 1 ? 0 : index / (count - 1) - 0.5;
+  const jitter = (Math.random() - 0.5) * 2.2;
+
+  const x =
+    basis.base.x +
+    basis.axisX * along +
+    basis.perpX * (t * lateralSpan + jitter);
+  const z =
+    basis.base.z +
+    basis.axisZ * along +
+    basis.perpZ * (t * lateralSpan + jitter);
+
+  const pos = findFormationPosition(game.mapDef, game.units, x, z);
+  if (!pos) return false;
+
+  const unit = spawnUnitAt({
+    def,
+    faction,
+    team,
+    x: pos.x,
+    z: pos.z,
+    scene: game.scene,
+    mapDef: game.mapDef,
+  });
+  unit._mapDef = game.mapDef;
+  unit.position.y = sampleTerrainHeight(pos.x, pos.z, game.mapDef);
+  unit.lastStandRole = PRESET_ROLE_BY_TYPE[unitType] ?? 'line';
+  unit.lastStandEchelon = echelon;
+  game.units.push(unit);
+  return true;
+}
+
+/** Deploy mirrored preset battle groups for both sides (large-map preset mode). */
+export function deployLastStandPresetForces(game) {
+  const state = game.lastStand;
+  if (!state || !isLastStandPresetDeployMode(state.deployMode)) return;
+
+  for (const team of ['player', 'enemy']) {
+    const faction = team === 'player' ? game.playerFaction : game.enemyFaction;
+    const basis = getFormationBasis(game.mapDef, team);
+
+    for (const slot of LAST_STAND_PRESET_ROSTER) {
+      const def = faction?.units?.[slot.type];
+      if (!def) continue;
+      for (let i = 0; i < slot.count; i++) {
+        spawnPresetUnit(game, {
+          faction,
+          team,
+          unitType: slot.type,
+          echelon: slot.echelon,
+          index: i,
+          count: slot.count,
+          basis,
+        });
+      }
+    }
+  }
 }
 
 function pickWeightedUnitType(faction, supplies, weights = ENEMY_TYPE_WEIGHTS) {
@@ -106,6 +232,7 @@ function placeEnemyUnit(game, unitType) {
 export function tryPlacePlayerUnit(game, unitType, x, z) {
   const state = game.lastStand;
   if (!state || state.phase !== 'deploy') return { ok: false, reason: 'not_deploy' };
+  if (isLastStandPresetDeployMode(state.deployMode)) return { ok: false, reason: 'preset_mode' };
 
   const faction = game.playerFaction;
   const def = faction?.units?.[unitType];
@@ -133,7 +260,7 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
 
 export function updateLastStandEnemyDeploy(game, dt) {
   const state = game.lastStand;
-  if (!state || state.phase !== 'deploy') return;
+  if (!state || state.phase !== 'deploy' || isLastStandPresetDeployMode(state.deployMode)) return;
 
   state.enemyDeployTimer -= dt;
   if (state.enemyDeployTimer > 0) return;
@@ -158,7 +285,32 @@ const LAST_STAND_DEFENSIVE_TYPES = new Set([
 ]);
 const LAST_STAND_AGGRESSIVE_TYPES = new Set(['tank', 'armoredCar', 'superHeavyTank']);
 
-/** Assign per-unit attack vs hold roles when Last Stand battle begins. */
+function holdRadiusForType(type) {
+  if (type === 'artillery' || type === 'mortar') return 12;
+  if (type === 'antiTankGun') return 10;
+  if (type === 'infantry') return 14;
+  if (type === 'machineGun' || type === 'sniper') return 11;
+  if (type === 'tank' || type === 'superHeavyTank') return 16;
+  if (type === 'armoredCar') return 18;
+  return 12;
+}
+
+function assignDefensiveHold(unit, defendChance) {
+  const type = unit.def.type;
+  if (Math.random() >= defendChance) {
+    unit.lastStandStance = 'attack';
+    unit.defensiveHold = null;
+    return;
+  }
+  unit.lastStandStance = 'defend';
+  unit.defensiveHold = {
+    x: unit.position.x,
+    z: unit.position.z,
+    radius: holdRadiusForType(type),
+  };
+}
+
+/** Assign per-unit attack vs hold roles when Last Stand battle begins (manual deploy). */
 export function assignLastStandEnemyStances(game) {
   for (const unit of game.units) {
     if (unit.team !== 'enemy' || unit.dead) continue;
@@ -169,24 +321,51 @@ export function assignLastStandEnemyStances(game) {
     else if (LAST_STAND_AGGRESSIVE_TYPES.has(type)) defendChance = 0.22;
     else if (type === 'infantry' || type === 'medic' || type === 'engineer') defendChance = 0.5;
 
-    unit.lastStandStance = Math.random() < defendChance ? 'defend' : 'attack';
-    if (unit.lastStandStance === 'defend') {
-      const radius =
-        type === 'artillery' || type === 'mortar' ? 10 : type === 'infantry' ? 14 : 12;
-      unit.defensiveHold = {
-        x: unit.position.x,
-        z: unit.position.z,
-        radius,
-      };
-    } else {
+    assignDefensiveHold(unit, defendChance);
+  }
+}
+
+/** Combined-arms stances for preset battle groups — mixed defend / probe / assault. */
+export function assignLastStandPresetStances(game) {
+  for (const unit of game.units) {
+    if (unit.dead) continue;
+
+    const role = unit.lastStandRole ?? PRESET_ROLE_BY_TYPE[unit.def?.type] ?? 'line';
+    unit.lastStandRole = role;
+
+    if (unit.team === 'player') {
+      unit.lastStandStance = null;
       unit.defensiveHold = null;
+      continue;
     }
+
+    let defendChance = 0.5;
+    switch (role) {
+      case 'line':
+        defendChance = 0.78;
+        break;
+      case 'support':
+        defendChance = 0.88;
+        break;
+      case 'arty':
+        defendChance = 0.94;
+        break;
+      case 'recon':
+        defendChance = 0.18;
+        break;
+      case 'armor':
+        defendChance = 0.12;
+        break;
+      default:
+        defendChance = 0.55;
+    }
+    assignDefensiveHold(unit, defendChance);
   }
 }
 
 export function flushEnemyDeployment(game) {
   const state = game.lastStand;
-  if (!state) return;
+  if (!state || isLastStandPresetDeployMode(state.deployMode)) return;
 
   const faction = game.enemyFaction;
   const types = getProducibleUnits(faction).sort(
@@ -230,11 +409,15 @@ export function checkLastStandVictory(game) {
     return { victory: true, detail: 'Last man standing — all enemy forces destroyed!' };
   }
   if (playerAlive === 0) {
-    return { victory: false, detail: 'Your army has been wiped out.' };
+    return { victory: false, detail: 'Your forces have been wiped out.' };
   }
   return null;
 }
 
 export function isLastStandDeployPhase(game) {
   return !!(game.lastStand && game.lastStand.phase === 'deploy');
+}
+
+export function isLastStandPresetForce(game) {
+  return isLastStandPresetDeployMode(game?.lastStand?.deployMode);
 }

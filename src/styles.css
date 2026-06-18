@@ -2766,6 +2766,17 @@ body,
   display: none !important;
 }
 
+.laststand-deploy-note {
+  font-size: 0.88rem;
+  opacity: 0.85;
+  margin: 0.5rem 0 0;
+}
+
+.map-size-card--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .overlay-guide {
   position: fixed;
   inset: 0;
