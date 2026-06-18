@@ -634,9 +634,17 @@ export function applyBattleSave(game, snapshot) {
   game.resources = { ...snapshot.resources };
 
   if (snapshot.camera) {
-    game.cameraTarget.set(snapshot.camera.targetX, 0, snapshot.camera.targetZ);
-    game.zoom = snapshot.camera.zoom ?? game.zoom;
-    game.cameraYaw = snapshot.camera.yaw ?? game.cameraYaw;
+    const tx = Number(snapshot.camera.targetX);
+    const tz = Number(snapshot.camera.targetZ);
+    if (Number.isFinite(tx) && Number.isFinite(tz)) {
+      game.cameraTarget.set(tx, 0, tz);
+    }
+    const zoom = Number(snapshot.camera.zoom);
+    if (Number.isFinite(zoom)) {
+      game.zoom = THREE.MathUtils.clamp(zoom, game.zoomMin, game.zoomMax);
+    }
+    const yaw = Number(snapshot.camera.yaw);
+    if (Number.isFinite(yaw)) game.cameraYaw = yaw;
   }
 
   for (const hData of snapshot.hqs ?? []) {

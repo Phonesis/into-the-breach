@@ -492,8 +492,8 @@ export class Game {
   }
 
   _startRenderLoop() {
-    if (this._rafActive) return;
     this._rafActive = true;
+    this.clock.getDelta();
     requestAnimationFrame(this.animate);
   }
 
@@ -501,9 +501,32 @@ export class Game {
     this._rafActive = false;
   }
 
+  /** Sync canvas size and draw one frame so restores never show a blank battlefield. */
+  _bootstrapBattleView() {
+    this.onResize();
+    if (!this.mapDef) return;
+    this._clampCameraTarget();
+    this._updateCameraFromTarget();
+    updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
+    updateLightingForTarget(this.lights, this.cameraTarget.x, this.cameraTarget.z);
+    this._renderFrame();
+  }
+
+  _clampCameraTarget() {
+    if (!this.mapDef) return;
+    const half = this.mapDef.size / 2 - 5;
+    this.cameraTarget.x = THREE.MathUtils.clamp(this.cameraTarget.x, -half, half);
+    this.cameraTarget.z = THREE.MathUtils.clamp(this.cameraTarget.z, -half, half);
+    this.zoom = THREE.MathUtils.clamp(this.zoom, this.zoomMin, this.zoomMax);
+    if (!Number.isFinite(this.cameraYaw)) {
+      this.cameraYaw = Math.atan2(-0.52, 0.72);
+    }
+  }
+
   onResize() {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
+    if (w <= 0 || h <= 0) return;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -875,7 +898,11 @@ export class Game {
         ? this.mapDef.enemyBase
         : enemyBasePos;
     if (restoreSnapshot) {
-      applyBattleSave(this, restoreSnapshot);
+      if (!applyBattleSave(this, restoreSnapshot)) {
+        this.stopGame();
+        return false;
+      }
+      this._clampCameraTarget();
       this._updateCameraFromTarget();
       updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     } else {
@@ -900,8 +927,10 @@ export class Game {
     }
     this.running = true;
     this.gameOver = false;
-    this.paused = false;
-    this.ui?.setGamePaused(false);
+    if (!restoreSnapshot) {
+      this.paused = false;
+      this.ui?.setGamePaused(false);
+    }
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._teardownPending = false;
@@ -971,7 +1000,9 @@ export class Game {
     preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
       if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
     });
+    this._bootstrapBattleView();
     this._startRenderLoop();
+    return true;
   }
 
   _rebuildUnitCaches() {
@@ -1268,10 +1299,10 @@ export class Game {
   loadBattle(saveId) {
     const snapshot = loadBattleSaveData(saveId);
     if (!snapshot?.session) return false;
-    this.activeSaveId = saveId;
     const { factionId, mapId, gameMode, options = {} } = snapshot.session;
-    this.startGame(factionId, mapId, gameMode, { ...options, restoreSnapshot: snapshot });
-    return true;
+    if (!FACTIONS[factionId] || !MAPS[mapId]) return false;
+    this.activeSaveId = saveId;
+    return this.startGame(factionId, mapId, gameMode, { ...options, restoreSnapshot: snapshot });
   }
 
   /** Player-initiated surrender — counts as a defeat, then Main Menu from the end screen. */
@@ -1436,6 +1467,7 @@ export class Game {
     this._enemyAlive = [];
     flushDisposeQueueSync(40);
     disposeBattleScene(this.scene);
+    this.lights = null;
     this.mapDef = null;
     this._stopRenderLoop();
     this._emptyFieldHandled = false;
