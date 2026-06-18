@@ -896,7 +896,9 @@ export class Game {
     this._deployUiAccum = 0;
     this._rosterUiAccum = 0;
     this._emptyFieldHandled = false;
-    this.matchTime = 0;
+    if (!restoreSnapshot) {
+      this.matchTime = 0;
+    }
     this._hqThreat = null;
     this._hqAlertPlayed = false;
     this.controller.enable();
@@ -935,8 +937,11 @@ export class Game {
     if (this.lastStand) {
       this.ui.updateLastStandDeploy(this);
     } else {
-      this.ui.updateDeployCountdown(this._getDeployPhase());
+      const deployPhase = this._getDeployPhase();
+      this.ui.updateDeployCountdown(deployPhase);
+      this.ui.updateBattleOpening(deployPhase ? deployPhase.secondsLeft : 0);
     }
+    this._syncDeployZoneVisuals();
     this._syncPlacementCapture();
     this._rebuildUnitCaches();
     this._syncUnitRoster();
