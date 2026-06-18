@@ -163,7 +163,12 @@ import {
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import { snapUnitYaw } from '../units/VehicleRotation.js';
-import { applyUnitDeathVisual, unitHasCorpseLinger } from '../units/UnitMeshes.js';
+import {
+  applyUnitDeathVisual,
+  unitHasCorpseLinger,
+  updateDetachedCorpseFalls,
+  clearDetachedCorpseFalls,
+} from '../units/UnitMeshes.js';
 import { FireSupportManager } from './FireSupport.js';
 import {
   updateFireSupportEffects,
@@ -1178,7 +1183,7 @@ export class Game {
 
     this.cameraYaw = Math.atan2(-dirX, -dirZ);
     const mapScale = this.mapDef?.sizeScale ?? 1;
-    this.zoom = 34 * Math.sqrt(mapScale);
+    this.zoom = 24 * Math.sqrt(mapScale);
 
     this.cameraTarget.set(
       playerFocus.x + dirX * 8,
@@ -1433,6 +1438,7 @@ export class Game {
     clearTerrainDamage(this.scene);
     clearCombatEffects();
     clearWreckEffects();
+    clearDetachedCorpseFalls();
     clearHqBurnEffects();
     this.scenery?.clear();
     this.scenery = null;
@@ -2238,6 +2244,7 @@ export class Game {
         }
 
         this.matchTime += dt;
+        updateDetachedCorpseFalls(dt);
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
         updateHospitalHealing(this.baseBuildings, this._aliveUnits, dt);

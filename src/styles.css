@@ -584,6 +584,7 @@ body,
   left: 0;
   right: 0;
   padding: 0.75rem 1rem;
+  padding-left: calc(0.65rem + 4.6rem + 1rem);
   background: linear-gradient(0deg, rgba(8, 12, 18, 0.9) 0%, transparent 100%);
   display: flex;
   gap: 1rem;
@@ -1210,6 +1211,10 @@ body,
 }
 
 @media (max-width: 720px) {
+  .hud-bottom {
+    padding-left: 1rem;
+  }
+
   .unit-roster {
     top: auto;
     bottom: 7.5rem;

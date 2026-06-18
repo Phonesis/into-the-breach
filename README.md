@@ -74,7 +74,7 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 | **Training Ground** | No AI — practice orders, production, fire missions, and fire support. Destroy the passive **Practice Target HQ**. |
 | **Assault & Defend** | Scenario on a fixed frontline. Pick **Attack** or **Defend** after choosing the mode. |
 | **Tower Defence** | No player army. Spend **defense points** on emplacements (bunkers, MG nests, AT guns, mines, wire, artillery pits) and hold the frontline through **12 waves**. |
-| **Last Stand** | **2,000** deployment supplies per side. Place your entire army anywhere on the map; the AI deploys in parallel. **Begin Battle** when ready — no HQ, capture points, reinforcements, or fire support. Win by wiping the enemy force. |
+| **Last Stand** | **2,000** deployment supplies per side. Place your entire army anywhere on the map; the AI deploys in parallel. **Begin Battle** when ready — no HQ, capture points, or reinforcements. Strafe and barrage fire support unlock once battle begins. Win by wiping the enemy force. |
 
 ### Campaign
 
@@ -132,7 +132,7 @@ Pick **Attack** or **Defend** in the menu. Central **frontline** capture point (
 ### Last Stand
 
 - **Deploy phase:** Pick a unit type, **LMB** on the map to place it (anywhere valid on the battlefield). The enemy AI places units in parallel from the same **2,000** supply pool. **Esc** cancels the current placement selection. Click **Begin Battle** when your deployment is ready.
-- **Battle phase:** No HQ income, capture zones, production queue, or off-map fire support. Standard RTS orders only.
+- **Battle phase:** No HQ income, capture zones, or production queue. Strafe and barrage fire support are available. Standard RTS orders otherwise.
 - Enemy units get random **attack** or **hold** stances (mortars, AT guns, and MGs tend to defend; tanks and cars tend to push).
 - **Victory:** Destroy every enemy unit. **Defeat:** Your army is eliminated.
 

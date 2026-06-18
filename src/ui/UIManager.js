@@ -1866,6 +1866,7 @@ export class UIManager {
       launchBtn?.classList.add('hidden');
       this._hudLastStandDeploy = false;
       this._setProductionPanelVisible(false);
+      this.root.querySelector('#firesupport-panel')?.classList.remove('hidden');
       this._defaultHudHint = LAST_STAND_BATTLE_HINT;
       const hint = this.root.querySelector('#hud-hint');
       if (hint) {
@@ -1879,6 +1880,7 @@ export class UIManager {
 
     this._hudLastStandDeploy = true;
     this._setProductionPanelVisible(!preset);
+    this.root.querySelector('#firesupport-panel')?.classList.add('hidden');
     banner?.classList.remove('hidden');
     if (title) {
       title.textContent = preset ? 'Battle groups deployed' : 'Deploy your forces';

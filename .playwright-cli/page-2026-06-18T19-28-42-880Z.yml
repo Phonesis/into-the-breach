@@ -1,0 +1,26 @@
+- generic [ref=e11]:
+  - heading "Game Mode" [level=1] [ref=e13]
+  - generic [ref=e14]:
+    - heading "Select Mode" [level=2] [ref=e15]
+    - generic [ref=e16]:
+      - button "Campaign Full battle vs AI — Classic (all units from HQ) or Base Building (construct depots to unlock armor & artillery)." [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]: Campaign
+        - generic [ref=e19]: Full battle vs AI — Classic (all units from HQ) or Base Building (construct depots to unlock armor & artillery).
+      - button "Training Ground No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ." [ref=e20] [cursor=pointer]:
+        - generic [ref=e21]: Training Ground
+        - generic [ref=e22]: No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ.
+      - button "Assault & Defend Attackers must seize the frontline; defenders hold until time runs out or repel the assault." [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]: Assault & Defend
+        - generic [ref=e25]: Attackers must seize the frontline; defenders hold until time runs out or repel the assault.
+      - button "Clear Defenses Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win." [ref=e26] [cursor=pointer]:
+        - generic [ref=e27]: Clear Defenses
+        - generic [ref=e28]: Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win.
+      - button "Tower Defence Hold the frontline against escalating waves — 12-wave victory or endless survival. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages." [ref=e29] [cursor=pointer]:
+        - generic [ref=e30]: Tower Defence
+        - generic [ref=e31]: Hold the frontline against escalating waves — 12-wave victory or endless survival. Spend defense points on bunkers, MG nests, AT guns, wire, and artillery barrages.
+      - button "Last Stand Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Fight to the last unit." [ref=e32] [cursor=pointer]:
+        - generic [ref=e33]: Last Stand
+        - generic [ref=e34]: Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Fight to the last unit.
+    - generic [ref=e35]:
+      - button "Back" [ref=e36] [cursor=pointer]
+      - button "Continue" [disabled] [ref=e37]

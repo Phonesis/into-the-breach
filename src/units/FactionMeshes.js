@@ -193,10 +193,6 @@ function addRedCross(group, x, y, z, size = 0.09) {
 }
 
 export function buildFactionMG(group, body, detail, dark, factionId) {
-  const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.62, 0.1, 10), dark);
-  slab.position.y = 0.06;
-  group.add(slab);
-
   if (factionId === 'germany') {
     addMgTripod(group, dark, { spread: 0.44, legLen: 0.5, pivotY: 0.36 });
 
@@ -312,10 +308,6 @@ export function buildFactionMG(group, body, detail, dark, factionId) {
 }
 
 export function buildFactionMedic(group, body, dark, factionId) {
-  const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.54, 0.1, 10), dark);
-  slab.position.y = 0.06;
-  group.add(slab);
-
   const aidCrate = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.2), mat(0x5a4a38, { rough: 0.82 }));
   aidCrate.position.set(0.32, 0.14, -0.18);
   group.add(aidCrate);
@@ -364,7 +356,7 @@ export function buildFactionMedic(group, body, dark, factionId) {
     }
 
     soldier.add(torso, head, helmet);
-    soldier.position.set(x, 0.14, z);
+    soldier.position.set(x, 0, z);
     soldier.name = 'squadMember';
     soldier.userData.squadIndex = group.userData.nextSquadIndex ?? 0;
     group.userData.nextSquadIndex = (group.userData.nextSquadIndex ?? 0) + 1;
@@ -375,10 +367,6 @@ export function buildFactionMedic(group, body, dark, factionId) {
 }
 
 export function buildFactionEngineer(group, body, dark, factionId) {
-  const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.54, 0.1, 10), dark);
-  slab.position.y = 0.06;
-  group.add(slab);
-
   const toolbox = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.15, 0.22), mat(0x6b4a2e, { rough: 0.82 }));
   toolbox.position.set(0.34, 0.14, -0.16);
   group.add(toolbox);
@@ -434,7 +422,7 @@ export function buildFactionEngineer(group, body, dark, factionId) {
     }
 
     soldier.add(torso, head, helmet);
-    soldier.position.set(x, 0.14, z);
+    soldier.position.set(x, 0, z);
     soldier.name = 'squadMember';
     soldier.userData.squadIndex = group.userData.nextSquadIndex ?? 0;
     group.userData.nextSquadIndex = (group.userData.nextSquadIndex ?? 0) + 1;
@@ -445,10 +433,6 @@ export function buildFactionEngineer(group, body, dark, factionId) {
 }
 
 export function buildFactionMortar(group, body, detail, dark, factionId) {
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.75, 0.14, 10), dark);
-  base.position.y = 0.1;
-  group.add(base);
-
   const tubeLen = factionId === 'usa' ? 1.2 : 1.45;
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, tubeLen, 10), dark);
   tube.rotation.x = -1.15;
@@ -485,10 +469,6 @@ export function buildFactionMortar(group, body, detail, dark, factionId) {
 }
 
 export function buildFactionInfantry(group, body, dark, factionId) {
-  const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.2, 10), dark);
-  slab.position.y = 0.1;
-  group.add(slab);
-
   const helmetStyle = factionId;
   const positions = [
     [0, 0, 0],
@@ -534,7 +514,7 @@ export function buildFactionInfantry(group, body, dark, factionId) {
     }
 
     soldier.add(torso, head, helmet, gun);
-    soldier.position.set(px, 0.15, pz);
+    soldier.position.set(px, 0, pz);
     soldier.name = 'squadMember';
     soldier.userData.squadIndex = i;
     group.add(soldier);
@@ -544,10 +524,6 @@ export function buildFactionInfantry(group, body, dark, factionId) {
 }
 
 export function buildFactionSniper(group, body, detail, dark, factionId, ghillieMat) {
-  const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 0.12, 8), dark);
-  slab.position.y = 0.08;
-  group.add(slab);
-
   const soldier = new THREE.Group();
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.36, 0.14), body);
   torso.position.y = 0.4;
@@ -571,7 +547,7 @@ export function buildFactionSniper(group, body, detail, dark, factionId, ghillie
   scope.position.set(0.42, 0.46, 0.08);
 
   soldier.add(torso, head, helmet, rifle, scope);
-  soldier.position.set(0, 0.12, 0);
+  soldier.position.set(0, 0, 0);
   soldier.name = 'squadMember';
   soldier.userData.squadIndex = 0;
   group.add(soldier);

@@ -1,0 +1,38 @@
+- generic [ref=e199]:
+  - generic [ref=e200]:
+    - heading "Select Theater" [level=1] [ref=e201]
+    - paragraph [ref=e202]: Fight on battlefields modeled after real WW2 campaigns.
+  - generic [ref=e203]:
+    - heading "Choose Map" [level=2] [ref=e204]
+    - generic [ref=e205]:
+      - button "Normandy Operation Overlord — Cotentin Peninsula, June 1944 Hedgerows · Farm tracks · Overcast skies" [ref=e206] [cursor=pointer]:
+        - generic [ref=e207]: Normandy
+        - generic [ref=e208]: Operation Overlord — Cotentin Peninsula, June 1944
+        - generic [ref=e209]: Hedgerows · Farm tracks · Overcast skies
+      - button "North Africa Second Battle of El Alamein — Western Desert, Oct 1942 Open desert · Escarpments · Heat haze" [ref=e210] [cursor=pointer]:
+        - generic [ref=e211]: North Africa
+        - generic [ref=e212]: Second Battle of El Alamein — Western Desert, Oct 1942
+        - generic [ref=e213]: Open desert · Escarpments · Heat haze
+      - button "Eastern Front Battle of Kursk — Steppe south of Orel, July 1943 Rolling steppe · Treelines · Summer dust" [ref=e214] [cursor=pointer]:
+        - generic [ref=e215]: Eastern Front
+        - generic [ref=e216]: Battle of Kursk — Steppe south of Orel, July 1943
+        - generic [ref=e217]: Rolling steppe · Treelines · Summer dust
+      - button "Italy Battle of Monte Cassino — Liri Valley, Jan 1944 Hill country · Olive groves · Mountain mist" [ref=e218] [cursor=pointer]:
+        - generic [ref=e219]: Italy
+        - generic [ref=e220]: Battle of Monte Cassino — Liri Valley, Jan 1944
+        - generic [ref=e221]: Hill country · Olive groves · Mountain mist
+    - generic [ref=e222]:
+      - heading "Map Size" [level=2] [ref=e223]
+      - generic [ref=e224]:
+        - button "Small Tight engagement zone — fast contact and short flanks" [ref=e225] [cursor=pointer]:
+          - generic [ref=e226]: Small
+          - generic [ref=e227]: Tight engagement zone — fast contact and short flanks
+        - button "Medium Expanded theater — extra maneuver room (default)" [ref=e228] [cursor=pointer]:
+          - generic [ref=e229]: Medium
+          - generic [ref=e230]: Expanded theater — extra maneuver room (default)
+        - button "Large Grand theater — long advances and sweeping flanks" [ref=e231] [cursor=pointer]:
+          - generic [ref=e232]: Large
+          - generic [ref=e233]: Grand theater — long advances and sweeping flanks
+    - generic [ref=e234]:
+      - button "Back" [ref=e235] [cursor=pointer]
+      - button "Deploy Forces" [disabled] [ref=e236]

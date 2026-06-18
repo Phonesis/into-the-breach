@@ -26,7 +26,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Last Stand</strong> — two deployment styles on the theater screen:',
       '<strong>Manual Deployment</strong> — <strong>2,000</strong> supplies per side on any map size. Pick units and <strong>LMB</strong> anywhere to place; the enemy deploys in parallel. <strong>Begin Battle</strong> when ready.',
       '<strong>Preset Battle Group</strong> — <strong>Large map only</strong>. Both sides field a full combined-arms force (~68 units each) in realistic echelons: rifle line, mortars/AT/artillery support, armor reserve. Enemy AI mixes defensive fires with armor probes and infantry support. <strong>Begin Battle</strong> when ready.',
-      'No HQ, capture points, reinforcements, or fire support in either style. Win by destroying every enemy unit; lose if your army is wiped out.',
+      'No HQ, capture points, or reinforcements in either style. Strafe and barrage unlock once battle begins. Win by destroying every enemy unit; lose if your army is wiped out.',
     ],
   },
   {
@@ -151,7 +151,7 @@ export const GAME_GUIDE_SECTIONS = [
       'Off-map strikes from the HUD — no friendly fire on your units or HQ.',
       '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with spatial fly-by audio and MG bursts along your line.',
       '<strong>Artillery barrage</strong> (~95 s cooldown) — Shell warnings, then clustered impacts.',
-      'Click Strafe or Barrage, then LMB on valid ground. Esc cancels targeting. Not available in Last Stand or Tower Defence.',
+      'Click Strafe or Barrage, then LMB on valid ground. Esc cancels targeting. Not available in Tower Defence or during Last Stand deployment.',
     ],
   },
   {

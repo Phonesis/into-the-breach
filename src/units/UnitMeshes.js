@@ -21,6 +21,10 @@ import { SQUAD_SIZES } from '../data/squadSizes.js';
 
 export { mat };
 
+const CORPSE_FALL_SEC = 0.45;
+/** @type {Set<THREE.Group>} */
+const activeCorpseAnchors = new Set();
+
 export function createUnitMesh(type, teamColor, accentColor, factionId = 'germany') {
   const group = new THREE.Group();
   const bodyTex = getBodyTexture(factionId, type);
@@ -322,28 +326,83 @@ function getSquadMembers(mesh) {
   return members;
 }
 
-function spawnCasualtyAtMember(mesh, member, factionId, unitType) {
-  const squadIndex = member.userData.squadIndex;
+function removeDetachedCorpse(unit, squadIndex) {
+  const entries = unit._detachedCorpses?.filter((e) => e.squadIndex === squadIndex) ?? [];
+  for (const { anchor } of entries) {
+    anchor.parent?.remove(anchor);
+    activeCorpseAnchors.delete(anchor);
+    disposeMeshObject(anchor);
+  }
+  unit._detachedCorpses = unit._detachedCorpses?.filter((e) => e.squadIndex !== squadIndex) ?? [];
+}
+
+function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex, rotY = 0, animateFall = true) {
+  const scene = unit.mesh?.parent;
+  if (!scene || !unit.mesh) return null;
+
+  const worldPos = new THREE.Vector3(localOffset.x, localOffset.y, localOffset.z);
+  unit.mesh.localToWorld(worldPos);
+
+  const groundY = sampleTerrainHeight(worldPos.x, worldPos.z, unit._mapDef) + 0.02;
+  const startY = animateFall ? worldPos.y + 0.52 : groundY;
+
+  const anchor = new THREE.Group();
+  anchor.name = 'detachedCorpse';
+  anchor.userData.unitId = unit.id;
+  anchor.userData.squadIndex = squadIndex;
+
   const body = buildFallenSoldierBody(factionId, { ghillie: unitType === 'sniper' });
-  body.position.copy(member.position);
-  body.position.y = 0;
-  body.rotation.y = (member.rotation?.y ?? 0) + (Math.random() - 0.5) * 1.2;
+  body.rotation.y = rotY + (Math.random() - 0.5) * 1.2;
   body.rotation.z = (Math.random() - 0.5) * 0.15;
-  body.userData.squadIndex = squadIndex;
-  mesh.add(body);
-  addBloodPoolAt(
-    mesh,
-    member.position.x,
-    member.position.z,
-    0.5 + Math.random() * 0.28,
-    squadIndex
+  anchor.add(body);
+
+  addBloodPoolAt(anchor, 0, 0, 0.5 + Math.random() * 0.28, squadIndex);
+
+  anchor.position.set(worldPos.x, startY, worldPos.z);
+  anchor.rotation.y = rotY + (Math.random() - 0.5) * 0.4;
+
+  if (animateFall) {
+    anchor.rotation.x = -1.05;
+    anchor.userData.fall = {
+      elapsed: 0,
+      dur: CORPSE_FALL_SEC,
+      startY,
+      endY: groundY,
+      startRotX: -1.05,
+      endRotX: (Math.random() - 0.5) * 0.12,
+    };
+    activeCorpseAnchors.add(anchor);
+  } else {
+    anchor.rotation.x = (Math.random() - 0.5) * 0.12;
+  }
+
+  scene.add(anchor);
+  unit._detachedCorpses = unit._detachedCorpses ?? [];
+  unit._detachedCorpses.push({ anchor, squadIndex });
+  return anchor;
+}
+
+function spawnCasualtyAtMember(unit, member, factionId, unitType) {
+  const squadIndex = member.userData.squadIndex;
+  placeDetachedCorpse(
+    unit,
+    member.position.clone(),
+    factionId,
+    unitType,
+    squadIndex,
+    member.rotation?.y ?? 0,
+    true
   );
   member.visible = false;
 }
 
-function restoreSquadMember(mesh, member) {
+function restoreSquadMember(unit, member) {
   const squadIndex = member.userData.squadIndex;
   member.visible = true;
+  removeDetachedCorpse(unit, squadIndex);
+
+  const mesh = unit.mesh;
+  if (!mesh) return;
   const toRemove = [];
   for (const child of mesh.children) {
     if (child.userData?.squadIndex === squadIndex && (child.name === 'fallenBody' || child.name === 'bloodPool')) {
@@ -354,6 +413,56 @@ function restoreSquadMember(mesh, member) {
     mesh.remove(obj);
     disposeMeshObject(obj);
   }
+}
+
+function migrateMeshCorpsesToWorld(unit) {
+  const mesh = unit.mesh;
+  const scene = mesh?.parent;
+  if (!mesh || !scene) return;
+
+  const toMigrate = [];
+  for (const child of mesh.children) {
+    if (child.name === 'fallenBody' || child.name === 'bloodPool' || child.name === 'corpseStain') {
+      toMigrate.push(child);
+    }
+  }
+
+  for (const child of toMigrate) {
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    child.updateWorldMatrix(true, false);
+    child.getWorldPosition(worldPos);
+    child.getWorldQuaternion(worldQuat);
+
+    mesh.remove(child);
+    child.position.copy(worldPos);
+    child.quaternion.copy(worldQuat);
+    scene.add(child);
+  }
+}
+
+/** Animate fallen bodies dropping to the ground at their death location. */
+export function updateDetachedCorpseFalls(dt) {
+  if (dt <= 0) return;
+  for (const anchor of activeCorpseAnchors) {
+    const fall = anchor.userData.fall;
+    if (!fall) continue;
+    fall.elapsed += dt;
+    const t = Math.min(1, fall.elapsed / fall.dur);
+    const eased = t * t * (3 - 2 * t);
+    anchor.position.y = THREE.MathUtils.lerp(fall.startY, fall.endY, eased);
+    anchor.rotation.x = THREE.MathUtils.lerp(fall.startRotX, fall.endRotX, eased);
+    if (t >= 1) {
+      anchor.position.y = fall.endY;
+      anchor.rotation.x = fall.endRotX;
+      delete anchor.userData.fall;
+      activeCorpseAnchors.delete(anchor);
+    }
+  }
+}
+
+export function clearDetachedCorpseFalls() {
+  activeCorpseAnchors.clear();
 }
 
 export function updateSquadCasualtyVisual(unit) {
@@ -375,11 +484,11 @@ export function updateSquadCasualtyVisual(unit) {
 
   if (living < prevLiving) {
     for (let i = living; i < members.length; i++) {
-      if (members[i].visible) spawnCasualtyAtMember(unit.mesh, members[i], factionId, type);
+      if (members[i].visible) spawnCasualtyAtMember(unit, members[i], factionId, type);
     }
   } else if (living > prevLiving) {
     for (let i = prevLiving; i < living && i < members.length; i++) {
-      restoreSquadMember(unit.mesh, members[i]);
+      restoreSquadMember(unit, members[i]);
     }
   }
 
@@ -502,43 +611,52 @@ function hideLivingUnitMesh(mesh) {
 export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
   if (!mesh || mesh.userData.corpseApplied) return;
   mesh.userData.corpseApplied = true;
+  const unit = mesh.userData?.unit;
   hideUnitChrome(mesh);
   hideLivingUnitMesh(mesh);
 
   mesh.rotation.x = 0;
   mesh.rotation.z = 0;
 
+  if (unit) migrateMeshCorpsesToWorld(unit);
+
   const factionId = mesh.userData.factionId ?? 'germany';
   const members = getSquadMembers(mesh);
 
-  if (members.length) {
+  if (unit && members.length) {
     for (const member of members) {
-      if (member.visible) spawnCasualtyAtMember(mesh, member, factionId, unitType);
+      if (member.visible) spawnCasualtyAtMember(unit, member, factionId, unitType);
     }
-  } else {
+  } else if (unit) {
     const count = corpseBodyCount(unitType);
     const spread = unitType === 'infantry' ? 1.35 : 1.05;
-    const ghillie = unitType === 'sniper';
     for (let i = 0; i < count; i++) {
-      const body = buildFallenSoldierBody(factionId, { ghillie });
       const angle = Math.random() * Math.PI * 2;
       const dist = Math.random() * spread * 0.55;
-      body.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-      body.rotation.y = angle + (Math.random() - 0.5) * 0.8;
-      body.rotation.z = (Math.random() - 0.5) * 0.12;
-      mesh.add(body);
+      placeDetachedCorpse(
+        unit,
+        new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist),
+        factionId,
+        unitType,
+        -1 - i,
+        angle + (Math.random() - 0.5) * 0.8,
+        false
+      );
     }
   }
 
-  if (unitType === 'machineGun') {
+  if (unitType === 'machineGun' && unit?.mesh?.parent) {
     const gun = new THREE.Mesh(
       new THREE.BoxGeometry(0.65, 0.07, 0.07),
       new THREE.MeshStandardMaterial({ color: 0x2a2a28, roughness: 0.7, metalness: 0.35 })
     );
-    gun.position.set(0.35, 0.05, -0.25);
-    gun.rotation.y = Math.random() * 0.6;
     gun.name = 'fallenBody';
-    mesh.add(gun);
+    const local = new THREE.Vector3(0.35, 0.05, -0.25);
+    const worldPos = local.clone();
+    unit.mesh.localToWorld(worldPos);
+    gun.position.copy(worldPos);
+    gun.rotation.y = unit.mesh.rotation.y + Math.random() * 0.6;
+    unit.mesh.parent.add(gun);
   }
 
   if (!mesh.children.some((c) => c.name === 'corpseStain')) {

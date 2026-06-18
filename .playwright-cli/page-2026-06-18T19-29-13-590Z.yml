@@ -1,0 +1,109 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: Germany
+          - generic: Normandy · Medium
+          - generic: Training — no enemy AI
+        - generic:
+          - button "Save" [ref=e237] [cursor=pointer]
+          - button "Leave Training" [ref=e238] [cursor=pointer]
+          - generic:
+            - generic: Supplies (+1/3 pts)
+            - text: "217"
+          - generic: "Your forces: 11 · Practice mode"
+      - generic:
+        - generic "Saint-Lô Crossroads — Held (yours)":
+          - generic: Saint-Lô Crossroads ★
+          - generic: 100%
+        - generic "Carentan Road — Neutral":
+          - generic: Carentan Road
+          - generic: 0%
+        - generic "Vire Bridge — Neutral":
+          - generic: Vire Bridge
+          - generic: 0%
+      - generic "Tactical map" [ref=e239]:
+        - generic [ref=e240]:
+          - generic [ref=e241]: Tactical Map
+          - button "Hide" [pressed] [ref=e242] [cursor=pointer]
+        - generic "Battlefield overview" [ref=e243]
+        - paragraph [ref=e244]: Green — friendly · Red — enemy · Traces show live fire · Click to pan
+      - complementary "Your forces" [ref=e245]:
+        - heading "Forces" [level=3] [ref=e246]
+        - button "Field icons" [pressed] [ref=e247] [cursor=pointer]:
+          - img [ref=e249]
+          - generic [ref=e254]: Field icons
+        - generic [ref=e255]:
+          - button "AT 100%" [ref=e256] [cursor=pointer]:
+            - img [ref=e258]
+            - generic [ref=e269]:
+              - generic [ref=e270]: AT
+              - generic [ref=e274]: 100%
+          - button "AC 100%" [ref=e275] [cursor=pointer]:
+            - img [ref=e277]
+            - generic [ref=e287]:
+              - generic [ref=e288]: AC
+              - generic [ref=e292]: 100%
+          - button "Arty 100%" [ref=e293] [cursor=pointer]:
+            - img [ref=e295]
+            - generic [ref=e305]:
+              - generic [ref=e306]: Arty
+              - generic [ref=e310]: 100%
+          - button "Eng 100%" [ref=e311] [cursor=pointer]:
+            - img [ref=e313]
+            - generic [ref=e320]:
+              - generic [ref=e321]: Eng
+              - generic [ref=e325]: 100%
+          - button "Inf 100%" [ref=e326] [cursor=pointer]:
+            - img [ref=e328]
+            - generic [ref=e333]:
+              - generic [ref=e334]: Inf
+              - generic [ref=e338]: 100%
+          - button "Inf 100%" [ref=e339] [cursor=pointer]:
+            - img [ref=e341]
+            - generic [ref=e346]:
+              - generic [ref=e347]: Inf
+              - generic [ref=e351]: 100%
+          - button "Inf 100%" [ref=e352] [cursor=pointer]:
+            - img [ref=e354]
+            - generic [ref=e359]:
+              - generic [ref=e360]: Inf
+              - generic [ref=e364]: 100%
+          - button "MG 100%" [ref=e365] [cursor=pointer]:
+            - img [ref=e367]
+            - generic [ref=e375]:
+              - generic [ref=e376]: MG
+              - generic [ref=e380]: 100%
+          - button "Mrt 100%" [ref=e381] [cursor=pointer]:
+            - img [ref=e383]
+            - generic [ref=e389]:
+              - generic [ref=e390]: Mrt
+              - generic [ref=e394]: 100%
+          - button "Snp 100%" [ref=e395] [cursor=pointer]:
+            - img [ref=e397]
+            - generic [ref=e404]:
+              - generic [ref=e405]: Snp
+              - generic [ref=e409]: 100%
+          - button "Tk 100%" [ref=e410] [cursor=pointer]:
+            - img [ref=e412]
+            - generic [ref=e421]:
+              - generic [ref=e422]: Tk
+              - generic [ref=e426]: 100%
+      - generic:
+        - generic [ref=e428]:
+          - heading "No selection" [level=3] [ref=e429]
+          - paragraph [ref=e430]: Click a unit in Forces or on the battlefield to select.
+        - text: ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙
+        - generic [ref=e431]:
+          - heading "Fire Support" [level=3] [ref=e432]
+          - generic [ref=e433]:
+            - button "Strafe Ready" [ref=e434] [cursor=pointer]:
+              - generic [ref=e435]: Strafe
+              - generic [ref=e436]: Ready
+            - button "Barrage Ready" [ref=e437] [cursor=pointer]:
+              - generic [ref=e438]: Barrage
+              - generic [ref=e439]: Ready
+          - paragraph [ref=e440]: Call off-map support — each strike has a long cooldown
+        - paragraph: "Tutorial: practice vs static HQ — train all unit types, capture neutral points"
+        - button "Field Manual" [ref=e441] [cursor=pointer]
