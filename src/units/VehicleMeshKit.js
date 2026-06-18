@@ -362,6 +362,11 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
     wheel.position.set(wx, wy, wz);
     group.add(wheel);
   }
+  const turretPivot = new THREE.Group();
+  turretPivot.name = 'turretPivot';
+  group.add(turretPivot);
+  group.userData.turretPivot = turretPivot;
+
   const t = d.turret;
   if (t.style === 'cylinder') {
     const base = new THREE.Mesh(
@@ -369,23 +374,33 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
       body
     );
     base.position.set(0, t.y - 0.06, t.z);
-    group.add(base);
+    base.userData.tankPart = 'turret';
+    turretPivot.add(base);
     const tur = new THREE.Mesh(
       new THREE.CylinderGeometry(t.w * 0.92, t.w, t.h, 10),
       body
     );
     tur.position.set(0, t.y, t.z);
-    group.add(tur);
+    tur.userData.tankPart = 'turret';
+    turretPivot.add(tur);
   } else if (t.style === 'open') {
     addBox(
-      group,
+      turretPivot,
       new THREE.BoxGeometry(t.w * 1.05, t.h * 0.35, t.d * 1.05),
       body,
-      { y: t.y - 0.14, z: t.z }
+      { y: t.y - 0.14, z: t.z, part: 'turret' }
     );
-    addBox(group, new THREE.BoxGeometry(t.w, t.h, t.d), body, { y: t.y, z: t.z });
+    addBox(turretPivot, new THREE.BoxGeometry(t.w, t.h, t.d), body, {
+      y: t.y,
+      z: t.z,
+      part: 'turret',
+    });
   } else {
-    addBox(group, new THREE.BoxGeometry(t.w, t.h, t.d), body, { y: t.y, z: t.z });
+    addBox(turretPivot, new THREE.BoxGeometry(t.w, t.h, t.d), body, {
+      y: t.y,
+      z: t.z,
+      part: 'turret',
+    });
   }
   const b = d.barrel;
   const gun = new THREE.Mesh(
@@ -395,20 +410,22 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   gun.rotation.x = Math.PI / 2;
   gun.position.set(b.offsetX ?? 0.22, b.y, b.z);
   gun.userData.tankPart = 'barrel';
-  group.add(gun);
+  turretPivot.add(gun);
   if (d.secondaryGun) {
     const s = d.secondaryGun;
     if (s.style === 'box') {
-      addBox(group, new THREE.BoxGeometry(s.len, 0.1, 0.1), dark, {
+      addBox(turretPivot, new THREE.BoxGeometry(s.len, 0.1, 0.1), dark, {
         x: 0.15,
         y: s.y,
         z: s.z,
+        part: 'barrel',
       });
     } else {
-      addBox(group, new THREE.BoxGeometry(s.len, 0.08, 0.08), dark, {
+      addBox(turretPivot, new THREE.BoxGeometry(s.len, 0.08, 0.08), dark, {
         x: 0.15,
         y: s.y,
         z: s.z,
+        part: 'barrel',
       });
     }
   }

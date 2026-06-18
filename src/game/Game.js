@@ -1315,11 +1315,18 @@ export class Game {
 
   saveBattle() {
     if (!this.running || this.gameOver) return false;
-    const snapshot = captureBattleSave(this, { id: this.activeSaveId });
-    const id = writeBattleSave(snapshot, this.activeSaveId);
-    this.activeSaveId = id;
-    this.ui?.showSaveToast?.('Battle saved — resume later from the main menu');
-    return true;
+    try {
+      const snapshot = captureBattleSave(this, { id: this.activeSaveId });
+      const id = writeBattleSave(snapshot, this.activeSaveId);
+      this.activeSaveId = id;
+      this.ui?.showSaveToast?.('Battle saved — resume later from the main menu');
+      this.ui?.refreshTitleSaveButton?.();
+      return true;
+    } catch (err) {
+      console.error('Battle save failed:', err);
+      this.ui?.showSaveToast?.('Could not save — battle state may be too large for this browser.');
+      return false;
+    }
   }
 
   loadBattle(saveId) {
@@ -2031,7 +2038,7 @@ export class Game {
   endGame(victory, detail) {
     if (this.gameOver) return;
 
-    if (this.activeSaveId) {
+    if (victory && this.activeSaveId) {
       deleteBattleSave(this.activeSaveId);
       this.activeSaveId = null;
     }

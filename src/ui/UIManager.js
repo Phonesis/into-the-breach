@@ -148,7 +148,7 @@ export class UIManager {
         </div>
         <div class="title-actions">
           <button class="btn btn-primary interactive" id="btn-start">Begin</button>
-          <button class="btn btn-secondary interactive hidden" id="btn-load-saves">Load Saved Game</button>
+          <button class="btn btn-secondary interactive" id="btn-load-saves">Load Saved Game</button>
           <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
         </div>
       </div>
@@ -902,6 +902,7 @@ export class UIManager {
     this.root.querySelector('#btn-menu').onclick = () => {
       this.hideEndOverlay();
       if (this.callbacks.onReturnMenu) this.callbacks.onReturnMenu();
+      this.refreshTitleSaveButton();
       show('title');
     };
 
@@ -1038,8 +1039,12 @@ export class UIManager {
   refreshTitleSaveButton() {
     const btn = this.root.querySelector('#btn-load-saves');
     if (!btn) return;
-    const hasSaves = listBattleSaves().length > 0;
-    btn.classList.toggle('hidden', !hasSaves);
+    const count = listBattleSaves().length;
+    btn.textContent = count > 0 ? `Load Saved Game (${count})` : 'Load Saved Game';
+    btn.title =
+      count > 0
+        ? `${count} saved battle${count === 1 ? '' : 's'} in this browser`
+        : 'No saves yet — use Save in the HUD during a fight';
   }
 
   renderSaveList() {

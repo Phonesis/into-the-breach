@@ -129,25 +129,34 @@ function readStore() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { saves: [] };
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed?.saves) ? parsed : { saves: [] };
+    if (Array.isArray(parsed?.saves)) return parsed;
+    if (Array.isArray(parsed)) return { saves: parsed };
+    return { saves: [] };
   } catch {
     return { saves: [] };
   }
 }
 
 function writeStore(store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    return true;
+  } catch (err) {
+    console.error('Failed to write battle saves:', err);
+    return false;
+  }
 }
 
 export function listBattleSaves() {
   return readStore()
-    .saves.map((s) => ({
+    .saves.filter((s) => s?.id && s?.session?.factionId && s?.session?.mapId)
+    .map((s) => ({
       id: s.id,
       savedAt: s.savedAt,
       label: s.label,
-      factionId: s.session?.factionId,
-      mapId: s.session?.mapId,
-      gameMode: s.session?.gameMode,
+      factionId: s.session.factionId,
+      mapId: s.session.mapId,
+      gameMode: s.session.gameMode,
       matchTime: s.matchTime ?? 0,
     }))
     .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
@@ -275,7 +284,10 @@ export function captureBattleSave(game, { id = null } = {}) {
     })),
     units: unitSnapshots,
     assault: game.assault ? { ...game.assault, frontlineCpId: game.assault.frontlineCp?.id } : null,
-    towerDefense: game.towerDefense ? { ...game.towerDefense } : null,
+    towerDefense:
+      game.towerDefense && typeof game.towerDefense === 'object'
+        ? { ...game.towerDefense }
+        : null,
     lastStand: game.lastStand ? { ...game.lastStand, supplies: { ...game.lastStand.supplies } } : null,
     defenses: game.defenses
       ? {
@@ -326,10 +338,10 @@ export function captureBattleSave(game, { id = null } = {}) {
         }
       : null,
     engineerSandbags: {
-      pendingType: game.engineerSandbags.pendingType,
+      pendingType: game.engineerSandbags?.pendingType ?? null,
       nextSiteId: peekEngineerSiteNextId(),
-      builtPositions: game.engineerSandbags._builtPositions.map((p) => ({ ...p })),
-      sites: game.engineerSandbags.sites.map((s) => ({
+      builtPositions: (game.engineerSandbags?._builtPositions ?? []).map((p) => ({ ...p })),
+      sites: (game.engineerSandbags?.sites ?? []).map((s) => ({
         id: s.id,
         buildType: s.buildType,
         team: s.team,
@@ -339,7 +351,7 @@ export function captureBattleSave(game, { id = null } = {}) {
         progress: s.progress,
         engineerId: s.engineerId,
       })),
-      fieldBunkers: game.engineerSandbags.fieldBunkers
+      fieldBunkers: (game.engineerSandbags?.fieldBunkers ?? [])
         .filter((e) => !e.destroyed)
         .map((e) => ({
           id: e.id,
@@ -377,7 +389,7 @@ export function captureBattleSave(game, { id = null } = {}) {
     }
   }
 
-  for (const pos of game.engineerSandbags._builtPositions) {
+  for (const pos of game.engineerSandbags?._builtPositions ?? []) {
     if (pos.buildType !== 'sandbags') continue;
     const preset = FIELD_BUILD_TYPES.sandbags;
     snapshot.engineerSandbags.engineerScenery.push({
@@ -406,7 +418,9 @@ export function writeBattleSave(snapshot, existingId = null) {
   if (store.saves.length > MAX_SAVES) {
     store.saves = store.saves.slice(0, MAX_SAVES);
   }
-  writeStore(store);
+  if (!writeStore(store)) {
+    throw new Error('localStorage write failed');
+  }
   return id;
 }
 
