@@ -583,7 +583,7 @@ export function applyUnitDeathVisual(unit) {
   snapCorpseToTerrain(mesh, unit._mapDef);
 
   if (isTankType(type)) {
-    unit.wreckTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    unit.wreckTimeLeft = 1;
     applyTankWreckLook(mesh);
     return;
   }
@@ -596,28 +596,28 @@ export function applyUnitDeathVisual(unit) {
     type === 'medic' ||
     type === 'engineer'
   ) {
-    unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
+    unit.corpseTimeLeft = 1;
     applyInfantryCorpseLook(mesh, type);
     return;
   }
 
   if (type === 'armoredCar') {
-    unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    unit.corpseTimeLeft = 1;
     unit.wreckTimeLeft = 0;
     applyVehicleCorpseLook(mesh, { heavy: false });
     return;
   }
 
   if (type === 'artillery' || type === 'antiTankGun') {
-    unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    unit.corpseTimeLeft = 1;
     applyVehicleCorpseLook(mesh, { heavy: type === 'artillery' });
   }
 }
 
+/** True while a dead unit's wreck or corpse mesh should stay on the battlefield. */
 export function unitHasCorpseLinger(unit) {
   if (!unit?.dead) return false;
-  if (isTankType(unit.def?.type)) return unit.wreckTimeLeft > 0;
-  return (unit.corpseTimeLeft ?? 0) > 0;
+  return !!unit.mesh?.userData?.deathVisualApplied && !!unit.mesh?.parent;
 }
 
 /** Scorched, knocked-out look for destroyed tanks left on the field. */

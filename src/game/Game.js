@@ -163,12 +163,7 @@ import {
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import { snapUnitYaw } from '../units/VehicleRotation.js';
-import {
-  applyUnitDeathVisual,
-  unitHasCorpseLinger,
-  INFANTRY_CORPSE_LINGER_SEC,
-  VEHICLE_WRECK_LINGER_SEC,
-} from '../units/UnitMeshes.js';
+import { applyUnitDeathVisual, unitHasCorpseLinger } from '../units/UnitMeshes.js';
 import { FireSupportManager } from './FireSupport.js';
 import {
   updateFireSupportEffects,
@@ -1965,14 +1960,6 @@ export class Game {
     return null;
   }
 
-  _accelerateCleanupIfPlayerWiped() {
-    if (this.units.some((u) => u.team === PLAYER_TEAM && !u.dead)) return;
-    for (const u of this.units) {
-      if (!u.dead || u.def?.type !== 'tank' || u.wreckTimeLeft <= 0) continue;
-      u.wreckTimeLeft = Math.min(u.wreckTimeLeft, 2.5);
-    }
-  }
-
   endGame(victory, detail) {
     if (this.gameOver) return;
 
@@ -2001,14 +1988,8 @@ export class Game {
       u.moveTarget = null;
       u._movePath = null;
       if (u.dead) {
-        u.wreckTimeLeft = 0;
-        u.corpseTimeLeft = 0;
         removeCoverMarker(u);
         removeRetreatMarker(u);
-        if (u.wreckFire) {
-          removeWreckEffect(u.wreckFire);
-          u.wreckFire = null;
-        }
       }
     }
 
@@ -2017,7 +1998,6 @@ export class Game {
     requestAnimationFrame(() => {
       if (!this.gameOver) return;
       this._purgeBattlefieldEffects();
-      this._fastCullDeadUnits();
       for (const h of this.hqs) {
         if (h.dead) this.battleStats.recordHq(h.team);
       }
@@ -2054,58 +2034,10 @@ export class Game {
     this.fireSupport?.reset();
   }
 
-  /** Drop dead meshes from the scene immediately; dispose GPU assets in idle slices. */
-  /** No live units on the map — clear corpses and resolve win/loss without sim churn. */
-  _purgeCorpsesWhenFieldEmpty() {
+  /** No live units on the map — skip corpse churn while victory/defeat is resolved. */
+  _handleEmptyBattlefield() {
     if (this._aliveUnits.length > 0 || this.gameOver || this._emptyFieldHandled) return;
     this._emptyFieldHandled = true;
-
-    const meshes = [];
-    for (const u of this.units) {
-      if (!u.dead) continue;
-      if (u.wreckFire) {
-        removeWreckEffect(u.wreckFire);
-        u.wreckFire = null;
-      }
-      u.wreckTimeLeft = 0;
-      u.corpseTimeLeft = 0;
-      removeCoverMarker(u);
-      removeRetreatMarker(u);
-      if (u.mesh?.parent) {
-        this.scene.remove(u.mesh);
-        meshes.push(u.mesh);
-        u.mesh = null;
-      }
-    }
-    if (meshes.length) queueMeshDispose(...meshes);
-    if (this.units.some((u) => u.dead)) {
-      this.units = this.units.filter((u) => !u.dead);
-      this._rebuildUnitCaches();
-    }
-  }
-
-  _fastCullDeadUnits() {
-    if (this._teardownPending) return;
-    this._teardownPending = true;
-
-    const meshes = [];
-    for (const u of this.units) {
-      if (!u.dead) continue;
-      if (u.wreckFire) {
-        removeWreckEffect(u.wreckFire);
-        u.wreckFire = null;
-      }
-      if (u.mesh?.parent) {
-        this.scene.remove(u.mesh);
-        meshes.push(u.mesh);
-        u.mesh = null;
-      }
-    }
-    this.units = this.units.filter((u) => !u.dead);
-    this._rebuildUnitCaches();
-    this._syncUnitRoster();
-    this._teardownPending = false;
-    if (meshes.length) queueMeshDispose(...meshes);
   }
 
   /** Victory/defeat panel — must be synchronous when the match ends. */
@@ -2425,7 +2357,7 @@ export class Game {
           this._tickBattleHud();
         }
         if (!fieldHasUnits) {
-          if (!this._emptyFieldHandled) this._purgeCorpsesWhenFieldEmpty();
+          if (!this._emptyFieldHandled) this._handleEmptyBattlefield();
           this._victoryCheckAccum += dt;
           if (this._victoryCheckAccum >= 0.1) {
             this._victoryCheckAccum = 0;
@@ -2508,7 +2440,6 @@ export class Game {
             );
           }
 
-          this._accelerateCleanupIfPlayerWiped();
           this.cleanupDead(dt);
           this._rosterUiAccum += dt;
           if (this._rosterUiAccum >= 0.35) {
@@ -2541,11 +2472,7 @@ export class Game {
   cleanupDead(dt) {
     if (this.gameOver) return;
 
-    let deadMeshes = 0;
     let cachesDirty = false;
-    const maxDeadMeshes = this.campaign
-      ? Math.max(48, 20 + Math.ceil(VEHICLE_WRECK_LINGER_SEC / 15))
-      : Math.max(72, 28 + Math.ceil(VEHICLE_WRECK_LINGER_SEC / 10));
     const unitsBefore = this.units.length;
 
     for (const u of this.units) {
@@ -2556,54 +2483,14 @@ export class Game {
       }
       if (!u.mesh?.parent) continue;
 
-      deadMeshes++;
-      if (deadMeshes > maxDeadMeshes) {
-        const lingerLeft = u.corpseTimeLeft ?? u.wreckTimeLeft ?? 0;
-        const lingerMax = (u.corpseTimeLeft ?? 0) > 0 ? INFANTRY_CORPSE_LINGER_SEC : VEHICLE_WRECK_LINGER_SEC;
-        if (lingerLeft > lingerMax * 0.2) continue;
-        if (u.wreckFire) removeWreckEffect(u.wreckFire);
-        const mesh = u.mesh;
-        this.scene.remove(mesh);
-        u.mesh = null;
-        u.wreckFire = null;
-        queueMeshDispose(mesh);
+      if (!u.mesh.userData?.deathVisualApplied) {
+        applyUnitDeathVisual(u);
         cachesDirty = true;
         continue;
       }
 
-      if (isTankType(u.def.type) && u.wreckTimeLeft > 0) {
-        u.wreckTimeLeft -= dt;
-        if (!u.wreckFire) {
-          u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
-        }
-        u.mesh.position.y -= dt * 0.012;
-        if (u.wreckTimeLeft <= 0) {
-          if (u.wreckFire) removeWreckEffect(u.wreckFire);
-          u.wreckFire = null;
-          const mesh = u.mesh;
-          this.scene.remove(mesh);
-          u.mesh = null;
-          queueMeshDispose(mesh);
-          cachesDirty = true;
-        }
-        continue;
-      }
-
-      if ((u.corpseTimeLeft ?? 0) > 0) {
-        u.corpseTimeLeft -= dt;
-        if (u.corpseTimeLeft <= 0) {
-          const mesh = u.mesh;
-          this.scene.remove(mesh);
-          u.mesh = null;
-          queueMeshDispose(mesh);
-          cachesDirty = true;
-        }
-        continue;
-      }
-
-      if (!u.mesh.userData?.deathVisualApplied) {
-        applyUnitDeathVisual(u);
-        continue;
+      if (isTankType(u.def.type) && u.mesh.userData?.wreckApplied && !u.wreckFire) {
+        u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
       }
     }
     this.units = this.units.filter(
