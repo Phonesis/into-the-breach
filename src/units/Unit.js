@@ -19,6 +19,14 @@ import { getMoveReachConfig } from './VehicleTypes.js';
 
 let nextId = 1;
 
+export function setUnitNextId(n) {
+  nextId = Math.max(1, Math.floor(n) || 1);
+}
+
+export function peekUnitNextId() {
+  return nextId;
+}
+
 export class Unit {
   constructor({ def, faction, team, position, scene }) {
     this.id = nextId++;

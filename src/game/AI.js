@@ -17,6 +17,15 @@ export function resetAI(openingDelay = 0, firstProdDelay = 5) {
   aiProdTimer = Math.max(0, firstProdDelay);
 }
 
+export function exportAIState() {
+  return { timer: aiTimer, prodTimer: aiProdTimer };
+}
+
+export function importAIState({ timer = 0, prodTimer = 5 } = {}) {
+  aiTimer = Math.max(0, timer);
+  aiProdTimer = Math.max(0, prodTimer);
+}
+
 export function updateAI({
   enemyUnits,
   playerUnits,

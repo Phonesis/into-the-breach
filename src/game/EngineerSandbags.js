@@ -54,6 +54,14 @@ export const FIELD_BUILD_TYPES = {
 
 let nextSiteId = 1;
 
+export function setEngineerSiteNextId(n) {
+  nextSiteId = Math.max(1, Math.floor(n) || 1);
+}
+
+export function peekEngineerSiteNextId() {
+  return nextSiteId;
+}
+
 export class EngineerSandbagManager {
   constructor(game) {
     this.game = game;

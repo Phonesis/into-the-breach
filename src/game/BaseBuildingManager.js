@@ -20,6 +20,14 @@ import { spawnExplosion } from '../effects/CombatEffects.js';
 
 let nextId = 1;
 
+export function setBaseBuildingNextId(n) {
+  nextId = Math.max(1, Math.floor(n) || 1);
+}
+
+export function peekBaseBuildingNextId() {
+  return nextId;
+}
+
 export class BaseBuildingManager {
   constructor(game) {
     this.game = game;

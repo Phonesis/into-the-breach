@@ -53,6 +53,8 @@ export const GAME_GUIDE_SECTIONS = [
       ['Engage target', 'Confirm attack on highlighted enemy (selection panel)'],
       ['Launch Battle Now', 'Skip quiet-sector staging (countdown banner)'],
       ['Start Wave Now', 'Tower Defence — skip prepare countdown and begin the current wave'],
+      ['Save', 'HUD top-right — store battle progress in this browser; resume from <strong>Load Saved Game</strong> on the title screen'],
+      ['Load Saved Game', 'Title screen — resume a saved battle (faction, map, units, supplies, and timer restored)'],
       ['Surrender', 'Quit battle — counts as defeat, then Main Menu'],
       ['Strafe / Barrage', 'Arm fire support → LMB on map · Esc cancels'],
       ['Tablet / touch', 'Camera pad: pan, rotate, zoom · <strong>Target</strong> = tap enemy to highlight, tap again or Engage to attack · <strong>Fire</strong> = tap ground/cover (Shift+LMB) · long-press = move/attack · <code>?tablet=1</code> forces tablet UI'],

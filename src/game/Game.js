@@ -168,6 +168,13 @@ import {
   updateFireSupportEffects,
   clearFireSupportEffects,
 } from '../effects/FireSupportEffects.js';
+import {
+  captureBattleSave,
+  applyBattleSave,
+  writeBattleSave,
+  loadBattleSaveData,
+  deleteBattleSave,
+} from './BattleSave.js';
 
 const PLAYER_TEAM = 'player';
 const ENEMY_TEAM = 'enemy';
@@ -241,6 +248,7 @@ export class Game {
     this.defenses = null;
     this.difficulty = getDifficulty(DEFAULT_DIFFICULTY);
     this.lastSession = null;
+    this.activeSaveId = null;
     this.resources = { player: STARTING_RESOURCES, enemy: ENEMY_STARTING_RESOURCES };
     this.battleStats = new BattleStats();
 
@@ -560,12 +568,15 @@ export class Game {
   startGame(factionId, mapId, gameMode = 'campaign', options = {}) {
     sounds.enterBattle();
     sounds.unlock();
+    const restoreSnapshot = options.restoreSnapshot ?? null;
+    const startOptions = { ...options };
+    delete startOptions.restoreSnapshot;
     this.stopGame();
     this.lastSession = {
       factionId,
       mapId,
       gameMode,
-      options: { ...options },
+      options: startOptions,
     };
     this.gameMode = gameMode;
     this.tutorial = gameMode === 'tutorial';
@@ -573,14 +584,14 @@ export class Game {
     this.towerDefense = isTowerDefenseMode(gameMode);
     this.lastStand = isLastStandMode(gameMode) ? createLastStandState() : null;
     this.campaign = isCampaignMode(gameMode);
-    this.campaignStyle = this.campaign ? (options.campaignStyle ?? 'classic') : 'classic';
-    this.assaultRole = options.assaultRole ?? 'defend';
+    this.campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
+    this.assaultRole = startOptions.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(
-      this.tutorial ? DEFAULT_DIFFICULTY : (options.difficulty ?? DEFAULT_DIFFICULTY)
+      this.tutorial ? DEFAULT_DIFFICULTY : (startOptions.difficulty ?? DEFAULT_DIFFICULTY)
     );
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
-    this.mapDef = buildMapDef(MAPS[mapId], options.mapSize ?? 'medium');
+    this.mapDef = buildMapDef(MAPS[mapId], startOptions.mapSize ?? 'medium');
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
     const assault = isAssaultMode(gameMode);
@@ -708,12 +719,14 @@ export class Game {
         cp.progress = 0;
         cp.group.visible = false;
       }
-      this.towerDefense = createTowerDefenseState({
-        mapDef: this.mapDef,
-        difficulty: this.difficulty,
-        waveMode: options.tdWaveMode ?? 'standard',
-      });
-      startNextWave(this.towerDefense);
+      if (!restoreSnapshot) {
+        this.towerDefense = createTowerDefenseState({
+          mapDef: this.mapDef,
+          difficulty: this.difficulty,
+          waveMode: startOptions.tdWaveMode ?? 'standard',
+        });
+        startNextWave(this.towerDefense);
+      }
       this.defenses = new DefenseStructureManager({
         scene: this.scene,
         mapDef: this.mapDef,
@@ -781,7 +794,7 @@ export class Game {
       : null;
 
     const baseBuildingCampaign = this.campaignStyle === 'baseBuilding';
-    this.units = this.towerDefense || this.lastStand
+    this.units = restoreSnapshot || this.towerDefense || this.lastStand
       ? []
       : spawnArmy({
           faction: this.playerFaction,
@@ -840,20 +853,30 @@ export class Game {
       : this.clearance
         ? this.mapDef.enemyBase
         : enemyBasePos;
-    this._setupBattleCamera(camFocus, enemyFocus);
-    updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
-    this._faceUnitsToward(this.units.filter((u) => u.team === PLAYER_TEAM), enemyFocus);
-    this._faceUnitsToward(this.units.filter((u) => u.team === ENEMY_TEAM), camFocus);
+    if (restoreSnapshot) {
+      applyBattleSave(this, restoreSnapshot);
+      this._updateCameraFromTarget();
+      updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
+    } else {
+      this._setupBattleCamera(camFocus, enemyFocus);
+      updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
+      this._faceUnitsToward(this.units.filter((u) => u.team === PLAYER_TEAM), enemyFocus);
+      this._faceUnitsToward(this.units.filter((u) => u.team === ENEMY_TEAM), camFocus);
+    }
     this._rosterKey = '';
 
-    const deployTeams = this._getDeployZoneTeamsAt(0);
+    const deployTeams = restoreSnapshot ? this._getDeployZoneTeamsAt(this.matchTime) : this._getDeployZoneTeamsAt(0);
     const deployRadius = getDeployRadius(this.mapDef);
     if (deployTeams.length) {
-      containTeamsToDeployZone(this.units, this.hqs, this.mapDef, deployTeams, deployRadius);
+      if (!restoreSnapshot) {
+        containTeamsToDeployZone(this.units, this.hqs, this.mapDef, deployTeams, deployRadius);
+      }
       this._showDeployZoneRings(deployTeams);
     }
 
-    resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
+    if (!restoreSnapshot) {
+      resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
+    }
     this.running = true;
     this.gameOver = false;
     this.paused = false;
@@ -1077,6 +1100,17 @@ export class Game {
     sounds.play('order');
   }
 
+  _updateCameraFromTarget() {
+    const horizontalDist = this.zoom * 0.89;
+    const camOffset = new THREE.Vector3(
+      Math.sin(this.cameraYaw) * horizontalDist,
+      this.zoom * 0.88,
+      Math.cos(this.cameraYaw) * horizontalDist
+    );
+    this.camera.position.copy(this.cameraTarget).add(camOffset);
+    this.camera.lookAt(this.cameraTarget);
+  }
+
   _setupBattleCamera(playerFocus, enemyFocus) {
     const dx = enemyFocus.x - playerFocus.x;
     const dz = enemyFocus.z - playerFocus.z;
@@ -1094,14 +1128,7 @@ export class Game {
       playerFocus.z + dirZ * 8
     );
 
-    const horizontalDist = this.zoom * 0.89;
-    const camOffset = new THREE.Vector3(
-      Math.sin(this.cameraYaw) * horizontalDist,
-      this.zoom * 0.88,
-      Math.cos(this.cameraYaw) * horizontalDist
-    );
-    this.camera.position.copy(this.cameraTarget).add(camOffset);
-    this.camera.lookAt(this.cameraTarget);
+    this._updateCameraFromTarget();
   }
 
   _faceUnitsToward(units, target) {
@@ -1198,7 +1225,26 @@ export class Game {
   replay() {
     const s = this.lastSession;
     if (!s) return;
+    this.activeSaveId = null;
     this.startGame(s.factionId, s.mapId, s.gameMode, s.options);
+  }
+
+  saveBattle() {
+    if (!this.running || this.gameOver) return false;
+    const snapshot = captureBattleSave(this, { id: this.activeSaveId });
+    const id = writeBattleSave(snapshot, this.activeSaveId);
+    this.activeSaveId = id;
+    this.ui?.showSaveToast?.('Battle saved — resume later from the main menu');
+    return true;
+  }
+
+  loadBattle(saveId) {
+    const snapshot = loadBattleSaveData(saveId);
+    if (!snapshot?.session) return false;
+    this.activeSaveId = saveId;
+    const { factionId, mapId, gameMode, options = {} } = snapshot.session;
+    this.startGame(factionId, mapId, gameMode, { ...options, restoreSnapshot: snapshot });
+    return true;
   }
 
   /** Player-initiated surrender — counts as a defeat, then Main Menu from the end screen. */
@@ -1891,6 +1937,11 @@ export class Game {
 
   endGame(victory, detail) {
     if (this.gameOver) return;
+
+    if (this.activeSaveId) {
+      deleteBattleSave(this.activeSaveId);
+      this.activeSaveId = null;
+    }
 
     this.gameOver = true;
     this.running = false;

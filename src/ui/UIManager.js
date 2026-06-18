@@ -31,6 +31,7 @@ import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 import { BattleMinimap } from './Minimap.js';
+import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
 
 const PRODUCE_LABELS = {
   infantry: 'Inf',
@@ -138,7 +139,23 @@ export class UIManager {
         </div>
         <div class="title-actions">
           <button class="btn btn-primary interactive" id="btn-start">Begin</button>
+          <button class="btn btn-secondary interactive hidden" id="btn-load-saves">Load Saved Game</button>
           <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
+        </div>
+      </div>
+
+      <div id="screen-saves" class="screen interactive hidden">
+        <div class="title-block">
+          <h1>Saved Battles</h1>
+          <p>Resume a battle from where you left off. Saves are stored in this browser.</p>
+        </div>
+        <div class="panel">
+          <h2>Your Saves</h2>
+          <div class="save-list" id="save-list"></div>
+          <p class="save-list-empty hidden" id="save-list-empty">No saved battles yet. Use <strong>Save</strong> in the HUD during a fight.</p>
+          <div class="actions">
+            <button class="btn btn-secondary interactive" id="btn-back-saves">Back</button>
+          </div>
         </div>
       </div>
 
@@ -249,6 +266,14 @@ export class UIManager {
             </div>
           </div>
           <div class="hud-top-right">
+            <button
+              type="button"
+              class="btn-save-hud interactive"
+              id="btn-save-battle"
+              title="Save battle progress to resume later"
+            >
+              Save
+            </button>
             <button
               type="button"
               class="btn-surrender-hud interactive"
@@ -488,6 +513,7 @@ export class UIManager {
       </div>
 
       <div id="select-box" class="select-box"></div>
+      <div id="save-toast" class="save-toast hidden" role="status" aria-live="polite"></div>
     `;
 
     this.renderModes();
@@ -501,6 +527,7 @@ export class UIManager {
     this.guideFromMenu = false;
     this.bind();
     this._bindUnitRoster();
+    this.refreshTitleSaveButton();
   }
 
   renderDifficulties() {
@@ -632,7 +659,7 @@ export class UIManager {
   }
 
   bind() {
-    const menuScreens = new Set(['title', 'mode', 'assault-role', 'faction', 'map']);
+    const menuScreens = new Set(['title', 'mode', 'assault-role', 'faction', 'map', 'saves']);
 
     const show = (id) => {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
@@ -645,6 +672,11 @@ export class UIManager {
     };
 
     this.root.querySelector('#btn-start').onclick = () => show('mode');
+    this.root.querySelector('#btn-load-saves').onclick = () => {
+      this.renderSaveList();
+      show('saves');
+    };
+    this.root.querySelector('#btn-back-saves').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
     this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
     this.root.querySelector('#btn-toggle-field-icons')?.addEventListener('click', () => {
@@ -836,6 +868,10 @@ export class UIManager {
       this.callbacks.onCancelFireMissions?.();
     });
 
+    this.root.querySelector('#btn-save-battle')?.addEventListener('click', () => {
+      this.callbacks.onSaveBattle?.();
+    });
+
     this.root.querySelector('#btn-surrender')?.addEventListener('click', () => {
       const tutorial = !this.root.querySelector('#tutorial-banner')?.classList.contains('hidden');
       const msg = tutorial
@@ -900,6 +936,67 @@ export class UIManager {
       overlay.setAttribute('aria-hidden', paused ? 'false' : 'true');
     }
     hud?.classList.toggle('game-paused', !!paused);
+  }
+
+  refreshTitleSaveButton() {
+    const btn = this.root.querySelector('#btn-load-saves');
+    if (!btn) return;
+    const hasSaves = listBattleSaves().length > 0;
+    btn.classList.toggle('hidden', !hasSaves);
+  }
+
+  renderSaveList() {
+    const list = this.root.querySelector('#save-list');
+    const empty = this.root.querySelector('#save-list-empty');
+    if (!list) return;
+    const saves = listBattleSaves();
+    this.refreshTitleSaveButton();
+    if (empty) empty.classList.toggle('hidden', saves.length > 0);
+    if (!saves.length) {
+      list.innerHTML = '';
+      return;
+    }
+    list.innerHTML = saves
+      .map((save) => {
+        const meta = formatSaveMeta(save);
+        return `
+          <div class="save-card" data-id="${save.id}">
+            <div class="save-card-main">
+              <span class="save-card-label">${save.label ?? `${meta.faction} — ${meta.map}`}</span>
+              <span class="save-card-meta">${meta.mode} · ${meta.elapsed} elapsed · ${meta.when}</span>
+            </div>
+            <div class="save-card-actions">
+              <button type="button" class="btn btn-primary interactive save-load-btn" data-id="${save.id}">Resume</button>
+              <button type="button" class="btn btn-secondary interactive save-delete-btn" data-id="${save.id}">Delete</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    list.querySelectorAll('.save-load-btn').forEach((btn) => {
+      btn.onclick = () => {
+        this.callbacks.onLoadBattle?.(btn.dataset.id);
+      };
+    });
+    list.querySelectorAll('.save-delete-btn').forEach((btn) => {
+      btn.onclick = () => {
+        deleteBattleSave(btn.dataset.id);
+        this.renderSaveList();
+      };
+    });
+  }
+
+  showSaveToast(message) {
+    const toast = this.root.querySelector('#save-toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    clearTimeout(this._saveToastTimer);
+    this._saveToastTimer = setTimeout(() => {
+      toast.classList.add('hidden');
+    }, 3200);
+    this.refreshTitleSaveButton();
   }
 
   showHUD(faction, mapDef, gameMode = 'campaign', options = {}) {
@@ -1566,6 +1663,7 @@ export class UIManager {
     this.root.querySelector('#hud').classList.add('hidden');
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
+    this.refreshTitleSaveButton();
   }
 
   updateHqThreat(threat) {

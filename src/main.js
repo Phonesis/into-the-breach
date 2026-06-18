@@ -50,6 +50,22 @@ const ui = new UIManager(uiRoot, {
     sounds.leaveBattle();
     ui.hideHUD();
   },
+  onSaveBattle() {
+    game?.saveBattle();
+  },
+  async onLoadBattle(saveId) {
+    await preloadUnitTextures();
+    sounds.enterBattle();
+    if (!game) {
+      game = new Game({ canvas, ui });
+      wireSelectBox(canvas, ui);
+    }
+    if (!game.loadBattle(saveId)) {
+      ui.showSaveToast?.('Could not load that save.');
+      return;
+    }
+    ui.refreshTitleSaveButton();
+  },
   onReplay() {
     game?.replay();
   },
