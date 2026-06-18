@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { distanceBetween } from '../game/Targeting.js';
 import { MEDIC_AURA_RANGE } from '../game/MedicBehavior.js';
-import { ENGINEER_AURA_RANGE } from '../game/EngineerBehavior.js';
+import {
+  ENGINEER_AURA_RANGE,
+  isEngineerNearHq,
+  isHqBeingRepairedByEngineers,
+} from '../game/EngineerBehavior.js';
 import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior.js';
 import { getActiveMotorPools, isUnitNearMotorPool } from '../game/MotorPoolBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
@@ -111,8 +115,27 @@ function canReceiveEngineerHeal(ally) {
   return isVehicleUnit(ally.def?.type);
 }
 
-function getHealKind(unit, units, baseBuildings) {
+function engineerIsWorking(unit, units, hqs) {
+  if (!unit || unit.dead || unit.def?.type !== 'engineer') return false;
+
+  for (const ally of units) {
+    if (ally.dead || ally.team !== unit.team || ally.id === unit.id) continue;
+    if (!canReceiveEngineerHeal(ally)) continue;
+    if (distanceBetween(unit, ally) <= ENGINEER_AURA_RANGE) return true;
+  }
+
+  for (const hq of hqs ?? []) {
+    if (isEngineerNearHq(unit, hq)) return true;
+  }
+  return false;
+}
+
+function getHealKind(unit, units, baseBuildings, hqs = null) {
   if (!unit || unit.dead) return null;
+
+  if (unit.def?.type === 'engineer' && engineerIsWorking(unit, units, hqs)) {
+    return 'engineer';
+  }
 
   for (const medic of units) {
     if (medic.dead || medic.team !== unit.team || medic.def?.type !== 'medic') continue;
@@ -174,19 +197,64 @@ export function removeHealMarker(unit) {
   unit.healMarkerKind = null;
 }
 
-export function syncHealMarkers(units, baseBuildings = null) {
+function attachHqRepairMarker(hq) {
+  if (!hq?.mesh) return;
+  const map = getSpannerTexture();
+  const baseScale = 2.4;
+
+  if (!hq.repairMarker) {
+    const mat = new THREE.SpriteMaterial({
+      map,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.name = 'hqRepairMarker';
+    sprite.renderOrder = 26;
+    hq.mesh.add(sprite);
+    hq.repairMarker = sprite;
+  }
+
+  hq.repairMarker.visible = true;
+  hq.repairMarker.position.y = 7.2;
+  const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.08;
+  hq.repairMarker.scale.set(baseScale * pulse, baseScale * pulse, 1);
+}
+
+export function removeHqRepairMarker(hq) {
+  const marker = hq?.repairMarker;
+  if (!marker) return;
+  if (marker.parent) marker.parent.remove(marker);
+  marker.material?.dispose();
+  hq.repairMarker = null;
+}
+
+export function syncHealMarkers(units, baseBuildings = null, hqs = null) {
   for (const unit of units) {
     if (unit.dead || !unit.mesh) {
       removeHealMarker(unit);
       continue;
     }
 
-    const kind = getHealKind(unit, units, baseBuildings);
+    const kind = getHealKind(unit, units, baseBuildings, hqs);
     if (!kind) {
       removeHealMarker(unit);
       continue;
     }
 
     attachHealMarker(unit, kind);
+  }
+
+  for (const hq of hqs ?? []) {
+    if (hq.dead || !hq.mesh) {
+      removeHqRepairMarker(hq);
+      continue;
+    }
+    if (isHqBeingRepairedByEngineers(hq, units)) {
+      attachHqRepairMarker(hq);
+    } else {
+      removeHqRepairMarker(hq);
+    }
   }
 }

@@ -91,3 +91,10 @@ export function disposeFrontlineVisual(scene) {
     }
   });
 }
+
+/** Move the red frontline overlay when Tower Defence HQ Defense retreats the line. */
+export function repositionFrontlineVisual(mapDef, scene, fl, visible = true) {
+  disposeFrontlineVisual(scene);
+  buildFrontlineVisual({ ...mapDef, frontline: fl }, scene);
+  setFrontlineVisible(scene, visible);
+}

@@ -1,6 +1,7 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { getFrontlineBasis, getFrontlineDef } from './AssaultMode.js';
+import { repositionFrontlineVisual } from '../world/Frontline.js';
+import { getFrontlineDef } from './AssaultMode.js';
 import {
   TD_PREPARE_TIME,
   TD_PREPARE_TIME_BETWEEN,
@@ -8,6 +9,11 @@ import {
   TD_BREACH_MARGIN,
   TD_KILL_REWARD,
   TD_WAVE_CLEAR_BONUS,
+  TD_FRONTLINE_RETREAT_STEP,
+  TD_MIN_FRONTLINE_FROM_HQ,
+  TD_FRONTLINE_SHIFT_COOLDOWN,
+  TD_PLAYER_FRONTLINE_MARGIN,
+  isTdHqDefenseStyle,
 } from '../data/towerDefense.js';
 
 const PLAYER = 'player';
@@ -103,6 +109,139 @@ function formatAssaultBrief({ sectors }) {
   return `Multi-sector assault — ${names.join(' · ')}`;
 }
 
+/** Effective frontline — mutable in HQ Defense when the line retreats. */
+export function getTdFrontlineDef(game) {
+  const td = game?.towerDefense;
+  if (td && isTdHqDefenseStyle(td)) {
+    const baseFl = getFrontlineDef(game.mapDef);
+    return {
+      x: td.frontlineX ?? baseFl.x,
+      z: td.frontlineZ ?? baseFl.z,
+      name: baseFl.name ?? 'Frontline',
+    };
+  }
+  return getFrontlineDef(game.mapDef);
+}
+
+/** Axis from player HQ → enemy HQ; perpendicular spans the frontline. */
+export function getTdFrontlineBasis(game) {
+  const fl = getTdFrontlineDef(game);
+  const pb = game.mapDef.playerBase;
+  const eb = game.mapDef.enemyBase;
+  const axisX = eb.x - pb.x;
+  const axisZ = eb.z - pb.z;
+  const len = Math.hypot(axisX, axisZ) || 1;
+  const enemyDirX = axisX / len;
+  const enemyDirZ = axisZ / len;
+  return {
+    fl,
+    pb,
+    eb,
+    enemyDirX,
+    enemyDirZ,
+    perpX: -enemyDirZ,
+    perpZ: enemyDirX,
+    lineLen: game.mapDef.size * 0.72,
+  };
+}
+
+/** + = past the line toward enemy territory (HQ → frontline axis). */
+export function alongTdFrontTowardEnemy(x, z, game) {
+  const { fl, pb } = getTdFrontlineBasis(game);
+  const fx = fl.x - pb.x;
+  const fz = fl.z - pb.z;
+  const flen = Math.hypot(fx, fz) || 1;
+  return ((x - fl.x) * fx) / flen + ((z - fl.z) * fz) / flen;
+}
+
+export function clampToPlayerSideOfFrontline(x, z, game, margin = TD_PLAYER_FRONTLINE_MARGIN) {
+  const { fl, pb } = getTdFrontlineBasis(game);
+  const fx = fl.x - pb.x;
+  const fz = fl.z - pb.z;
+  const flen = Math.hypot(fx, fz) || 1;
+  const nx = fx / flen;
+  const nz = fz / flen;
+  const along = (x - fl.x) * nx + (z - fl.z) * nz;
+  if (along <= margin) return { x, z };
+  return {
+    x: x - nx * (along - margin),
+    z: z - nz * (along - margin),
+  };
+}
+
+export function retreatTowerDefenseFrontline(game) {
+  const td = game.towerDefense;
+  if (!td || !isTdHqDefenseStyle(td)) return false;
+
+  const pb = game.mapDef.playerBase;
+  const fl = { x: td.frontlineX, z: td.frontlineZ };
+  const dx = pb.x - fl.x;
+  const dz = pb.z - fl.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist <= TD_MIN_FRONTLINE_FROM_HQ) return false;
+
+  const step = Math.min(TD_FRONTLINE_RETREAT_STEP, dist - TD_MIN_FRONTLINE_FROM_HQ);
+  td.frontlineX = fl.x + (dx / dist) * step;
+  td.frontlineZ = fl.z + (dz / dist) * step;
+  td.frontlineShifts = (td.frontlineShifts ?? 0) + 1;
+
+  repositionFrontlineVisual(game.mapDef, game.scene, getTdFrontlineDef(game), game.showFrontline);
+  game.defenses?.setFrontlineAxis?.(getTdFrontlineDef(game), pb);
+  return true;
+}
+
+export function updateHqDefenseFrontlineRetreat(game, dt) {
+  const td = game.towerDefense;
+  if (!td || !isTdHqDefenseStyle(td)) return;
+
+  td.frontlineShiftCooldown = Math.max(0, (td.frontlineShiftCooldown ?? 0) - dt);
+  if (td.frontlineShiftCooldown > 0) return;
+
+  const { fl, pb } = getTdFrontlineBasis(game);
+  const toPlayerX = pb.x - fl.x;
+  const toPlayerZ = pb.z - fl.z;
+
+  let breached = false;
+  for (const u of game._enemyAlive) {
+    const vx = u.position.x - fl.x;
+    const vz = u.position.z - fl.z;
+    if (vx * toPlayerX + vz * toPlayerZ > 0) {
+      breached = true;
+      break;
+    }
+  }
+
+  if (breached && retreatTowerDefenseFrontline(game)) {
+    td.frontlineShiftCooldown = TD_FRONTLINE_SHIFT_COOLDOWN;
+  }
+}
+
+export function enforcePlayerFrontlineClamp(game) {
+  if (!isTdHqDefenseStyle(game.towerDefense)) return;
+
+  for (const unit of game._playerAlive) {
+    if (unit.retreating || unit.surrendered || unit._captureExit) continue;
+    const clamped = clampToPlayerSideOfFrontline(unit.position.x, unit.position.z, game);
+    if (clamped.x !== unit.position.x || clamped.z !== unit.position.z) {
+      unit.position.x = clamped.x;
+      unit.position.z = clamped.z;
+      unit.position.y = sampleTerrainHeight(clamped.x, clamped.z, game.mapDef);
+    }
+    if (unit.moveTarget) {
+      const mt = clampToPlayerSideOfFrontline(unit.moveTarget.x, unit.moveTarget.z, game);
+      unit.moveTarget.x = mt.x;
+      unit.moveTarget.z = mt.z;
+    }
+    if (unit._movePath?.length) {
+      for (const wp of unit._movePath) {
+        const wpClamped = clampToPlayerSideOfFrontline(wp.x, wp.z, game);
+        wp.x = wpClamped.x;
+        wp.z = wpClamped.z;
+      }
+    }
+  }
+}
+
 function alongFront(x, z, basis) {
   return (x - basis.fl.x) * basis.enemyDirX + (z - basis.fl.z) * basis.enemyDirZ;
 }
@@ -115,8 +254,9 @@ function clampToMap(x, z, mapDef) {
   };
 }
 
-function computeSpawnForSector(mapDef, sector, profile) {
-  const basis = getFrontlineBasis(mapDef);
+function computeSpawnForSector(game, sector, profile) {
+  const basis = getTdFrontlineBasis(game);
+  const mapDef = game.mapDef;
   const { fl, perpX, perpZ, lineLen, enemyDirX, enemyDirZ } = basis;
 
   const alongT =
@@ -154,9 +294,15 @@ function computeSpawnForSector(mapDef, sector, profile) {
 }
 
 /** @returns {{ wave, phase: 'prepare'|'active', phaseTimer, spawnQueue, spawned, totalToSpawn }} */
-export function createTowerDefenseState({ mapDef, difficulty, waveMode = 'standard' }) {
+export function createTowerDefenseState({
+  mapDef,
+  difficulty,
+  waveMode = 'standard',
+  style = 'emplacements',
+}) {
   const waveMult = difficulty?.enemyArmyMult ?? 1;
   const endless = waveMode === 'endless';
+  const fl = getFrontlineDef(mapDef);
   return {
     wave: 0,
     phase: 'prepare',
@@ -166,10 +312,15 @@ export function createTowerDefenseState({ mapDef, difficulty, waveMode = 'standa
     totalToSpawn: 0,
     waveMult,
     waveMode,
+    style,
     endless,
     wavesCleared: 0,
     killsThisWave: 0,
     breached: false,
+    frontlineX: fl.x,
+    frontlineZ: fl.z,
+    frontlineShifts: 0,
+    frontlineShiftCooldown: 0,
     assaultProfile: null,
     assaultSectors: [],
     assaultBrief: null,
@@ -285,7 +436,7 @@ function spawnWaveUnit(game, type) {
   const sectors = td?.assaultSectors?.length ? td.assaultSectors : pickWaveAssaultSectors(td?.wave ?? 1).sectors;
   const profile = td?.assaultProfile ?? getWaveAssaultProfile(td?.wave ?? 1);
   const sector = sectors[td?.spawned % sectors.length];
-  const spawn = computeSpawnForSector(game.mapDef, sector, profile);
+  const spawn = computeSpawnForSector(game, sector, profile);
 
   const unit = new Unit({
     def,
@@ -337,9 +488,10 @@ export function rewardTowerDefenseKill(game, unit) {
   td.killsThisWave += 1;
 }
 
-export function updateTowerDefenseEnemyAI(enemyUnits, mapDef, td, defenses, dt) {
-  const fl = getFrontlineDef(mapDef);
-  const pb = mapDef.playerBase;
+export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
+  const mapDef = game.mapDef;
+  const td = game.towerDefense;
+  const { fl, pb } = getTdFrontlineBasis(game);
   const advanceX = pb.x - fl.x;
   const advanceZ = pb.z - fl.z;
   const advLen = Math.hypot(advanceX, advanceZ) || 1;
@@ -401,9 +553,9 @@ function pickNearestDefenseInRange(unit, defenses) {
  */
 export function checkTowerDefenseBreach(game) {
   const td = game.towerDefense;
-  if (!td || td.breached) return null;
+  if (!td || td.breached || isTdHqDefenseStyle(td)) return null;
 
-  const fl = getFrontlineDef(game.mapDef);
+  const fl = getTdFrontlineDef(game);
   const pb = game.mapDef.playerBase;
   const toPlayerX = pb.x - fl.x;
   const toPlayerZ = pb.z - fl.z;
@@ -452,12 +604,15 @@ export function checkTowerDefenseVictory(game) {
 
 export function formatTowerDefenseHud(td) {
   if (!td) return null;
+  const hqDefense = isTdHqDefenseStyle(td);
   const secondsLeft = Math.max(0, td.phaseTimer);
   const prepareTotal =
     td.wave <= 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
   const phaseLabel =
     td.phase === 'prepare'
-      ? `Prepare defenses — ${Math.ceil(secondsLeft)}s`
+      ? hqDefense
+        ? `Prepare forces — ${Math.ceil(secondsLeft)}s`
+        : `Prepare defenses — ${Math.ceil(secondsLeft)}s`
       : `Wave ${td.wave} — ${td.spawned}/${td.totalToSpawn} deployed`;
   const countdownTitle =
     td.phase === 'prepare'
@@ -466,16 +621,26 @@ export function formatTowerDefenseHud(td) {
         : 'Next wave'
       : '';
   const assaultLine = td.assaultBrief ? `${td.assaultBrief}.` : '';
+  const retreatNote =
+    hqDefense && (td.frontlineShifts ?? 0) > 0
+      ? ` · Frontline retreated ${td.frontlineShifts}×`
+      : '';
   const countdownSubtitle =
     td.phase === 'prepare'
       ? td.endless
-        ? `Wave ${td.wave} — endless assault${assaultLine ? ` · ${assaultLine}` : ''}`
-        : `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline${assaultLine ? ` · ${assaultLine}` : ''}`
+        ? hqDefense
+          ? `Wave ${td.wave} — endless assault · train at HQ${retreatNote}${assaultLine ? ` · ${assaultLine}` : ''}`
+          : `Wave ${td.wave} — endless assault${assaultLine ? ` · ${assaultLine}` : ''}`
+        : hqDefense
+          ? `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — deploy reinforcements · hold your side of the line${retreatNote}${assaultLine ? ` · ${assaultLine}` : ''}`
+          : `Wave ${td.wave} of ${TD_WAVES_TO_WIN} — fortify the frontline${assaultLine ? ` · ${assaultLine}` : ''}`
       : '';
   return {
     wave: td.wave,
     maxWaves: td.endless ? null : TD_WAVES_TO_WIN,
     endless: !!td.endless,
+    hqDefense,
+    frontlineShifts: td.frontlineShifts ?? 0,
     wavesCleared: td.wavesCleared ?? 0,
     phase: td.phase,
     phaseLabel,

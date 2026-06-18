@@ -23,6 +23,7 @@ import {
   CLEARANCE_STARTING_RESOURCES,
   getProducibleUnits,
 } from '../data/gameModes.js';
+import { TD_HQ_DEFENSE_STARTING_SUPPLIES, isTdHqDefenseStyle } from '../data/towerDefense.js';
 import {
   createLastStandState,
   updateLastStandEnemyDeploy,
@@ -45,6 +46,9 @@ import {
   checkTowerDefenseBreach,
   checkTowerDefenseVictory,
   rewardTowerDefenseKill,
+  clampToPlayerSideOfFrontline,
+  updateHqDefenseFrontlineRetreat,
+  enforcePlayerFrontlineClamp,
 } from './TowerDefenseMode.js';
 import { DefenseStructureManager } from './DefenseStructures.js';
 import { getFrontlineDef } from './AssaultMode.js';
@@ -59,7 +63,7 @@ import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
-import { updateEngineerHealing } from './EngineerBehavior.js';
+import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
@@ -355,7 +359,10 @@ export class Game {
           .filter((t) => t.team !== PLAYER_TEAM && !t.dead);
       },
       getIsTowerDefense: () =>
-        isTowerDefenseMode(this.gameMode) && this.running && !this.gameOver,
+        isTowerDefenseMode(this.gameMode) &&
+        this.running &&
+        !this.gameOver &&
+        !isTdHqDefenseStyle(this.towerDefense),
       getIsBaseBuildingMode: () => isBaseBuildingCampaign(this),
       pickPlayerBaseBuilding: (raycaster, pointer, camera) =>
         this.baseBuildings?.raycastPlayerEntry(raycaster, pointer, camera) ?? null,
@@ -641,7 +648,9 @@ export class Game {
         : this.tutorial
           ? TUTORIAL_STARTING_RESOURCES
           : this.towerDefense
-            ? TD_STARTING_POINTS
+            ? (startOptions.tdStyle === 'hqDefense'
+                ? TD_HQ_DEFENSE_STARTING_SUPPLIES
+                : TD_STARTING_POINTS)
             : this.clearance
               ? CLEARANCE_STARTING_RESOURCES
               : assault
@@ -755,6 +764,9 @@ export class Game {
       });
       setupAssaultCapturePoints(this.capturePoints, this.mapDef, this.assault.defenderTeam);
     } else if (this.towerDefense) {
+      const tdStyle =
+        restoreSnapshot?.towerDefense?.style ?? startOptions.tdStyle ?? 'emplacements';
+      const tdHqDefense = tdStyle === 'hqDefense';
       for (const cp of this.capturePoints) {
         cp.owner = null;
         cp.progress = 0;
@@ -765,26 +777,29 @@ export class Game {
           mapDef: this.mapDef,
           difficulty: this.difficulty,
           waveMode: startOptions.tdWaveMode ?? 'standard',
+          style: tdStyle,
         });
         startNextWave(this.towerDefense);
       }
-      this.defenses = new DefenseStructureManager({
-        scene: this.scene,
-        mapDef: this.mapDef,
-        getEnemyUnits: () => this._enemyAlive,
-        getTerrainMesh: () => this._terrainMesh,
-        factionId: this.playerFaction?.id ?? 'germany',
-        factionAccent: this.playerFaction?.accent ?? 0xc9a227,
-        onChange: () => {
-          this.ui?.updateDefenses(this);
-          this._syncPlacementCapture();
-        },
-        onFireTrace: (shot) => this.ui?.recordMinimapFire?.(shot),
-      });
-      this.defenses.setFrontlineAxis(
-        getFrontlineDef(this.mapDef),
-        this.mapDef.playerBase
-      );
+      if (!tdHqDefense) {
+        this.defenses = new DefenseStructureManager({
+          scene: this.scene,
+          mapDef: this.mapDef,
+          getEnemyUnits: () => this._enemyAlive,
+          getTerrainMesh: () => this._terrainMesh,
+          factionId: this.playerFaction?.id ?? 'germany',
+          factionAccent: this.playerFaction?.accent ?? 0xc9a227,
+          onChange: () => {
+            this.ui?.updateDefenses(this);
+            this._syncPlacementCapture();
+          },
+          onFireTrace: (shot) => this.ui?.recordMinimapFire?.(shot),
+        });
+        this.defenses.setFrontlineAxis(
+          getFrontlineDef(this.mapDef),
+          this.mapDef.playerBase
+        );
+      }
     } else if (this.tutorial) {
       for (const cp of this.capturePoints) {
         cp.owner = null;
@@ -964,6 +979,7 @@ export class Game {
       difficulty: this.tutorial ? null : this.difficulty,
       towerDefense: this.towerDefense,
       tdEndless: !!this.towerDefense?.endless,
+      tdHqDefense: isTdHqDefenseStyle(this.towerDefense),
       lastStand: !!this.lastStand,
       lastStandPreset: isLastStandPresetForce(this),
       campaignStyle: this.campaignStyle,
@@ -1088,7 +1104,12 @@ export class Game {
   }
 
   _clampPlayerDeployPoint(x, z) {
-    if (!this._isPlayerDeployZoneActive()) return { x, z };
+    if (!this._isPlayerDeployZoneActive()) {
+      if (isTdHqDefenseStyle(this.towerDefense)) {
+        return clampToPlayerSideOfFrontline(x, z, this);
+      }
+      return { x, z };
+    }
     const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
     return clampPointToHqZone(x, z, hq, getDeployRadius(this.mapDef));
   }
@@ -1750,7 +1771,8 @@ export class Game {
   }
 
   tryProduce(unitType) {
-    if (!this.running || this.gameOver || this.towerDefense) return false;
+    if (!this.running || this.gameOver) return false;
+    if (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense)) return false;
 
     if (this.paused) return false;
 
@@ -1783,7 +1805,11 @@ export class Game {
   tickEconomy(dt) {
     if (this.lastStand) return;
     if (this.towerDefense) {
-      this.resources.player += 0.4 * dt;
+      if (isTdHqDefenseStyle(this.towerDefense)) {
+        this.resources.player += HQ_INCOME_RATE * dt;
+      } else {
+        this.resources.player += 0.4 * dt;
+      }
       return;
     }
     const hqRate = this.campaign ? CAMPAIGN_BALANCE.hqIncomeRate : HQ_INCOME_RATE;
@@ -1883,20 +1909,24 @@ export class Game {
     const playerAlive = this._countAlive(PLAYER_TEAM);
     const enemyAlive = this._countAlive(ENEMY_TEAM);
 
+    const tdHqDefense = isTdHqDefenseStyle(this.towerDefense);
     this.ui.updateArmyStats(playerAlive, enemyAlive, {
       tutorial: this.tutorial,
       assault: this.assault,
       clearance: this.clearance,
       towerDefense: this.towerDefense,
+      tdHqDefense,
       defenseCount: this.defenses?.entries.filter((e) => !e.destroyed).length ?? 0,
       wipeHint: this._getArmyWipeHint(playerAlive),
     });
     this.ui.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
     if (!this.towerDefense) this.ui.updateCapturePoints(this.capturePoints);
-    if (!this.towerDefense) this.ui.updateProduction(this);
+    if (!this.towerDefense || tdHqDefense) this.ui.updateProduction(this);
     if (this.baseBuildings?.active) this.ui.updateBaseBuild(this);
-    if (this.towerDefense) {
+    if (this.towerDefense && !tdHqDefense) {
       this.ui.updateDefenses(this);
+    }
+    if (this.towerDefense) {
       this.ui.updateTowerDefense(this);
     }
     if (this.assault) this.ui.updateAssaultHUD(this.assault);
@@ -2250,6 +2280,7 @@ export class Game {
         updateHospitalHealing(this.baseBuildings, this._aliveUnits, dt);
         updateMotorPoolHealing(this.baseBuildings, this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
+        updateEngineerHqRepair(this.hqs, this._aliveUnits, dt);
         this.engineerSandbags?.update(dt);
         if (this.engineerSandbags?.sites?.length) {
           this.ui?.updateEngineerBuild(this);
@@ -2258,7 +2289,7 @@ export class Game {
         if (getGarrisonBunkerSources(this).length > 0) {
           updateBunkerGarrison(this._aliveUnits, this);
         }
-        syncHealMarkers(this._aliveUnits, this.baseBuildings);
+        syncHealMarkers(this._aliveUnits, this.baseBuildings, this.hqs);
         syncDamageSmoke(this._aliveUnits);
         updateDamageSmoke(this._aliveUnits, dt);
         syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
@@ -2281,6 +2312,10 @@ export class Game {
           this.production.update(dt, this.units);
         } else {
           updateTowerDefenseMode(this, dt);
+          if (isTdHqDefenseStyle(this.towerDefense)) {
+            this.production.update(dt, this.units);
+            updateHqDefenseFrontlineRetreat(this, dt);
+          }
         }
 
         if (this.assault) {
@@ -2305,6 +2340,9 @@ export class Game {
             ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
             : null,
         });
+        if (isTdHqDefenseStyle(this.towerDefense)) {
+          enforcePlayerFrontlineClamp(this);
+        }
 
         const stagingTeams = this._getDeployZoneTeamsAt();
         if (stagingTeams.length) {
@@ -2380,6 +2418,9 @@ export class Game {
             }
           );
           this._rebuildUnitCaches();
+          if (isTdHqDefenseStyle(this.towerDefense)) {
+            enforcePlayerFrontlineClamp(this);
+          }
         }
 
         if (this.towerDefense && this.defenses) {
@@ -2440,13 +2481,7 @@ export class Game {
           }
 
           if (this.towerDefense) {
-            updateTowerDefenseEnemyAI(
-              this._enemyAlive,
-              this.mapDef,
-              this.towerDefense,
-              this.defenses,
-              dt
-            );
+            updateTowerDefenseEnemyAI(this._enemyAlive, this, this.defenses, dt);
           } else if (!this.tutorial && !isLastStandDeployPhase(this)) {
             updateAI({
               enemyUnits: this._enemyAlive,

@@ -2,7 +2,9 @@ import { FACTIONS } from '../data/factions.js';
 import { MAPS } from '../data/maps.js';
 import { GAME_MODES } from '../data/gameModes.js';
 import { BASE_BUILDING_TYPES } from '../data/baseBuildings.js';
-import { DEFENSE_TYPES } from '../data/towerDefense.js';
+import { DEFENSE_TYPES, isTdHqDefenseStyle } from '../data/towerDefense.js';
+import { getTdFrontlineDef } from './TowerDefenseMode.js';
+import { repositionFrontlineVisual } from '../world/Frontline.js';
 import { spawnUnitAt } from './Spawner.js';
 import { setUnitNextId } from '../units/Unit.js';
 import {
@@ -675,6 +677,14 @@ export function applyBattleSave(game, snapshot) {
   }
   if (snapshot.towerDefense) {
     game.towerDefense = { ...snapshot.towerDefense };
+    if (isTdHqDefenseStyle(game.towerDefense)) {
+      repositionFrontlineVisual(
+        game.mapDef,
+        game.scene,
+        getTdFrontlineDef(game),
+        game.showFrontline
+      );
+    }
   }
   if (snapshot.lastStand) {
     game.lastStand = {

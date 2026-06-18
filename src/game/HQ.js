@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { refreshHqDamageVisuals, removeHqBurn } from '../effects/HqBurnEffects.js';
+import { removeHqRepairMarker } from '../visual/HealMarkers.js';
 import {
   createCamoMaterial,
   getInfantryUniformTexture,
@@ -166,8 +167,20 @@ export class HQ {
     refreshHqDamageVisuals(this, amount);
   }
 
+  repair(amount) {
+    if (this.dead || amount <= 0 || this.hp >= this.maxHp) return false;
+    const before = this.hp;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+    if (this.hp > before) {
+      refreshHqDamageVisuals(this, 0);
+      return true;
+    }
+    return false;
+  }
+
   dispose(scene) {
     removeHqBurn(this);
+    removeHqRepairMarker(this);
     scene.remove(this.mesh);
     this.mesh.traverse((c) => {
       if (c.geometry) c.geometry.dispose();

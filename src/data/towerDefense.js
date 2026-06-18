@@ -20,7 +20,47 @@ export const TD_WAVE_MODES = {
 };
 
 export const TD_WAVE_MODE_LIST = Object.values(TD_WAVE_MODES);
-/** Enemy dot past frontline toward HQ above this = sector lost. */
+
+/** Tower Defence play style — emplacement building vs HQ army defense. */
+export const TD_STYLE_MODES = {
+  emplacements: {
+    id: 'emplacements',
+    name: 'Emplacements',
+    subtitle: 'Spend defense points on bunkers, wire, and guns behind the frontline.',
+  },
+  hqDefense: {
+    id: 'hqDefense',
+    name: 'HQ Defense',
+    subtitle: 'Spawn any unit from HQ — hold the line. Lose only if HQ is destroyed.',
+  },
+};
+
+export const TD_STYLE_MODE_LIST = Object.values(TD_STYLE_MODES);
+
+export function isTdHqDefenseStyle(td) {
+  return td?.style === 'hqDefense';
+}
+
+export function isTdEmplacementStyle(td) {
+  return !td?.style || td.style === 'emplacements';
+}
+
+/** Starting supplies for HQ Defense (production from HQ). */
+export const TD_HQ_DEFENSE_STARTING_SUPPLIES = 180;
+
+/** How far the frontline retreats toward HQ when the enemy breaches. */
+export const TD_FRONTLINE_RETREAT_STEP = 16;
+
+/** Minimum distance from HQ the frontline can retreat to. */
+export const TD_MIN_FRONTLINE_FROM_HQ = 14;
+
+/** Seconds between automatic frontline retreats after a breach. */
+export const TD_FRONTLINE_SHIFT_COOLDOWN = 12;
+
+/** Player units may not move past the frontline beyond this margin (m). */
+export const TD_PLAYER_FRONTLINE_MARGIN = 2;
+
+/** Enemy dot past frontline toward HQ above this = sector lost (emplacements) or retreat (HQ Defense). */
 export const TD_BREACH_MARGIN = 2;
 export const TD_KILL_REWARD = {
   infantry: 8,

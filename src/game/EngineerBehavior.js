@@ -7,6 +7,12 @@ export const ENGINEER_AURA_RANGE = 16;
 /** HP restored per second at point-blank (scales down with distance). */
 export const ENGINEER_HEAL_PER_SEC = 2.8;
 
+/** Game meters — engineers within this range of a damaged HQ can repair it. */
+export const ENGINEER_HQ_REPAIR_RANGE = ENGINEER_AURA_RANGE;
+
+/** HQ structural repair rate at point-blank (scales down with distance). */
+export const ENGINEER_HQ_REPAIR_PER_SEC = 5.2;
+
 /** Multiplier applied to panic-retreat chance when a friendly engineer is in range. */
 export const ENGINEER_RETREAT_DISCOURAGE = 0.34;
 
@@ -18,6 +24,27 @@ export function getEngineerRetreatMultiplier(unit, units) {
     if (distanceBetween(unit, engineer) <= ENGINEER_AURA_RANGE) return ENGINEER_RETREAT_DISCOURAGE;
   }
   return 1;
+}
+
+function distanceToPoint(unit, x, z) {
+  const dx = unit.position.x - x;
+  const dz = unit.position.z - z;
+  return Math.hypot(dx, dz);
+}
+
+export function isEngineerNearHq(engineer, hq) {
+  if (!engineer || engineer.dead || engineer.def?.type !== 'engineer') return false;
+  if (!hq || hq.dead || hq.hp >= hq.maxHp) return false;
+  if (engineer.team !== hq.team) return false;
+  return distanceToPoint(engineer, hq.position.x, hq.position.z) <= ENGINEER_HQ_REPAIR_RANGE;
+}
+
+export function isHqBeingRepairedByEngineers(hq, units) {
+  if (!hq || hq.dead || hq.hp >= hq.maxHp) return false;
+  for (const engineer of units) {
+    if (isEngineerNearHq(engineer, hq)) return true;
+  }
+  return false;
 }
 
 export function updateEngineerHealing(units, dt) {
@@ -38,5 +65,28 @@ export function updateEngineerHealing(units, dt) {
       const proximity = 1 - (dist / ENGINEER_AURA_RANGE) * 0.55;
       ally.hp = Math.min(ally.maxHp, ally.hp + ENGINEER_HEAL_PER_SEC * proximity * dt);
     }
+  }
+}
+
+export function updateEngineerHqRepair(hqs, units, dt) {
+  if (dt <= 0 || !hqs?.length) return;
+
+  const engineers = units.filter((u) => !u.dead && u.def?.type === 'engineer');
+  if (!engineers.length) return;
+
+  for (const hq of hqs) {
+    if (hq.dead || hq.hp >= hq.maxHp) continue;
+
+    let nearestDist = Infinity;
+    for (const engineer of engineers) {
+      if (engineer.team !== hq.team) continue;
+      const dist = distanceToPoint(engineer, hq.position.x, hq.position.z);
+      if (dist > ENGINEER_HQ_REPAIR_RANGE) continue;
+      nearestDist = Math.min(nearestDist, dist);
+    }
+    if (!Number.isFinite(nearestDist)) continue;
+
+    const proximity = 1 - (nearestDist / ENGINEER_HQ_REPAIR_RANGE) * 0.55;
+    hq.repair(ENGINEER_HQ_REPAIR_PER_SEC * proximity * dt);
   }
 }

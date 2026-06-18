@@ -14,12 +14,14 @@ import {
   DEFENSE_TYPES,
   TD_MAX_ARTILLERY_PITS,
   TD_WAVE_MODE_LIST,
+  TD_STYLE_MODE_LIST,
   getArtilleryPitCount,
   defenseNeedsAmmo,
   getResupplyCost,
   getAmmoRatio,
 } from '../data/towerDefense.js';
 import { formatTowerDefenseHud } from '../game/TowerDefenseMode.js';
+import { isHqBeingRepairedByEngineers } from '../game/EngineerBehavior.js';
 import {
   CAMPAIGN_STYLE_LIST,
   BASE_BUILDING_TYPE_LIST,
@@ -107,6 +109,7 @@ export class UIManager {
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
     this.selectedTdWaveMode = 'standard';
+    this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
@@ -231,6 +234,10 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
             <h2>Wave Mode</h2>
             <div class="campaign-style-grid" id="td-wave-mode-grid"></div>
+          </div>
+          <div class="campaign-style-block hidden" id="td-style-block">
+            <h2>Defence Style</h2>
+            <div class="campaign-style-grid" id="td-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="laststand-deploy-block">
             <h2>Deployment Style</h2>
@@ -582,6 +589,19 @@ export class UIManager {
     ).join('');
   }
 
+  renderTdStyles() {
+    const grid = this.root.querySelector('#td-style-grid');
+    if (!grid) return;
+    grid.innerHTML = TD_STYLE_MODE_LIST.map(
+      (m) => `
+      <button type="button" class="card-btn interactive campaign-style-card td-style-card${m.id === this.selectedTdStyle ? ' selected' : ''}" data-id="${m.id}">
+        <span class="name">${m.name}</span>
+        <span class="meta">${m.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
   renderLastStandDeployModes() {
     const grid = this.root.querySelector('#laststand-deploy-grid');
     if (!grid) return;
@@ -609,6 +629,7 @@ export class UIManager {
     const block = this.root.querySelector('#difficulty-block');
     const styleBlock = this.root.querySelector('#campaign-style-block');
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
+    const tdStyleBlock = this.root.querySelector('#td-style-block');
     const lastStandBlock = this.root.querySelector('#laststand-deploy-block');
     const isTutorial = this.selectedGameMode === 'tutorial';
     const isCampaign = this.selectedGameMode === 'campaign';
@@ -617,10 +638,14 @@ export class UIManager {
     if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
+    if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
     if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
     this.renderDifficulties();
     if (isCampaign) this.renderCampaignStyles();
-    if (isTowerDefense) this.renderTdWaveModes();
+    if (isTowerDefense) {
+      this.renderTdWaveModes();
+      this.renderTdStyles();
+    }
     if (isLastStand) {
       this.renderLastStandDeployModes();
       this.updateLastStandMapSizeLock();
@@ -809,9 +834,12 @@ export class UIManager {
 
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
-      if (!btn || btn.classList.contains('td-wave-mode-card')) return;
+      if (!btn || btn.classList.contains('td-wave-mode-card') || btn.classList.contains('td-style-card'))
+        return;
       this.root.querySelectorAll('.campaign-style-card').forEach((b) => {
-        if (!b.classList.contains('td-wave-mode-card')) b.classList.remove('selected');
+        if (!b.classList.contains('td-wave-mode-card') && !b.classList.contains('td-style-card')) {
+          b.classList.remove('selected');
+        }
       });
       btn.classList.add('selected');
       this.selectedCampaignStyle = btn.dataset.id;
@@ -823,6 +851,14 @@ export class UIManager {
       this.root.querySelectorAll('.td-wave-mode-card').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
       this.selectedTdWaveMode = btn.dataset.id;
+    });
+
+    this.root.querySelector('#td-style-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.td-style-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.td-style-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedTdStyle = btn.dataset.id;
     });
 
     this.root.querySelector('#laststand-deploy-grid')?.addEventListener('click', (e) => {
@@ -855,6 +891,8 @@ export class UIManager {
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
           tdWaveMode:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
+          tdStyle:
+            this.selectedGameMode === 'towerDefense' ? this.selectedTdStyle : undefined,
           lastStandDeployMode:
             this.selectedGameMode === 'lastStand' ? this.selectedLastStandDeployMode : undefined,
         });
@@ -1071,6 +1109,7 @@ export class UIManager {
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance';
     const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
+    const tdHqDefense = towerDefense && (options.tdHqDefense || options.tdStyle === 'hqDefense');
     const lastStand = gameMode === 'lastStand' || options.lastStand;
     const baseBuilding =
       gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
@@ -1088,16 +1127,22 @@ export class UIManager {
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
     this._hudTdEndless = !!(towerDefense && options.tdEndless);
-    this.root.querySelector('#td-wave-countdown')?.classList.add('hidden');
+    const tdCountdown = this.root.querySelector('#td-wave-countdown');
+    tdCountdown?.classList.add('hidden');
+    tdCountdown?.classList.toggle('td-wave-countdown-side', tdHqDefense);
     this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
     this._hudTowerDefense = towerDefense;
+    this._hudTdHqDefense = tdHqDefense;
     this._hudHasFrontline = assault || towerDefense;
     this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
     this._syncFrontlineToggle();
-    this._setProductionPanelVisible(lastStand && !options.lastStandPreset);
-    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', towerDefense || lastStand);
-    this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense);
-    this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense);
+    this.root.querySelector('#firesupport-panel')?.classList.toggle(
+      'hidden',
+      (towerDefense && !tdHqDefense) || lastStand
+    );
+    this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense && !tdHqDefense);
+    this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
+    this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
     this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
     this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
     const prodTitle = this.root.querySelector('#production-panel h3');
@@ -1127,6 +1172,10 @@ export class UIManager {
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
+      } else if (towerDefense && tdHqDefense) {
+        this._defaultHudHint = options.tdEndless
+          ? 'Tower Defence (HQ Defense · Endless): train any unit at HQ · hold your side of the frontline · lose if HQ falls'
+          : 'Tower Defence (HQ Defense): spawn reinforcements from HQ · units cannot cross the frontline · line retreats if breached · lose if HQ falls';
       } else if (towerDefense) {
         this._defaultHudHint = options.tdEndless
           ? 'Tower Defence (Endless): build behind the frontline · survive escalating waves · see how long you last'
@@ -1234,9 +1283,8 @@ export class UIManager {
   _setProductionPanelVisible(visible) {
     const panel = this.root.querySelector('#production-panel');
     if (!panel) return;
-    const show = this._hudLastStand
-      ? this._hudLastStandDeploy
-      : !this._hudTowerDefense && visible;
+    const tdBlocksProduction = this._hudTowerDefense && !this._hudTdHqDefense;
+    const show = this._hudLastStand ? this._hudLastStandDeploy : !tdBlocksProduction && visible;
     panel.classList.toggle('hidden', !show);
   }
 
@@ -1482,6 +1530,7 @@ export class UIManager {
     const showCountdown =
       this._hudTowerDefense && hud.phase === 'prepare' && hud.secondsLeft > 0.05;
     countdown.classList.toggle('hidden', !showCountdown);
+    countdown.classList.toggle('td-wave-countdown-side', !!hud.hqDefense);
     if (!showCountdown) {
       card?.classList.remove('td-wave-countdown-urgent');
       return;
@@ -1795,6 +1844,8 @@ export class UIManager {
       el.textContent = `Your forces: ${playerAlive} · Practice mode`;
     } else if (clearance) {
       el.textContent = `Your forces: ${playerAlive} · Defenders left: ${enemyAlive}`;
+    } else if (opts.towerDefense && opts.tdHqDefense) {
+      el.textContent = `Your forces: ${playerAlive} · Assault force: ${enemyAlive}`;
     } else if (opts.towerDefense) {
       el.textContent = `Assault force: ${enemyAlive} · Defenses: ${opts.defenseCount ?? '—'}`;
     } else if (assault) {
@@ -2224,6 +2275,11 @@ export class UIManager {
     if (hq && !hq.dead) {
       this._renderCoverBanner([]);
       const teamLabel = hq.team === 'player' ? 'Your headquarters' : 'Enemy headquarters';
+      const beingRepaired =
+        hq.hp < hq.maxHp && isHqBeingRepairedByEngineers(hq, game?.units ?? []);
+      const repairHint = beingRepaired
+        ? '<p class="hq-selected-hint"><strong>Engineers on site</strong> — structural repairs in progress.</p>'
+        : '';
       const trainHint =
         this._hudBaseBuilding && hq.team === 'player'
           ? '<p class="hq-selected-hint">Train <strong>infantry squads</strong> from the panel — click completed depots on the map for other unit types.</p>'
@@ -2232,6 +2288,7 @@ export class UIManager {
         <h3 class="hq-selected-title">${hq.name ?? 'Headquarters'}</h3>
         <p class="hq-selected-meta">${teamLabel}</p>
         ${hpBarMarkup(hq.hp, hq.maxHp)}
+        ${repairHint}
         ${trainHint}
       `;
       this.updateEngineerBuild(game);
