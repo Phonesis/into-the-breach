@@ -894,7 +894,7 @@ export class Game {
           enemyArmyMult: this.difficulty.enemyArmyMult,
         })
       );
-    } else if (!this.tutorial && !this.towerDefense) {
+    } else if (!this.tutorial && !this.towerDefense && !this.lastStand) {
       const enemyArmyScale =
         this.difficulty.enemyArmyMult *
         (this.campaign ? CAMPAIGN_BALANCE.enemyArmyMult : 1);

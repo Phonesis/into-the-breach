@@ -52,7 +52,6 @@ function buildSmokeVisual(scene, mapDef, x, z) {
 
   const sprites = [];
   const mats = [];
-  const geos = [];
   const smokeTex = getSmokeScreenTexture();
 
   const spots = [
@@ -93,57 +92,8 @@ function buildSmokeVisual(scene, mapDef, x, z) {
     mats.push(mat);
   }
 
-  const groundGeo = new THREE.CircleGeometry(SMOKE_RADIUS * 0.96, 48);
-  groundGeo.rotateX(-Math.PI / 2);
-  const groundMat = new THREE.MeshBasicMaterial({
-    color: 0xd8dde4,
-    transparent: true,
-    opacity: 0.38,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    depthTest: true,
-  });
-  const groundDisc = new THREE.Mesh(groundGeo, groundMat);
-  groundDisc.position.y = 0.12;
-  groundDisc.renderOrder = 4;
-  group.add(groundDisc);
-  geos.push(groundGeo);
-  mats.push(groundMat);
-
-  const innerRingGeo = new THREE.RingGeometry(SMOKE_RADIUS * 0.72, SMOKE_RADIUS * 0.9, 48);
-  innerRingGeo.rotateX(-Math.PI / 2);
-  const innerRingMat = new THREE.MeshBasicMaterial({
-    color: 0xb8c0cc,
-    transparent: true,
-    opacity: 0.28,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
-  innerRing.position.y = 0.16;
-  innerRing.renderOrder = 5;
-  group.add(innerRing);
-  geos.push(innerRingGeo);
-  mats.push(innerRingMat);
-
-  const ringGeo = new THREE.RingGeometry(SMOKE_RADIUS * 0.9, SMOKE_RADIUS * 1.02, 48);
-  ringGeo.rotateX(-Math.PI / 2);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0xa8b4c4,
-    transparent: true,
-    opacity: 0.42,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.position.y = 0.18;
-  ring.renderOrder = 5;
-  group.add(ring);
-  geos.push(ringGeo);
-  mats.push(ringMat);
-
   scene.add(group);
-  return { group, sprites, ring, ringMat, groundDisc, groundMat, innerRing, innerRingMat, mats, geos };
+  return { group, sprites, mats };
 }
 
 export class SmokeScreenManager {
@@ -225,7 +175,6 @@ export class SmokeScreenManager {
   _disposeVisual(screen) {
     if (screen.group?.parent) screen.group.parent.remove(screen.group);
     for (const mat of screen.mats ?? []) mat?.dispose();
-    for (const geo of screen.geos ?? []) geo?.dispose();
     for (const sprite of screen.sprites ?? []) {
       if (!screen.mats?.includes(sprite.material)) sprite.material?.dispose();
     }
@@ -255,9 +204,6 @@ export class SmokeScreenManager {
         );
         idx++;
       }
-      if (s.groundMat) s.groundMat.opacity = 0.14 + life * 0.3;
-      if (s.innerRingMat) s.innerRingMat.opacity = 0.1 + life * 0.22;
-      if (s.ringMat) s.ringMat.opacity = 0.16 + life * 0.3;
 
       if (s.remaining <= 0) {
         this._disposeVisual(s);
