@@ -153,7 +153,12 @@ import { updateAI, resetAI } from './AI.js';
 import { containTeamsToDeployZone, clampPointToHqZone } from './OpeningDeployZone.js';
 import { createDeployZoneRings, disposeDeployZoneRings } from '../visual/DeployZoneRing.js';
 import { RTSController } from '../input/RTSController.js';
-import { canManualFireOrder, resolveBattleCursor } from '../input/BattleCursor.js';
+import {
+  canManualFireOrder,
+  canSmokeShellOrder,
+  resolveBattleCursor,
+} from '../input/BattleCursor.js';
+import { SmokeScreenManager } from './SmokeScreen.js';
 import { isActiveManualFireMission } from './Targeting.js';
 import { HQ } from './HQ.js';
 import { createCapturePoints } from './CapturePoint.js';
@@ -328,6 +333,8 @@ export class Game {
     this.targetIndicators = new TargetIndicators(this.scene);
 
     this.fireSupport = new FireSupportManager(this);
+    this.smokeScreens = new SmokeScreenManager(this);
+    this.smokeShellTargeting = false;
     this.engineerSandbags = new EngineerSandbagManager(this);
     this.baseBuildings = new BaseBuildingManager(this);
     this.campaignStyle = 'classic';
@@ -344,6 +351,8 @@ export class Game {
       getPlayerTeam: () => PLAYER_TEAM,
       getPendingFireSupport: () =>
         this.running && !this.gameOver ? this.fireSupport.pending : null,
+      getPendingSmokeShell: () =>
+        this.running && !this.gameOver ? this.smokeShellTargeting : false,
       getPendingDefensePlacement: () =>
         this.running && !this.gameOver ? this.defenses?.getPending() : null,
       getPendingLastStandDeploy: () =>
@@ -371,6 +380,7 @@ export class Game {
       getShiftHeld: () => !!(this.keys.ShiftLeft || this.keys.ShiftRight),
       clampDeployPoint: (x, z) => this._clampPlayerDeployPoint(x, z),
       onFireSupportTarget: (mode, x, z) => this.handleFireSupportTarget(mode, x, z),
+      onSmokeShellTarget: (mode, x, z) => this.handleSmokeShellTarget(mode, x, z),
       onDefensePlacement: (mode, x, z) => this.handleDefensePlacement(mode, x, z),
       onLastStandPlacement: (mode, x, z) => this.handleLastStandPlacement(mode, x, z),
       onSandbagPlacement: (mode, x, z) => this.handleSandbagPlacement(mode, x, z),
@@ -401,9 +411,10 @@ export class Game {
         if ((type === 'attack' || type === 'fire') && selected?.length) {
           this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq, this);
         }
-        if (type === 'fire' || type === 'attack' || type === 'move') {
+        if (type === 'fire' || type === 'attack' || type === 'smoke' || type === 'move') {
           this._selectionUiKey = '';
           this.ui?.updateFireMissionControls(this._countActiveFireMissions());
+          this.ui?.updateSmokeShell(this);
         }
         this._syncBattleCursor();
       },
@@ -451,6 +462,9 @@ export class Game {
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
         this.ui?.updateFireSupport(this.fireSupport);
+      }
+      if (e.code === 'Escape' && this.smokeShellTargeting) {
+        this.cancelSmokeShellTargeting();
       }
       if (e.code === 'Escape' && this._countActiveFireMissions() > 0) {
         this.cancelAllFireMissions();
@@ -675,6 +689,8 @@ export class Game {
     this.battleStats.reset();
     this._battleStatsFinalized = false;
     this.fireSupport.reset();
+    this.smokeScreens.reset();
+    this.smokeShellTargeting = false;
     this.engineerSandbags.reset();
     this.baseBuildings.reset();
     if (this.campaignStyle === 'baseBuilding') {
@@ -1136,8 +1152,10 @@ export class Game {
         deployPending ||
         sandbagPending ||
         baseBuildPending,
+      smokeShellPending: !!this.smokeShellTargeting,
       shiftHeld,
       hasManualFireSelection: selected.some(canManualFireOrder),
+      hasSmokeShellSelection: selected.some(canSmokeShellOrder),
     });
   }
 
@@ -1423,8 +1441,18 @@ export class Game {
     this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
   }
 
+  cancelSmokeShellTargeting() {
+    if (!this.smokeShellTargeting) return false;
+    this.smokeShellTargeting = false;
+    this.smokeScreens?.clearPreview();
+    this.ui?.updateSmokeShell(this);
+    this._syncBattleCursor();
+    return true;
+  }
+
   cancelAllFireMissions() {
     if (!this.running || this.gameOver) return false;
+    this.cancelSmokeShellTargeting();
 
     let cleared = 0;
     for (const u of this.units) {
@@ -1550,9 +1578,64 @@ export class Game {
   armFireSupport(type) {
     if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
     if (!this.fireSupport.isReady(type) && this.fireSupport.pending !== type) return;
+    this.cancelSmokeShellTargeting();
     this.fireSupport.arm(type);
     this._syncBattleCursor();
     this.ui?.updateFireSupport(this.fireSupport);
+  }
+
+  armSmokeShell() {
+    if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
+    const artillery = this._playerAlive.filter(
+      (u) => u.selected && canSmokeShellOrder(u)
+    );
+    if (artillery.length === 0) return;
+
+    if (this.smokeShellTargeting) {
+      this.cancelSmokeShellTargeting();
+      return;
+    }
+
+    this.fireSupport?.cancel();
+    this.smokeShellTargeting = true;
+    sounds.play('select');
+    this._syncBattleCursor();
+    this.ui?.updateSmokeShell(this);
+    this.ui?.updateFireSupport(this.fireSupport);
+  }
+
+  handleSmokeShellTarget(mode, x, z) {
+    if (!this.running || this.gameOver || this._isPlayerDeployZoneActive()) return;
+    if (!this.smokeShellTargeting) return;
+
+    if (mode === 'preview') {
+      this.smokeScreens.updatePreview(x, z);
+      return;
+    }
+
+    if (mode !== 'place') return;
+
+    const selected = this._playerAlive.filter(
+      (u) => u.selected && canSmokeShellOrder(u)
+    );
+    if (selected.length === 0) return;
+
+    for (const u of selected) {
+      u.setSmokeShellOrder(x, z);
+    }
+
+    this.smokeShellTargeting = false;
+    this.smokeScreens.clearPreview();
+    sounds.play('order');
+    this.ui?.updateSmokeShell(this);
+    this.ui?.updateFireMissionControls(this._countActiveFireMissions());
+    this._syncBattleCursor();
+    this.ui?.updateSelection(
+      selected,
+      this.controller?.hoveredTarget,
+      this.selectedHq,
+      this
+    );
   }
 
   _screenToGround(clientX, clientY) {
@@ -2107,6 +2190,8 @@ export class Game {
     clearFireSupportEffects();
     clearTerrainDamage(this.scene);
     this.fireSupport?.reset();
+    this.smokeScreens?.reset();
+    this.smokeShellTargeting = false;
   }
 
   /** No live units on the map — skip corpse churn while victory/defeat is resolved. */
@@ -2422,6 +2507,7 @@ export class Game {
               clearance: this.clearance,
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,
+              smokeScreens: this.smokeScreens,
             }
           );
           this._rebuildUnitCaches();
@@ -2472,6 +2558,7 @@ export class Game {
         }
 
         this.fireSupport.update(dt);
+        this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
         flushTerrainNormals(this._terrainMesh);
 

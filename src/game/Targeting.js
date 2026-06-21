@@ -66,13 +66,17 @@ export function tankCanEngageTarget(attacker, target) {
 /** True when the unit is executing a player-issued Shift+LMB fire mission. */
 export function isActiveManualFireMission(unit) {
   if (!unit || unit.dead || !unit.attackOrder || unit.attackOrder.dead) return false;
-  return unit.attackOrder.isGround || !!unit._manualFireMission;
+  return unit.attackOrder.isGround || unit.attackOrder.isSmokeShell || !!unit._manualFireMission;
+}
+
+export function isSmokeShellTarget(target) {
+  return !!(target?.isSmokeShell && target.position);
 }
 
 /** True when a player-issued attack order is in weapon range (ground, cover, or unit). */
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;
-  if (target.isGround) return isPointInRange(unit, target.position);
+  if (target.isGround || target.isSmokeShell) return isPointInRange(unit, target.position);
   return tankCanEngageTarget(unit, target);
 }
 
@@ -169,6 +173,19 @@ export function findNearestEnemy(unit, targets) {
 export function createGroundTarget(x, z) {
   return {
     isGround: true,
+    dead: false,
+    team: null,
+    position: { x, z, y: 0 },
+    mesh: { position: { x, z, y: 0 } },
+    takeDamage() {},
+  };
+}
+
+/** Create an artillery smoke-shell ground target (no HE splash). */
+export function createSmokeShellTarget(x, z) {
+  return {
+    isSmokeShell: true,
+    isGround: false,
     dead: false,
     team: null,
     position: { x, z, y: 0 },

@@ -47,6 +47,7 @@ export const GAME_GUIDE_SECTIONS = [
       ['LMB drag', 'Box-select on the battlefield'],
       ['RMB', 'Move to ground, or attack enemy under cursor'],
       ['Shift + LMB', 'Fire at open ground or cover (trees, hedges, bunkers) — all combat units in range'],
+      ['Alt + Shift + LMB', 'Selected artillery fires a smoke shell at open ground — blocks enemy line of sight for 60s'],
       ['Esc', 'Cancel fire-support targeting, active unit fire missions, engineer field-work placement, campaign base construction, Last Stand placement, or pending TD build'],
       ['WASD / arrows', 'Pan camera · wheel zoom'],
       ['P', 'Pause / resume — camera still pans while paused; orders are blocked'],
@@ -121,6 +122,7 @@ export const GAME_GUIDE_SECTIONS = [
     body: [
       'LMB on an enemy (with units selected) issues an attack. Hover highlights valid targets; use <strong>Engage target</strong> or LMB on the highlighted enemy.',
       '<strong>Shift + LMB</strong> orders manual fire for selected combat units in range: click <strong>cover</strong> (trees, hedges, bunkers) to destroy it, or <strong>open ground</strong> for a fire mission. Works for every fighting unit — infantry, tanks, AT guns, and artillery. A red reticle appears on the cursor while Shift is held. <strong>RMB move</strong> or <strong>Esc</strong> cancels active fire missions.',
+      '<strong>Smoke shells</strong> (artillery counter to AT guns): select artillery → <strong>Smoke shell</strong> button or <strong>Alt+Shift+LMB</strong> on open ground. The howitzer fires one smoke round; a grey cloud lasts <strong>60 seconds</strong> (~200 m wide). Enemies firing through the screen have no clear line of sight — about <strong>82% of shots miss</strong> (blind fire). Advance infantry or tanks under the smoke to close on towed guns.',
       'Idle units auto-fire on enemies in range. Damage falls off with distance.',
       'Tanks and <strong>super heavy tanks</strong> carry a <strong>coax machine gun</strong> (~520 m) alongside the main gun — effective vs infantry and soft targets; tanks close on soft targets and use the coax instead of wasting main-gun rounds. Rifles and MGs cannot damage tanks — use AT guns, mortars, tank guns, or artillery. Super heavies are slower, tougher, and hit harder. <strong>Anti-tank guns</strong> (~700 m) excel vs tanks and armored cars but are weak vs infantry. Mortars, tank guns, and artillery are strong anti-armor.',
       'Armored cars take partial small-arms damage (~32%) but die quickly to snipers, mortars, and tank guns.',

@@ -1,4 +1,5 @@
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
+import { spawnSmokePuff } from '../effects/CombatEffects.js';
 import { sampleTerrainHeight, hasReachedMoveDest, advanceUnitOnTerrain } from '../world/Terrain.js';
 import { advanceMovePath } from './MovePath.js';
 
@@ -15,7 +16,9 @@ import {
   tankCanEngageTarget,
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
+  isSmokeShellTarget,
 } from './Targeting.js';
+import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat } from './RetreatBehavior.js';
@@ -119,7 +122,7 @@ export function updateCombat(
 
     attacker.target = target;
 
-    const canFireMain = target.isGround
+    const canFireMain = target.isGround || isSmokeShellTarget(target)
       ? isPointInRange(attacker, target.position)
       : isInRange(attacker, target);
     const canFireCoax =
@@ -136,7 +139,7 @@ export function updateCombat(
         if (hasReachedMoveDest(attacker, standoff, mapDef, reach.horiz * 0.85, reach.height * 0.85)) {
           attacker.moveTarget = null;
         }
-      } else if (target.isGround && attacker.moveTarget) {
+      } else if ((target.isGround || isSmokeShellTarget(target)) && attacker.moveTarget) {
         attacker.moveTarget = null;
       }
     }
@@ -203,7 +206,9 @@ function scalePracticeHqDamage(target, damage, options) {
 
 function resolveAttackTarget(attacker, targets, acquireTargets) {
   if (attacker.attackOrder) {
-    if (attacker.attackOrder.isGround) return attacker.attackOrder;
+    if (attacker.attackOrder.isGround || isSmokeShellTarget(attacker.attackOrder)) {
+      return attacker.attackOrder;
+    }
     if (!attacker.attackOrder.dead) {
       if (
         !isSceneryTarget(attacker.attackOrder) &&
@@ -248,16 +253,62 @@ function fire(
   const attackerType = coax ? 'machineGun' : attacker.def.type;
 
   const map = attacker._mapDef || mapDef;
-  const impact = target.isGround
+  const vfxType =
+    coax ? 'machineGun' : attacker.def.type === 'antiTankGun' ? 'tank' : attacker.def.type;
+  const isGroundShot = target.isGround || isSmokeShellTarget(target);
+  const impact = isGroundShot
     ? { x: target.position.x, z: target.position.z }
     : {
         x: target.position?.x ?? target.mesh.position.x,
         z: target.position?.z ?? target.mesh.position.z,
       };
 
-  const dist = target.isGround
+  const dist = isGroundShot
     ? distanceToPoint(attacker, impact)
     : distanceBetween(attacker, target);
+
+  if (
+    !isGroundShot &&
+    !isSceneryTarget(target) &&
+    !isDefenseTarget(target) &&
+    !isBaseBuildingTarget(target) &&
+    options.smokeScreens?.isLosObscured?.(attacker.position.x, attacker.position.z, impact.x, impact.z)
+  ) {
+    if (Math.random() < SMOKE_MISS_CHANCE) {
+      const missOffset = 4 + Math.random() * 7;
+      const missAngle = Math.random() * Math.PI * 2;
+      const missImpact = {
+        x: impact.x + Math.cos(missAngle) * missOffset,
+        z: impact.z + Math.sin(missAngle) * missOffset,
+      };
+      const showVfx =
+        attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+      if (showVfx && scene) {
+        const from = attacker.position.clone();
+        if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + (coax ? 0.95 : 1);
+        const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
+        const to = { x: missImpact.x, y: toY, z: missImpact.z };
+        spawnMuzzleFlash(scene, from, to, vfxType);
+      }
+      if (onFire) {
+        onFire({
+          attacker,
+          target,
+          def: attacker.def,
+          dist,
+          coaxFire: coax,
+          killed: false,
+          targetIsHQ: false,
+          targetIsScenery: false,
+          groundImpact: false,
+          smokeMiss: true,
+          from: attacker.position,
+          to: missImpact,
+        });
+      }
+      return;
+    }
+  }
 
   const falloff = Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
   const paceMult = options.paceDamageMult ?? 1;
@@ -286,6 +337,48 @@ function fire(
   }
   if (isBaseBuildingTarget(target)) {
     damage *= getStructureDamageMultiplier(attackerType);
+  }
+
+  if (isSmokeShellTarget(target)) {
+    options.smokeScreens?.deploy?.(impact.x, impact.z, attacker.team);
+    attacker.clearAttackOrder();
+    const showSmokeVfx =
+      attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+    if (showSmokeVfx && scene) {
+      const from = attacker.position.clone();
+      if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + 1;
+      const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
+      const to = { x: impact.x, y: toY, z: impact.z };
+      spawnMuzzleFlash(scene, from, to, 'artillery');
+      for (let i = 0; i < 4; i++) {
+        spawnSmokePuff(
+          scene,
+          {
+            x: impact.x + (Math.random() - 0.5) * 8,
+            y: toY + 0.5,
+            z: impact.z + (Math.random() - 0.5) * 8,
+          },
+          2.2 + Math.random() * 1.5
+        );
+      }
+    }
+    if (onFire) {
+      onFire({
+        attacker,
+        target,
+        def: attacker.def,
+        dist,
+        coaxFire: false,
+        killed: false,
+        targetIsHQ: false,
+        targetIsScenery: false,
+        groundImpact: true,
+        smokeDeployed: true,
+        from: attacker.position,
+        to: impact,
+      });
+    }
+    return;
   }
 
   if (target.isGround) {
@@ -329,8 +422,6 @@ function fire(
 
   const showVfx =
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
-  const vfxType =
-    coax ? 'machineGun' : attacker.def.type === 'antiTankGun' ? 'tank' : attacker.def.type;
 
   if (showVfx && scene) {
     const from = attacker.position.clone();
@@ -422,7 +513,10 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       }
     }
 
-    if (unit.attackOrder?.isGround && unit._userMoveOrder) {
+    if (
+      (unit.attackOrder?.isGround || unit.attackOrder?.isSmokeShell) &&
+      unit._userMoveOrder
+    ) {
       unit.clearAttackOrder();
     } else if (
       !unit._userMoveOrder &&
@@ -442,7 +536,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !unit.attackOrder.dead &&
       !canEngageManualOrder(unit, unit.attackOrder)
     ) {
-      if (unit.attackOrder.isGround) {
+      if (unit.attackOrder.isGround || unit.attackOrder.isSmokeShell) {
         const dest = getGroundFireMoveDest(unit, unit.attackOrder.position);
         if (dest) unit.moveTarget = dest;
       } else {

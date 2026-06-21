@@ -35,6 +35,7 @@ import {
 } from '../visual/DefenseMeshes.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { wrapDefenseTarget } from './DefenseTarget.js';
+import { createSmokeShellTarget } from './Targeting.js';
 import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
 import { updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
@@ -64,8 +65,19 @@ function getUnitTypeKey(faction, unit) {
 
 function serializeTargetRef(target) {
   if (!target) return null;
+  if (target.isSmokeShell) {
+    return {
+      kind: 'smoke',
+      x: target.position?.x ?? target.x,
+      z: target.position?.z ?? target.z,
+    };
+  }
   if (target.isGround) {
-    return { kind: 'ground', x: target.x, z: target.z };
+    return {
+      kind: 'ground',
+      x: target.position?.x ?? target.x,
+      z: target.position?.z ?? target.z,
+    };
   }
   if (target.isDefense && target.entry) {
     return { kind: 'defense', id: target.entry.id };
@@ -94,7 +106,16 @@ function resolveTargetRef(game, ref, unitById) {
   if (!ref) return null;
   switch (ref.kind) {
     case 'ground':
-      return { isGround: true, x: ref.x, z: ref.z, dead: false };
+      return {
+        isGround: true,
+        dead: false,
+        team: null,
+        position: { x: ref.x, z: ref.z, y: 0 },
+        mesh: { position: { x: ref.x, z: ref.z, y: 0 } },
+        takeDamage() {},
+      };
+    case 'smoke':
+      return createSmokeShellTarget(ref.x, ref.z);
     case 'unit':
       return unitById.get(ref.id) ?? null;
     case 'hq':
@@ -263,6 +284,7 @@ export function captureBattleSave(game, { id = null } = {}) {
     fireSupport: {
       cooldowns: { ...game.fireSupport.cooldowns },
     },
+    smokeScreens: game.smokeScreens?.serialize?.() ?? [],
     battleStats: {
       losses: game.battleStats.losses,
       prisonersTaken: game.battleStats.prisonersTaken,
@@ -766,6 +788,8 @@ export function applyBattleSave(game, snapshot) {
   game.fireSupport.cooldowns = { ...snapshot.fireSupport?.cooldowns };
   game.fireSupport.pending = null;
   game.fireSupport.clearPreview();
+  game.smokeShellTargeting = false;
+  game.smokeScreens?.restore?.(snapshot.smokeScreens ?? []);
 
   if (snapshot.battleStats) {
     game.battleStats.losses = snapshot.battleStats.losses;

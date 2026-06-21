@@ -13,7 +13,11 @@ import { removeRankMarker } from '../game/EliteBehavior.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeDamageSmoke } from '../visual/DamageSmoke.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
-import { distanceBetween, getStandoffPosition } from '../game/Targeting.js';
+import {
+  createSmokeShellTarget,
+  distanceBetween,
+  getStandoffPosition,
+} from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
 
@@ -115,7 +119,12 @@ export class Unit {
   }
 
   cancelManualFireMission() {
-    if (!this.attackOrder?.isGround && !this._manualFireMission) return false;
+    if (
+      !this.attackOrder?.isGround &&
+      !this.attackOrder?.isSmokeShell &&
+      !this._manualFireMission
+    )
+      return false;
     this.clearAttackOrder();
     this.moveTarget = null;
     this._movePath = null;
@@ -133,6 +142,20 @@ export class Unit {
     clearRetreat(this);
     this.attackOrder = groundTarget;
     this.target = groundTarget;
+    this._chasingAttack = false;
+    this._userMoveOrder = false;
+    this._movePath = null;
+    this.moveTarget = null;
+  }
+
+  setSmokeShellOrder(x, z) {
+    if (this.surrendered || this._captureExit) return;
+    if (this.def?.type !== 'artillery') return;
+    clearRetreat(this);
+    const target = createSmokeShellTarget(x, z);
+    this.attackOrder = target;
+    this.target = target;
+    this._manualFireMission = true;
     this._chasingAttack = false;
     this._userMoveOrder = false;
     this._movePath = null;

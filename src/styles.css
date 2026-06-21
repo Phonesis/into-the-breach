@@ -860,6 +860,32 @@ body,
   display: none;
 }
 
+.smoke-shell-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(140, 160, 180, 0.22);
+}
+
+.smoke-shell-actions.hidden {
+  display: none;
+}
+
+.smoke-shell-actions .btn {
+  width: 100%;
+}
+
+.smoke-shell-actions .btn.armed {
+  background: linear-gradient(180deg, #6a7a88 0%, #4a5560 100%);
+  border-color: #b8c8d8;
+}
+
+.smoke-shell-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(200, 210, 220, 0.82);
+}
+
 .engineer-build-actions {
   margin-top: 0.55rem;
   padding-top: 0.5rem;

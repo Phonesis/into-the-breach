@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { spreadGroupMoveDestinations } from '../game/GroupMovement.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
-import { canManualFireOrder } from './BattleCursor.js';
+import { canManualFireOrder, canSmokeShellOrder } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 
@@ -21,6 +21,7 @@ export class RTSController {
     getTerrainMesh,
     getPlayerTeam,
     getPendingFireSupport,
+    getPendingSmokeShell,
     getPendingDefensePlacement,
     getPendingLastStandDeploy,
     getPendingSandbagPlacement,
@@ -34,6 +35,7 @@ export class RTSController {
     getShiftHeld,
     clampDeployPoint,
     onFireSupportTarget,
+    onSmokeShellTarget,
     onDefensePlacement,
     onLastStandPlacement,
     onSandbagPlacement,
@@ -53,6 +55,7 @@ export class RTSController {
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.getPlayerTeam = getPlayerTeam;
     this.getPendingFireSupport = getPendingFireSupport;
+    this.getPendingSmokeShell = getPendingSmokeShell ?? (() => false);
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
     this.getPendingSandbagPlacement = getPendingSandbagPlacement ?? (() => null);
@@ -67,6 +70,7 @@ export class RTSController {
     this.getShiftHeld = getShiftHeld ?? (() => this._modifierShift);
     this.clampDeployPoint = clampDeployPoint ?? ((x, z) => ({ x, z }));
     this.onFireSupportTarget = onFireSupportTarget;
+    this.onSmokeShellTarget = onSmokeShellTarget;
     this.onDefensePlacement = onDefensePlacement;
     this.onLastStandPlacement = onLastStandPlacement;
     this.onSandbagPlacement = onSandbagPlacement;
@@ -501,6 +505,24 @@ export class RTSController {
     return true;
   }
 
+  /** Alt+Shift+LMB — artillery smoke shell at open ground. */
+  issueShiftSmokeShell() {
+    if (this._inputBlocked()) return false;
+
+    const selected = this.getSelectedPlayerUnits().filter((u) => canSmokeShellOrder(u));
+    if (selected.length === 0) return false;
+
+    const pick = this._pickShiftFireTarget();
+    if (!pick || pick.kind !== 'ground') return false;
+
+    this._lastOrderAt = Date.now();
+    for (const u of selected) {
+      u.setSmokeShellOrder(pick.point.x, pick.point.z);
+    }
+    if (this.onOrder) this.onOrder('smoke', selected);
+    return true;
+  }
+
   /** Shift+LMB — attack cover under cursor, otherwise fire at open ground. */
   issueShiftManualFire() {
     if (this._inputBlocked()) return false;
@@ -579,15 +601,19 @@ export class RTSController {
     if (this._inputBlocked()) return;
     this.setPointerFromEvent(e);
     const pendingFs = this.getPendingFireSupport?.();
+    const pendingSmoke = this.getPendingSmokeShell?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
+    if (pendingFs || pendingSmoke || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
           this.onFireSupportTarget('preview', ground.x, ground.z);
+        }
+        if (pendingSmoke && this.onSmokeShellTarget) {
+          this.onSmokeShellTarget('preview', ground.x, ground.z);
         }
         if (pendingDef && this.onDefensePlacement) {
           this.onDefensePlacement('preview', ground.x, ground.z);
@@ -629,15 +655,19 @@ export class RTSController {
     }
 
     const pendingFs = this.getPendingFireSupport?.();
+    const pendingSmoke = this.getPendingSmokeShell?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
+    if (pendingFs || pendingSmoke || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
           this.onFireSupportTarget('place', ground.x, ground.z);
+        }
+        if (pendingSmoke && this.onSmokeShellTarget) {
+          this.onSmokeShellTarget('place', ground.x, ground.z);
         }
         if (pendingDef && this.onDefensePlacement) {
           this.onDefensePlacement('place', ground.x, ground.z);
@@ -695,12 +725,20 @@ export class RTSController {
     } else {
       const selectedBefore = units.filter((u) => u.selected && !u.dead);
       const shiftHeld = e.shiftKey || this.isManualFireModifier();
+      const altHeld = e.altKey;
+      const hasArtillery = selectedBefore.some((u) => canSmokeShellOrder(u));
+      const shiftSmokeShell = shiftHeld && altHeld && hasArtillery;
       const shiftManualFire =
         shiftHeld &&
+        !altHeld &&
         selectedBefore.length > 0 &&
         selectedBefore.some((u) => canManualFireOrder(u));
 
-      if (shiftManualFire) {
+      if (shiftSmokeShell) {
+        this.issueShiftSmokeShell();
+        this._tabletTargetConfirmKey = null;
+        this._notifySelection(units);
+      } else if (shiftManualFire) {
         this.issueShiftManualFire();
         this._tabletTargetConfirmKey = null;
         this._notifySelection(units);

@@ -461,6 +461,14 @@ export class UIManager {
                 Cancel fire missions
               </button>
             </div>
+            <div class="smoke-shell-actions hidden" id="smoke-shell-actions">
+              <button type="button" class="btn btn-secondary interactive" id="btn-smoke-shell">
+                Smoke shell
+              </button>
+              <p class="smoke-shell-hint" id="smoke-shell-hint">
+                Alt+Shift+LMB on ground — smoke lasts 60s and blocks enemy line of sight
+              </p>
+            </div>
             <div class="engineer-build-actions hidden" id="engineer-build-actions">
               <div class="engineer-build-btns" id="engineer-build-btns">
                 <button type="button" class="btn btn-primary interactive" id="btn-build-sandbags">
@@ -964,6 +972,14 @@ export class UIManager {
       e.preventDefault();
       e.stopPropagation();
       this.callbacks.onCancelFireMissions?.();
+    });
+
+    const smokeShellBtn = this.root.querySelector('#btn-smoke-shell');
+    smokeShellBtn?.addEventListener('pointerdown', stopHudPointer);
+    smokeShellBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.callbacks.onArmSmokeShell?.();
     });
 
     this.root.querySelector('#btn-save-battle')?.addEventListener('click', () => {
@@ -2250,6 +2266,29 @@ export class UIManager {
     btn.textContent = n === 1 ? 'Cancel fire mission' : `Cancel fire missions (${n})`;
   }
 
+  updateSmokeShell(game = null) {
+    const wrap = this.root.querySelector('#smoke-shell-actions');
+    const btn = this.root.querySelector('#btn-smoke-shell');
+    const hint = this.root.querySelector('#smoke-shell-hint');
+    if (!wrap || !btn) return;
+
+    const selected =
+      game?._playerAlive?.filter(
+        (u) => u.selected && !u.dead && u.def?.type === 'artillery'
+      ) ?? [];
+    const hasArtillery = selected.length > 0;
+    wrap.classList.toggle('hidden', !hasArtillery);
+
+    const armed = !!game?.smokeShellTargeting;
+    btn.classList.toggle('armed', armed);
+    btn.textContent = armed ? 'Cancel smoke shell' : 'Smoke shell';
+    if (hint) {
+      hint.textContent = armed
+        ? 'Click the map to place smoke (Esc to cancel)'
+        : 'Alt+Shift+LMB on ground, or arm then click — smoke lasts 60s and blocks enemy aim';
+    }
+  }
+
   updateSelection(units, hoverTarget = null, hq = null, game = null) {
     const body = this.root.querySelector('#selection-body');
     const offer = this.root.querySelector('#target-offer');
@@ -2297,6 +2336,7 @@ export class UIManager {
         ${trainHint}
       `;
       this.updateEngineerBuild(game);
+      this.updateSmokeShell(game);
       return;
     }
 
@@ -2319,6 +2359,7 @@ export class UIManager {
         <p class="hq-selected-hint">${detail}</p>
       `;
       this.updateEngineerBuild(game);
+      this.updateSmokeShell(game);
       return;
     }
 
@@ -2329,6 +2370,7 @@ export class UIManager {
       body.innerHTML = `<h3>No selection</h3><p>${emptyHint}</p>`;
       this._renderCoverBanner([]);
       this.updateEngineerBuild(game);
+      this.updateSmokeShell(game);
       return;
     }
 
@@ -2341,11 +2383,13 @@ export class UIManager {
         ? ` · Coax ${u.def.coaxMG.rangeMeters ?? u.def.coaxMG.range * 10} m / ${u.def.coaxMG.damage} dmg`
         : '';
       const orderLine = u.attackOrder
-        ? u.attackOrder.isGround || u._manualFireMission
-          ? u.attackOrder.isGround
-            ? ' · Fire mission'
-            : ` · Fire mission on <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
-          : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
+        ? u.attackOrder.isSmokeShell
+          ? ' · Smoke shell mission'
+          : u.attackOrder.isGround || u._manualFireMission
+            ? u.attackOrder.isGround
+              ? ' · Fire mission'
+              : ` · Fire mission on <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
+            : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
         : '';
       const cover = getCoverStatus(u);
       let coverBlock = '';
@@ -2382,10 +2426,12 @@ export class UIManager {
         ${coverBlock}
       `;
       this.updateEngineerBuild(game);
+      this.updateSmokeShell(game);
       return;
     }
 
     this.updateEngineerBuild(game);
+    this.updateSmokeShell(game);
 
     const types = {};
     for (const u of units) types[u.type] = (types[u.type] || 0) + 1;
