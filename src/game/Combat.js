@@ -310,7 +310,10 @@ function fire(
     }
   }
 
-  const falloff = Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
+  const falloff =
+    attacker.def.type === 'antiTankGun'
+      ? Math.max(0.4, 1 - (dist / weaponRange) * 0.62)
+      : Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
   const paceMult = options.paceDamageMult ?? 1;
   let damage = weaponDamage * falloff * (0.88 + Math.random() * 0.24) * paceMult;
   if (!coax && attacker.def.type === 'sniper' && !target.isGround) {

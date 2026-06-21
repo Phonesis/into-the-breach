@@ -803,7 +803,12 @@ export function applyBattleSave(game, snapshot) {
     game.production._spawnAngle = { ...snapshot.production.spawnAngle };
   }
 
-  game.fireSupport.cooldowns = { ...snapshot.fireSupport?.cooldowns };
+  game.fireSupport.cooldowns = {
+    ...Object.fromEntries(
+      Object.keys(game.fireSupport.cooldowns).map((id) => [id, 0])
+    ),
+    ...snapshot.fireSupport?.cooldowns,
+  };
   game.fireSupport.pending = null;
   game.fireSupport.clearPreview();
   game.smokeShellTargeting = false;

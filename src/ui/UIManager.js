@@ -1789,6 +1789,8 @@ export class UIManager {
         hint.textContent = 'Click the map to call fighter strafe (Esc to cancel)';
       } else if (manager.pending === 'barrage') {
         hint.textContent = 'Click the map for artillery barrage (Esc to cancel)';
+      } else if (manager.pending === 'creepingBarrage') {
+        hint.textContent = 'Click the map — creeping barrage lifts toward your target (Esc to cancel)';
       } else {
         hint.textContent = 'Call off-map support — each strike has a long cooldown';
       }

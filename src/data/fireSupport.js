@@ -24,6 +24,22 @@ export const FIRE_SUPPORT_TYPES = {
     damage: 48,
     hqDamage: 150,
   },
+  creepingBarrage: {
+    id: 'creepingBarrage',
+    label: 'Creeping Barrage',
+    short: 'Creep',
+    cooldown: 148,
+    warnTime: 2.4,
+    shellCount: 20,
+    shellInterval: 0.38,
+    creepLength: 32,
+    laneWidth: 7,
+    hitRadius: 4.2,
+    targetRadius: 11,
+    damage: 58,
+    targetDamage: 74,
+    hqDamage: 210,
+  },
 };
 
 export const FIRE_SUPPORT_LIST = Object.values(FIRE_SUPPORT_TYPES);

@@ -100,7 +100,7 @@ export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5) {
 }
 
 /**
- * @param {'strafe'|'barrage'} kind
+ * @param {'strafe'|'barrage'|'creeping'} kind
  */
 export function spawnStrikeImpact(scene, mapDef, x, z, kind = 'barrage', terrainMesh = null) {
   const y = sampleTerrainHeight(x, z, mapDef);

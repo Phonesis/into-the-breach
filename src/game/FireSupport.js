@@ -12,11 +12,28 @@ import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/Soun
 
 const PLAYER = 'player';
 
+function makeCooldowns() {
+  return Object.fromEntries(
+    Object.keys(FIRE_SUPPORT_TYPES).map((id) => [id, 0])
+  );
+}
+
+function creepAxisFromPlayer(game, tx, tz) {
+  const mapDef = game.mapDef;
+  const hq = game.hqs.find((h) => h.team === PLAYER);
+  const hx = hq?.position?.x ?? mapDef.playerBase.x;
+  const hz = hq?.position?.z ?? mapDef.playerBase.z;
+  let dx = tx - hx;
+  let dz = tz - hz;
+  const len = Math.hypot(dx, dz) || 1;
+  return { dx: dx / len, dz: dz / len, perpX: -dz / len, perpZ: dx / len };
+}
+
 export class FireSupportManager {
   constructor(game) {
     this.game = game;
     this.pending = null;
-    this.cooldowns = { strafe: 0, barrage: 0 };
+    this.cooldowns = makeCooldowns();
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
@@ -25,7 +42,7 @@ export class FireSupportManager {
 
   reset() {
     this.pending = null;
-    this.cooldowns = { strafe: 0, barrage: 0 };
+    this.cooldowns = makeCooldowns();
     this.events = [];
     this._sceneryStrikeCount = 0;
     this.clearPreview();
@@ -68,18 +85,26 @@ export class FireSupportManager {
     this.preview = null;
   }
 
+  _previewStyle(type, def) {
+    if (type === 'barrage') return { scale: def.radius, color: 0xff5533 };
+    if (type === 'creepingBarrage') {
+      return { scale: def.targetRadius ?? def.creepLength * 0.4, color: 0xff2244 };
+    }
+    return { scale: def.runLength * 0.5, color: 0xffcc55 };
+  }
+
   updatePreview(x, z) {
     if (!this.pending || !this.game.mapDef) return;
     const def = this.getDef(this.pending);
-    this._previewScale =
-      this.pending === 'barrage' ? def.radius : def.runLength * 0.5;
+    const { scale, color } = this._previewStyle(this.pending, def);
+    this._previewScale = scale;
     const y = sampleTerrainHeight(x, z, this.game.mapDef) + 0.25;
 
     if (!this.preview) {
       const geo = new THREE.RingGeometry(0.88, 1, 40);
       geo.rotateX(-Math.PI / 2);
       const mat = new THREE.MeshBasicMaterial({
-        color: this.pending === 'barrage' ? 0xff5533 : 0xffcc55,
+        color,
         transparent: true,
         opacity: 0.5,
         side: THREE.DoubleSide,
@@ -91,7 +116,7 @@ export class FireSupportManager {
 
     this.preview.position.set(x, y, z);
     this.preview.scale.set(this._previewScale, 1, this._previewScale);
-    this.preview.material.color.setHex(this.pending === 'barrage' ? 0xff5533 : 0xffcc55);
+    this.preview.material.color.setHex(color);
   }
 
   tryPlaceTarget(x, z) {
@@ -184,6 +209,44 @@ export class FireSupportManager {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'barrage', this.game._terrainMesh);
             this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2);
             sounds.playImpact('shell', { x: ix, z: iz }, 0.05);
+          },
+        });
+      }
+    } else if (type === 'creepingBarrage') {
+      const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz);
+      const startX = tx - dx * def.creepLength;
+      const startZ = tz - dz * def.creepLength;
+
+      spawnStrikeWarning(scene, mapDef, tx, tz, def.targetRadius, true);
+      spawnStrikeWarning(scene, mapDef, startX, startZ, def.laneWidth * 0.55, true);
+
+      const artyProfile = resolveWeaponProfile(
+        this.game.playerFaction?.units?.artillery ?? { type: 'artillery' },
+        this.game.playerFaction?.id
+      );
+      sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.62, volume: 0.85 });
+
+      for (let i = 0; i < def.shellCount; i++) {
+        const t = def.warnTime + i * def.shellInterval;
+        const ratio = def.shellCount <= 1 ? 1 : i / (def.shellCount - 1);
+        const along = def.creepLength * ratio;
+        const cx = startX + dx * along;
+        const cz = startZ + dz * along;
+        const laneTight = 1 - ratio * 0.72;
+        const lateral = (Math.random() - 0.5) * def.laneWidth * laneTight;
+        const ix = cx + perpX * lateral;
+        const iz = cz + perpZ * lateral;
+        const atTarget = ratio >= 0.82;
+        const shellDamage = atTarget ? def.targetDamage : def.damage * (0.78 + ratio * 0.28);
+        const shellRadius = atTarget ? def.targetRadius : def.hitRadius;
+        const hqMult = atTarget ? 0.42 : 0.16 + ratio * 0.12;
+
+        this.events.push({
+          at: t,
+          fn: () => {
+            spawnStrikeImpact(scene, mapDef, ix, iz, 'creeping', this.game._terrainMesh);
+            this.applyDamage(ix, iz, shellRadius, shellDamage, def.hqDamage * hqMult);
+            sounds.playImpact('shell', { x: ix, z: iz }, atTarget ? 0.09 : 0.05);
           },
         });
       }
