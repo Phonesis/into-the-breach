@@ -47,6 +47,35 @@ export function getFlameTexture() {
   return flameTexture;
 }
 
+let smokeScreenTexture = null;
+
+/** Dense bright puff for artillery smoke screens — more opaque than generic smoke. */
+export function getSmokeScreenTexture() {
+  if (smokeScreenTexture) return smokeScreenTexture;
+  smokeScreenTexture = makeCanvas(192, 192, (ctx, w, h) => {
+    const cx = w * 0.5;
+    const cy = w * 0.48;
+    ctx.clearRect(0, 0, w, h);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.52);
+    g.addColorStop(0, 'rgba(245, 245, 240, 0.92)');
+    g.addColorStop(0.22, 'rgba(210, 215, 220, 0.78)');
+    g.addColorStop(0.42, 'rgba(165, 172, 180, 0.55)');
+    g.addColorStop(0.62, 'rgba(110, 118, 128, 0.28)');
+    g.addColorStop(0.82, 'rgba(70, 76, 84, 0.1)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    const core = ctx.createRadialGradient(cx, cy - h * 0.06, 0, cx, cy, w * 0.28);
+    core.addColorStop(0, 'rgba(255, 255, 252, 0.75)');
+    core.addColorStop(1, 'rgba(220, 225, 230, 0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - h * 0.04, w * 0.22, h * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  return smokeScreenTexture;
+}
+
 /** Soft smoke puff alpha. */
 export function getSmokeTexture() {
   if (smokeTexture) return smokeTexture;

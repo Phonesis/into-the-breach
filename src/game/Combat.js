@@ -350,15 +350,15 @@ function fire(
       const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
       const to = { x: impact.x, y: toY, z: impact.z };
       spawnMuzzleFlash(scene, from, to, 'artillery');
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 8; i++) {
         spawnSmokePuff(
           scene,
           {
-            x: impact.x + (Math.random() - 0.5) * 8,
-            y: toY + 0.5,
-            z: impact.z + (Math.random() - 0.5) * 8,
+            x: impact.x + (Math.random() - 0.5) * 14,
+            y: toY + 0.8 + Math.random() * 2,
+            z: impact.z + (Math.random() - 0.5) * 14,
           },
-          2.2 + Math.random() * 1.5
+          3.5 + Math.random() * 2.5
         );
       }
     }

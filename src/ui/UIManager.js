@@ -228,7 +228,7 @@ export class UIManager {
             <div class="difficulty-grid" id="difficulty-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="campaign-style-block">
-            <h2>Campaign Style</h2>
+            <h2>Standard Style</h2>
             <div class="campaign-style-grid" id="campaign-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
@@ -282,7 +282,7 @@ export class UIManager {
               <span class="frontline-toggle-label">Frontline</span>
             </button>
             <div class="laststand-banner hidden" id="laststand-banner">
-              Last Stand — deploy your army, then fight to the last unit. No HQ or reinforcements.
+              Battle Simulation — deploy your army, then engage. No HQ or reinforcements.
             </div>
           </div>
           <div class="hud-top-right">
@@ -524,6 +524,23 @@ export class UIManager {
           <div class="guide-scroll" id="guide-content"></div>
           <div class="guide-actions">
             <button type="button" class="btn btn-secondary interactive" id="btn-guide-close">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="laststand-briefing-overlay" class="laststand-briefing-overlay hidden interactive" aria-hidden="true">
+        <div class="laststand-briefing-box">
+          <p class="laststand-briefing-eyebrow" id="laststand-briefing-eyebrow">Field orders</p>
+          <h2 class="laststand-briefing-title" id="laststand-briefing-title">—</h2>
+          <p class="laststand-briefing-meta" id="laststand-briefing-meta">—</p>
+          <div class="laststand-briefing-body" id="laststand-briefing-body"></div>
+          <div class="laststand-briefing-actions">
+            <button type="button" class="btn btn-secondary interactive" id="btn-laststand-briefing-review">
+              Review deployment
+            </button>
+            <button type="button" class="btn btn-primary interactive" id="btn-laststand-briefing-begin">
+              Begin Battle
+            </button>
           </div>
         </div>
       </div>
@@ -923,6 +940,14 @@ export class UIManager {
       this.callbacks.onLaunchBattleNow?.();
     });
 
+    this._lastStandBriefingHandlers = { onBegin: null, onDismiss: null };
+    this.root.querySelector('#btn-laststand-briefing-begin')?.addEventListener('click', () => {
+      this._lastStandBriefingHandlers.onBegin?.();
+    });
+    this.root.querySelector('#btn-laststand-briefing-review')?.addEventListener('click', () => {
+      this._lastStandBriefingHandlers.onDismiss?.();
+    });
+
     this.root.querySelector('#btn-td-skip-wave-countdown')?.addEventListener('click', () => {
       this.callbacks.onSkipTowerDefenseWave?.();
     });
@@ -1206,7 +1231,7 @@ export class UIManager {
           'Preset battle group: full combined-arms forces deployed · Begin Battle when ready · destroy every enemy unit';
       } else if (lastStand) {
         this._defaultHudHint =
-          'Last Stand: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
+          'Battle Simulation: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
       } else if (baseBuilding) {
         this._defaultHudHint =
           'Base Building: click HQ for infantry · click depots to train specialized units · Base Construction panel places new structures';
@@ -1226,7 +1251,7 @@ export class UIManager {
           'Preset battle group deployed · Begin Battle when ready · camera pad (right)';
       } else if (tabletOn && lastStand) {
         hint.textContent =
-          'Last Stand: tap unit, tap map to place · camera pad (right) · Begin Battle when ready';
+          'Battle Simulation: tap unit, tap map to place · camera pad (right) · Begin Battle when ready';
       } else if (tabletOn && !hint.textContent.includes('camera pad')) {
         hint.textContent += ' · Camera pad (right)';
       }
@@ -1790,6 +1815,7 @@ export class UIManager {
 
   hideHUD() {
     this.setGamePaused(false);
+    this.hideLastStandBriefing();
     this.closeGuide();
     this.tabletCamera?.setVisible(false);
     this.callbacks.onTabletTargetMode?.(false);
@@ -1914,13 +1940,56 @@ export class UIManager {
     }
   }
 
+  showLastStandBriefing(briefing, { onBegin, onDismiss } = {}) {
+    const overlay = this.root.querySelector('#laststand-briefing-overlay');
+    if (!overlay || !briefing) return;
+
+    this._lastStandBriefingHandlers.onBegin = onBegin ?? null;
+    this._lastStandBriefingHandlers.onDismiss = onDismiss ?? null;
+
+    const title = this.root.querySelector('#laststand-briefing-title');
+    const meta = this.root.querySelector('#laststand-briefing-meta');
+    const body = this.root.querySelector('#laststand-briefing-body');
+    if (title) title.textContent = briefing.operation ?? 'Meeting Engagement';
+    if (meta) {
+      meta.textContent = `${briefing.location ?? '—'} · ${briefing.date ?? '—'} · ${briefing.time ?? '—'} · ${briefing.weather ?? ''}`;
+    }
+    if (body) {
+      body.innerHTML = `
+        <p class="laststand-briefing-lead">${briefing.situation ?? ''}</p>
+        <dl class="laststand-briefing-dl">
+          <dt>Terrain</dt>
+          <dd>${briefing.terrain ?? '—'}</dd>
+          <dt>Enemy plan (SIGINT)</dt>
+          <dd>${briefing.enemyPlan ?? '—'} — ${briefing.enemyIntel ?? ''}</dd>
+          <dt>Expected conduct</dt>
+          <dd>${briefing.enemySignal ?? ''}</dd>
+          <dt>Your objective</dt>
+          <dd>${briefing.objective ?? ''}</dd>
+        </dl>
+      `;
+    }
+
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+
+  hideLastStandBriefing() {
+    const overlay = this.root.querySelector('#laststand-briefing-overlay');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    this._lastStandBriefingHandlers.onBegin = null;
+    this._lastStandBriefingHandlers.onDismiss = null;
+  }
+
   updateLastStandDeploy(game) {
     if (!game?.lastStand) return;
 
     const preset = isLastStandPresetDeployMode(game.lastStand.deployMode);
     const LAST_STAND_BATTLE_HINT = preset
       ? 'Preset battle group — combined arms clash · destroy all enemy forces to win'
-      : 'Last Stand — no reinforcements · wipe out all enemy units to win';
+      : 'Battle Simulation — no reinforcements · wipe out all enemy units to win';
 
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
@@ -1967,11 +2036,19 @@ export class UIManager {
     if (launchBtn) {
       launchBtn.textContent = 'Begin Battle';
       launchBtn.classList.remove('hidden');
-      launchBtn.disabled = playerCount === 0 || !this.callbacks.onLaunchBattleNow;
+      const briefingOpen = !!this.root.querySelector('#laststand-briefing-overlay:not(.hidden)');
+      launchBtn.disabled =
+        playerCount === 0 ||
+        !this.callbacks.onLaunchBattleNow ||
+        briefingOpen ||
+        (preset && !game.lastStand.briefingShown);
     }
     if (qEl) {
       if (preset) {
-        qEl.textContent = 'Preset force — rifle line, support weapons, and armor echelons are in position';
+        const plan = game.lastStand.enemyTactic?.name;
+        qEl.textContent = plan
+          ? `Preset forces deployed — SIGINT indicates enemy plan: <strong>${plan}</strong>`
+          : 'Preset force — rifle line, support weapons, and armor echelons are in position';
       } else {
         const pending = game.lastStand.pendingType;
         qEl.textContent = pending

@@ -36,6 +36,7 @@ import {
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { wrapDefenseTarget } from './DefenseTarget.js';
 import { createSmokeShellTarget } from './Targeting.js';
+import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
 import { updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
@@ -310,7 +311,18 @@ export function captureBattleSave(game, { id = null } = {}) {
       game.towerDefense && typeof game.towerDefense === 'object'
         ? { ...game.towerDefense }
         : null,
-    lastStand: game.lastStand ? { ...game.lastStand, supplies: { ...game.lastStand.supplies } } : null,
+    lastStand: game.lastStand
+      ? {
+          phase: game.lastStand.phase,
+          deployMode: game.lastStand.deployMode,
+          supplies: { ...game.lastStand.supplies },
+          pendingType: game.lastStand.pendingType,
+          enemyDeployTimer: game.lastStand.enemyDeployTimer,
+          enemyTacticId: game.lastStand.enemyTactic?.id ?? game.lastStand.enemyTacticId ?? null,
+          flankSide: game.lastStand.flankSide ?? 1,
+          briefingShown: game.lastStand.briefingShown ?? game.lastStand.phase !== 'deploy',
+        }
+      : null,
     defenses: game.defenses
       ? {
           barrageCooldown: game.defenses.barrageCooldown,
@@ -727,6 +739,12 @@ export function applyBattleSave(game, snapshot) {
       ...snapshot.lastStand,
       supplies: { ...snapshot.lastStand.supplies },
     };
+    if (game.lastStand.enemyTacticId) {
+      game.lastStand.enemyTactic = getLastStandTactic(game.lastStand.enemyTacticId);
+    }
+    if (game.lastStand.briefingShown == null) {
+      game.lastStand.briefingShown = game.lastStand.phase !== 'deploy';
+    }
   }
 
   destroySavedScenery(game, snapshot.sceneryDestroyed);

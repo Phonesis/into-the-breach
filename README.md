@@ -69,20 +69,20 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 
 | Mode | Description |
 |------|-------------|
-| **Campaign** | Full skirmish vs AI with difficulty selection. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
+| **Standard** | Full skirmish vs AI with difficulty selection. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
 | **Clear Defenses** | Enemy dug in across the map — **no enemy HQ**. Destroy every defender. Opening ceasefire; your force stages behind your HQ. |
 | **Training Ground** | No AI — practice orders, production, fire missions, and fire support. Destroy the passive **Practice Target HQ**. |
 | **Assault & Defend** | Scenario on a fixed frontline. Pick **Attack** or **Defend** after choosing the mode. |
 | **Tower Defence** | No player army. Spend **defense points** on emplacements (bunkers, MG nests, AT guns, mines, wire, artillery pits) and hold the frontline through **12 waves**. |
-| **Last Stand** | **2,000** deployment supplies per side. Place your entire army anywhere on the map; the AI deploys in parallel. **Begin Battle** when ready — no HQ, capture points, or reinforcements. Strafe and barrage fire support unlock once battle begins. Win by wiping the enemy force. |
+| **Battle Simulation** | **2,000** deployment supplies per side. Place your entire army anywhere on the map; the AI deploys in parallel. **Begin Battle** when ready — no HQ, capture points, or reinforcements. Strafe and barrage fire support unlock once battle begins. Win by wiping the enemy force. |
 
-### Campaign
+### Standard
 
 - Opponent faction mirrors your pick (e.g. USA vs Germany, Soviet Union vs Germany).
 - **Difficulty:** Easy, Medium, or Hard — adjusts enemy damage, income, army size, and AI aggression.
 - **Pacing:** Higher unit HP, lower damage, slower HQ/capture income, longer build times, larger opening armies, and slower AI reinforcement (see `src/data/campaignPace.js`).
 - AI produces units, captures points, and attacks.
-- Starting armies (each side): 5× infantry, MG, sniper, mortar, armored car, **1× anti-tank gun**, 2× tank, artillery (enemy scaled by difficulty + campaign army mult).
+- Starting armies (each side): 5× infantry, MG, sniper, mortar, armored car, **1× anti-tank gun**, 2× tank, artillery (enemy scaled by difficulty + standard army mult).
 
 **Victory:** Enemy HQ destroyed, or enemy eliminated (no field units and cannot reinforce).
 
@@ -129,7 +129,7 @@ Pick **Attack** or **Defend** in the menu. Central **frontline** capture point (
 - **12 waves**; lose if enemies breach the frontline toward your HQ or your HQ falls.
 - See Field Manual → **Game modes** for emplacement details.
 
-### Last Stand
+### Battle Simulation
 
 - **Deploy phase:** Pick a unit type, **LMB** on the map to place it (anywhere valid on the battlefield). The enemy AI places units in parallel from the same **2,000** supply pool. **Esc** cancels the current placement selection. Click **Begin Battle** when your deployment is ready.
 - **Battle phase:** No HQ income, capture zones, or production queue. Strafe and barrage fire support are available. Standard RTS orders otherwise.
@@ -156,7 +156,7 @@ Four playable factions, each with **eleven** buildable unit types. Ranges in the
 | Super heavy tank | Slow, very tough breakthrough armor + coax MG | 255–265 | 27–29 |
 | Artillery | Long-range bombardment | 90 | 14 |
 
-Campaign multiplies build times by **~1.65×**.
+Standard mode multiplies build times by **~1.65×**.
 
 ### Anti-tank guns (by faction)
 
@@ -234,7 +234,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **LMB drag** | Box-select multiple units |
 | **RMB** | Move to ground, or **attack** enemy unit/HQ under cursor |
 | **Shift + LMB** | **Manual fire** — open ground (fire mission) or **cover scenery** (trees, hedges, bunkers) in range; red reticle while Shift held |
-| **Esc** | Cancel fire-support targeting, **active unit fire missions**, Last Stand placement, or pending TD emplacement |
+| **Esc** | Cancel fire-support targeting, **active unit fire missions**, Battle Simulation placement, or pending TD emplacement |
 | **WASD / arrows** | Pan camera |
 | **Mouse wheel / trackpad** | Zoom |
 | **Forces panel** | Click to select; Shift-click to add; each row shows an HP bar |
@@ -255,18 +255,18 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 
 | Mode | Player start | Enemy start | HQ income (/sec) | Per captured point (/sec) |
 |------|--------------|-------------|------------------|---------------------------|
-| Campaign | 120 | 75 × difficulty | 2.1 | 4.2 |
+| Standard | 120 | 75 × difficulty | 2.1 | 4.2 |
 | Training | 200 | — | 5 | 6 |
 | Assault | 140 | 120 × difficulty | 3 | 6 |
 | Clear Defenses | 160 | — | 3 | 6 |
 | Tower Defence | defense points | — | wave rewards | — |
-| Last Stand | 2,000 deploy budget | 2,000 deploy budget | — | — |
+| Battle Simulation | 2,000 deploy budget | 2,000 deploy budget | — | — |
 
-Each map has **three** capture points (Assault: frontline pre-held by defender, flanks neutral). **Last Stand** and **Tower Defence** have no capture income. Stand friendly units in a zone to flip ownership; income stacks per point held.
+Each map has **three** capture points (Assault: frontline pre-held by defender, flanks neutral). **Battle Simulation** and **Tower Defence** have no capture income. Stand friendly units in a zone to flip ownership; income stacks per point held.
 
-**Quiet sector:** ~**32 s** in Campaign / Assault — no combat fire; units must stay inside the HQ staging ring. **Launch Battle Now** on the banner skips the wait. Clear Defenses: **10 s** ceasefire for your staged forces.
+**Quiet sector:** ~**32 s** in Standard / Assault — no combat fire; units must stay inside the HQ staging ring. **Launch Battle Now** on the banner skips the wait. Clear Defenses: **10 s** ceasefire for your staged forces.
 
-**Production:** Up to **4** queued items per HQ. New units spawn in a ring around your HQ. Reinforcements spawned mid-battle receive campaign HP scaling in Campaign mode.
+**Production:** Up to **4** queued items per HQ. New units spawn in a ring around your HQ. Reinforcements spawned mid-battle receive bonus HP scaling in Standard mode.
 
 **Elimination rule:** Wiping all field units does **not** end the battle if that side’s HQ is intact and they still have units building, can afford a build, or (in modes with income) can recover via supplies. See `src/game/EliminationRules.js`.
 
@@ -279,7 +279,7 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 - **Fire mission:** **Shift + LMB** on open ground for bombardment-capable units (see controls).
 - **Defensive fire:** Units engage enemies in range when idle or while executing orders in range.
 - **Range falloff:** Damage scales with distance inside max range.
-- **Difficulty:** Enemy damage multiplier varies by Easy / Medium / Hard; Campaign also applies a global damage multiplier (~0.58).
+- **Difficulty:** Enemy damage multiplier varies by Easy / Medium / Hard; Standard also applies a global damage multiplier (~0.58).
 - **Tank coax MG:** Medium and super-heavy tanks fire a **coax/bow machine gun** on a separate cooldown (~520 m) alongside the main gun — effective vs infantry while the cannon reloads.
 - **Anti-tank guns:** Bonus damage vs tanks, super heavies, and armored cars; weak vs infantry. Tank-gun VFX and sounds.
 - **Armor:** **Rifles and MGs cannot damage tanks or super heavies** (0% — use AT guns, mortars, tank guns, or artillery). **Armored cars** take partial small-arms damage (~32%). Snipers chip armor slightly; mortars and dedicated AT weapons are effective.
@@ -318,7 +318,7 @@ One-use tactical strikes (HUD). **No friendly fire** on your own units/HQ.
 | **Strafing run** | ~72 s | Fighter passes along the target line with spatial fly-by audio; MG bursts |
 | **Artillery barrage** | ~95 s | ~14 shells with warning markers, then impacts |
 
-Click **Strafe** or **Barrage** → **LMB** on valid ground → brief warning → strike. Not available in **Last Stand** or **Tower Defence**.
+Click **Strafe** or **Barrage** → **LMB** on valid ground → brief warning → strike. Not available in **Battle Simulation** or **Tower Defence**.
 
 ---
 
@@ -386,7 +386,7 @@ src/
     maps.js               # Map defs, bases, capture points
     mapSizes.js           # Small / Medium / Large theater scale
     gameModes.js          # Mode config & unit production order
-    campaignPace.js       # Campaign balance & AI pacing merge
+    campaignPace.js       # Standard mode balance & AI pacing merge
     gameGuide.js          # Field Manual HTML (sections + unit cards)
     towerDefense.js       # TD waves, emplacements, economy
     difficulty.js         # Easy / Medium / Hard profiles

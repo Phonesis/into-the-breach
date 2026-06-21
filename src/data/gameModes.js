@@ -1,7 +1,7 @@
 export const GAME_MODES = {
   campaign: {
     id: 'campaign',
-    name: 'Campaign',
+    name: 'Standard',
     subtitle:
       'Full battle vs AI — Classic (all units from HQ) or Base Building (construct depots to unlock armor & artillery).',
   },
@@ -29,13 +29,13 @@ export const GAME_MODES = {
   },
   lastStand: {
     id: 'lastStand',
-    name: 'Last Stand',
+    name: 'Battle Simulation',
     subtitle:
-      'Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Fight to the last unit.',
+      'Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Pure force-on-force — no HQ or reinforcements.',
   },
 };
 
-/** Deployment budget per side in Last Stand mode. */
+/** Deployment budget per side in Battle Simulation mode. */
 export const LAST_STAND_SUPPLIES = 2000;
 
 export const GAME_MODE_LIST = Object.values(GAME_MODES);

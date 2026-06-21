@@ -3,6 +3,8 @@ import {
   isLastStandPresetDeployMode,
   LAST_STAND_PRESET_ROSTER,
 } from '../data/lastStandForces.js';
+import { pickLastStandTactic, getLastStandTactic } from '../data/lastStandTactics.js';
+import { buildLastStandBriefing } from '../data/lastStandBriefing.js';
 
 export { isLastStandMode, LAST_STAND_SUPPLIES };
 import { spawnUnitAt } from './Spawner.js';
@@ -325,8 +327,31 @@ export function assignLastStandEnemyStances(game) {
   }
 }
 
-/** Combined-arms stances for preset battle groups — mixed defend / probe / assault. */
+/** Roll enemy battle plan and briefing for preset Last Stand (once per engagement). */
+export function initLastStandPresetEngagement(game) {
+  const state = game.lastStand;
+  if (!state || !isLastStandPresetDeployMode(state.deployMode)) return null;
+
+  const tactic = pickLastStandTactic();
+  state.enemyTactic = tactic;
+  state.flankSide = Math.random() < 0.5 ? -1 : 1;
+  state.briefing = buildLastStandBriefing({
+    mapDef: game.mapDef,
+    playerFaction: game.playerFaction,
+    enemyFaction: game.enemyFaction,
+    tactic,
+  });
+  state.briefingShown = false;
+  return state.briefing;
+}
+
+/** Combined-arms stances for preset battle groups — varies by enemy battle plan. */
 export function assignLastStandPresetStances(game) {
+  const tactic =
+    game.lastStand?.enemyTactic ??
+    getLastStandTactic(game.lastStand?.enemyTacticId);
+  const stanceTable = tactic?.stances ?? getLastStandTactic('armoredThrust').stances;
+
   for (const unit of game.units) {
     if (unit.dead) continue;
 
@@ -339,26 +364,7 @@ export function assignLastStandPresetStances(game) {
       continue;
     }
 
-    let defendChance = 0.5;
-    switch (role) {
-      case 'line':
-        defendChance = 0.78;
-        break;
-      case 'support':
-        defendChance = 0.88;
-        break;
-      case 'arty':
-        defendChance = 0.94;
-        break;
-      case 'recon':
-        defendChance = 0.18;
-        break;
-      case 'armor':
-        defendChance = 0.12;
-        break;
-      default:
-        defendChance = 0.55;
-    }
+    const defendChance = stanceTable[role] ?? stanceTable.line ?? 0.55;
     assignDefensiveHold(unit, defendChance);
   }
 }

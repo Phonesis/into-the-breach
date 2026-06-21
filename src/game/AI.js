@@ -1,5 +1,6 @@
 import { getStandoffPosition, findNearestEnemy, isInRange } from './Targeting.js';
 import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
+import { getLastStandTactic } from '../data/lastStandTactics.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
@@ -41,6 +42,8 @@ export function updateAI({
   difficulty,
   openingCeasefire = false,
   lastStand = false,
+  lastStandTactic = null,
+  lastStandFlankSide = 1,
 }) {
   const d = difficulty ?? { aiTickMult: 1, aiProdMult: 1, captureChanceMult: 1, attackAggressionMult: 1 };
 
@@ -84,7 +87,15 @@ export function updateAI({
 
     if (lastStand) {
       if (unit.lastStandRole) {
-        updateLastStandPresetUnit(unit, alivePlayers, aliveEnemies, mapDef, d);
+        updateLastStandPresetUnit(
+          unit,
+          alivePlayers,
+          aliveEnemies,
+          mapDef,
+          d,
+          lastStandTactic,
+          lastStandFlankSide
+        );
       } else {
         updateLastStandUnit(unit, alivePlayers, mapDef, d);
       }
@@ -254,16 +265,67 @@ function countAlliesInRole(allies, role, nearUnit, radius) {
   return n;
 }
 
-/** Preset Last Stand — combined arms: hold fires, armor probes, infantry supports armor pushes. */
-function updateLastStandPresetUnit(unit, players, allies, mapDef, difficulty) {
+function getPresetAdvancePoint(mapDef, players, mode, flankSide, spread) {
+  const cluster = averagePosition(players);
+  const half = mapDef.size / 2 - 8;
+
+  if (mode === 'flank' && mapDef?.playerBase && mapDef?.enemyBase) {
+    const own = mapDef.enemyBase;
+    const foe = mapDef.playerBase;
+    const axisX = foe.x - own.x;
+    const axisZ = foe.z - own.z;
+    const len = Math.hypot(axisX, axisZ) || 1;
+    const perpX = -axisZ / len;
+    const perpZ = axisX / len;
+    const midX = (own.x + foe.x) * 0.5;
+    const midZ = (own.z + foe.z) * 0.5;
+    const flankDist = (mapDef.size ?? 120) * 0.2;
+    return {
+      x: clamp(midX + perpX * flankSide * flankDist + (Math.random() - 0.5) * spread, -half, half),
+      z: clamp(midZ + perpZ * flankSide * flankDist + (Math.random() - 0.5) * spread, -half, half),
+    };
+  }
+
+  return {
+    x: clamp(cluster.x + (Math.random() - 0.5) * spread, -half, half),
+    z: clamp(cluster.z + (Math.random() - 0.5) * spread, -half, half),
+  };
+}
+
+function findLeadRecon(allies) {
+  let best = null;
+  let bestDist = -1;
+  for (const a of allies) {
+    if (a.dead || a.lastStandRole !== 'recon') continue;
+    if (!a.moveTarget && !a.attackOrder) continue;
+    const dist = Math.hypot(a.position.x, a.position.z);
+    if (dist > bestDist) {
+      bestDist = dist;
+      best = a;
+    }
+  }
+  return best;
+}
+
+/** Preset Last Stand — combined arms behavior varies by enemy battle plan. */
+function updateLastStandPresetUnit(
+  unit,
+  players,
+  allies,
+  mapDef,
+  difficulty,
+  lastStandTactic,
+  flankSide = 1
+) {
   const d = difficulty ?? { attackAggressionMult: 1 };
+  const tactic = lastStandTactic ?? getLastStandTactic('armoredThrust');
+  const ai = tactic.ai ?? getLastStandTactic('armoredThrust').ai;
   const role = unit.lastStandRole ?? 'line';
   const hold = unit.defensiveHold;
   const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
   const focus = pickPresetAttackTarget(unit, players);
 
   if (role === 'armor' || role === 'recon') {
-    const playerCluster = averagePosition(players);
     if (focus) {
       unit.setAttackOrder(focus);
       if (!isInRange(unit, focus)) {
@@ -271,39 +333,95 @@ function updateLastStandPresetUnit(unit, players, allies, mapDef, difficulty) {
       }
       return;
     }
+
+    if (ai.armorMode === 'hold' && role === 'armor' && isDefensive) {
+      if (hold) {
+        const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+        if (dist > hold.radius) {
+          unit.clearAttackOrder();
+          unit.moveTarget = { x: hold.x, z: hold.z };
+        } else {
+          unit.clearAttackOrder();
+          unit.moveTarget = null;
+        }
+      }
+      return;
+    }
+
+    if (role === 'armor' && ai.armorMode === 'followRecon') {
+      const leadRecon = findLeadRecon(allies);
+      if (leadRecon?.moveTarget) {
+        unit.clearAttackOrder();
+        unit.moveTarget = {
+          x: leadRecon.moveTarget.x + (Math.random() - 0.5) * 10,
+          z: leadRecon.moveTarget.z + (Math.random() - 0.5) * 10,
+        };
+        const half = mapDef.size / 2 - 8;
+        unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
+        unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
+        return;
+      }
+    }
+
     unit.clearAttackOrder();
-    const flank = role === 'recon' ? 22 : 12;
-    unit.moveTarget = {
-      x: playerCluster.x + (Math.random() - 0.5) * flank,
-      z: playerCluster.z + (Math.random() - 0.5) * flank,
-    };
-    const half = mapDef.size / 2 - 8;
-    unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
-    unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
+    const spread =
+      role === 'recon'
+        ? ai.armorFlankSpread * 1.35
+        : ai.armorFlankSpread * (ai.armorMode === 'flank' ? 1.1 : 1);
+    unit.moveTarget = getPresetAdvancePoint(
+      mapDef,
+      players,
+      role === 'recon' ? 'center' : ai.armorMode,
+      flankSide,
+      spread
+    );
     return;
   }
 
-  if (role === 'line' && isDefensive && countAlliesInRole(allies, 'armor', unit, 42) > 0) {
-    const armorLead = allies.find(
-      (a) =>
-        !a.dead &&
-        a.lastStandRole === 'armor' &&
-        a.lastStandStance === 'attack' &&
-        unit.distanceTo(a) < 42
-    );
-    if (armorLead && (armorLead.attackOrder || armorLead.moveTarget) && Math.random() < 0.28 * d.attackAggressionMult) {
-      unit.lastStandStance = 'attack';
-      unit.defensiveHold = null;
-      if (armorLead.attackOrder && !armorLead.attackOrder.dead) {
-        unit.setAttackOrder(armorLead.attackOrder);
-        unit.moveTarget = getStandoffPosition(unit, armorLead.attackOrder);
-      } else if (armorLead.moveTarget) {
-        unit.moveTarget = {
-          x: armorLead.moveTarget.x + (Math.random() - 0.5) * 8,
-          z: armorLead.moveTarget.z + (Math.random() - 0.5) * 8,
-        };
+  if (role === 'line') {
+    if (!isDefensive && players.length > 0) {
+      if (focus) {
+        unit.setAttackOrder(focus);
+        if (!isInRange(unit, focus)) {
+          unit.moveTarget = getStandoffPosition(unit, focus);
+        }
+        return;
       }
-      return;
+      const advanceChance = (ai.infantryAdvanceMult ?? 0.55) * 0.32 * d.attackAggressionMult;
+      if (Math.random() < advanceChance) {
+        unit.clearAttackOrder();
+        unit.moveTarget = getPresetAdvancePoint(mapDef, players, 'center', flankSide, 14);
+        return;
+      }
+    }
+
+    if (isDefensive && countAlliesInRole(allies, 'armor', unit, 42) > 0) {
+      const armorLead = allies.find(
+        (a) =>
+          !a.dead &&
+          a.lastStandRole === 'armor' &&
+          a.lastStandStance === 'attack' &&
+          unit.distanceTo(a) < 42
+      );
+      const followChance = 0.28 * (ai.lineFollowArmorMult ?? 1) * d.attackAggressionMult;
+      if (
+        armorLead &&
+        (armorLead.attackOrder || armorLead.moveTarget) &&
+        Math.random() < followChance
+      ) {
+        unit.lastStandStance = 'attack';
+        unit.defensiveHold = null;
+        if (armorLead.attackOrder && !armorLead.attackOrder.dead) {
+          unit.setAttackOrder(armorLead.attackOrder);
+          unit.moveTarget = getStandoffPosition(unit, armorLead.attackOrder);
+        } else if (armorLead.moveTarget) {
+          unit.moveTarget = {
+            x: armorLead.moveTarget.x + (Math.random() - 0.5) * 8,
+            z: armorLead.moveTarget.z + (Math.random() - 0.5) * 8,
+          };
+        }
+        return;
+      }
     }
   }
 

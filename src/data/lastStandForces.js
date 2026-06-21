@@ -1,4 +1,4 @@
-/** Last Stand deployment options and preset combined-arms rosters. */
+/** Battle Simulation deployment options and preset combined-arms rosters. */
 
 export const LAST_STAND_DEPLOY_MODES = {
   manual: {

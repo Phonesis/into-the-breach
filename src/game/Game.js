@@ -31,6 +31,7 @@ import {
   assignLastStandEnemyStances,
   assignLastStandPresetStances,
   deployLastStandPresetForces,
+  initLastStandPresetEngagement,
   isLastStandPresetForce,
   checkLastStandVictory,
   isLastStandDeployPhase,
@@ -916,6 +917,7 @@ export class Game {
 
     if (this.lastStand && isLastStandPresetForce(this) && !restoreSnapshot) {
       deployLastStandPresetForces(this);
+      initLastStandPresetEngagement(this);
     }
 
     for (const u of this.units) {
@@ -1024,6 +1026,25 @@ export class Game {
     this.ui.updateFireSupport(this.fireSupport);
     if (this.lastStand) {
       this.ui.updateLastStandDeploy(this);
+      if (
+        isLastStandPresetForce(this) &&
+        !restoreSnapshot &&
+        this.lastStand.briefing &&
+        !this.lastStand.briefingShown
+      ) {
+        this.ui.showLastStandBriefing(this.lastStand.briefing, {
+          onBegin: () => {
+            this.lastStand.briefingShown = true;
+            this.ui.hideLastStandBriefing();
+            this.launchLastStandBattle();
+          },
+          onDismiss: () => {
+            this.lastStand.briefingShown = true;
+            this.ui.hideLastStandBriefing();
+            this.ui.updateLastStandDeploy(this);
+          },
+        });
+      }
     } else {
       const deployPhase = this._getDeployPhase();
       this.ui.updateDeployCountdown(deployPhase);
@@ -2040,7 +2061,7 @@ export class Game {
       if (!gracePeriod && enemyHQDead) {
         this.endGame(
           true,
-          'Practice complete! You destroyed the target HQ. Return to the menu to play Campaign mode.'
+          'Practice complete! You destroyed the target HQ. Return to the menu to play Standard mode.'
         );
       }
       return;
@@ -2590,6 +2611,8 @@ export class Game {
               clearance: this.clearance,
               campaign: this.campaign,
               lastStand: !!this.lastStand && this.lastStand.phase === 'battle',
+              lastStandTactic: this.lastStand?.enemyTactic ?? null,
+              lastStandFlankSide: this.lastStand?.flankSide ?? 1,
               openingCeasefire:
                 !this.lastStand && this.matchTime < BATTLE_OPENING_TIME,
               difficulty: this.campaign

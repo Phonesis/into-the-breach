@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getSmokeTexture } from '../effects/FireTextures.js';
+import { getSmokeScreenTexture } from '../effects/FireTextures.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 
 /** Smoke screen lasts 60 seconds. */
@@ -51,52 +51,99 @@ function buildSmokeVisual(scene, mapDef, x, z) {
   group.position.set(x, y, z);
 
   const sprites = [];
+  const mats = [];
+  const geos = [];
+  const smokeTex = getSmokeScreenTexture();
+
   const spots = [
-    { ox: 0, oz: 0, sx: 14, sy: 9 },
-    { ox: -5, oz: 3, sx: 11, sy: 8 },
-    { ox: 5, oz: -4, sx: 12, sy: 8.5 },
-    { ox: -3, oz: -6, sx: 10, sy: 7.5 },
-    { ox: 6, oz: 5, sx: 10.5, sy: 7.8 },
-    { ox: -7, oz: -2, sx: 9.5, sy: 7 },
-    { ox: 2, oz: 7, sx: 9, sy: 6.8 },
+    { ox: 0, oz: 0, sx: 22, sy: 16, y: 3.8, op: 0.82 },
+    { ox: -7, oz: 4, sx: 19, sy: 14, y: 4.6, op: 0.76 },
+    { ox: 8, oz: -5, sx: 20, sy: 15, y: 4.2, op: 0.78 },
+    { ox: -5, oz: -8, sx: 18, sy: 13, y: 3.4, op: 0.74 },
+    { ox: 9, oz: 7, sx: 17, sy: 13, y: 5.1, op: 0.72 },
+    { ox: -10, oz: -3, sx: 16, sy: 12, y: 3.9, op: 0.7 },
+    { ox: 4, oz: 10, sx: 16, sy: 12, y: 4.8, op: 0.7 },
+    { ox: -2, oz: 2, sx: 24, sy: 17, y: 2.6, op: 0.68 },
+    { ox: 6, oz: 1, sx: 21, sy: 14, y: 2.2, op: 0.66 },
+    { ox: -8, oz: 8, sx: 17, sy: 12, y: 5.6, op: 0.64 },
+    { ox: 11, oz: -2, sx: 15, sy: 11, y: 3.1, op: 0.62 },
+    { ox: 0, oz: -11, sx: 18, sy: 13, y: 2.8, op: 0.65 },
   ];
 
   for (const spot of spots) {
     const mat = new THREE.SpriteMaterial({
-      map: getSmokeTexture(),
-      color: 0xc8c8c8,
+      map: smokeTex,
+      color: 0xe8ecef,
       transparent: true,
-      opacity: 0.52,
+      opacity: spot.op,
       depthWrite: false,
-      depthTest: true,
+      depthTest: false,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.position.set(spot.ox, 2.2 + Math.random() * 1.2, spot.oz);
+    sprite.position.set(spot.ox, spot.y, spot.oz);
     sprite.scale.set(spot.sx, spot.sy, 1);
-    sprite.renderOrder = 6;
+    sprite.renderOrder = 12;
     sprite.userData.wobble = Math.random() * Math.PI * 2;
-    sprite.userData.baseY = sprite.position.y;
+    sprite.userData.baseY = spot.y;
     sprite.userData.baseSx = spot.sx;
     sprite.userData.baseSy = spot.sy;
+    sprite.userData.baseOp = spot.op;
     group.add(sprite);
     sprites.push(sprite);
+    mats.push(mat);
   }
 
-  const ringGeo = new THREE.RingGeometry(SMOKE_RADIUS * 0.92, SMOKE_RADIUS, 48);
+  const groundGeo = new THREE.CircleGeometry(SMOKE_RADIUS * 0.96, 48);
+  groundGeo.rotateX(-Math.PI / 2);
+  const groundMat = new THREE.MeshBasicMaterial({
+    color: 0xd8dde4,
+    transparent: true,
+    opacity: 0.38,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const groundDisc = new THREE.Mesh(groundGeo, groundMat);
+  groundDisc.position.y = 0.12;
+  groundDisc.renderOrder = 4;
+  group.add(groundDisc);
+  geos.push(groundGeo);
+  mats.push(groundMat);
+
+  const innerRingGeo = new THREE.RingGeometry(SMOKE_RADIUS * 0.72, SMOKE_RADIUS * 0.9, 48);
+  innerRingGeo.rotateX(-Math.PI / 2);
+  const innerRingMat = new THREE.MeshBasicMaterial({
+    color: 0xb8c0cc,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
+  innerRing.position.y = 0.16;
+  innerRing.renderOrder = 5;
+  group.add(innerRing);
+  geos.push(innerRingGeo);
+  mats.push(innerRingMat);
+
+  const ringGeo = new THREE.RingGeometry(SMOKE_RADIUS * 0.9, SMOKE_RADIUS * 1.02, 48);
   ringGeo.rotateX(-Math.PI / 2);
   const ringMat = new THREE.MeshBasicMaterial({
-    color: 0x9aa0a8,
+    color: 0xa8b4c4,
     transparent: true,
-    opacity: 0.14,
+    opacity: 0.42,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
   const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.position.y = 0.08;
+  ring.position.y = 0.18;
+  ring.renderOrder = 5;
   group.add(ring);
+  geos.push(ringGeo);
+  mats.push(ringMat);
 
   scene.add(group);
-  return { group, sprites, ring, ringMat };
+  return { group, sprites, ring, ringMat, groundDisc, groundMat, innerRing, innerRingMat, mats, geos };
 }
 
 export class SmokeScreenManager {
@@ -135,9 +182,9 @@ export class SmokeScreenManager {
       const geo = new THREE.RingGeometry(0.88, 1, 40);
       geo.rotateX(-Math.PI / 2);
       const mat = new THREE.MeshBasicMaterial({
-        color: 0x9aa8b8,
+        color: 0xb8c8dc,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.62,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
@@ -177,11 +224,11 @@ export class SmokeScreenManager {
 
   _disposeVisual(screen) {
     if (screen.group?.parent) screen.group.parent.remove(screen.group);
+    for (const mat of screen.mats ?? []) mat?.dispose();
+    for (const geo of screen.geos ?? []) geo?.dispose();
     for (const sprite of screen.sprites ?? []) {
-      sprite.material?.dispose();
+      if (!screen.mats?.includes(sprite.material)) sprite.material?.dispose();
     }
-    screen.ring?.geometry?.dispose();
-    screen.ringMat?.dispose();
   }
 
   update(dt) {
@@ -195,18 +242,22 @@ export class SmokeScreenManager {
       for (const sprite of s.sprites ?? []) {
         const mat = sprite.material;
         if (!mat) continue;
-        const pulse = 0.94 + Math.sin(s.phase * 0.9 + sprite.userData.wobble) * 0.06;
-        mat.opacity = (0.22 + life * 0.38) * pulse;
+        const pulse = 0.92 + Math.sin(s.phase * 0.9 + sprite.userData.wobble) * 0.08;
+        const baseOp = sprite.userData.baseOp ?? 0.7;
+        mat.opacity = (0.32 + life * (baseOp - 0.32)) * pulse;
         sprite.position.y =
-          sprite.userData.baseY + Math.sin(s.phase * 0.7 + idx) * 0.35 + (1 - life) * 0.8;
+          sprite.userData.baseY + Math.sin(s.phase * 0.7 + idx) * 0.45 + (1 - life) * 1.1;
+        const sizeMult = 0.92 + life * 0.14;
         sprite.scale.set(
-          sprite.userData.baseSx * (0.88 + life * 0.18) * pulse,
-          sprite.userData.baseSy * (0.88 + life * 0.18) * pulse,
+          sprite.userData.baseSx * sizeMult * pulse,
+          sprite.userData.baseSy * sizeMult * pulse,
           1
         );
         idx++;
       }
-      if (s.ringMat) s.ringMat.opacity = 0.06 + life * 0.12;
+      if (s.groundMat) s.groundMat.opacity = 0.14 + life * 0.3;
+      if (s.innerRingMat) s.innerRingMat.opacity = 0.1 + life * 0.22;
+      if (s.ringMat) s.ringMat.opacity = 0.16 + life * 0.3;
 
       if (s.remaining <= 0) {
         this._disposeVisual(s);
