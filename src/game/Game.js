@@ -2399,7 +2399,10 @@ export class Game {
           this.ui?.updateEngineerBuild(this);
         }
         this.baseBuildings?.update(dt);
-        if (getGarrisonBunkerSources(this).length > 0) {
+        if (
+          getGarrisonBunkerSources(this).length > 0 ||
+          this._aliveUnits.some((u) => u._garrisonBunkerId)
+        ) {
           updateBunkerGarrison(this._aliveUnits, this);
         }
         syncHealMarkers(this._aliveUnits, this.baseBuildings, this.hqs);
@@ -2452,6 +2455,7 @@ export class Game {
           getWireSlowMult: this.defenses
             ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
             : null,
+          scenery: this.scenery,
         });
         if (isTdHqDefenseStyle(this.towerDefense)) {
           enforcePlayerFrontlineClamp(this);

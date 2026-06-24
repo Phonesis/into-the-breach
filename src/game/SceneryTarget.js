@@ -6,6 +6,14 @@ const LABELS = {
   hedge: 'Hedge / wall',
   rock: 'Rock',
   bunker: 'Fighting position',
+  farmHouse: 'Farmhouse',
+  barn: 'Barn',
+  outbuilding: 'Outbuilding',
+  stoneWall: 'Stone wall',
+  haystack: 'Haystack',
+  fieldFence: 'Field fence',
+  cart: 'Abandoned cart',
+  stump: 'Stump',
 };
 
 export function isSceneryTarget(target) {

@@ -3,7 +3,7 @@ import { distanceBetween } from './Targeting.js';
 export const BUNKER_GARRISON_COVER_MULT = 0.22;
 export const BUNKER_ENTER_RANGE = 3.8;
 
-const GARRISON_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic']);
+const GARRISON_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer']);
 
 export function canGarrisonType(unitType) {
   return GARRISON_TYPES.has(unitType);
@@ -17,18 +17,19 @@ export function getGarrisonCoverMultiplier(unit) {
   return isUnitGarrisoned(unit) ? BUNKER_GARRISON_COVER_MULT : 1;
 }
 
-/** Collect managers that own garrison-capable bunkers (HQ builds + engineer field bunkers). */
+/** Collect managers that own garrison-capable bunkers / shelters. */
 export function getGarrisonBunkerSources(game) {
   const sources = [];
   if (game?.baseBuildings?.active) sources.push(game.baseBuildings);
   if (game?.engineerSandbags?.hasGarrisonBunkers?.()) sources.push(game.engineerSandbags);
+  if (game?.scenery?.hasGarrisonShelters?.()) sources.push(game.scenery);
   return sources;
 }
 
 function normalizeGarrisonSources(sources) {
   if (!sources) return [];
   if (Array.isArray(sources)) return sources.filter(Boolean);
-  if (sources.baseBuildings || sources.engineerSandbags) {
+  if (sources.baseBuildings || sources.engineerSandbags || sources.scenery) {
     return getGarrisonBunkerSources(sources);
   }
   return [sources];
@@ -63,6 +64,9 @@ export function releaseFromBunker(unit, sources) {
   const found = findBunkerEntry(unit._garrisonBunkerId, list);
   if (found?.entry?.garrison) {
     found.entry.garrison = found.entry.garrison.filter((id) => id !== unit.id);
+    if (found.entry.garrison.length === 0 && found.entry.neutralGarrison) {
+      found.entry.garrisonTeam = null;
+    }
   }
   unit._garrisonBunkerId = null;
   if (unit.mesh) unit.mesh.visible = true;
@@ -72,7 +76,11 @@ export function tryEnterBunker(unit, bunker, sources) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
   if (!bunker || bunker.destroyed || bunker.building || !bunker.def?.garrison) return false;
   if (!canGarrisonType(unit.def?.type)) return false;
-  if (bunker.team !== unit.team) return false;
+  if (bunker.neutralGarrison) {
+    if (bunker.garrisonTeam && bunker.garrisonTeam !== unit.team) return false;
+  } else if (bunker.team !== unit.team) {
+    return false;
+  }
 
   const cap = bunker.def.garrisonCapacity ?? 2;
   if ((bunker.garrison?.length ?? 0) >= cap) return false;
@@ -82,6 +90,7 @@ export function tryEnterBunker(unit, bunker, sources) {
 
   releaseFromBunker(unit, sources);
   bunker.garrison = bunker.garrison ?? [];
+  if (bunker.neutralGarrison) bunker.garrisonTeam = unit.team;
   bunker.garrison.push(unit.id);
   unit._garrisonBunkerId = bunker.id;
   unit.clearAttackOrder();
@@ -90,13 +99,18 @@ export function tryEnterBunker(unit, bunker, sources) {
   unit.retreating = false;
   unit.position.x = bunker.x + (bunker.garrison.length - 1) * 0.35 - 0.35;
   unit.position.z = bunker.z;
-  if (unit.mesh) unit.mesh.visible = true;
+  if (unit.mesh) unit.mesh.visible = bunker.hideGarrisoned !== true;
   return true;
 }
 
 export function updateBunkerGarrison(units, sources) {
   const list = normalizeGarrisonSources(sources);
-  if (!list.length) return;
+  if (!list.length) {
+    for (const unit of units) {
+      if (unit._garrisonBunkerId) releaseFromBunker(unit, list);
+    }
+    return;
+  }
 
   for (const unit of units) {
     if (unit.dead) continue;
@@ -115,6 +129,7 @@ export function updateBunkerGarrison(units, sources) {
       const idx = bunker.garrison.indexOf(unit.id);
       unit.position.x = bunker.x + (idx >= 0 ? idx : 0) * 0.35 - 0.35;
       unit.position.z = bunker.z;
+      if (unit.mesh) unit.mesh.visible = bunker.hideGarrisoned !== true;
       continue;
     }
 

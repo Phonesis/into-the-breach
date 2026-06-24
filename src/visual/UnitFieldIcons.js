@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
 import { getUnitIconMarkup } from '../ui/unitIcons.js';
 
 const textureCache = new Map();
@@ -37,6 +39,41 @@ function iconYOffset(unit) {
   if (unit.retreating) y += 2.3;
   else if (unit.coverMarker?.visible) y += 1.7;
   return y;
+}
+
+function needsWorldSpaceIcon(unit) {
+  return (
+    isUnitGarrisoned(unit) &&
+    unit.mesh &&
+    !unit.mesh.visible &&
+    !!unit.mesh.parent
+  );
+}
+
+function reparentFieldIcon(unit) {
+  if (!unit.fieldIcon || !unit.mesh) return;
+  const sprite = unit.fieldIcon;
+  const worldSpace = needsWorldSpaceIcon(unit);
+  const desiredParent = worldSpace ? unit.mesh.parent : unit.mesh;
+  if (!desiredParent) return;
+  if (sprite.parent !== desiredParent) desiredParent.add(sprite);
+  sprite.userData.worldSpace = worldSpace;
+}
+
+function updateFieldIconTransform(unit) {
+  if (!unit.fieldIcon) return;
+  const yOff = iconYOffset(unit);
+  if (unit.fieldIcon.userData.worldSpace) {
+    const yBase = unit._mapDef
+      ? sampleTerrainHeight(unit.position.x, unit.position.z, unit._mapDef)
+      : unit.position.y;
+    const lift = Math.max(yOff, 4.6);
+    unit.fieldIcon.position.set(unit.position.x, yBase + lift, unit.position.z);
+  } else {
+    unit.fieldIcon.position.set(0, yOff, 0);
+  }
+  unit.fieldIcon.scale.set(ICON_SCALE, ICON_SCALE, 1);
+  unit.fieldIcon.visible = true;
 }
 
 function toSvgBlobUrl(type) {
@@ -171,9 +208,8 @@ export function syncUnitFieldIcon(unit, enabled) {
   attachFieldIcon(unit);
   if (!unit.fieldIcon) return;
 
-  unit.fieldIcon.visible = true;
-  unit.fieldIcon.scale.set(ICON_SCALE, ICON_SCALE, 1);
-  unit.fieldIcon.position.y = iconYOffset(unit);
+  reparentFieldIcon(unit);
+  updateFieldIconTransform(unit);
 }
 
 export function syncPlayerFieldIcons(units, enabled) {

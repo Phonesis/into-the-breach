@@ -590,6 +590,13 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
     }
     advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
+    if (options.scenery && isTankType(unit.def?.type)) {
+      options.scenery.crushAt?.(
+        unit.position.x,
+        unit.position.z,
+        unit.def.type === 'superHeavyTank' ? 2.8 : 2.1
+      );
+    }
     advanceMovePath(unit, mapDef);
     if (!unit.moveTarget) {
       unit._chasingAttack = false;
