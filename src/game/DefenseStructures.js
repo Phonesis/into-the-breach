@@ -24,9 +24,11 @@ import { spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.
 import { spawnExplosion } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
+import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 
 const ARMOR_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
 
 const MORTAR_SOUND_BY_FACTION = {
   germany: 'mortar_germany',
@@ -34,6 +36,36 @@ const MORTAR_SOUND_BY_FACTION = {
   uk: 'mortar_uk',
   russia: 'mortar_russia',
 };
+
+function emplacementWeaponProfile(def, factionId) {
+  const f = factionId ?? 'germany';
+  if (def.weaponSound === 'mg' || def.weaponType === 'machineGun') {
+    return mgProfileForFaction(f);
+  }
+  if (def.weaponType === 'mortar' || def.weaponSound === 'mortar') {
+    return MORTAR_SOUND_BY_FACTION[f] ?? 'mortar_germany';
+  }
+  if (def.weaponSound === 'tank_75' || def.weaponType === 'tank' || def.weaponType === 'superHeavyTank') {
+    if (f === 'russia') {
+      return def.caliber >= 100 ? 'tank_122_russia' : 'tank_76_russia';
+    }
+    if (f === 'germany' && (def.caliber >= 85 || def.weaponType === 'superHeavyTank')) {
+      return 'tank_88_germany';
+    }
+    if (f === 'usa' && def.caliber >= 85) return 'tank_90_usa';
+    if (f === 'uk' && def.caliber >= 85) return 'tank_17pdr_uk';
+    return `tank_75_${f}`;
+  }
+  return mgProfileForFaction(f);
+}
+
+function emplacementWeaponVolume(def) {
+  if (def.weaponType === 'mortar' || def.weaponSound === 'mortar') return 0.82;
+  if (def.weaponSound === 'tank_75' || def.weaponType === 'tank' || def.weaponType === 'superHeavyTank') {
+    return 0.88;
+  }
+  return 0.8;
+}
 
 function disposeMeshTree(mesh) {
   if (!mesh) return;
@@ -500,14 +532,21 @@ export class DefenseStructureManager {
 
     const dx = target.position.x - entry.x;
     const dz = target.position.z - entry.z;
-    entry.mesh.rotation.y = Math.atan2(dx, dz);
+    const aimYaw = Math.atan2(dx, dz);
+    const pivot = entry.mesh?.userData?.defenseAimPivot;
+    if (pivot) {
+      pivot.rotation.y = aimYaw - (entry.mesh.rotation.y ?? 0);
+    } else if (!BUNKER_AIM_TYPES.has(entry.typeId)) {
+      entry.mesh.rotation.y = aimYaw;
+    }
+
+    const wType = def.weaponType ?? (def.weaponSound === 'tank_75' ? 'tank' : 'machineGun');
 
     if (scene && mapDef) {
       const fromY = sampleTerrainHeight(entry.x, entry.z, mapDef) + 1.2;
       const toY = sampleTerrainHeight(target.position.x, target.position.z, mapDef) + 1;
       const from = { x: entry.x, y: fromY, z: entry.z };
       const to = { x: target.position.x, y: toY, z: target.position.z };
-      const wType = def.weaponType ?? (def.weaponSound === 'tank_75' ? 'tank' : 'machineGun');
       if (wType === 'mortar') {
         spawnShellExplosion(scene, to, 'medium');
       } else {
@@ -524,13 +563,19 @@ export class DefenseStructureManager {
       weaponType: wType,
     });
 
-    if (def.weaponSound === 'mg') {
-      sounds.playWeapon('mg', { x: entry.x, z: entry.z }, { volume: 0.62 });
-    } else if (def.weaponSound === 'tank_75') {
-      sounds.playWeapon('tank_75', { x: entry.x, z: entry.z }, { volume: 0.72 });
-    } else if (def.weaponType === 'mortar' || def.weaponSound === 'mortar') {
-      const profile = MORTAR_SOUND_BY_FACTION[this.factionId] ?? 'mortar_germany';
-      sounds.playWeapon(profile, { x: entry.x, z: entry.z }, { volume: 0.7 });
+    if (def.damage) {
+      const profile = emplacementWeaponProfile(def, this.factionId);
+      const shotGapMs = Math.max(40, Math.floor(850 / (def.attackSpeed || 1)));
+      sounds.playWeapon(
+        profile,
+        { x: entry.x, z: entry.z },
+        {
+          volume: emplacementWeaponVolume(def),
+          nearField: true,
+          gapKey: entry.id,
+          minGapMs: shotGapMs,
+        }
+      );
     }
   }
 

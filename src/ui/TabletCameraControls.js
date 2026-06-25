@@ -21,6 +21,7 @@ function emptyInput() {
     rotateRight: false,
     zoomIn: false,
     zoomOut: false,
+    zoomTap: null,
   };
 }
 
@@ -38,28 +39,50 @@ export class TabletCameraControls {
       const action = btn.dataset.cam;
       if (!ACTIONS.includes(action)) continue;
 
-      btn.addEventListener('pointerdown', (e) => {
+      const press = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        btn.setPointerCapture(e.pointerId);
+        if (e.pointerId != null) {
+          try {
+            btn.setPointerCapture(e.pointerId);
+          } catch {
+            /* Safari may reject capture on some nodes */
+          }
+        }
         this.input[action] = true;
         btn.classList.add('is-active');
-      });
+      };
 
       const release = (e) => {
-        if (e.pointerId != null && btn.hasPointerCapture?.(e.pointerId)) {
-          btn.releasePointerCapture(e.pointerId);
+        if (e?.pointerId != null && btn.hasPointerCapture?.(e.pointerId)) {
+          try {
+            btn.releasePointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
         }
         this.input[action] = false;
         btn.classList.remove('is-active');
       };
 
+      btn.addEventListener('pointerdown', press);
+      btn.addEventListener('touchstart', press, { passive: false });
       btn.addEventListener('pointerup', release);
       btn.addEventListener('pointercancel', release);
+      btn.addEventListener('touchend', release);
+      btn.addEventListener('touchcancel', release);
       btn.addEventListener('lostpointercapture', () => {
         this.input[action] = false;
         btn.classList.remove('is-active');
       });
+
+      if (action === 'zoomIn' || action === 'zoomOut') {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.input.zoomTap = action;
+        });
+      }
     }
 
     window.addEventListener('blur', this._boundBlur);
@@ -82,10 +105,15 @@ export class TabletCameraControls {
 
   clear() {
     for (const key of ACTIONS) this.input[key] = false;
+    this.input.zoomTap = null;
     if (!this.mount) return;
     for (const btn of this.mount.querySelectorAll('[data-cam]')) {
       btn.classList.remove('is-active');
     }
+  }
+
+  clearZoomTap() {
+    this.input.zoomTap = null;
   }
 
   dispose() {

@@ -1556,7 +1556,7 @@ body,
   animation: td-countdown-pulse 1.6s ease-in-out infinite;
 }
 
-/* HQ Defense — compact side panel so the battlefield stays clear during prepare */
+/* Compact side panel — keeps the battlefield clear for placing defenses between waves */
 .td-wave-countdown.td-wave-countdown-side {
   top: 5.75rem;
   left: auto;
@@ -1677,6 +1677,136 @@ body,
   width: 100%;
   font-size: 0.84rem;
   letter-spacing: 0.04em;
+}
+
+.td-breach-alert {
+  position: absolute;
+  top: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 28;
+  pointer-events: none;
+  width: min(94vw, 22rem);
+}
+
+.td-breach-alert-card {
+  pointer-events: auto;
+  text-align: center;
+  padding: 1rem 1.2rem 0.95rem;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 95, 70, 0.9);
+  background: linear-gradient(180deg, rgba(42, 8, 8, 0.97) 0%, rgba(68, 14, 10, 0.95) 100%);
+  box-shadow:
+    0 0 48px rgba(255, 80, 50, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.6);
+  animation: td-breach-pulse 0.85s ease-in-out infinite;
+}
+
+.td-breach-alert-card.td-breach-alert-critical {
+  border-color: rgba(255, 210, 120, 0.95);
+  animation: td-breach-critical 0.45s ease-in-out infinite;
+}
+
+.td-breach-alert-eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ffb0a0;
+  font-weight: 700;
+}
+
+.td-breach-alert-title {
+  margin: 0.2rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff5f0;
+}
+
+.td-breach-alert-value {
+  margin: 0.15rem 0 0.2rem;
+  font-size: 4.5rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffe0d0;
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 32px rgba(255, 120, 70, 0.85),
+    0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+.td-breach-alert-card.td-breach-alert-critical .td-breach-alert-value {
+  color: #fff8c8;
+  text-shadow:
+    0 0 36px rgba(255, 200, 80, 0.9),
+    0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+.td-breach-alert-sub {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #f0c8c0;
+}
+
+.td-breach-alert-track {
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.td-breach-alert-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #8a2010 0%, #e05030 45%, #ffb090 100%);
+  transition: width 0.08s linear;
+}
+
+.td-breach-alert-card.td-breach-alert-critical .td-breach-alert-fill {
+  background: linear-gradient(90deg, #a02810 0%, #ff9040 40%, #ffe8a0 100%);
+}
+
+@keyframes td-breach-pulse {
+  0%,
+  100% {
+    border-color: rgba(255, 95, 70, 0.75);
+    box-shadow:
+      0 0 32px rgba(255, 80, 50, 0.4),
+      0 10px 28px rgba(0, 0, 0, 0.6);
+  }
+  50% {
+    border-color: rgba(255, 150, 110, 1);
+    box-shadow:
+      0 0 56px rgba(255, 100, 60, 0.65),
+      0 10px 28px rgba(0, 0, 0, 0.6);
+  }
+}
+
+@keyframes td-breach-critical {
+  0%,
+  100% {
+    transform: scale(1);
+    border-color: rgba(255, 200, 100, 0.9);
+  }
+  50% {
+    transform: scale(1.02);
+    border-color: rgba(255, 240, 180, 1);
+  }
+}
+
+@media (max-width: 720px) {
+  .td-breach-alert {
+    top: 3.75rem;
+    width: min(92vw, 20rem);
+  }
+
+  .td-breach-alert-value {
+    font-size: 3.6rem;
+  }
 }
 
 @keyframes td-countdown-pulse {
@@ -2146,6 +2276,7 @@ body,
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tablet-camera.hidden {
@@ -2251,6 +2382,43 @@ body,
   grid-row: 3;
 }
 
+/* Touch tablets (iPad, etc.) — camera pad top-left so minimap and map stay clear */
+@media (hover: none) and (pointer: coarse) {
+  .tablet-camera {
+    top: calc(4.5rem + env(safe-area-inset-top, 0px));
+    left: calc(0.55rem + env(safe-area-inset-left, 0px));
+    right: auto;
+    bottom: auto;
+    transform: none;
+    max-width: min(11.25rem, 40vw);
+    padding: 0.45rem 0.42rem 0.5rem;
+    gap: 0.35rem;
+    opacity: 0.94;
+  }
+
+  .tablet-camera-pad {
+    grid-template-columns: repeat(3, 2.35rem);
+    grid-template-rows: repeat(3, 2.35rem);
+    gap: 0.22rem;
+  }
+
+  .tablet-cam-btn {
+    width: 2.35rem;
+    height: 2.35rem;
+    font-size: 0.95rem;
+  }
+
+  .tablet-mode-btn {
+    height: 2.1rem;
+    font-size: 0.68rem;
+  }
+
+  .battle-minimap,
+  .battle-minimap-show {
+    bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @media (max-width: 720px) {
   .battle-minimap,
   .battle-minimap-show {
@@ -2259,15 +2427,21 @@ body,
     width: 9.5rem;
   }
 
-  .tablet-camera {
-    right: 0.45rem;
-    bottom: 4.75rem;
-    transform: scale(0.92);
-    transform-origin: bottom right;
-  }
-
   .hud-hint {
     max-width: 42vw;
+  }
+}
+
+@media (max-width: 720px) and (hover: none) and (pointer: coarse) {
+  .tablet-camera {
+    top: calc(4rem + env(safe-area-inset-top, 0px));
+    max-width: min(10.5rem, 44vw);
+  }
+
+  .battle-minimap,
+  .battle-minimap-show {
+    bottom: calc(4.85rem + env(safe-area-inset-bottom, 0px));
+    width: 9.5rem;
   }
 }
 
@@ -2578,7 +2752,7 @@ body,
 .overlay-msg {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2623,6 +2797,54 @@ body,
 
 .end-actions .btn.hidden {
   display: none;
+}
+
+.post-match-view-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem 1.25rem;
+  max-width: min(92vw, 36rem);
+  padding: 0.75rem 1.1rem;
+  background: rgba(12, 18, 26, 0.94);
+  border: 1px solid rgba(201, 162, 39, 0.55);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.post-match-view-bar.hidden {
+  display: none;
+}
+
+.post-match-view-hint {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #c8d0dc;
+}
+
+#hud.hud-post-match-view .hud-top,
+#hud.hud-post-match-view .hud-bottom,
+#hud.hud-post-match-view #capture-bar,
+#hud.hud-post-match-view #unit-roster,
+#hud.hud-post-match-view #production-panel,
+#hud.hud-post-match-view #defense-panel,
+#hud.hud-post-match-view #base-build-panel,
+#hud.hud-post-match-view #firesupport-panel,
+#hud.hud-post-match-view .tablet-camera-actions,
+#hud.hud-post-match-view #tutorial-banner,
+#hud.hud-post-match-view #assault-banner,
+#hud.hud-post-match-view #clearance-banner,
+#hud.hud-post-match-view #td-banner,
+#hud.hud-post-match-view #laststand-banner,
+#hud.hud-post-match-view #btn-toggle-frontline {
+  display: none !important;
 }
 
 .end-stats {

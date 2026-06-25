@@ -70,17 +70,111 @@ export class SoundManager {
     this.menuMusic = null;
     this.menuMusicVisible = false;
     this.inBattle = false;
+    this._resumePromise = null;
+    this._warmedUp = false;
+    this._pendingPlays = [];
+    this._maxPendingPlays = 32;
+    this._battleLockOsc = null;
+    this._battleLockGain = null;
+    this._htmlLock = null;
+    this._samplesReady = false;
+    /** @type {HTMLAudioElement[]} */
+    this._htmlPool = [];
+    this._htmlPoolBusy = 0;
     /** @type {Record<string, AudioBuffer[]>} */
     this.infantryDeathBuffers = { default: [], germany: [], russia: [] };
   }
 
+  _stopBattleAudioLock() {
+    try {
+      this._battleLockOsc?.stop();
+    } catch {
+      /* already stopped */
+    }
+    this._battleLockOsc?.disconnect?.();
+    this._battleLockGain?.disconnect?.();
+    this._battleLockOsc = null;
+    this._battleLockGain = null;
+
+    if (this._htmlLock) {
+      this._htmlLock.pause();
+      this._htmlLock.removeAttribute('src');
+      this._htmlLock.load();
+      this._htmlLock = null;
+    }
+  }
+
+  /** Inaudible loop keeps iOS/Safari from suspending AudioContext during long TD prepare phases. */
+  _startBattleAudioLock() {
+    if (!this.ctx || this.muted || !this._isRunning()) return false;
+
+    if (!this._battleLockOsc) {
+      try {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 1;
+        const g = this.ctx.createGain();
+        g.gain.value = 0.00001;
+        osc.connect(g);
+        g.connect(this.master);
+        osc.start(0);
+        this._battleLockOsc = osc;
+        this._battleLockGain = g;
+      } catch {
+        /* unavailable */
+      }
+    }
+
+    if (!this._htmlLock) {
+      const audio = new Audio(publicUrl('sounds/impact.wav'));
+      audio.loop = true;
+      audio.volume = 0.001;
+      audio.preload = 'auto';
+      void audio.play().then(() => {
+        this._htmlLock = audio;
+      }).catch(() => {});
+    }
+
+    return !!this._battleLockOsc || !!this._htmlLock;
+  }
+
+  _isRunning() {
+    return this.ctx?.state === 'running';
+  }
+
+  _flushPendingPlays() {
+    if (!this._isRunning() || !this._pendingPlays.length) return;
+    const pending = this._pendingPlays.splice(0);
+    for (const fn of pending) fn();
+  }
+
+  _enqueuePending(fn) {
+    this._pendingPlays.push(fn);
+    if (this._pendingPlays.length > this._maxPendingPlays) {
+      this._pendingPlays.shift();
+    }
+  }
+
+  _warmUpNow(vol = 0.03) {
+    if (!this._isRunning()) return false;
+    const buf = this.weaponBuffers.mg ?? this.buffers.impact;
+    if (!buf) return false;
+    this._playBuffer(buf, { vol, wet: 0, pan: 0, rate: 0.85 });
+    this._warmedUp = true;
+    return true;
+  }
+
   unlock() {
-    if (this.unlocked) return;
+    if (this.unlocked) {
+      this._resumeContext();
+      return;
+    }
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this._buildGraph();
       this.unlocked = true;
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      this._warmedUp = false;
+      this._resumeContext();
       this.vehicleEngines = new VehicleEngineAudio(this);
       this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
@@ -175,6 +269,155 @@ export class SoundManager {
       }
     }
     await Promise.all(deathLoads);
+    this._samplesReady = true;
+    this._flushPendingPlays();
+  }
+
+  _resumeContext() {
+    if (!this.ctx || this.ctx.state === 'running') return Promise.resolve();
+    if (this.ctx.state !== 'suspended') return Promise.resolve();
+    if (!this._resumePromise) {
+      this._resumePromise = this.ctx.resume().finally(() => {
+        this._resumePromise = null;
+      });
+    }
+    return this._resumePromise;
+  }
+
+  /** Run callback once samples are decoded and AudioContext is running. */
+  _runWhenReady(fn, fallback) {
+    if (!this.unlocked || !this.ctx || this.muted) return;
+    const attempt = () => {
+      if (!this.ctx || this.muted) return;
+      if (this._isRunning()) {
+        fn();
+        return;
+      }
+      void this._resumeContext().then(() => {
+        if (this._isRunning()) {
+          fn();
+          this._flushPendingPlays();
+          return;
+        }
+        fallback?.();
+        this._enqueuePending(fn);
+      });
+    };
+    if (this._loadPromise) void this._loadPromise.then(attempt);
+    else attempt();
+  }
+
+  _borrowHtmlAudio() {
+    const free = this._htmlPool.find((a) => a.paused && !a.ended);
+    if (free) return free;
+    if (this._htmlPool.length < 8) {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      this._htmlPool.push(audio);
+      return audio;
+    }
+    return new Audio();
+  }
+
+  _playWeaponHtml(profile, opts = {}) {
+    const sampleFile = pickSampleFile(profile, this.weaponBuffers);
+    if (!sampleFile) return false;
+
+    const gapKey = opts.gapKey ?? profile;
+    const minGap = opts.minGapMs ?? minGapMsForProfile(profile);
+    const now = performance.now();
+    if (now - (this._lastByType[gapKey] ?? 0) < minGap) return false;
+
+    try {
+      const audio = this._borrowHtmlAudio();
+      audio.src = publicUrl(`sounds/${sampleFile}`);
+      audio.volume = Math.min(1, (opts.volume ?? 1) * 0.75);
+      this._lastByType[gapKey] = now;
+      this._htmlPoolBusy += 1;
+      void audio.play().catch(() => {}).finally(() => {
+        this._htmlPoolBusy = Math.max(0, this._htmlPoolBusy - 1);
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  _playWeaponNow(profile, worldPos = null, opts = {}) {
+    const sampleFile = pickSampleFile(profile, this.weaponBuffers);
+    if (!sampleFile) return false;
+    const buf = this.weaponBuffers[sampleFile.replace(/\.wav$/i, '')];
+    if (!buf) return false;
+
+    const gapKey = opts.gapKey ?? profile;
+    const minGap = opts.minGapMs ?? minGapMsForProfile(profile);
+    const now = performance.now();
+    if (now - (this._lastByType[gapKey] ?? 0) < minGap) return false;
+
+    const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+    const dist =
+      worldPos && !opts.nearField ? this._calcDist(worldPos.x, worldPos.z) : 0;
+    const vol =
+      (opts.volume ?? 1) * (opts.nearField ? 1 : this._distanceGain(dist));
+    const rate = (opts.rate ?? 1) * (0.94 + Math.random() * 0.12);
+    const wet =
+      profile.startsWith('howitzer') || profile.startsWith('mortar')
+        ? 0.5
+        : profile.startsWith('tank') || profile.startsWith('at')
+          ? 0.34
+          : 0.28;
+
+    this._lastByType[gapKey] = now;
+    this._playBuffer(buf, { pan, vol, rate, wet });
+    return true;
+  }
+
+  /** Wait until weapon/impact samples are decoded (call after unlock before combat). */
+  async ensureLoaded() {
+    this.unlock();
+    if (this._loadPromise) await this._loadPromise;
+    await this._resumeContext();
+  }
+
+  resumeContext() {
+    return this._resumeContext().then((result) => {
+      if (this._isRunning()) this._flushPendingPlays();
+      return result;
+    });
+  }
+
+  /** Prime the audio graph after a user gesture so the first combat shot is audible. */
+  warmUp() {
+    this._runWhenReady(() => {
+      if (this._warmedUp) return;
+      this._warmUpNow(0.03);
+    });
+  }
+
+  /**
+   * Full combat audio prime — load samples, resume context, warm graph, flush queue.
+   * Call on user gestures and right before the first TD wave.
+   */
+  async primeForCombat() {
+    await this.ensureLoaded();
+    await this._resumeContext();
+    if (this._isRunning()) {
+      if (this.inBattle) this._startBattleAudioLock();
+      if (!this._warmedUp) this._warmUpNow(0.03);
+      this._flushPendingPlays();
+    }
+    return this._isRunning();
+  }
+
+  /**
+   * Re-assert battle audio lock during TD prepare countdown.
+   */
+  keepAlive() {
+    if (!this.unlocked || !this.ctx || this.muted || !this.inBattle) return;
+    void this._resumeContext().then(() => {
+      if (!this._isRunning()) return;
+      this._startBattleAudioLock();
+    });
   }
 
   setListener(worldX, worldZ) {
@@ -196,11 +439,18 @@ export class SoundManager {
     this.inBattle = true;
     this.menuMusicVisible = false;
     this.menuMusic?.stopImmediate();
+    void this.ensureLoaded().then(() => {
+      void this._resumeContext().then(() => {
+        if (this.inBattle) this._startBattleAudioLock();
+      });
+    });
   }
 
   /** Call when returning to menus (stopGame, main menu). */
   leaveBattle() {
     this.inBattle = false;
+    this._stopBattleAudioLock();
+    this._pendingPlays = [];
   }
 
   setMenuMusicActive(active) {
@@ -230,90 +480,78 @@ export class SoundManager {
   /** Play a weapon profile (faction-specific ids from WeaponSounds.js). */
   playWeapon(profile, worldPos = null, opts = {}) {
     if (!this.unlocked || !this.ctx || this.muted) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
 
-    const minGap = minGapMsForProfile(profile);
-    const now = performance.now();
-    if (now - (this._lastByType[profile] ?? 0) < minGap) return;
-    this._lastByType[profile] = now;
+    const htmlFallback = () => {
+      this._playWeaponHtml(profile, opts);
+    };
+    const playNow = () => {
+      if (!this._playWeaponNow(profile, worldPos, opts)) htmlFallback();
+    };
 
-    const sampleFile = pickSampleFile(profile, this.weaponBuffers);
-    if (!sampleFile) return;
-    const buf = this.weaponBuffers[sampleFile.replace(/\.wav$/i, '')];
-    if (!buf) return;
+    if (this._samplesReady && this._isRunning()) {
+      playNow();
+      return;
+    }
 
-    const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
-    const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-    const vol = (opts.volume ?? 1) * this._distanceGain(dist);
-    const rate = (opts.rate ?? 1) * (0.94 + Math.random() * 0.12);
-    const wet =
-      profile.startsWith('howitzer') || profile.startsWith('mortar')
-        ? 0.5
-        : profile.startsWith('tank') || profile.startsWith('at')
-          ? 0.34
-          : 0.28;
-
-    this._playBuffer(buf, { pan, vol, rate, wet });
+    this._runWhenReady(playNow, htmlFallback);
   }
 
   /** Infantry / MG / sniper casualty — random field yell in the unit's language. */
   playInfantryDeath(worldPos = null, factionId = null) {
-    if (!this.unlocked || !this.ctx || this.muted) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    this._runWhenReady(() => {
+      const voiceKey = infantryDeathVoiceKey(factionId);
+      let bufs = this.infantryDeathBuffers[voiceKey];
+      if (!bufs?.length) bufs = this.infantryDeathBuffers.default;
+      if (!bufs?.length) return;
 
-    const voiceKey = infantryDeathVoiceKey(factionId);
-    let bufs = this.infantryDeathBuffers[voiceKey];
-    if (!bufs?.length) bufs = this.infantryDeathBuffers.default;
-    if (!bufs?.length) return;
+      const now = performance.now();
+      if (now - (this._lastByType._infDeath ?? 0) < 140) return;
+      this._lastByType._infDeath = now;
 
-    const now = performance.now();
-    if (now - (this._lastByType._infDeath ?? 0) < 140) return;
-    this._lastByType._infDeath = now;
+      const buf = bufs[Math.floor(Math.random() * bufs.length)];
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const vol = this._distanceGain(dist) * (0.72 + Math.random() * 0.18);
 
-    const buf = bufs[Math.floor(Math.random() * bufs.length)];
-    const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
-    const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-    const vol = this._distanceGain(dist) * (0.72 + Math.random() * 0.18);
-
-    this._playBuffer(buf, {
-      pan,
-      vol: vol * 1.08,
-      rate: 0.9 + Math.random() * 0.14,
-      wet: 0.18,
+      this._playBuffer(buf, {
+        pan,
+        vol: vol * 1.08,
+        rate: 0.9 + Math.random() * 0.14,
+        wet: 0.18,
+      });
     });
   }
 
   playImpact(type, worldPos, delaySec = 0) {
-    if (!this.unlocked || !this.ctx || this.muted) return;
-    const now = performance.now();
-    if (now - (this._lastByType._impact ?? 0) < (type === 'bullet' ? 120 : 80)) return;
-    this._lastByType._impact = now;
-    const useExplosion =
-      type === 'shell' || type === 'tank_round' || type === 'explosion';
-    const key = useExplosion ? 'explosion' : 'impact';
-    const buf = this.buffers[key];
-    if (!buf) return;
+    this._runWhenReady(() => {
+      const now = performance.now();
+      if (now - (this._lastByType._impact ?? 0) < (type === 'bullet' ? 120 : 80)) return;
+      const useExplosion =
+        type === 'shell' || type === 'tank_round' || type === 'explosion';
+      const key = useExplosion ? 'explosion' : 'impact';
+      const buf = this.buffers[key];
+      if (!buf) return;
+      this._lastByType._impact = now;
 
-    const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
-    const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-    const gain = useExplosion
-      ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
-      : 0.85;
-    const vol = this._distanceGain(dist) * gain;
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const gain = useExplosion
+        ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
+        : 0.85;
+      const vol = this._distanceGain(dist) * gain;
 
-    this._playBuffer(buf, {
-      pan,
-      vol,
-      rate: useExplosion ? 0.86 + Math.random() * 0.1 : 0.9 + Math.random() * 0.15,
-      wet: useExplosion ? 0.3 : 0.45,
-      delay: delaySec,
+      this._playBuffer(buf, {
+        pan,
+        vol,
+        rate: useExplosion ? 0.86 + Math.random() * 0.1 : 0.9 + Math.random() * 0.15,
+        wet: useExplosion ? 0.3 : 0.45,
+        delay: delaySec,
+      });
     });
   }
 
   play(type) {
-    if (!this.unlocked || !this.ctx || this.muted) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-
+    this._runWhenReady(() => {
     switch (type) {
       case 'select':
         this._beep(640, 0.04, 0.05);
@@ -355,25 +593,31 @@ export class SoundManager {
       default:
         break;
     }
+    });
   }
 
   _playBuffer(buffer, { pan = 0, vol = 1, rate = 1, wet = 0.3, delay = 0 }) {
+    if (!this.ctx || !buffer) return;
     const t0 = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.playbackRate.value = rate;
 
     const dry = this.ctx.createGain();
-    const wetG = this.ctx.createGain();
-    const panner = this.ctx.createStereoPanner();
-    panner.pan.value = pan;
-
     dry.gain.value = vol * (1 - wet * 0.5);
+    const wetG = this.ctx.createGain();
     wetG.gain.value = vol * wet;
 
-    src.connect(panner);
-    panner.connect(dry);
-    panner.connect(wetG);
+    try {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = pan;
+      src.connect(panner);
+      panner.connect(dry);
+      panner.connect(wetG);
+    } catch {
+      src.connect(dry);
+    }
+
     dry.connect(this.dryBus);
     wetG.connect(this.wetBus);
 

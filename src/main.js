@@ -19,13 +19,13 @@ function primeAudio() {
 
 function resumeAudioContext() {
   primeAudio();
-  const ctx = sounds.ctx;
-  if (ctx?.state === 'suspended') ctx.resume();
-  if (!sounds.inBattle) sounds.setMenuMusicActive(true);
+  void sounds.primeForCombat().then(() => {
+    if (!sounds.inBattle) sounds.setMenuMusicActive(true);
+  });
 }
 
-uiRoot.addEventListener('pointerdown', resumeAudioContext, { once: true });
-window.addEventListener('keydown', resumeAudioContext, { once: true });
+uiRoot.addEventListener('pointerdown', resumeAudioContext);
+window.addEventListener('keydown', resumeAudioContext);
 
 const ui = new UIManager(uiRoot, {
   onMenuVisible(visible) {
@@ -38,6 +38,8 @@ const ui = new UIManager(uiRoot, {
   },
   async onStartGame(factionId, mapId, gameMode, options = {}) {
     await preloadUnitTextures();
+    primeAudio();
+    await sounds.primeForCombat();
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -55,6 +57,8 @@ const ui = new UIManager(uiRoot, {
   },
   async onLoadBattle(saveId) {
     await preloadUnitTextures();
+    primeAudio();
+    await sounds.primeForCombat();
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -68,6 +72,12 @@ const ui = new UIManager(uiRoot, {
   },
   onReplay() {
     game?.replay();
+  },
+  onViewBattlefield() {
+    game?.enterPostMatchView();
+  },
+  onExitBattlefieldView() {
+    game?.exitPostMatchView();
   },
   onConfirmTarget() {
     game?.confirmTargetAttack();
@@ -141,6 +151,7 @@ function wireSelectBox(canvas, uiManager) {
   let start = null;
 
   canvas.addEventListener('pointerdown', (e) => {
+    resumeAudioContext();
     if (e.button !== 0 || !game?.running) return;
     start = { x: e.clientX, y: e.clientY };
     box.style.left = `${e.clientX}px`;
@@ -171,5 +182,3 @@ function wireSelectBox(canvas, uiManager) {
 }
 
 // Right-click orders are handled by RTSController (pointerdown + contextmenu).
-
-resumeAudioContext();

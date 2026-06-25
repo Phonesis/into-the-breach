@@ -236,6 +236,7 @@ export class Game {
     this._tabHidden = false;
     this._rafActive = false;
     this._postMatchRenderAccum = 0;
+    this.viewingBattlefield = false;
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
@@ -460,6 +461,9 @@ export class Game {
       ) {
         e.preventDefault();
       }
+      if (e.code === 'Escape' && this.viewingBattlefield) {
+        this.exitPostMatchView();
+      }
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
         this.ui?.updateFireSupport(this.fireSupport);
@@ -581,7 +585,7 @@ export class Game {
     canvas.addEventListener(
       'touchmove',
       (e) => {
-        if (!this.running || e.touches.length !== 2) return;
+        if ((!this.running && !this.viewingBattlefield) || e.touches.length !== 2) return;
         const dist = pinchDist(e.touches);
         if (lastPinchDist > 0) {
           const delta = (lastPinchDist - dist) * 0.045;
@@ -603,7 +607,7 @@ export class Game {
   }
 
   onWheel(e) {
-    if (!this.running) return;
+    if (!this.running && !this.viewingBattlefield) return;
     e.preventDefault();
     let step;
     if (e.deltaMode === 1) {
@@ -620,6 +624,7 @@ export class Game {
   startGame(factionId, mapId, gameMode = 'campaign', options = {}) {
     sounds.enterBattle();
     sounds.unlock();
+    void sounds.primeForCombat();
     const restoreSnapshot = options.restoreSnapshot ?? null;
     const startOptions = { ...options };
     delete startOptions.restoreSnapshot;
@@ -972,6 +977,7 @@ export class Game {
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._teardownPending = false;
+    this.viewingBattlefield = false;
     this._hudUiAccum = 0;
     this._victoryCheckAccum = 0;
     this._captureUiAccum = 0;
@@ -1199,6 +1205,7 @@ export class Game {
   /** End Tower Defence prepare countdown and start the current wave immediately. */
   skipTowerDefenseWave() {
     if (!this.running || this.gameOver || !this.towerDefense) return;
+    void sounds.primeForCombat();
     if (!skipTowerDefensePrepare(this)) return;
     sounds.play('order');
     this._syncBattleCursor();
@@ -1507,7 +1514,9 @@ export class Game {
     this._battleStatsFinalized = false;
     this._pendingEnd = null;
     this._teardownPending = false;
+    this.viewingBattlefield = false;
     this.ui?.hideEndOverlay();
+    this.ui?.hidePostMatchViewBar();
     this.controller.disable();
     this.canvas.style.cursor = '';
     this.targetIndicators?.clear();
@@ -1809,6 +1818,7 @@ export class Game {
         this.spendResources(PLAYER_TEAM, cost)
       );
       if (placed) {
+        void sounds.primeForCombat();
         this.ui?.updateDefenses(this);
         this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
         this._syncPlacementCapture();
@@ -1857,6 +1867,7 @@ export class Game {
   armDefense(typeId) {
     if (!this.running || this.gameOver || !this.defenses) return;
     sounds.unlock();
+    void sounds.primeForCombat();
     this.fireSupport?.cancel();
     if (!this.defenses.arm(typeId)) {
       if (typeId === 'artillery' && this.defenses.isArtilleryPitCapReached()) {
@@ -1983,12 +1994,26 @@ export class Game {
       .crossVectors(viewForward, new THREE.Vector3(0, 1, 0))
       .normalize();
 
-    if (this.keys['ArrowUp'] || pad?.zoomIn) {
+    if (this.keys['ArrowUp']) {
       this.cameraTarget.addScaledVector(viewForward, dollySpeed);
     }
-    if (this.keys['ArrowDown'] || pad?.zoomOut) {
+    if (this.keys['ArrowDown']) {
       this.cameraTarget.addScaledVector(viewForward, -dollySpeed);
     }
+
+    const zoomRate = 52 * dt;
+    if (pad?.zoomTap === 'zoomIn') {
+      this.zoom = THREE.MathUtils.clamp(this.zoom - 5.5, this.zoomMin, this.zoomMax);
+    } else if (pad?.zoomTap === 'zoomOut') {
+      this.zoom = THREE.MathUtils.clamp(this.zoom + 5.5, this.zoomMin, this.zoomMax);
+    }
+    if (pad?.zoomIn) {
+      this.zoom = THREE.MathUtils.clamp(this.zoom - zoomRate, this.zoomMin, this.zoomMax);
+    }
+    if (pad?.zoomOut) {
+      this.zoom = THREE.MathUtils.clamp(this.zoom + zoomRate, this.zoomMin, this.zoomMax);
+    }
+    this.ui?.clearTabletCameraZoomTap?.();
 
     this.cameraTarget.addScaledVector(viewForward, panForward * panSpeed);
     this.cameraTarget.addScaledVector(viewRight, panRight * panSpeed);
@@ -2149,6 +2174,7 @@ export class Game {
 
     this.gameOver = true;
     this.running = false;
+    this.viewingBattlefield = false;
     this._postMatchRenderAccum = 0;
     this._pendingEnd = { victory, detail };
 
@@ -2221,12 +2247,51 @@ export class Game {
     this._emptyFieldHandled = true;
   }
 
+  _endOverlayMessage(victory, detail) {
+    return `${victory ? this.playerFaction.name + ' victory' : 'Defeat'} at ${this.mapDef.name}. ${detail}`;
+  }
+
   /** Victory/defeat panel — must be synchronous when the match ends. */
   _showEndOverlayNow(victory, detail) {
     if (this._endOverlayShown || !this.ui) return;
     this._endOverlayShown = true;
-    const message = `${victory ? this.playerFaction.name + ' victory' : 'Defeat'} at ${this.mapDef.name}. ${detail}`;
-    this.ui.showEndOverlay(victory, message, null, !!this.lastSession);
+    this.ui.showEndOverlay(victory, this._endOverlayMessage(victory, detail), null, !!this.lastSession);
+  }
+
+  /** Dismiss the results modal and explore the map with camera controls only. */
+  enterPostMatchView() {
+    if (!this.gameOver || this.viewingBattlefield) return;
+    this.viewingBattlefield = true;
+    this.setTabletTargetMode(false);
+    this.setTabletFireMode(false);
+    this.ui.hideEndOverlay({ clearStats: false });
+    this.ui.showPostMatchViewBar();
+    this._applyPendingDeathVisuals();
+    this._postMatchRenderAccum = 0;
+  }
+
+  exitPostMatchView() {
+    if (!this.gameOver || !this.viewingBattlefield) return;
+    this.viewingBattlefield = false;
+    this.ui.hidePostMatchViewBar();
+    const { victory, detail } = this._pendingEnd ?? { victory: false, detail: '' };
+    this.ui.showEndOverlay(
+      victory,
+      this._endOverlayMessage(victory, detail),
+      this._buildEndBattleReport(),
+      !!this.lastSession
+    );
+  }
+
+  _applyPendingDeathVisuals() {
+    for (const u of this.units) {
+      if (!u.dead || !u.mesh?.parent || u.mesh.userData?.deathVisualApplied) continue;
+      applyUnitDeathVisual(u);
+      if (isTankType(u.def?.type) && u.mesh.userData?.wreckApplied && !u.wreckFire) {
+        u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+      }
+    }
+    this._rebuildUnitCaches();
   }
 
   _presentEndScreen(victory, detail) {
@@ -2368,6 +2433,14 @@ export class Game {
     if (this.gameOver) {
       if (!this._endOverlayShown && this._pendingEnd) {
         this._presentEndScreen(this._pendingEnd.victory, this._pendingEnd.detail);
+      }
+      if (this.viewingBattlefield) {
+        this.updateCamera(dt);
+        updateWreckEffects(dt, this.camera);
+        updateHqBurnEffects(dt, this.camera, this.hqs);
+        updateDetachedCorpseFalls(dt);
+        this._renderFrame();
+        return;
       }
       this._postMatchRenderAccum += dt;
       if (this._postMatchRenderAccum < 0.05) return;
@@ -2544,7 +2617,7 @@ export class Game {
         if (this.towerDefense && this.defenses) {
           this.defenses.update(dt, this.scene, this.mapDef);
           if (!this.gameOver) {
-            const breach = checkTowerDefenseBreach(this);
+            const breach = checkTowerDefenseBreach(this, dt);
             if (breach) this.endGame(breach.victory, breach.detail);
           }
         }

@@ -1,3 +1,4 @@
+import { sounds } from '../audio/SoundManager.js';
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { repositionFrontlineVisual } from '../world/Frontline.js';
@@ -7,6 +8,12 @@ import {
   TD_PREPARE_TIME_BETWEEN,
   TD_WAVES_TO_WIN,
   TD_BREACH_MARGIN,
+  TD_BREACH_GRACE_TIME,
+  TD_SPAWN_MIN_PAST_FRONTLINE,
+  TD_SPAWN_PAST_ENEMY_BASE_MIN,
+  TD_SPAWN_PAST_ENEMY_BASE_MAX,
+  TD_SPAWN_ENEMY_BLEND_MIN,
+  TD_SPAWN_ENEMY_BLEND_MAX,
   TD_KILL_REWARD,
   TD_WAVE_CLEAR_BONUS,
   TD_FRONTLINE_RETREAT_STEP,
@@ -187,6 +194,7 @@ export function retreatTowerDefenseFrontline(game) {
 
   repositionFrontlineVisual(game.mapDef, game.scene, getTdFrontlineDef(game), game.showFrontline);
   game.defenses?.setFrontlineAxis?.(getTdFrontlineDef(game), pb);
+  invalidateTdEnemyMoveGoals(game);
   return true;
 }
 
@@ -257,30 +265,36 @@ function clampToMap(x, z, mapDef) {
 function computeSpawnForSector(game, sector, profile) {
   const basis = getTdFrontlineBasis(game);
   const mapDef = game.mapDef;
-  const { fl, perpX, perpZ, lineLen, enemyDirX, enemyDirZ } = basis;
+  const { fl, eb, perpX, perpZ, lineLen, enemyDirX, enemyDirZ } = basis;
 
   const alongT =
     sector.along * profile.sectionSpread * 0.5 * lineLen +
-    (Math.random() - 0.5) * profile.sectionSpread * 0.2 * lineLen;
+    (Math.random() - 0.5) * profile.sectionSpread * 0.25 * lineLen;
   const targetX = fl.x + perpX * alongT;
   const targetZ = fl.z + perpZ * alongT;
 
-  const flankAngle =
-    profile.maxFlankAngle * sector.flankSign * (0.5 + Math.random() * 0.5) +
-    (Math.random() - 0.5) * 0.22;
-  const depth = profile.depthBase + Math.random() * profile.depthVar;
-  const cos = Math.cos(flankAngle);
-  const sin = Math.sin(flankAngle);
-  const dirX = enemyDirX * cos - enemyDirZ * sin;
-  const dirZ = enemyDirX * sin + enemyDirZ * cos;
-  const lateral = (Math.random() - 0.5) * profile.flankSpread;
+  // Rally near enemy HQ with sector-based lateral spread, then march to the frontline.
+  const lateral =
+    alongT * 0.4 +
+    sector.flankSign * profile.flankSpread * (0.15 + Math.random() * 0.35) +
+    (Math.random() - 0.5) * profile.flankSpread * 0.35;
+  const blend =
+    TD_SPAWN_ENEMY_BLEND_MIN +
+    Math.random() * (TD_SPAWN_ENEMY_BLEND_MAX - TD_SPAWN_ENEMY_BLEND_MIN);
+  const pastEnemyBase =
+    TD_SPAWN_PAST_ENEMY_BASE_MIN +
+    Math.random() * (TD_SPAWN_PAST_ENEMY_BASE_MAX - TD_SPAWN_PAST_ENEMY_BASE_MIN);
 
-  let x = targetX + dirX * depth + perpX * lateral;
-  let z = targetZ + dirZ * depth + perpZ * lateral;
+  let x =
+    fl.x + (eb.x - fl.x) * blend + perpX * lateral + enemyDirX * pastEnemyBase;
+  let z =
+    fl.z + (eb.z - fl.z) * blend + perpZ * lateral + enemyDirZ * pastEnemyBase;
 
-  if (alongFront(x, z, basis) < 14) {
-    x = targetX + enemyDirX * (depth * 0.85);
-    z = targetZ + enemyDirZ * (depth * 0.85);
+  if (alongFront(x, z, basis) < TD_SPAWN_MIN_PAST_FRONTLINE) {
+    const fixDepth =
+      TD_SPAWN_MIN_PAST_FRONTLINE + Math.random() * Math.max(6, profile.depthVar * 0.5);
+    x = targetX + enemyDirX * fixDepth + perpX * lateral * 0.45;
+    z = targetZ + enemyDirZ * fixDepth + perpZ * lateral * 0.45;
   }
 
   const clamped = clampToMap(x, z, mapDef);
@@ -317,6 +331,7 @@ export function createTowerDefenseState({
     wavesCleared: 0,
     killsThisWave: 0,
     breached: false,
+    breachGraceTimer: 0,
     frontlineX: fl.x,
     frontlineZ: fl.z,
     frontlineShifts: 0,
@@ -386,6 +401,8 @@ function beginActiveWave(td) {
   td.phaseTimer = 0;
   td.spawnTimer = 0;
   td.spawnInterval = Math.max(0.35, 2.8 - td.wave * 0.12);
+  td.audioKeepaliveTimer = 0;
+  void sounds.primeForCombat();
 }
 
 /** End prepare phase early (player override). */
@@ -404,6 +421,11 @@ export function updateTowerDefenseMode(game, dt) {
   td.phaseTimer -= dt;
 
   if (td.phase === 'prepare') {
+    td.audioKeepaliveTimer = (td.audioKeepaliveTimer ?? 5) - dt;
+    if (td.audioKeepaliveTimer <= 0) {
+      td.audioKeepaliveTimer = 5;
+      sounds.keepAlive();
+    }
     game.ui?.updateTowerDefense?.(game);
     if (td.phaseTimer <= 0) {
       beginActiveWave(td);
@@ -450,6 +472,7 @@ function spawnWaveUnit(game, type) {
   unit._tdFrontlineTarget = { x: spawn.targetX, z: spawn.targetZ };
   unit._tdSpawnSector = spawn.sectorLabel;
   unit.position.y = sampleTerrainHeight(spawn.x, spawn.z, game.mapDef);
+  unit.moveTarget = { x: spawn.targetX, z: spawn.targetZ };
   game.units.push(unit);
   game._rebuildUnitCaches();
 }
@@ -488,47 +511,78 @@ export function rewardTowerDefenseKill(game, unit) {
   td.killsThisWave += 1;
 }
 
-export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
-  const mapDef = game.mapDef;
-  const td = game.towerDefense;
-  const { fl, pb } = getTdFrontlineBasis(game);
-  const advanceX = pb.x - fl.x;
-  const advanceZ = pb.z - fl.z;
-  const advLen = Math.hypot(advanceX, advanceZ) || 1;
-  const ax = advanceX / advLen;
-  const az = advanceZ / advLen;
+/** Force TD attackers to pick a new march goal (e.g. after the frontline retreats). */
+export function invalidateTdEnemyMoveGoals(game) {
+  for (const unit of game._enemyAlive ?? []) {
+    if (!unit._tdAttacker) continue;
+    unit._tdGoalStale = true;
+    unit._tdMoveGoal = null;
+    unit._tdGoalJitter = null;
+  }
+}
 
+function tdEnemyGoalReached(unit, threshold = 5) {
+  const goal = unit._tdMoveGoal;
+  if (!goal) return true;
+  return Math.hypot(unit.position.x - goal.x, unit.position.z - goal.z) < threshold;
+}
+
+function computeTdEnemyMoveGoal(unit, game) {
+  const { fl, pb, perpX, perpZ } = getTdFrontlineBasis(game);
+  const toPlayerX = pb.x - fl.x;
+  const toPlayerZ = pb.z - fl.z;
+  const vx = unit.position.x - fl.x;
+  const vz = unit.position.z - fl.z;
+  const pastLine = vx * toPlayerX + vz * toPlayerZ > 0;
+
+  const jitter = unit._tdGoalJitter ?? {
+    x: (Math.random() - 0.5) * (pastLine ? 6 : 8),
+    z: (Math.random() - 0.5) * (pastLine ? 6 : 8),
+  };
+  unit._tdGoalJitter = jitter;
+
+  if (pastLine) {
+    return { x: pb.x + jitter.x, z: pb.z + jitter.z, kind: 'hq' };
+  }
+
+  const along = (unit.position.x - fl.x) * perpX + (unit.position.z - fl.z) * perpZ;
+  const advLen = Math.hypot(toPlayerX, toPlayerZ) || 1;
+  const atLine = tdEnemyGoalReached(unit, 7);
+  const push = atLine ? 8 : TD_BREACH_MARGIN * 0.5;
+  const baseX = fl.x + perpX * along + (toPlayerX / advLen) * push;
+  const baseZ = fl.z + perpZ * along + (toPlayerZ / advLen) * push;
+
+  unit._tdFrontlineTarget = { x: baseX, z: baseZ };
+  return { x: baseX + jitter.x, z: baseZ + jitter.z, kind: 'frontline' };
+}
+
+export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
   for (const unit of enemyUnits) {
     if (unit.retreating || unit.surrendered || unit._captureExit) continue;
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
 
-    const toPlayerX = pb.x - fl.x;
-    const toPlayerZ = pb.z - fl.z;
-    const vx = unit.position.x - fl.x;
-    const vz = unit.position.z - fl.z;
-    const pastLine = vx * toPlayerX + vz * toPlayerZ > 0;
-
-    if (unit.attackOrder) continue;
-
     const nearDefense = pickNearestDefenseInRange(unit, defenses);
     if (nearDefense) {
       unit.setAttackOrder(nearDefense);
+      unit._tdMoveGoal = null;
       continue;
     }
 
-    if (pastLine) {
-      unit.clearAttackOrder();
-      unit.moveTarget = { x: pb.x + (Math.random() - 0.5) * 6, z: pb.z + (Math.random() - 0.5) * 6 };
-    } else {
-      unit.clearAttackOrder();
-      const target = unit._tdFrontlineTarget;
-      const goalX = target?.x ?? fl.x;
-      const goalZ = target?.z ?? fl.z;
-      unit.moveTarget = {
-        x: goalX + ax * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 8,
-        z: goalZ + az * (TD_BREACH_MARGIN * 0.5) + (Math.random() - 0.5) * 8,
-      };
-    }
+    if (unit.attackOrder) continue;
+
+    unit.clearAttackOrder();
+
+    const needGoal =
+      unit._tdGoalStale ||
+      !unit._tdMoveGoal ||
+      !unit.moveTarget ||
+      tdEnemyGoalReached(unit);
+
+    if (!needGoal) continue;
+
+    unit._tdMoveGoal = computeTdEnemyMoveGoal(unit, game);
+    unit._tdGoalStale = false;
+    unit.moveTarget = { x: unit._tdMoveGoal.x, z: unit._tdMoveGoal.z };
   }
 }
 
@@ -548,10 +602,11 @@ function pickNearestDefenseInRange(unit, defenses) {
 }
 
 /**
- * Enemy has breached when any unit crosses the frontline toward the player HQ.
+ * Enemy has breached when any unit crosses the frontline toward the player HQ
+ * and remains past it for TD_BREACH_GRACE_TIME seconds.
  * Uses dot(enemy - frontline, playerBase - frontline) > 0.
  */
-export function checkTowerDefenseBreach(game) {
+export function checkTowerDefenseBreach(game, dt = 0) {
   const td = game.towerDefense;
   if (!td || td.breached || isTdHqDefenseStyle(td)) return null;
 
@@ -561,19 +616,30 @@ export function checkTowerDefenseBreach(game) {
   const toPlayerZ = pb.z - fl.z;
   const len = Math.hypot(toPlayerX, toPlayerZ) || 1;
 
+  let pastLine = false;
   for (const u of game._enemyAlive) {
     const vx = u.position.x - fl.x;
     const vz = u.position.z - fl.z;
     const towardPlayer = (vx * toPlayerX + vz * toPlayerZ) / len;
     if (towardPlayer > TD_BREACH_MARGIN) {
-      td.breached = true;
-      return {
-        victory: false,
-        detail: 'Enemy forces breached the frontline — your sector has fallen.',
-      };
+      pastLine = true;
+      break;
     }
   }
-  return null;
+
+  if (!pastLine) {
+    td.breachGraceTimer = 0;
+    return null;
+  }
+
+  td.breachGraceTimer = (td.breachGraceTimer ?? 0) + dt;
+  if (td.breachGraceTimer < TD_BREACH_GRACE_TIME) return null;
+
+  td.breached = true;
+  return {
+    victory: false,
+    detail: 'Enemy forces overran the frontline — your sector has fallen.',
+  };
 }
 
 export function checkTowerDefenseVictory(game) {
@@ -608,12 +674,22 @@ export function formatTowerDefenseHud(td) {
   const secondsLeft = Math.max(0, td.phaseTimer);
   const prepareTotal =
     td.wave <= 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
+  const breachGraceLeft =
+    !hqDefense && !td.breached && (td.breachGraceTimer ?? 0) > 0
+      ? Math.max(1, Math.ceil(TD_BREACH_GRACE_TIME - td.breachGraceTimer))
+      : 0;
+  const breachGraceProgress =
+    breachGraceLeft > 0
+      ? Math.max(0, 1 - (td.breachGraceTimer ?? 0) / TD_BREACH_GRACE_TIME)
+      : 0;
   const phaseLabel =
     td.phase === 'prepare'
       ? hqDefense
         ? `Prepare forces — ${Math.ceil(secondsLeft)}s`
         : `Prepare defenses — ${Math.ceil(secondsLeft)}s`
-      : `Wave ${td.wave} — ${td.spawned}/${td.totalToSpawn} deployed`;
+      : breachGraceLeft
+        ? `Wave ${td.wave} — BREACH ${breachGraceLeft}s`
+        : `Wave ${td.wave} — ${td.spawned}/${td.totalToSpawn} deployed`;
   const countdownTitle =
     td.phase === 'prepare'
       ? td.wave <= 1
@@ -651,5 +727,7 @@ export function formatTowerDefenseHud(td) {
     countdownTitle,
     countdownSubtitle,
     assaultBrief: td.assaultBrief ?? null,
+    breachGraceLeft,
+    breachGraceProgress,
   };
 }

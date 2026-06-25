@@ -62,6 +62,16 @@ export const TD_PLAYER_FRONTLINE_MARGIN = 2;
 
 /** Enemy dot past frontline toward HQ above this = sector lost (emplacements) or retreat (HQ Defense). */
 export const TD_BREACH_MARGIN = 2;
+
+/** Seconds enemies may remain past the frontline before emplacement mode defeat. */
+export const TD_BREACH_GRACE_TIME = 10;
+
+/** Wave spawns assemble behind enemy lines, then march to the frontline. */
+export const TD_SPAWN_MIN_PAST_FRONTLINE = 26;
+export const TD_SPAWN_PAST_ENEMY_BASE_MIN = 0;
+export const TD_SPAWN_PAST_ENEMY_BASE_MAX = 10;
+export const TD_SPAWN_ENEMY_BLEND_MIN = 0.78;
+export const TD_SPAWN_ENEMY_BLEND_MAX = 0.97;
 export const TD_KILL_REWARD = {
   infantry: 8,
   machineGun: 10,

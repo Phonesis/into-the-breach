@@ -344,7 +344,7 @@ export class UIManager {
           </div>
         </div>
 
-        <div id="td-wave-countdown" class="td-wave-countdown hidden" aria-live="polite">
+        <div id="td-wave-countdown" class="td-wave-countdown td-wave-countdown-side hidden" aria-live="polite">
           <div class="td-wave-countdown-card" id="td-wave-countdown-card">
             <p class="td-wave-countdown-title" id="td-wave-countdown-title">Prepare defenses</p>
             <p class="td-wave-countdown-value" id="td-wave-countdown-value">30</p>
@@ -359,6 +359,18 @@ export class UIManager {
             >
               Start Wave Now
             </button>
+          </div>
+        </div>
+
+        <div id="td-breach-alert" class="td-breach-alert hidden" aria-live="assertive" role="alert">
+          <div class="td-breach-alert-card" id="td-breach-alert-card">
+            <p class="td-breach-alert-eyebrow">Sector overrun imminent</p>
+            <p class="td-breach-alert-title">Clear the frontline</p>
+            <p class="td-breach-alert-value" id="td-breach-alert-value">10</p>
+            <p class="td-breach-alert-sub" id="td-breach-alert-sub">Enemy past the line — destroy them before time runs out</p>
+            <div class="td-breach-alert-track">
+              <div class="td-breach-alert-fill" id="td-breach-alert-fill"></div>
+            </div>
           </div>
         </div>
 
@@ -398,8 +410,8 @@ export class UIManager {
             <button type="button" class="tablet-cam-btn pad-down" data-cam="panBack" aria-label="Pan back">▼</button>
           </div>
           <div class="tablet-camera-zoom" role="group" aria-label="Zoom">
-            <button type="button" class="tablet-cam-btn" data-cam="zoomIn" aria-label="Move camera in">＋</button>
-            <button type="button" class="tablet-cam-btn" data-cam="zoomOut" aria-label="Move camera out">－</button>
+            <button type="button" class="tablet-cam-btn" data-cam="zoomIn" aria-label="Zoom in">＋</button>
+            <button type="button" class="tablet-cam-btn" data-cam="zoomOut" aria-label="Zoom out">－</button>
           </div>
         </div>
 
@@ -551,10 +563,16 @@ export class UIManager {
           <p id="end-msg"></p>
           <div id="end-stats" class="end-stats hidden"></div>
           <div class="end-actions">
+            <button class="btn btn-secondary interactive" id="btn-view-battlefield">View battlefield</button>
             <button class="btn btn-primary interactive hidden" id="btn-replay">Replay battle</button>
             <button class="btn btn-secondary interactive" id="btn-menu">Main Menu</button>
           </div>
         </div>
+      </div>
+
+      <div id="post-match-view-bar" class="post-match-view-bar hidden interactive" role="toolbar" aria-label="Post-battle inspection">
+        <p class="post-match-view-hint">Inspecting the battlefield — pan and zoom to explore</p>
+        <button type="button" class="btn btn-primary interactive" id="btn-back-to-results">Back to results</button>
       </div>
 
       <div id="select-box" class="select-box"></div>
@@ -926,13 +944,23 @@ export class UIManager {
 
     this.root.querySelector('#btn-menu').onclick = () => {
       this.hideEndOverlay();
+      this.hidePostMatchViewBar();
       if (this.callbacks.onReturnMenu) this.callbacks.onReturnMenu();
       this.refreshTitleSaveButton();
       show('title');
     };
 
+    this.root.querySelector('#btn-view-battlefield').onclick = () => {
+      if (this.callbacks.onViewBattlefield) this.callbacks.onViewBattlefield();
+    };
+
+    this.root.querySelector('#btn-back-to-results').onclick = () => {
+      if (this.callbacks.onExitBattlefieldView) this.callbacks.onExitBattlefieldView();
+    };
+
     this.root.querySelector('#btn-replay').onclick = () => {
       this.hideEndOverlay();
+      this.hidePostMatchViewBar();
       if (this.callbacks.onReplay) this.callbacks.onReplay();
     };
 
@@ -1175,7 +1203,8 @@ export class UIManager {
     this._hudTdEndless = !!(towerDefense && options.tdEndless);
     const tdCountdown = this.root.querySelector('#td-wave-countdown');
     tdCountdown?.classList.add('hidden');
-    tdCountdown?.classList.toggle('td-wave-countdown-side', tdHqDefense);
+    tdCountdown?.classList.toggle('td-wave-countdown-side', !!towerDefense);
+    this.hideTdBreachAlert();
     this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
     this._hudTowerDefense = towerDefense;
     this._hudTdHqDefense = tdHqDefense;
@@ -1571,26 +1600,45 @@ export class UIManager {
     const sub = this.root.querySelector('#td-wave-countdown-sub');
     const fill = this.root.querySelector('#td-wave-countdown-fill');
     const skipBtn = this.root.querySelector('#btn-td-skip-wave-countdown');
-    if (!countdown) return;
 
     const showCountdown =
       this._hudTowerDefense && hud.phase === 'prepare' && hud.secondsLeft > 0.05;
-    countdown.classList.toggle('hidden', !showCountdown);
-    countdown.classList.toggle('td-wave-countdown-side', !!hud.hqDefense);
-    if (!showCountdown) {
+    countdown?.classList.toggle('hidden', !showCountdown);
+    countdown?.classList.toggle('td-wave-countdown-side', !!this._hudTowerDefense);
+
+    if (showCountdown && countdown) {
+      const s = Math.max(1, Math.ceil(hud.secondsLeft));
+      const pct = Math.min(100, Math.max(0, hud.prepareProgress * 100));
+      if (title) title.textContent = hud.countdownTitle;
+      if (value) value.textContent = String(s);
+      if (sub) sub.textContent = hud.countdownSubtitle;
+      if (fill) fill.style.width = `${pct}%`;
+      card?.classList.toggle('td-wave-countdown-urgent', s <= 5);
+      if (skipBtn) {
+        skipBtn.disabled = !this.callbacks.onSkipTowerDefenseWave;
+      }
+    } else {
       card?.classList.remove('td-wave-countdown-urgent');
-      return;
     }
 
-    const s = Math.max(1, Math.ceil(hud.secondsLeft));
-    const pct = Math.min(100, Math.max(0, hud.prepareProgress * 100));
-    if (title) title.textContent = hud.countdownTitle;
-    if (value) value.textContent = String(s);
-    if (sub) sub.textContent = hud.countdownSubtitle;
-    if (fill) fill.style.width = `${pct}%`;
-    card?.classList.toggle('td-wave-countdown-urgent', s <= 5);
-    if (skipBtn) {
-      skipBtn.disabled = !this.callbacks.onSkipTowerDefenseWave;
+    const breachAlert = this.root.querySelector('#td-breach-alert');
+    const breachCard = this.root.querySelector('#td-breach-alert-card');
+    const breachValue = this.root.querySelector('#td-breach-alert-value');
+    const breachFill = this.root.querySelector('#td-breach-alert-fill');
+    const showBreach =
+      !game?.gameOver &&
+      this._hudTowerDefense &&
+      !hud.hqDefense &&
+      (hud.breachGraceLeft ?? 0) > 0;
+    breachAlert?.classList.toggle('hidden', !showBreach);
+    if (showBreach) {
+      const left = hud.breachGraceLeft ?? 0;
+      const pctLeft = Math.min(100, Math.max(0, (hud.breachGraceProgress ?? 0) * 100));
+      if (breachValue) breachValue.textContent = String(left);
+      if (breachFill) breachFill.style.width = `${pctLeft}%`;
+      breachCard?.classList.toggle('td-breach-alert-critical', left <= 3);
+    } else {
+      breachCard?.classList.remove('td-breach-alert-critical');
     }
   }
 
@@ -1801,6 +1849,10 @@ export class UIManager {
     return this.tabletCamera?.getInput() ?? null;
   }
 
+  clearTabletCameraZoomTap() {
+    this.tabletCamera?.clearZoomTap();
+  }
+
   setTabletTargetMode(on) {
     const btn = this.root.querySelector('#btn-tablet-target');
     if (!btn) return;
@@ -1824,6 +1876,7 @@ export class UIManager {
     this.callbacks.onTabletFireMode?.(false);
     this.updateHqThreat(null);
     this.root.querySelector('#hud').classList.add('hidden');
+    this.hideTdBreachAlert();
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
     this.refreshTitleSaveButton();
@@ -2535,9 +2588,19 @@ export class UIManager {
     `;
   }
 
+  hideTdBreachAlert() {
+    const breachAlert = this.root.querySelector('#td-breach-alert');
+    const breachCard = this.root.querySelector('#td-breach-alert-card');
+    breachAlert?.classList.add('hidden');
+    breachCard?.classList.remove('td-breach-alert-critical');
+  }
+
   showEndOverlay(victory, message, report, canReplay = false) {
     const overlay = this.root.querySelector('#overlay-end');
     if (!overlay) return;
+
+    this.hideTdBreachAlert();
+    this.root.querySelector('#td-wave-countdown')?.classList.add('hidden');
 
     const titleEl = this.root.querySelector('#end-title');
     const msgEl = this.root.querySelector('#end-msg');
@@ -2665,13 +2728,26 @@ export class UIManager {
     `;
   }
 
-  hideEndOverlay() {
+  hideEndOverlay({ clearStats = true } = {}) {
     this.root.querySelector('#overlay-end').classList.add('hidden');
     const statsEl = this.root.querySelector('#end-stats');
-    if (statsEl) {
+    if (!statsEl) return;
+    if (clearStats) {
       statsEl.classList.add('hidden');
       statsEl.innerHTML = '';
     }
+  }
+
+  showPostMatchViewBar() {
+    this.root.querySelector('#hud')?.classList.add('hud-post-match-view');
+    this.root.querySelector('#post-match-view-bar')?.classList.remove('hidden');
+    const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
+    this.tabletCamera?.setVisible(tabletOn);
+  }
+
+  hidePostMatchViewBar() {
+    this.root.querySelector('#hud')?.classList.remove('hud-post-match-view');
+    this.root.querySelector('#post-match-view-bar')?.classList.add('hidden');
   }
 
   getSelectBoxEl() {
