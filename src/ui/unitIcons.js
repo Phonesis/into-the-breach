@@ -9,6 +9,14 @@ const ICONS = {
     <ellipse cx="16" cy="6.8" rx="3.8" ry="1.2" fill="currentColor" opacity="0.35"/>
   </svg>`,
 
+  paratrooper: `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <path d="M6 9c5-4 15-4 20 0-2 3-4 4-10 4s-8-1-10-4z" fill="currentColor" opacity="0.35"/>
+    <circle cx="16" cy="8.5" r="3" fill="currentColor"/>
+    <path d="M12 27V15l4-2.5 4 2.5V27" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M20 16.5l7-1.5v1.6l-6 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <circle cx="27" cy="15.8" r="1.2" fill="currentColor"/>
+  </svg>`,
+
   machineGun: `<svg viewBox="0 0 32 32" aria-hidden="true">
     <path d="M8 24l2-9M24 24l-2-9M16 24V13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
     <circle cx="16" cy="11" r="1.6" fill="currentColor"/>

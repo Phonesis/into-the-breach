@@ -134,7 +134,8 @@ export function resolveWeaponProfile(def, factionId = null) {
     }
     return `howitzer_105_${faction}`;
   }
-  if (def?.type === 'antiTankGun') {
+  if (def?.type === 'antiTankGun' || def?.type === 'paratrooper') {
+    if (def.weaponSound && WEAPON_SAMPLE_FILES[def.weaponSound]) return def.weaponSound;
     if (faction === 'russia' || def.weaponSound === 'at_76_russia') return 'at_76_russia';
     if (def.caliber >= 70) return `at_75_${faction}`;
     return faction === 'germany' ? 'at_75_germany' : `at_57_${faction}`;

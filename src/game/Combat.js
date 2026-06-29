@@ -1,5 +1,5 @@
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
-import { spawnSmokePuff } from '../effects/CombatEffects.js';
+import { spawnSmokePuff, triggerParatrooperAtRecoil } from '../effects/CombatEffects.js';
 import { sampleTerrainHeight, hasReachedMoveDest, advanceUnitOnTerrain } from '../world/Terrain.js';
 import { advanceMovePath } from './MovePath.js';
 
@@ -33,8 +33,17 @@ import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
 
 
-const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar']);
+const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+
+function isParatrooperAtShot(attacker, target, fireOpts = {}) {
+  if (attacker.def.type !== 'paratrooper') return false;
+  if (fireOpts.paratrooperAt === true) return true;
+  if (fireOpts.paratrooperAt === false) return false;
+  if (target.isGround || isSmokeShellTarget(target)) return false;
+  if (!target.def) return false;
+  return ARMOR_TARGET_TYPES.has(target.def.type);
+}
 
 /** Skip VFX for distant AI units to keep frame time stable. */
 function shouldSpawnVfx(attacker, listenerX, listenerZ) {
@@ -103,7 +112,7 @@ export function updateCombat(
   const lz = listener?.z ?? 0;
 
   for (const attacker of aliveUnits) {
-    if (attacker.retreating || attacker.surrendered || attacker._captureExit) continue;
+    if (attacker._dropping || attacker.retreating || attacker.surrendered || attacker._captureExit) continue;
     if (
       attacker.def.type === 'medic' ||
       attacker.def.type === 'engineer' ||
@@ -190,7 +199,11 @@ export function updateCombat(
       hqs,
       options
     );
-    attacker.attackCooldown = 1 / attacker.def.attackSpeed;
+    const paratrooperAt =
+      attacker.def.type === 'paratrooper' && isParatrooperAtShot(attacker, target);
+    attacker.attackCooldown = paratrooperAt
+      ? 1 / (attacker.def.atAttackSpeed ?? attacker.def.attackSpeed)
+      : 1 / attacker.def.attackSpeed;
   }
 }
 
@@ -248,13 +261,34 @@ function fire(
 ) {
   const coax = fireOpts.coax === true && attacker.def.coaxMG;
   const mg = attacker.def.coaxMG;
+  const isParatrooper = attacker.def.type === 'paratrooper';
+  const paratrooperAt = isParatrooper && isParatrooperAtShot(attacker, target, fireOpts);
+  let paratrooperUseMg = false;
+  if (isParatrooper && !paratrooperAt) {
+    attacker._mgVolley = (attacker._mgVolley ?? 0) + 1;
+    paratrooperUseMg = attacker.def.usesMG && attacker._mgVolley % 2 !== 0;
+  }
+
   const weaponRange = coax ? mg.range : attacker.def.range;
-  const weaponDamage = coax ? mg.damage : attacker.def.damage;
-  const attackerType = coax ? 'machineGun' : attacker.def.type;
+  let weaponDamage = coax ? mg.damage : attacker.def.damage;
+  let attackerType = coax ? 'machineGun' : attacker.def.type;
+  let vfxType = coax ? 'machineGun' : attacker.def.type;
+
+  if (isParatrooper && !coax) {
+    if (paratrooperAt) {
+      weaponDamage = attacker.def.damage;
+      attackerType = 'paratrooper';
+      vfxType = 'paratrooperAt';
+    } else {
+      weaponDamage = paratrooperUseMg ? attacker.def.mgDamage : attacker.def.smallArmsDamage;
+      attackerType = paratrooperUseMg ? 'machineGun' : 'infantry';
+      vfxType = attackerType;
+    }
+  } else if (!coax && attacker.def.type === 'antiTankGun') {
+    vfxType = 'tank';
+  }
 
   const map = attacker._mapDef || mapDef;
-  const vfxType =
-    coax ? 'machineGun' : attacker.def.type === 'antiTankGun' ? 'tank' : attacker.def.type;
   const isGroundShot = target.isGround || isSmokeShellTarget(target);
   const impact = isGroundShot
     ? { x: target.position.x, z: target.position.z }
@@ -289,6 +323,7 @@ function fire(
         const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
         const to = { x: missImpact.x, y: toY, z: missImpact.z };
         spawnMuzzleFlash(scene, from, to, vfxType);
+        if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
       }
       if (onFire) {
         onFire({
@@ -297,6 +332,7 @@ function fire(
           def: attacker.def,
           dist,
           coaxFire: coax,
+          paratrooperAtFire: paratrooperAt,
           killed: false,
           targetIsHQ: false,
           targetIsScenery: false,
@@ -311,7 +347,7 @@ function fire(
   }
 
   const falloff =
-    attacker.def.type === 'antiTankGun'
+    attacker.def.type === 'antiTankGun' || paratrooperAt
       ? Math.max(0.4, 1 - (dist / weaponRange) * 0.62)
       : Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
   const paceMult = options.paceDamageMult ?? 1;
@@ -324,8 +360,11 @@ function fire(
   damage *= getRankDamageMultiplier(attacker);
 
   if (attacker.def.antiArmor && !target.isGround && target.def) {
-    const vsArmor = ARMOR_TARGET_TYPES.has(target.def.type);
-    damage *= vsArmor ? attacker.def.antiArmorMult ?? 1.3 : attacker.def.softMult ?? 0.35;
+    const useAntiArmorScaling = !isParatrooper || paratrooperAt;
+    if (useAntiArmorScaling) {
+      const vsArmor = ARMOR_TARGET_TYPES.has(target.def.type);
+      damage *= vsArmor ? attacker.def.antiArmorMult ?? 1.3 : attacker.def.softMult ?? 0.35;
+    }
   }
 
   if (!target.isGround && !isSceneryTarget(target)) {
@@ -395,7 +434,7 @@ function fire(
       target.takeDamage(scalePracticeHqDamage(target, damage, options));
       if (!target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
-          maybeTriggerRetreat(target, hqs, livingUnits, attacker);
+          maybeTriggerRetreat(target, hqs, livingUnits, attacker, options.generalOrders);
         }
       }
       if (target.dead && target.def) recordEnemyKill(attacker, target);
@@ -412,7 +451,7 @@ function fire(
               ? attacker.def.type === 'superHeavyTank'
                 ? 5.5
                 : 4.5
-              : attacker.def.type === 'antiTankGun'
+              : attacker.def.type === 'antiTankGun' || paratrooperAt
                 ? 3.5
               : attacker.def.type === 'armoredCar'
                 ? 3
@@ -432,6 +471,7 @@ function fire(
     const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
     const to = { x: impact.x, y: toY, z: impact.z };
     spawnMuzzleFlash(scene, from, to, vfxType);
+    if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
   }
 
   if (onFire) {
@@ -441,6 +481,7 @@ function fire(
       def: attacker.def,
       dist,
       coaxFire: coax,
+      paratrooperAtFire: paratrooperAt,
       killed: !target.isGround && target.dead,
       targetIsHQ: !target.isGround && !target.def && !isSceneryTarget(target),
       targetIsScenery:
@@ -493,7 +534,7 @@ function applySplashDamage(
       other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
       if (!other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
-          maybeTriggerRetreat(other, hqs, units, attacker);
+          maybeTriggerRetreat(other, hqs, units, attacker, options.generalOrders);
         }
       }
       if (other.dead && other.def) recordEnemyKill(attacker, other);
@@ -503,7 +544,7 @@ function applySplashDamage(
 
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
-    if (unit.dead || unit.surrendered || unit._captureExit) continue;
+    if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit) continue;
 
     if (unit.retreating) {
       const hq = hqs.find((h) => h.team === unit.team && !h.dead);

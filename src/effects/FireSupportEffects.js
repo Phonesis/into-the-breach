@@ -70,8 +70,8 @@ export function spawnStrikeWarning(scene, mapDef, x, z, radius, isBarrage) {
   });
 }
 
-export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5) {
-  const y = sampleTerrainHeight(x, z, mapDef) + 22;
+export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5, altitude = 22) {
+  const y = sampleTerrainHeight(x, z, mapDef) + altitude;
   const group = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(4.5, 0.5, 1.2),

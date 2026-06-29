@@ -66,9 +66,24 @@ const TRACER_PROFILES = {
     glowOpacity: 0.55,
     linger: 0.05,
   },
+  paratrooperAt: {
+    headColor: 0xffcc66,
+    trailColor: 0xff7722,
+    glowColor: 0xff4400,
+    headSize: 0.62,
+    trailRadius: 0.11,
+    glowRadius: 0.17,
+    trailLength: 2.4,
+    minTravel: 0.14,
+    speed: 52,
+    trailOpacity: 0.9,
+    glowOpacity: 0.52,
+    linger: 0.1,
+  },
 };
 
-const SMALL_ARMS_TRACERS = new Set(['infantry', 'machineGun', 'armoredCar', 'sniper']);
+const SMALL_ARMS_TRACERS = new Set(['infantry', 'machineGun', 'armoredCar', 'sniper', 'paratrooperAt']);
+const activeAtRecoil = [];
 
 const flashTextures = new Map();
 const tracerHeadTextures = new Map();
@@ -139,6 +154,69 @@ function disposeEffect(effect) {
 
 export function clearCombatEffects() {
   while (active.length) disposeEffect(active.shift());
+  activeAtRecoil.length = 0;
+}
+
+export function triggerParatrooperAtRecoil(unitMesh) {
+  if (!unitMesh) return;
+  const lead = unitMesh.children.find((c) => c.userData?.squadIndex === 0);
+  const launcher = lead?.userData?.atLauncher;
+  if (!launcher?.tube) return;
+  activeAtRecoil.push({
+    tube: launcher.tube,
+    warhead: launcher.warhead,
+    t: 0,
+    duration: 0.34,
+    kick: 0.16,
+  });
+}
+
+function updateParatrooperAtRecoil(dt) {
+  for (let i = activeAtRecoil.length - 1; i >= 0; i--) {
+    const r = activeAtRecoil[i];
+    r.t += dt;
+    const p = Math.min(1, r.t / r.duration);
+    const kick = r.kick * Math.sin(p * Math.PI);
+    const tube = r.tube;
+    const warhead = r.warhead;
+    if (tube.userData._baseX === undefined) {
+      tube.userData._baseX = tube.position.x;
+      tube.userData._baseY = tube.position.y;
+      tube.userData._baseZ = tube.position.z;
+      tube.userData._baseRotY = tube.rotation.y;
+      if (warhead) {
+        warhead.userData._baseX = warhead.position.x;
+        warhead.userData._baseY = warhead.position.y;
+        warhead.userData._baseZ = warhead.position.z;
+        warhead.visible = true;
+      }
+    }
+    tube.position.x = tube.userData._baseX - kick;
+    tube.position.y = tube.userData._baseY + kick * 0.15;
+    tube.rotation.y = tube.userData._baseRotY + kick * 0.35;
+    if (warhead) {
+      if (p < 0.22) warhead.visible = false;
+      else {
+        warhead.visible = true;
+        warhead.position.x = warhead.userData._baseX - kick * 0.35;
+        warhead.position.y = warhead.userData._baseY + kick * 0.1;
+        warhead.position.z = warhead.userData._baseZ;
+      }
+    }
+    if (r.t >= r.duration) {
+      tube.position.x = tube.userData._baseX;
+      tube.position.y = tube.userData._baseY;
+      tube.position.z = tube.userData._baseZ;
+      tube.rotation.y = tube.userData._baseRotY;
+      if (warhead) {
+        warhead.visible = true;
+        warhead.position.x = warhead.userData._baseX;
+        warhead.position.y = warhead.userData._baseY;
+        warhead.position.z = warhead.userData._baseZ;
+      }
+      activeAtRecoil.splice(i, 1);
+    }
+  }
 }
 
 function orientTracerStripe(mesh, from, to, radius) {
@@ -218,6 +296,7 @@ function updateTracerBullet(fx, dt) {
 
 /** Call once per frame from the game loop. */
 export function updateCombatEffects(dt) {
+  updateParatrooperAtRecoil(dt);
   for (let i = active.length - 1; i >= 0; i--) {
     const fx = active[i];
 
@@ -270,7 +349,15 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle') {
   const toV = toVec3(to);
   const pos = fromV.clone();
   pos.y +=
-    weaponType === 'artillery' ? 1.4 : weaponType === 'tank' ? 1.2 : weaponType === 'mortar' ? 0.9 : 0.85;
+    weaponType === 'artillery'
+      ? 1.4
+      : weaponType === 'tank'
+        ? 1.2
+        : weaponType === 'paratrooperAt'
+          ? 1.05
+          : weaponType === 'mortar'
+            ? 0.9
+            : 0.85;
 
   if (SMALL_ARMS_TRACERS.has(weaponType)) {
     spawnBulletTracer(scene, pos, toV, weaponType);
@@ -281,22 +368,26 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle') {
   const flashColor =
     weaponType === 'artillery' || weaponType === 'mortar'
       ? 0xff6622
-      : weaponType === 'tank'
-        ? 0xffaa55
-        : weaponType === 'machineGun'
-          ? 0xffcc66
-          : 0xffdd88;
+      : weaponType === 'paratrooperAt'
+        ? 0xff8833
+        : weaponType === 'tank'
+          ? 0xffaa55
+          : weaponType === 'machineGun'
+            ? 0xffcc66
+            : 0xffdd88;
 
   const flashSize =
     weaponType === 'artillery'
       ? 1.1
       : weaponType === 'mortar'
         ? 0.5
-        : weaponType === 'tank'
-          ? 0.65
-          : weaponType === 'machineGun'
-            ? 0.32
-            : 0.22;
+        : weaponType === 'paratrooperAt'
+          ? 0.9
+          : weaponType === 'tank'
+            ? 0.65
+            : weaponType === 'machineGun'
+              ? 0.32
+              : 0.22;
 
   const mat = new THREE.SpriteMaterial({
     map: getFlashTexture(flashColor),
@@ -317,12 +408,23 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle') {
     mesh: sprite,
     material: mat,
     materials: [mat],
-    life: weaponType === 'artillery' || weaponType === 'mortar' ? 0.14 : 0.07,
+    life:
+      weaponType === 'artillery' || weaponType === 'mortar'
+        ? 0.14
+        : weaponType === 'paratrooperAt'
+          ? 0.12
+          : 0.07,
     maxLife: 0.14,
   });
 
   if (weaponType === 'tank' || weaponType === 'artillery') {
     spawnSmokePuff(scene, pos, 0.35);
+  } else if (weaponType === 'paratrooperAt') {
+    spawnSmokePuff(scene, pos, 0.55);
+    const backblast = pos.clone();
+    backblast.x -= (toV.x - fromV.x) * 0.04;
+    backblast.z -= (toV.z - fromV.z) * 0.04;
+    spawnSmokePuff(scene, backblast, 0.42);
   }
 }
 

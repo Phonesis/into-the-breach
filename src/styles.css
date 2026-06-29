@@ -1389,13 +1389,24 @@ body,
   margin-bottom: 0.4rem;
 }
 
+.hud-command-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
 .firesupport-panel {
   pointer-events: auto;
   background: rgba(18, 24, 32, 0.92);
   border: 1px solid rgba(201, 100, 60, 0.35);
   border-radius: 6px;
-  padding: 0.55rem 0.75rem;
+  padding: 0.45rem 0.65rem 0.55rem;
   min-width: 168px;
+}
+
+.firesupport-panel.collapsed {
+  padding-bottom: 0.4rem;
 }
 
 .firesupport-panel.targeting {
@@ -1403,11 +1414,54 @@ body,
   box-shadow: 0 0 12px rgba(255, 120, 40, 0.25);
 }
 
-.firesupport-panel h3 {
+.firesupport-header {
+  display: flex;
+  align-items: center;
+}
+
+.firesupport-header-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.firesupport-header-toggle:hover .firesupport-title {
+  color: #f0b878;
+}
+
+.firesupport-title {
   font-size: 0.85rem;
   font-weight: 700;
   color: #e8a060;
-  margin-bottom: 0.4rem;
+  line-height: 1.2;
+}
+
+.firesupport-chevron {
+  font-size: 0.62rem;
+  color: rgba(232, 160, 96, 0.75);
+  transition: transform 0.15s ease;
+}
+
+.firesupport-panel.collapsed .firesupport-chevron {
+  transform: rotate(-90deg);
+}
+
+.firesupport-body {
+  margin-top: 0.4rem;
+}
+
+.firesupport-panel.collapsed .firesupport-body {
+  display: none;
 }
 
 .firesupport-btns {
@@ -1458,6 +1512,142 @@ body,
 }
 
 .firesupport-hint {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  opacity: 0.75;
+  line-height: 1.35;
+  max-width: 14rem;
+}
+
+.generalorders-panel {
+  pointer-events: auto;
+  background: rgba(18, 24, 32, 0.92);
+  border: 1px solid rgba(90, 140, 200, 0.38);
+  border-radius: 6px;
+  padding: 0.45rem 0.65rem 0.55rem;
+  min-width: 168px;
+}
+
+.generalorders-panel.collapsed {
+  padding-bottom: 0.4rem;
+}
+
+.generalorders-panel.order-active {
+  border-color: rgba(120, 180, 255, 0.72);
+  box-shadow: 0 0 10px rgba(80, 140, 220, 0.2);
+}
+
+.generalorders-header {
+  display: flex;
+  align-items: center;
+}
+
+.generalorders-header-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.generalorders-header-toggle:hover .generalorders-title {
+  color: #a8d4ff;
+}
+
+.generalorders-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #7eb8e8;
+  line-height: 1.2;
+}
+
+.generalorders-chevron {
+  font-size: 0.62rem;
+  color: rgba(126, 184, 232, 0.75);
+  transition: transform 0.15s ease;
+}
+
+.generalorders-panel.collapsed .generalorders-chevron {
+  transform: rotate(-90deg);
+}
+
+.generalorders-body {
+  margin-top: 0.4rem;
+}
+
+.generalorders-panel.collapsed .generalorders-body {
+  display: none;
+}
+
+.generalorders-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.generalorders-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  background: rgba(24, 32, 48, 0.88);
+  border: 1px solid rgba(100, 150, 210, 0.35);
+  border-radius: 4px;
+  color: #e8f0fa;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.generalorders-btn:hover:not(:disabled) {
+  background: rgba(36, 52, 72, 0.95);
+  border-color: rgba(130, 180, 240, 0.55);
+}
+
+.generalorders-btn.order-running {
+  border-color: rgba(140, 200, 255, 0.75);
+  background: rgba(40, 60, 90, 0.95);
+}
+
+.generalorders-btn.order-cancellable {
+  border-color: rgba(255, 180, 100, 0.7);
+  background: rgba(52, 38, 28, 0.95);
+}
+
+.generalorders-btn.order-cancellable:hover:not(:disabled) {
+  border-color: rgba(255, 200, 120, 0.85);
+  background: rgba(68, 48, 32, 0.98);
+}
+
+.generalorders-btn.on-cooldown:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.generalorders-btn .go-cd {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: #93c5fd;
+}
+
+.generalorders-btn.on-cooldown .go-cd {
+  color: #f87171;
+}
+
+.generalorders-btn.order-running .go-cd {
+  color: #fde68a;
+}
+
+.generalorders-hint {
   margin-top: 0.4rem;
   font-size: 0.72rem;
   opacity: 0.75;
@@ -1842,20 +2032,73 @@ body,
 }
 
 .defense-panel {
+  pointer-events: auto;
   background: rgba(18, 24, 32, 0.92);
   border: 1px solid rgba(90, 159, 212, 0.35);
   border-radius: 8px;
-  padding: 0.85rem 1rem;
+  padding: 0.45rem 0.65rem 0.55rem;
   min-width: 200px;
   max-width: 280px;
 }
 
-.defense-panel h3 {
+.defense-panel.collapsed {
+  padding-bottom: 0.4rem;
+}
+
+.defense-panel.placing {
+  border-color: rgba(120, 190, 255, 0.72);
+  box-shadow: 0 0 10px rgba(80, 140, 220, 0.2);
+}
+
+.defense-header {
+  display: flex;
+  align-items: center;
+}
+
+.defense-header-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.defense-header-toggle:hover .defense-title {
+  color: #8ec8f0;
+}
+
+.defense-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   letter-spacing: 0.08em;
   color: #5a9fd4;
-  margin-bottom: 0.6rem;
+  line-height: 1.2;
+}
+
+.defense-chevron {
+  font-size: 0.62rem;
+  color: rgba(90, 159, 212, 0.75);
+  transition: transform 0.15s ease;
+}
+
+.defense-panel.collapsed .defense-chevron {
+  transform: rotate(-90deg);
+}
+
+.defense-body {
+  margin-top: 0.45rem;
+}
+
+.defense-panel.collapsed .defense-body {
+  display: none;
 }
 
 .defense-btns {
@@ -2837,6 +3080,8 @@ body,
 #hud.hud-post-match-view #defense-panel,
 #hud.hud-post-match-view #base-build-panel,
 #hud.hud-post-match-view #firesupport-panel,
+#hud.hud-post-match-view #generalorders-panel,
+#hud.hud-post-match-view .hud-command-panels,
 #hud.hud-post-match-view .tablet-camera-actions,
 #hud.hud-post-match-view #tutorial-banner,
 #hud.hud-post-match-view #assault-banner,

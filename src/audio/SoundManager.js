@@ -34,7 +34,15 @@ const INFANTRY_DEATH_FACTIONS = {
   germany: { prefix: 'infantry-death-germany', factions: new Set(['germany']) },
   russia: { prefix: 'infantry-death-russia', factions: new Set(['russia']) },
 };
-const INFANTRY_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer', 'mortar']);
+const INFANTRY_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'sniper',
+  'medic',
+  'engineer',
+  'mortar',
+]);
 
 function infantryDeathVoiceKey(factionId) {
   if (factionId === 'germany') return 'germany';
@@ -155,11 +163,20 @@ export class SoundManager {
     }
   }
 
-  _warmUpNow(vol = 0.03) {
-    if (!this._isRunning()) return false;
-    const buf = this.weaponBuffers.mg ?? this.buffers.impact;
+  _getSilentPrimeBuffer() {
+    if (!this.ctx) return null;
+    if (!this._silentPrimeBuf) {
+      this._silentPrimeBuf = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+    }
+    return this._silentPrimeBuf;
+  }
+
+  /** Prime Web Audio graph after a user gesture — inaudible (no weapon SFX on menus). */
+  _warmUpNow() {
+    if (!this._isRunning() || this._warmedUp) return false;
+    const buf = this._getSilentPrimeBuffer();
     if (!buf) return false;
-    this._playBuffer(buf, { vol, wet: 0, pan: 0, rate: 0.85 });
+    this._playBuffer(buf, { vol: 0.00001, wet: 0, pan: 0, rate: 1 });
     this._warmedUp = true;
     return true;
   }
@@ -390,7 +407,7 @@ export class SoundManager {
   warmUp() {
     this._runWhenReady(() => {
       if (this._warmedUp) return;
-      this._warmUpNow(0.03);
+      this._warmUpNow();
     });
   }
 
@@ -403,7 +420,7 @@ export class SoundManager {
     await this._resumeContext();
     if (this._isRunning()) {
       if (this.inBattle) this._startBattleAudioLock();
-      if (!this._warmedUp) this._warmUpNow(0.03);
+      if (!this._warmedUp) this._warmUpNow();
       this._flushPendingPlays();
     }
     return this._isRunning();

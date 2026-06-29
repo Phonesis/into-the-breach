@@ -1,6 +1,7 @@
 /** In-game Field Manual — rendered into the guide overlay / menu screen. */
 
 import { FACTION_LIST } from './factions.js';
+import { PARATROOPER_DEFS } from './paratroopers.js';
 import { getUnitIconMarkup } from '../ui/unitIcons.js';
 
 export const GAME_GUIDE_SECTIONS = [
@@ -60,7 +61,8 @@ export const GAME_GUIDE_SECTIONS = [
       ['Save', 'HUD top-right — store battle progress in this browser; resume from <strong>Load Saved Game</strong> on the title screen'],
       ['Load Saved Game', 'Title screen — resume a saved battle (faction, map, units, supplies, and timer restored)'],
       ['Surrender', 'Quit battle — counts as defeat, then Main Menu'],
-      ['Strafe / Barrage', 'Arm fire support → LMB on map · Esc cancels'],
+      ['Fire support', 'Strafe, Barrage, Creep, or Airborne → LMB on map · Esc cancels'],
+      ['General Orders', 'HUD panel below Fire Support — Full Retreat or Hold Ground (3 min cooldown each, 30 s effect)'],
       ['Tablet / touch', 'Camera pad: pan, rotate, zoom · <strong>Target</strong> = tap enemy to highlight, tap again or Engage to attack · <strong>Fire</strong> = tap ground/cover (Shift+LMB) · long-press = move/attack · <code>?tablet=1</code> forces tablet UI'],
       ['Cheat mode', 'Type <code>iddqd</code> during a battle, or add <code>?cheat=1</code> to the URL before loading — unlimited supplies and instant builds (<code>iddqd</code> toggles off)'],
     ],
@@ -126,7 +128,7 @@ export const GAME_GUIDE_SECTIONS = [
       'Idle units auto-fire on enemies in range. Damage falls off with distance.',
       'Tanks and <strong>super heavy tanks</strong> carry a <strong>coax machine gun</strong> (~520 m) alongside the main gun — effective vs infantry and soft targets; tanks close on soft targets and use the coax instead of wasting main-gun rounds. Rifles and MGs cannot damage tanks — use AT guns, mortars, tank guns, or artillery. Super heavies are slower, tougher, and hit harder. <strong>Anti-tank guns</strong> (~600 m) are dangerous vs armor at medium range but reload slowly, fall off at long range, and are very weak vs infantry — close under smoke or swarm with riflemen. Mortars, tank guns, and artillery are strong anti-armor.',
       'Armored cars take partial small-arms damage (~32%) but die quickly to snipers, mortars, and tank guns.',
-      'Damaged units may <strong>retreat</strong> toward their HQ (RETREAT tag) and stop attacking until safe. <strong>Medics</strong> nearby reduce retreat chance and slowly heal infantry, MG, mortar, and sniper teams — a <strong>green cross</strong> floats above units being healed. <strong>Engineers</strong> repair nearby vehicles, steady panicked tank and gun crews, and — when within ~16 m of a damaged <strong>HQ</strong> — restore headquarters HP (spanner icon on the engineer and HQ). Vehicles below half HP trail <strong>black engine smoke</strong> until repaired. Defenders in Clear Defenses do not retreat.',
+      'Damaged units may <strong>retreat</strong> toward their HQ (RETREAT tag) and stop attacking until safe. <strong>Medics</strong> nearby reduce retreat chance and slowly heal infantry, MG, mortar, and sniper teams — a <strong>green cross</strong> floats above units being healed. <strong>Engineers</strong> repair nearby vehicles, steady panicked tank and gun crews, and — when within ~16 m of a damaged <strong>HQ</strong> — restore headquarters HP (spanner icon on the engineer and HQ). Vehicles below half HP trail <strong>black engine smoke</strong> until repaired. Defenders in Clear Defenses do not retreat. Use <strong>General Orders</strong> (see below) to pull everyone back or stiffen the line during a push.',
       '<strong>Surrender:</strong> Foot troops and gun crews cut off from allies while taking fire may <strong>surrender</strong> (SURRENDER banner). They hold position, stop shooting, and are ignored by fire. Move a <strong>friendly within ~11 m</strong> to <strong>liberate</strong> them; let an <strong>enemy within ~11 m</strong> <strong>capture</strong> them — captured troops march off the map and count as casualties. Tanks, armored cars, and artillery never surrender. Dug-in Clear Defenses defenders never surrender.',
       '<strong>Veteran &amp; Elite:</strong> <strong>1 enemy kill</strong> promotes a unit to <strong>veteran</strong> (~9% more damage, steadier under fire, modest morale pressure on foes). <strong>3 kills</strong> upgrades them to <strong>elite</strong> (~18% damage, much less likely to retreat, stronger morale shock). Enemies hit by or fighting near veterans/elites are more likely to <strong>retreat or surrender</strong>. Rank persists on that unit; newly spawned reinforcements start fresh.',
       '<strong>Engineer field works:</strong> Select an engineer → <strong>Build sandbags</strong> or <strong>Build bunker</strong> → LMB within ~24 m. The engineer moves to the site and erects the position. <strong>Sandbags</strong> (~11 s) are quick heavy-cover fighting pits. <strong>Bunkers</strong> (~28 s) are sturdier emplacements that <strong>garrison foot troops</strong> (infantry, MG, sniper, medic) — move a squad onto the completed bunker to enter. Garrisoned units take heavy-cover reduction and can fire out; order a move to exit. In <strong>Base Building</strong> mode engineers can only build bunkers (max 6 per base, shared with HQ bunkers). Not available in Tower Defence. Esc cancels placement.',
@@ -154,14 +156,25 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with spatial fly-by audio and MG bursts along your line.',
       '<strong>Artillery barrage</strong> (~95 s cooldown) — Shell warnings, then clustered impacts.',
       '<strong>Creeping barrage</strong> (~148 s cooldown) — Slower recharge; shells advance in lifts along your attack axis and concentrate maximum fire on the point you click.',
+      '<strong>Airborne drop</strong> (~118 s cooldown) — A transport passes overhead; <strong>five elite paratrooper squads</strong> (four men each) descend by parachute on your target zone. They are <strong>not</strong> built from HQ — only called this way. On landing they fight with <strong>rifles and squad LMG</strong> vs infantry and <strong>anti-tank launchers</strong> (Panzerfaust, bazooka, PIAT, RPG-43, etc. by nation) vs tanks and armored cars. AT shots reload slowly (~4.5 s).',
       'Click a strike type, then LMB on valid ground. Esc cancels targeting. Not available in Tower Defence (Emplacements) or during Battle Simulation deployment; available in Tower Defence HQ Defense.',
+    ],
+  },
+  {
+    id: 'generalorders',
+    title: 'General orders',
+    body: [
+      'Command-wide orders from the <strong>General Orders</strong> HUD panel (below Fire Support, collapsible like that panel). One order active at a time; each button has a <strong>3-minute cooldown</strong> and the effect lasts <strong>30 seconds</strong>. Either order can be <strong>cancelled early</strong> — click the same button again (it reads <strong>Cancel Retreat</strong> or <strong>Cancel Hold</strong>) or press <strong>Esc</strong>.',
+      '<strong>Full Retreat</strong> — Every friendly unit is ordered to withdraw toward your HQ immediately. For the full 30 s, any unit not yet at HQ is kept retreating (overrides manual move orders until cancelled or the timer ends). Cancelling stops the withdrawal and troops accept new orders. Use when a push fails or the line must fall back in one motion.',
+      '<strong>Hold Ground</strong> — Troops are ordered to stand firm. Panic-retreat chance is greatly reduced for 30 s but <strong>not eliminated</strong> — battered or isolated units can still break. Cancel if the situation changes and you need normal morale again. Use before a major advance so riflemen and gun crews stay on the objective.',
+      'Not available in Tower Defence (Emplacements) or during Battle Simulation deployment; available in Tower Defence HQ Defense, Standard, Assault, Clear Defenses, Training, and Last Stand.',
     ],
   },
   {
     id: 'units',
     title: 'Unit roster',
     intro:
-      'Eleven unit types per faction (historical names differ). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
+      'Eleven buildable unit types per faction (historical names differ). <strong>Airborne paratroopers</strong> are fire-support only (see Fire support). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
     units: true,
   },
   {
@@ -277,6 +290,15 @@ export const GUIDE_UNIT_CARDS = [
     desc: 'Long-range bombardment; slow but devastating.',
     tags: ['Fire mission', 'Cratering'],
   },
+  {
+    type: 'paratrooper',
+    name: 'Airborne AT team',
+    cost: 'Fire support',
+    build: '—',
+    range: '~400 m',
+    desc: 'Elite paratroopers from Airborne Drop only — rifles/LMG vs soft targets; faction AT launcher vs armor. Cannot be trained at HQ.',
+    tags: ['Fire support', 'Anti-armor', 'Dual weapon'],
+  },
 ];
 
 function escapeHtml(text) {
@@ -323,6 +345,30 @@ function renderFactionHeavyTable() {
         <thead><tr><th>Nation</th><th>Medium tank</th><th>Super heavy</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+    </div>
+  `;
+}
+
+function renderFactionParatrooperTable() {
+  const rows = FACTION_LIST.map((f) => {
+    const para = PARATROOPER_DEFS[f.id];
+    if (!para) return '';
+    return `
+      <tr>
+        <td><img class="guide-faction-flag" src="${escapeHtml(f.flag)}" alt="" width="28" height="18" loading="lazy" /> ${escapeHtml(f.name)}</td>
+        <td>${escapeHtml(para.designation)}</td>
+        <td>${para.rangeMeters ?? para.range * 10} m</td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div class="guide-faction-block">
+      <h4 class="guide-subhead">Faction airborne teams (fire support only)</h4>
+      <table class="guide-table guide-faction-table">
+        <thead><tr><th>Nation</th><th>Designation</th><th>Combat range</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="guide-table-note">Dropped via <strong>Airborne</strong> fire support — five squads per call.</p>
     </div>
   `;
 }
@@ -389,6 +435,7 @@ function renderSection(section) {
     );
     parts.push(renderFactionHeavyTable());
     parts.push(renderFactionAtGunTable());
+    parts.push(renderFactionParatrooperTable());
   }
 
   return `

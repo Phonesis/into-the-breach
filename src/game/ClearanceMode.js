@@ -18,7 +18,7 @@ export const CLEARANCE_STARTING_RESOURCES = 160;
 /** Enemies hold fire briefly so forward defensive lines do not wipe the staging area. */
 export const CLEARANCE_CEASEFIRE_TIME = 10;
 
-const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun']);
+const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun', 'paratrooper']);
 
 /** Tanks ignore rifle/MG fire; dedicated anti-armor weapons hurt. */
 export function getArmorDamageMultiplier(attackerType, target) {

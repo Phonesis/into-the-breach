@@ -40,6 +40,18 @@ export const FIRE_SUPPORT_TYPES = {
     targetDamage: 74,
     hqDamage: 210,
   },
+  airborneDrop: {
+    id: 'airborneDrop',
+    label: 'Airborne Drop',
+    short: 'Airborne',
+    cooldown: 118,
+    warnTime: 3.4,
+    squadCount: 5,
+    dropRadius: 11,
+    dropHeight: 48,
+    descentRate: 12,
+    planeAltitude: 38,
+  },
 };
 
 export const FIRE_SUPPORT_LIST = Object.values(FIRE_SUPPORT_TYPES);

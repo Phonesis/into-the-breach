@@ -3,6 +3,7 @@ import {
   mat,
   buildFactionVehicle,
   buildFactionInfantry,
+  buildFactionParatrooper,
   buildFactionMG,
   buildFactionMortar,
   buildFactionMedic,
@@ -56,6 +57,9 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     built = true;
   } else if (type === 'infantry') {
     buildFactionInfantry(group, body, dark, factionId);
+    built = true;
+  } else if (type === 'paratrooper') {
+    buildFactionParatrooper(group, body, dark, factionId);
     built = true;
   } else if (type === 'sniper') {
     const ghillieTex = getGhillieTexture();
@@ -506,6 +510,7 @@ export const INFANTRY_CORPSE_LINGER_SEC = 90;
 function corpseBodyCount(unitType) {
   switch (unitType) {
     case 'infantry':
+    case 'paratrooper':
       return 2 + Math.floor(Math.random() * 2);
     case 'machineGun':
       return 2;
@@ -708,6 +713,7 @@ export function applyUnitDeathVisual(unit) {
 
   if (
     type === 'infantry' ||
+    type === 'paratrooper' ||
     type === 'machineGun' ||
     type === 'sniper' ||
     type === 'mortar' ||

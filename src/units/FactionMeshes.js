@@ -523,6 +523,80 @@ export function buildFactionInfantry(group, body, dark, factionId) {
   group.userData.hitRadius = 1.2;
 }
 
+export function buildFactionParatrooper(group, body, dark, factionId) {
+  const positions = [
+    { x: 0, z: 0, lead: true },
+    { x: 0.5, z: 0.32, lead: false },
+    { x: -0.46, z: 0.28, lead: false },
+    { x: 0.32, z: -0.48, lead: false },
+  ];
+
+  for (let i = 0; i < positions.length; i++) {
+    const { x: px, z: pz, lead } = positions[i];
+    const soldier = new THREE.Group();
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.38, 0.16), body);
+    torso.position.y = 0.42;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), mat(0xc8a882, { rough: 0.8 }));
+    head.position.y = 0.72;
+
+    let helmet;
+    if (factionId === 'germany') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2), body);
+      helmet.position.y = 0.76;
+    } else if (factionId === 'usa') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), body);
+      helmet.scale.set(1.05, 0.85, 1.05);
+      helmet.position.y = 0.76;
+    } else if (factionId === 'russia') {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), body);
+      helmet.scale.set(1.08, 0.8, 1.08);
+      helmet.position.y = 0.75;
+    } else {
+      helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat(0x4a4a48, { rough: 0.75 }));
+      helmet.scale.set(1.1, 0.75, 1.1);
+      helmet.position.y = 0.75;
+    }
+
+    soldier.add(torso, head, helmet);
+
+    if (lead) {
+      const tubeLen = factionId === 'uk' ? 0.72 : 0.78;
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, tubeLen, 8), dark);
+      tube.name = 'atTube';
+      tube.rotation.z = Math.PI / 2;
+      tube.rotation.y = 0.35;
+      tube.position.set(0.22, 0.44, 0.14);
+      soldier.add(tube);
+
+      const warhead = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), mat(0x2a2a28, { metal: 0.35 }));
+      warhead.name = 'atWarhead';
+      warhead.position.set(0.58, 0.48, 0.18);
+      soldier.add(warhead);
+
+      if (factionId === 'uk') {
+        const piatStock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.22), dark);
+        piatStock.name = 'atStock';
+        piatStock.position.set(-0.08, 0.38, -0.06);
+        soldier.add(piatStock);
+      }
+
+      soldier.userData.atLauncher = { tube, warhead };
+    } else {
+      const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.05, 0.05), dark);
+      rifle.position.set(0.14, 0.44, 0.1);
+      soldier.add(rifle);
+    }
+
+    soldier.position.set(px, 0, pz);
+    soldier.name = 'squadMember';
+    soldier.userData.squadIndex = i;
+    group.add(soldier);
+  }
+
+  group.userData.squadSize = positions.length;
+  group.userData.hitRadius = 1.2;
+}
+
 export function buildFactionSniper(group, body, detail, dark, factionId, ghillieMat) {
   const soldier = new THREE.Group();
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.36, 0.14), body);

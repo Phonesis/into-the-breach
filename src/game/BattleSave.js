@@ -285,6 +285,12 @@ export function captureBattleSave(game, { id = null } = {}) {
     fireSupport: {
       cooldowns: { ...game.fireSupport.cooldowns },
     },
+    generalOrders: {
+      cooldowns: { ...game.generalOrders.cooldowns },
+      active: game.generalOrders.active
+        ? { type: game.generalOrders.active.type, remaining: game.generalOrders.active.remaining }
+        : null,
+    },
     smokeScreens: game.smokeScreens?.serialize?.() ?? [],
     battleStats: {
       losses: game.battleStats.losses,
@@ -811,6 +817,15 @@ export function applyBattleSave(game, snapshot) {
   };
   game.fireSupport.pending = null;
   game.fireSupport.clearPreview();
+  game.generalOrders.cooldowns = {
+    ...Object.fromEntries(
+      Object.keys(game.generalOrders.cooldowns).map((id) => [id, 0])
+    ),
+    ...snapshot.generalOrders?.cooldowns,
+  };
+  game.generalOrders.active = snapshot.generalOrders?.active
+    ? { ...snapshot.generalOrders.active }
+    : null;
   game.smokeShellTargeting = false;
   game.smokeScreens?.restore?.(snapshot.smokeScreens ?? []);
 

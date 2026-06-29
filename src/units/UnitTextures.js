@@ -27,7 +27,15 @@ const VEHICLE_TYPES = new Set([
   'antiTankGun',
 ]);
 
-const INFANTRY_TYPES = new Set(['infantry', 'machineGun', 'mortar', 'sniper', 'medic', 'engineer']);
+const INFANTRY_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'mortar',
+  'sniper',
+  'medic',
+  'engineer',
+]);
 
 const cache = new Map();
 let loader = null;

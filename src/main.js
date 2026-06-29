@@ -109,6 +109,9 @@ const ui = new UIManager(uiRoot, {
   onFireSupport(type) {
     game?.armFireSupport(type);
   },
+  onGeneralOrder(type) {
+    game?.tryGeneralOrder(type);
+  },
   onArmSmokeShell() {
     game?.armSmokeShell();
   },

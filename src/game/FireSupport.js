@@ -8,6 +8,8 @@ import {
   spawnStrafePlane,
   spawnStrikeImpact,
 } from '../effects/FireSupportEffects.js';
+import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
+import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/SoundManager.js';
 
 const PLAYER = 'player';
@@ -89,6 +91,9 @@ export class FireSupportManager {
     if (type === 'barrage') return { scale: def.radius, color: 0xff5533 };
     if (type === 'creepingBarrage') {
       return { scale: def.targetRadius ?? def.creepLength * 0.4, color: 0xff2244 };
+    }
+    if (type === 'airborneDrop') {
+      return { scale: def.dropRadius ?? 11, color: 0x6ec4ff };
     }
     return { scale: def.runLength * 0.5, color: 0xffcc55 };
   }
@@ -250,6 +255,61 @@ export class FireSupportManager {
           },
         });
       }
+    } else if (type === 'airborneDrop') {
+      spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);
+
+      const hq = this.game.hqs.find((h) => h.team === PLAYER);
+      const hx = hq?.position?.x ?? mapDef.playerBase.x;
+      const hz = hq?.position?.z ?? mapDef.playerBase.z;
+      let dx = tx - hx;
+      let dz = tz - hz;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len;
+      dz /= len;
+      const perpX = -dz;
+      const perpZ = dx;
+      const runLen = def.dropRadius * 2.8;
+      const startX = tx - perpX * runLen * 0.5;
+      const startZ = tz - perpZ * runLen * 0.5;
+      const planeSpeed = 34;
+      const flyDuration = runLen / planeSpeed + 0.8;
+
+      this.events.push({
+        at: def.warnTime * 0.35,
+        fn: () => {
+          spawnStrafePlane(
+            scene,
+            mapDef,
+            startX,
+            startZ,
+            perpX,
+            perpZ,
+            flyDuration,
+            def.planeAltitude ?? 38
+          );
+          sounds.startStrafeFlyby({
+            x: startX,
+            z: startZ,
+            velX: perpX * planeSpeed,
+            velZ: perpZ * planeSpeed,
+            duration: flyDuration,
+          });
+        },
+      });
+
+      this.events.push({
+        at: def.warnTime,
+        fn: () => {
+          spawnParatrooperSquad(this.game, tx, tz, {
+            def: getParatrooperDef(this.game.playerFaction?.id),
+            squadCount: def.squadCount,
+            dropRadius: def.dropRadius,
+            dropHeight: def.dropHeight,
+            descentRate: def.descentRate,
+          });
+          sounds.play('spawn');
+        },
+      });
     }
   }
 

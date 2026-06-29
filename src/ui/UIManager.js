@@ -4,6 +4,12 @@ import { MAP_SIZE_LIST, formatMapHudLabel } from '../data/mapSizes.js';
 import { GAME_MODE_LIST, ASSAULT_ROLE_LIST, getProducibleUnits } from '../data/gameModes.js';
 import { DIFFICULTY_LIST, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import { FIRE_SUPPORT_LIST } from '../data/fireSupport.js';
+import { GENERAL_ORDER_LIST } from '../data/generalOrders.js';
+
+const GENERAL_ORDER_CANCEL_LABELS = {
+  fullRetreat: 'Cancel Retreat',
+  holdGround: 'Cancel Hold',
+};
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
@@ -83,6 +89,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
 
+
 const FACTION_ROSTER_LABELS = {
   infantry: 'Infantry',
   medic: 'Medic section',
@@ -116,6 +123,9 @@ export class UIManager {
     this._hudBaseBuilding = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
+    this.fireSupportExpanded = false;
+    this.generalOrdersExpanded = false;
+    this.defenseExpanded = false;
     this.render();
     this.tabletCamera = new TabletCameraControls(this.root);
     this.minimap = new BattleMinimap(this.root, {
@@ -127,6 +137,9 @@ export class UIManager {
     this.showMinimap = this.minimap.visible;
     this._syncFieldIconToggle();
     this._syncFrontlineToggle();
+    this._syncFireSupportCollapse();
+    this._syncGeneralOrdersCollapse();
+    this._syncDefenseCollapse();
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -214,7 +227,6 @@ export class UIManager {
       <div id="screen-map" class="screen interactive hidden">
         <div class="title-block">
           <h1>Select Theater</h1>
-          <p>Fight on battlefields modeled after real WW2 campaigns.</p>
         </div>
         <div class="panel">
           <h2>Choose Map</h2>
@@ -500,17 +512,30 @@ export class UIManager {
             <div class="produce-btns" id="produce-btns"></div>
             <p class="queue-text" id="queue-text">Queue empty</p>
           </div>
-          <div class="defense-panel interactive hidden" id="defense-panel">
-            <h3>Defenses</h3>
-            <div class="defense-btns" id="defense-btns"></div>
-            <p class="defense-selected" id="defense-selected"></p>
-            <button type="button" class="btn btn-primary defense-upgrade-btn interactive hidden" id="btn-defense-upgrade">
-              Upgrade emplacement
-            </button>
-            <button type="button" class="btn btn-secondary defense-resupply-btn interactive hidden" id="btn-defense-resupply">
-              Resupply ammo
-            </button>
-            <p class="defense-hint" id="defense-hint">Click a structure, then click behind the frontline to build.</p>
+          <div class="defense-panel interactive hidden collapsed" id="defense-panel">
+            <div class="defense-header">
+              <button
+                type="button"
+                class="defense-header-toggle interactive"
+                id="btn-toggle-defense"
+                aria-expanded="false"
+                title="Expand defenses panel"
+              >
+                <span class="defense-title">Defenses</span>
+                <span class="defense-chevron" aria-hidden="true">▼</span>
+              </button>
+            </div>
+            <div class="defense-body" id="defense-body">
+              <div class="defense-btns" id="defense-btns"></div>
+              <p class="defense-selected" id="defense-selected"></p>
+              <button type="button" class="btn btn-primary defense-upgrade-btn interactive hidden" id="btn-defense-upgrade">
+                Upgrade emplacement
+              </button>
+              <button type="button" class="btn btn-secondary defense-resupply-btn interactive hidden" id="btn-defense-resupply">
+                Resupply ammo
+              </button>
+              <p class="defense-hint" id="defense-hint">Click a structure, then click behind the frontline to build.</p>
+            </div>
           </div>
           <div class="base-build-panel interactive hidden" id="base-build-panel">
             <h3>Base Construction</h3>
@@ -519,10 +544,43 @@ export class UIManager {
               Build depots near HQ to unlock units. LMB place · Esc cancel.
             </p>
           </div>
-          <div class="firesupport-panel interactive" id="firesupport-panel">
-            <h3>Fire Support</h3>
-            <div class="firesupport-btns" id="firesupport-btns"></div>
-            <p class="firesupport-hint" id="firesupport-hint">Off-map assets on cooldown</p>
+          <div class="hud-command-panels">
+            <div class="firesupport-panel interactive collapsed" id="firesupport-panel">
+              <div class="firesupport-header">
+                <button
+                  type="button"
+                  class="firesupport-header-toggle interactive"
+                id="btn-toggle-firesupport"
+                aria-expanded="false"
+                title="Expand fire support panel"
+                >
+                  <span class="firesupport-title">Fire Support</span>
+                  <span class="firesupport-chevron" aria-hidden="true">▼</span>
+                </button>
+              </div>
+              <div class="firesupport-body" id="firesupport-body">
+                <div class="firesupport-btns" id="firesupport-btns"></div>
+                <p class="firesupport-hint" id="firesupport-hint">Off-map assets on cooldown</p>
+              </div>
+            </div>
+            <div class="generalorders-panel interactive collapsed" id="generalorders-panel">
+              <div class="generalorders-header">
+                <button
+                  type="button"
+                  class="generalorders-header-toggle interactive"
+                id="btn-toggle-generalorders"
+                aria-expanded="false"
+                title="Expand general orders panel"
+                >
+                  <span class="generalorders-title">General Orders</span>
+                  <span class="generalorders-chevron" aria-hidden="true">▼</span>
+                </button>
+              </div>
+              <div class="generalorders-body" id="generalorders-body">
+                <div class="generalorders-btns" id="generalorders-btns"></div>
+                <p class="generalorders-hint" id="generalorders-hint">Command-wide orders — 3 min cooldown each</p>
+              </div>
+            </div>
           </div>
           <p class="hud-hint" id="hud-hint">LMB select · Shift+LMB fire at ground or cover · RMB move/attack</p>
           <button type="button" class="btn-guide-hud interactive" id="btn-guide-hud">Field Manual</button>
@@ -806,6 +864,15 @@ export class UIManager {
       if (this.callbacks.onToggleFrontline) {
         this.callbacks.onToggleFrontline(this.showFrontline);
       }
+    });
+    this.root.querySelector('#btn-toggle-firesupport')?.addEventListener('click', () => {
+      this.setFireSupportExpanded(!this.fireSupportExpanded);
+    });
+    this.root.querySelector('#btn-toggle-generalorders')?.addEventListener('click', () => {
+      this.setGeneralOrdersExpanded(!this.generalOrdersExpanded);
+    });
+    this.root.querySelector('#btn-toggle-defense')?.addEventListener('click', () => {
+      this.setDefenseExpanded(!this.defenseExpanded);
     });
     this.root.querySelector('#btn-guide-close').onclick = () => this.closeGuide();
     this.root.querySelector('#btn-back-title').onclick = () => show('title');
@@ -1211,10 +1278,15 @@ export class UIManager {
     this._hudHasFrontline = assault || towerDefense;
     this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
     this._syncFrontlineToggle();
-    this.root.querySelector('#firesupport-panel')?.classList.toggle(
-      'hidden',
-      (towerDefense && !tdHqDefense) || lastStand
-    );
+    const hideCommandPanels = (towerDefense && !tdHqDefense) || lastStand;
+    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', hideCommandPanels);
+    this.root.querySelector('#generalorders-panel')?.classList.toggle('hidden', hideCommandPanels);
+    this.fireSupportExpanded = false;
+    this.generalOrdersExpanded = false;
+    this.defenseExpanded = false;
+    this._syncFireSupportCollapse();
+    this._syncGeneralOrdersCollapse();
+    this._syncDefenseCollapse();
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense && !tdHqDefense);
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
     this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
@@ -1317,6 +1389,7 @@ export class UIManager {
     }
 
     this.renderFireSupportButtons();
+    this.renderGeneralOrdersButtons();
     this.renderDefenseButtons();
     if (baseBuilding) this.renderBaseBuildButtons();
     this._bindUnitRoster();
@@ -1353,6 +1426,25 @@ export class UIManager {
     btn.title = this.showFrontline
       ? 'Hide red frontline on the map'
       : 'Show red frontline on the map';
+  }
+
+  setDefenseExpanded(on) {
+    this.defenseExpanded = !!on;
+    this._syncDefenseCollapse();
+  }
+
+  _syncDefenseCollapse() {
+    const panel = this.root.querySelector('#defense-panel');
+    const toggle = this.root.querySelector('#btn-toggle-defense');
+    if (!panel) return;
+
+    panel.classList.toggle('collapsed', !this.defenseExpanded);
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', this.defenseExpanded ? 'true' : 'false');
+      toggle.title = this.defenseExpanded
+        ? 'Collapse defenses panel'
+        : 'Expand defenses panel';
+    }
   }
 
   _setProductionPanelVisible(visible) {
@@ -1475,6 +1567,14 @@ export class UIManager {
   updateDefenses(game) {
     const isTd = game?.gameMode === 'towerDefense' || !!game?.towerDefense;
     if (!isTd || !game.defenses) return;
+
+    const panel = this.root.querySelector('#defense-panel');
+    const pending = game.defenses.getPending();
+    if (pending && !this.defenseExpanded) {
+      this.setDefenseExpanded(true);
+    }
+    panel?.classList.toggle('placing', !!pending);
+
     const pts = Math.floor(game.resources.player);
     const label = this.root.querySelector('.resource-label');
     if (label) label.textContent = 'Defense pts';
@@ -1524,7 +1624,6 @@ export class UIManager {
       }
     }
 
-    const pending = game.defenses.getPending();
     const hint = this.root.querySelector('#defense-hint');
     if (hint) {
       if (pending === 'barrage') {
@@ -1789,6 +1888,25 @@ export class UIManager {
       .join('');
   }
 
+  setFireSupportExpanded(on) {
+    this.fireSupportExpanded = !!on;
+    this._syncFireSupportCollapse();
+  }
+
+  _syncFireSupportCollapse() {
+    const panel = this.root.querySelector('#firesupport-panel');
+    const toggle = this.root.querySelector('#btn-toggle-firesupport');
+    if (!panel) return;
+
+    panel.classList.toggle('collapsed', !this.fireSupportExpanded);
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', this.fireSupportExpanded ? 'true' : 'false');
+      toggle.title = this.fireSupportExpanded
+        ? 'Collapse fire support panel'
+        : 'Expand fire support panel';
+    }
+  }
+
   renderFireSupportButtons() {
     const wrap = this.root.querySelector('#firesupport-btns');
     if (!wrap) return;
@@ -1812,6 +1930,10 @@ export class UIManager {
     const panel = this.root.querySelector('#firesupport-panel');
     const hint = this.root.querySelector('#firesupport-hint');
     if (!panel || !manager) return;
+
+    if (manager.pending && !this.fireSupportExpanded) {
+      this.setFireSupportExpanded(true);
+    }
 
     panel.classList.toggle('targeting', !!manager.pending);
 
@@ -1839,8 +1961,100 @@ export class UIManager {
         hint.textContent = 'Click the map for artillery barrage (Esc to cancel)';
       } else if (manager.pending === 'creepingBarrage') {
         hint.textContent = 'Click the map — creeping barrage lifts toward your target (Esc to cancel)';
+      } else if (manager.pending === 'airborneDrop') {
+        hint.textContent = 'Click the map to drop elite paratroopers (Esc to cancel)';
       } else {
         hint.textContent = 'Call off-map support — each strike has a long cooldown';
+      }
+    }
+  }
+
+  setGeneralOrdersExpanded(on) {
+    this.generalOrdersExpanded = !!on;
+    this._syncGeneralOrdersCollapse();
+  }
+
+  _syncGeneralOrdersCollapse() {
+    const panel = this.root.querySelector('#generalorders-panel');
+    const toggle = this.root.querySelector('#btn-toggle-generalorders');
+    if (!panel) return;
+
+    panel.classList.toggle('collapsed', !this.generalOrdersExpanded);
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', this.generalOrdersExpanded ? 'true' : 'false');
+      toggle.title = this.generalOrdersExpanded
+        ? 'Collapse general orders panel'
+        : 'Expand general orders panel';
+    }
+  }
+
+  renderGeneralOrdersButtons() {
+    const wrap = this.root.querySelector('#generalorders-btns');
+    if (!wrap) return;
+    wrap.innerHTML = GENERAL_ORDER_LIST.map(
+      (order) => `
+      <button type="button" class="generalorders-btn interactive" data-go="${order.id}" title="${order.label}">
+        <span class="go-name">${order.short}</span>
+        <span class="go-cd" data-cd="${order.id}">Ready</span>
+      </button>
+    `
+    ).join('');
+
+    wrap.querySelectorAll('.generalorders-btn').forEach((btn) => {
+      btn.onclick = () => {
+        if (this.callbacks.onGeneralOrder) this.callbacks.onGeneralOrder(btn.dataset.go);
+      };
+    });
+  }
+
+  updateGeneralOrders(manager) {
+    const panel = this.root.querySelector('#generalorders-panel');
+    const hint = this.root.querySelector('#generalorders-hint');
+    if (!panel || !manager) return;
+
+    const activeType = manager.getActiveType();
+    const activeRem = manager.getActiveRemaining();
+
+    panel.classList.toggle('order-active', !!activeType);
+
+    for (const order of GENERAL_ORDER_LIST) {
+      const cdEl = panel.querySelector(`[data-cd="${order.id}"]`);
+      const btn = panel.querySelector(`[data-go="${order.id}"]`);
+      const cdRem = manager.getCooldownRemaining(order.id);
+      const ready = manager.isReady(order.id);
+      const isActive = activeType === order.id;
+
+      if (cdEl) {
+        if (isActive) {
+          cdEl.textContent = `${Math.ceil(activeRem)}s`;
+        } else if (ready) {
+          cdEl.textContent = 'Ready';
+        } else {
+          cdEl.textContent = `${Math.ceil(cdRem)}s`;
+        }
+      }
+      if (btn) {
+        const cancellable = isActive;
+        btn.disabled = !ready && !cancellable;
+        btn.classList.toggle('order-running', isActive);
+        btn.classList.toggle('order-cancellable', cancellable);
+        btn.classList.toggle('on-cooldown', !ready && !isActive);
+        const nameEl = btn.querySelector('.go-name');
+        if (nameEl) {
+          nameEl.textContent = cancellable
+            ? (GENERAL_ORDER_CANCEL_LABELS[order.id] ?? `Cancel ${order.short}`)
+            : order.short;
+        }
+      }
+    }
+
+    if (hint) {
+      if (activeType === 'fullRetreat') {
+        hint.textContent = `Full Retreat — units withdrawing (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
+      } else if (activeType === 'holdGround') {
+        hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
+      } else {
+        hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
       }
     }
   }
@@ -2063,6 +2277,7 @@ export class UIManager {
       this._hudLastStandDeploy = false;
       this._setProductionPanelVisible(false);
       this.root.querySelector('#firesupport-panel')?.classList.remove('hidden');
+      this.root.querySelector('#generalorders-panel')?.classList.remove('hidden');
       this._defaultHudHint = LAST_STAND_BATTLE_HINT;
       const hint = this.root.querySelector('#hud-hint');
       if (hint) {
@@ -2077,6 +2292,7 @@ export class UIManager {
     this._hudLastStandDeploy = true;
     this._setProductionPanelVisible(!preset);
     this.root.querySelector('#firesupport-panel')?.classList.add('hidden');
+    this.root.querySelector('#generalorders-panel')?.classList.add('hidden');
     banner?.classList.remove('hidden');
     if (title) {
       title.textContent = preset ? 'Battle groups deployed' : 'Deploy your forces';

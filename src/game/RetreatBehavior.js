@@ -3,6 +3,7 @@ import { hasReachedMoveDest } from '../world/Terrain.js';
 import { getMedicRetreatMultiplier } from './MedicBehavior.js';
 import { getEngineerRetreatMultiplier } from './EngineerBehavior.js';
 import { getRankMoralePressure, getRankRetreatMultiplier } from './EliteBehavior.js';
+import { getCommanderRetreatMultiplier } from './GeneralOrders.js';
 
 const _retreatTex = { tex: null };
 
@@ -74,7 +75,7 @@ export function clearRetreat(unit) {
 }
 
 /** Random panic retreat toward friendly HQ after taking fire. */
-export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null) {
+export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, generalOrders = null) {
   if (unit.dead || unit.retreating || unit.defensiveHold) return;
 
   const hq = hqs.find((h) => h.team === unit.team && !h.dead);
@@ -94,6 +95,7 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null) {
   chance *= getEngineerRetreatMultiplier(unit, units);
   chance *= getRankRetreatMultiplier(unit);
   chance *= getRankMoralePressure(unit, units, attacker);
+  chance *= getCommanderRetreatMultiplier(unit, generalOrders);
 
   if (Math.random() < chance) {
     startRetreat(unit, hq);

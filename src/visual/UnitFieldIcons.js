@@ -8,6 +8,7 @@ const ICON_SCALE = 2.4;
 
 const SHORT_LABELS = {
   infantry: 'INF',
+  paratrooper: 'ABN',
   medic: 'MED',
   engineer: 'ENG',
   machineGun: 'MG',
@@ -22,6 +23,7 @@ const SHORT_LABELS = {
 
 const ICON_HEIGHT = {
   infantry: 2.35,
+  paratrooper: 2.5,
   medic: 2.35,
   engineer: 2.35,
   machineGun: 2.45,

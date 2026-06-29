@@ -180,10 +180,16 @@ import {
   clearDetachedCorpseFalls,
 } from '../units/UnitMeshes.js';
 import { FireSupportManager } from './FireSupport.js';
+import { GeneralOrdersManager } from './GeneralOrders.js';
 import {
   updateFireSupportEffects,
   clearFireSupportEffects,
 } from '../effects/FireSupportEffects.js';
+import {
+  updateParachuteDrops,
+  clearParachuteEffects,
+  clearActiveParachuteDrops,
+} from '../effects/ParachuteEffects.js';
 import {
   captureBattleSave,
   applyBattleSave,
@@ -335,6 +341,7 @@ export class Game {
     this.targetIndicators = new TargetIndicators(this.scene);
 
     this.fireSupport = new FireSupportManager(this);
+    this.generalOrders = new GeneralOrdersManager(this);
     this.smokeScreens = new SmokeScreenManager(this);
     this.smokeShellTargeting = false;
     this.engineerSandbags = new EngineerSandbagManager(this);
@@ -463,6 +470,11 @@ export class Game {
       }
       if (e.code === 'Escape' && this.viewingBattlefield) {
         this.exitPostMatchView();
+      }
+      if (e.code === 'Escape' && this.generalOrders?.isActive()) {
+        if (this.generalOrders.cancelActive()) {
+          this.ui?.updateGeneralOrders(this.generalOrders);
+        }
       }
       if (e.code === 'Escape' && this.fireSupport?.pending) {
         this.fireSupport.cancel();
@@ -695,6 +707,7 @@ export class Game {
     this.battleStats.reset();
     this._battleStatsFinalized = false;
     this.fireSupport.reset();
+    this.generalOrders.reset();
     this.smokeScreens.reset();
     this.smokeShellTargeting = false;
     this.engineerSandbags.reset();
@@ -1030,6 +1043,7 @@ export class Game {
     this.ui.updateDefenses(this);
     this.ui.updateTowerDefense(this);
     this.ui.updateFireSupport(this.fireSupport);
+    this.ui.updateGeneralOrders(this.generalOrders);
     if (this.lastStand) {
       this.ui.updateLastStandDeploy(this);
       if (
@@ -1530,6 +1544,7 @@ export class Game {
     this.scenery = null;
     this.selectedHq = null;
     clearFireSupportEffects();
+    clearParachuteEffects(this.scene);
     sounds.clearVehicleEngines();
     this.fireSupport?.clearPreview();
     disposeFrontlineVisual(this.scene);
@@ -1612,6 +1627,12 @@ export class Game {
     this.fireSupport.arm(type);
     this._syncBattleCursor();
     this.ui?.updateFireSupport(this.fireSupport);
+  }
+
+  tryGeneralOrder(type) {
+    if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
+    if (!this.generalOrders.issue(type)) return;
+    this.ui?.updateGeneralOrders(this.generalOrders);
   }
 
   armSmokeShell() {
@@ -2235,8 +2256,10 @@ export class Game {
     clearCombatEffects();
     clearWreckEffects();
     clearFireSupportEffects();
+    clearActiveParachuteDrops(this.scene);
     clearTerrainDamage(this.scene);
     this.fireSupport?.reset();
+    this.generalOrders?.reset();
     this.smokeScreens?.reset();
     this.smokeShellTargeting = false;
   }
@@ -2309,20 +2332,38 @@ export class Game {
     }
   }
 
-  _recordMinimapCombatFire({ attacker, def, from, to, coaxFire }) {
+  _recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire }) {
     if (!this.running || this.gameOver || !from || !to) return;
+    let weaponType = coaxFire ? 'machineGun' : def?.type ?? 'infantry';
+    if (def?.type === 'paratrooper' && !paratrooperAtFire) {
+      const useMg = def.usesMG && (attacker._mgVolley ?? 0) % 2 !== 0;
+      weaponType = useMg ? 'machineGun' : 'infantry';
+    }
     this.ui?.recordMinimapFire?.({
       fromX: from.x,
       fromZ: from.z,
       toX: to.x,
       toZ: to.z,
       team: attacker?.team,
-      weaponType: coaxFire ? 'machineGun' : def?.type ?? 'infantry',
+      weaponType,
     });
   }
 
-  onCombatFire({ attacker, target, def, dist, killed, targetIsHQ, targetIsScenery, groundImpact, from, to, coaxFire }) {
-    this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire });
+  onCombatFire({
+    attacker,
+    target,
+    def,
+    dist,
+    killed,
+    targetIsHQ,
+    targetIsScenery,
+    groundImpact,
+    from,
+    to,
+    coaxFire,
+    paratrooperAtFire,
+  }) {
+    this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
     const pos = { x: from.x, z: from.z };
     const factionId = attacker.faction?.id;
 
@@ -2342,12 +2383,16 @@ export class Game {
     let profile = resolveWeaponProfile(def, factionId);
     let rate = 0.94 + Math.random() * 0.1;
     let volume = 1;
-
     if (def.type === 'infantry') {
       attacker._mgVolley = (attacker._mgVolley ?? 0) + 1;
       const useMg = def.usesMG && attacker._mgVolley % 2 !== 0;
       if (useMg) profile = mgProfileForFaction(factionId);
       rate = useMg ? 1.02 : 0.98 + Math.random() * 0.06;
+    } else if (def.type === 'paratrooper' && !paratrooperAtFire) {
+      const useMg = def.usesMG && (attacker._mgVolley ?? 0) % 2 !== 0;
+      profile = useMg ? mgProfileForFaction(factionId) : `rifle_${factionId}`;
+      rate = useMg ? 1.02 : 0.98 + Math.random() * 0.06;
+      volume = 0.88;
     } else if (def.type === 'sniper') {
       rate = 0.92 + Math.random() * 0.04;
       volume = 0.9;
@@ -2356,8 +2401,9 @@ export class Game {
     } else if (def.type === 'mortar') {
       rate = 0.72 + Math.random() * 0.1;
       volume = 0.75;
-    } else if (isTankType(def.type) || def.type === 'antiTankGun') {
-      rate = 0.96 + Math.random() * 0.08;
+    } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
+      rate = def.type === 'paratrooper' ? 0.88 + Math.random() * 0.06 : 0.96 + Math.random() * 0.08;
+      volume = def.type === 'paratrooper' ? 0.92 : volume;
     }
 
     sounds.playWeapon(profile, pos, { rate, volume });
@@ -2365,7 +2411,7 @@ export class Game {
     if (def.type === 'artillery' || def.type === 'mortar') {
       const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
       sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
-    } else if (isTankType(def.type) || def.type === 'antiTankGun') {
+    } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
       sounds.playImpact('tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
@@ -2606,6 +2652,7 @@ export class Game {
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,
               smokeScreens: this.smokeScreens,
+              generalOrders: this.generalOrders,
             }
           );
           this._rebuildUnitCaches();
@@ -2656,8 +2703,10 @@ export class Game {
         }
 
         this.fireSupport.update(dt);
+        this.generalOrders.update(dt);
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
+        updateParachuteDrops(dt, this.scene, this.mapDef);
         flushTerrainNormals(this._terrainMesh);
 
         if (fieldHasUnits || hasCorpses) {
@@ -2670,6 +2719,7 @@ export class Game {
           if (this._fireSupportUiAccum >= 0.15) {
             this._fireSupportUiAccum = 0;
             this.ui?.updateFireSupport(this.fireSupport);
+            this.ui?.updateGeneralOrders(this.generalOrders);
           }
 
           if (this.towerDefense) {
