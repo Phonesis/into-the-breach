@@ -44,7 +44,11 @@ export function faceUnitTowardTarget(unit, target, dt) {
     slewTurretToward(unit.mesh, worldYaw, dt);
     return;
   }
-  unit.mesh.rotation.y = worldYaw;
+
+  // Towed guns / foot teams: hull faces travel direction while repositioning.
+  if (unit.moveTarget) return;
+
+  slewHullYaw(unit.mesh, worldYaw, dt, TURRET_SLEW_RATE);
 }
 
 export function faceUnitTowardMovement(unit, nx, nz, dt) {
