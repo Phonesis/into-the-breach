@@ -163,6 +163,7 @@ export class UIManager {
           <button class="btn btn-primary interactive" id="btn-start">Begin</button>
           <button class="btn btn-secondary interactive" id="btn-load-saves">Load Saved Game</button>
           <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
+          <button class="btn btn-secondary interactive" id="btn-about">About</button>
         </div>
       </div>
 
@@ -587,6 +588,29 @@ export class UIManager {
         </div>
       </div>
 
+      <div id="overlay-about" class="overlay-about hidden interactive" aria-hidden="true">
+        <div class="about-box">
+          <h2>About</h2>
+          <dl class="about-details">
+            <div class="about-row">
+              <dt>Author</dt>
+              <dd><a href="https://github.com/Phonesis" target="_blank" rel="noopener noreferrer">Martin Poole - GitHub Profile</a></dd>
+            </div>
+            <div class="about-row">
+              <dt>Version</dt>
+              <dd>1.0</dd>
+            </div>
+            <div class="about-row">
+              <dt>Feedback / bug reports</dt>
+              <dd><a href="mailto:martinppoole@gmail.com">martinppoole@gmail.com</a></dd>
+            </div>
+          </dl>
+          <div class="about-actions">
+            <button type="button" class="btn btn-secondary interactive" id="btn-about-close">Close</button>
+          </div>
+        </div>
+      </div>
+
       <div id="overlay-guide" class="overlay-guide hidden interactive">
         <div class="guide-box">
           <h2>Field Manual</h2>
@@ -852,6 +876,8 @@ export class UIManager {
     };
     this.root.querySelector('#btn-back-saves').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
+    this.root.querySelector('#btn-about')?.addEventListener('click', () => this.openAbout());
+    this.root.querySelector('#btn-about-close')?.addEventListener('click', () => this.closeAbout());
     this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
     this.root.querySelector('#btn-toggle-field-icons')?.addEventListener('click', () => {
       this.setUnitFieldIconsEnabled(!this.showUnitFieldIcons);
@@ -1116,6 +1142,20 @@ export class UIManager {
     });
 
     if (this.callbacks.onMenuVisible) this.callbacks.onMenuVisible(true);
+  }
+
+  openAbout() {
+    const overlay = this.root.querySelector('#overlay-about');
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+
+  closeAbout() {
+    const overlay = this.root.querySelector('#overlay-about');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
   }
 
   openGuide(fromMenu = false) {

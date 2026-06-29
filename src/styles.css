@@ -3424,6 +3424,83 @@ body,
   border-top: 1px solid rgba(140, 155, 170, 0.2);
 }
 
+.overlay-about {
+  position: fixed;
+  inset: 0;
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(8, 12, 18, 0.72);
+  pointer-events: auto;
+}
+
+.overlay-about.hidden {
+  display: none !important;
+}
+
+.about-box {
+  width: min(24rem, 92vw);
+  background: rgba(18, 24, 32, 0.98);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: 8px;
+  padding: 1.35rem 1.5rem 1.15rem;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  text-align: left;
+}
+
+.about-box h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.1em;
+  color: #c9a227;
+  margin-bottom: 1rem;
+}
+
+.about-details {
+  margin: 0;
+}
+
+.about-row {
+  margin-bottom: 0.85rem;
+}
+
+.about-row:last-child {
+  margin-bottom: 0;
+}
+
+.about-row dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  margin-bottom: 0.2rem;
+}
+
+.about-row dd {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #e8e4dc;
+}
+
+.about-row a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.about-row a:hover {
+  text-decoration: underline;
+}
+
+.about-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
 .overlay-guide {
   position: fixed;
   inset: 0;
