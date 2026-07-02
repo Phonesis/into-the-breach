@@ -17,10 +17,21 @@ import {
   getInfantryUniformTexture,
   createCamoMaterial,
 } from './UnitTextures.js';
+import { applyInfantryShadowPolicy } from './InfantryVisuals.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { SQUAD_SIZES } from '../data/squadSizes.js';
 
 export { mat };
+
+const INFANTRY_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'mortar',
+  'sniper',
+  'medic',
+  'engineer',
+]);
 
 const CORPSE_FALL_SEC = 0.45;
 /** @type {Set<THREE.Group>} */
@@ -75,12 +86,16 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     group.userData.hitRadius = 2;
   }
 
-  group.traverse((c) => {
-    if (c.isMesh) {
-      c.castShadow = true;
-      c.receiveShadow = true;
-    }
-  });
+  if (INFANTRY_TYPES.has(type)) {
+    applyInfantryShadowPolicy(group);
+  } else {
+    group.traverse((c) => {
+      if (c.isMesh) {
+        c.castShadow = true;
+        c.receiveShadow = true;
+      }
+    });
+  }
 
   const hitRadii = {
     infantry: 1.6,

@@ -57,7 +57,7 @@ export function faceUnitTowardMovement(unit, nx, nz, dt) {
     slewHullYaw(unit.mesh, yaw, dt);
     return;
   }
-  unit.mesh.rotation.y = yaw;
+  slewHullYaw(unit.mesh, yaw, dt, 9.5);
 }
 
 /** Instant snap for cinematics / deploy facing — keeps turret aligned with hull. */

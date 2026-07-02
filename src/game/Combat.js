@@ -31,6 +31,7 @@ import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
+import { updateInfantryWalkAnimation } from '../units/InfantryVisuals.js';
 
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
@@ -600,49 +601,47 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       }
     }
 
-    if (!unit.moveTarget) continue;
+    if (unit.moveTarget) {
+      const dest = unit.moveTarget;
 
-    const dest = unit.moveTarget;
-
-    const holdWhenFiring = [
-      'tank',
-      'superHeavyTank',
-      'artillery',
-      'antiTankGun',
-      'machineGun',
-      'mortar',
-      'sniper',
-    ];
-    if (
-      !unit._userMoveOrder &&
-      !unit.retreating &&
-      unit.attackOrder &&
-      !unit.attackOrder.dead &&
-      canEngageManualOrder(unit, unit.attackOrder) &&
-      holdWhenFiring.includes(unit.def.type)
-    ) {
-      unit.moveTarget = null;
-      unit._chasingAttack = false;
-      continue;
+      const holdWhenFiring = [
+        'tank',
+        'superHeavyTank',
+        'artillery',
+        'antiTankGun',
+        'machineGun',
+        'mortar',
+        'sniper',
+      ];
+      if (
+        !unit._userMoveOrder &&
+        !unit.retreating &&
+        unit.attackOrder &&
+        !unit.attackOrder.dead &&
+        canEngageManualOrder(unit, unit.attackOrder) &&
+        holdWhenFiring.includes(unit.def.type)
+      ) {
+        unit.moveTarget = null;
+        unit._chasingAttack = false;
+      } else {
+        let moveDt = dt;
+        if (options.getWireSlowMult && unit.team === 'enemy') {
+          moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
+        }
+        advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
+        if (options.scenery && isTankType(unit.def?.type)) {
+          options.scenery.crushAt?.(
+            unit.position.x,
+            unit.position.z,
+            unit.def.type === 'superHeavyTank' ? 2.8 : 2.1
+          );
+        }
+        advanceMovePath(unit, mapDef);
+        if (!unit.moveTarget) unit._chasingAttack = false;
+        unit._mapDef = mapDef;
+      }
     }
 
-    let moveDt = dt;
-    if (options.getWireSlowMult && unit.team === 'enemy') {
-      moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
-    }
-    advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
-    if (options.scenery && isTankType(unit.def?.type)) {
-      options.scenery.crushAt?.(
-        unit.position.x,
-        unit.position.z,
-        unit.def.type === 'superHeavyTank' ? 2.8 : 2.1
-      );
-    }
-    advanceMovePath(unit, mapDef);
-    if (!unit.moveTarget) {
-      unit._chasingAttack = false;
-      continue;
-    }
-    unit._mapDef = mapDef;
+    updateInfantryWalkAnimation(unit, dt);
   }
 }
