@@ -179,6 +179,7 @@ import {
   updateDetachedCorpseFalls,
   clearDetachedCorpseFalls,
 } from '../units/UnitMeshes.js';
+import { updateInfantryWeaponPose } from '../units/InfantryVisuals.js';
 import { FireSupportManager } from './FireSupport.js';
 import { GeneralOrdersManager } from './GeneralOrders.js';
 import {
@@ -2659,6 +2660,10 @@ export class Game {
           if (isTdHqDefenseStyle(this.towerDefense)) {
             enforcePlayerFrontlineClamp(this);
           }
+        }
+
+        for (const u of this._aliveUnits) {
+          updateInfantryWeaponPose(u, dt);
         }
 
         if (this.towerDefense && this.defenses) {

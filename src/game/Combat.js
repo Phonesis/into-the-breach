@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
 import { spawnSmokePuff, triggerParatrooperAtRecoil } from '../effects/CombatEffects.js';
 import { sampleTerrainHeight, hasReachedMoveDest, advanceUnitOnTerrain } from '../world/Terrain.js';
@@ -31,7 +32,12 @@ import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
-import { updateInfantryWalkAnimation } from '../units/InfantryVisuals.js';
+import {
+  getInfantryMuzzleWorldPosition,
+  markInfantryFireAim,
+  updateInfantryWalkAnimation,
+  usesInfantryMuzzleOrigin,
+} from '../units/InfantryVisuals.js';
 
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
@@ -135,6 +141,14 @@ export function updateCombat(
     const canFireMain = target.isGround || isSmokeShellTarget(target)
       ? isPointInRange(attacker, target.position)
       : isInRange(attacker, target);
+    if (
+      canFireMain &&
+      (attacker.def.type === 'infantry' ||
+        attacker.def.type === 'paratrooper' ||
+        attacker.def.type === 'sniper')
+    ) {
+      markInfantryFireAim(attacker, 0.28);
+    }
     const canFireCoax =
       !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
     const coaxHandlesSoft =
@@ -243,6 +257,18 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
   return findNearestEnemyInRange(attacker, acquireTargets, 1);
 }
 
+const _muzzleFrom = new THREE.Vector3();
+
+function resolveMuzzleFrom(attacker, map, vfxType, coax) {
+  if (usesInfantryMuzzleOrigin(attacker)) {
+    getInfantryMuzzleWorldPosition(attacker, vfxType, _muzzleFrom);
+    return { from: _muzzleFrom, exactOrigin: true };
+  }
+  _muzzleFrom.copy(attacker.position);
+  if (map) _muzzleFrom.y = sampleTerrainHeight(_muzzleFrom.x, _muzzleFrom.z, map) + (coax ? 0.95 : 1);
+  return { from: _muzzleFrom, exactOrigin: false };
+}
+
 function fire(
   attacker,
   target,
@@ -319,11 +345,10 @@ function fire(
       const showVfx =
         attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
       if (showVfx && scene) {
-        const from = attacker.position.clone();
-        if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + (coax ? 0.95 : 1);
+        const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
         const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
         const to = { x: missImpact.x, y: toY, z: missImpact.z };
-        spawnMuzzleFlash(scene, from, to, vfxType);
+        spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
         if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
       }
       if (onFire) {
@@ -467,12 +492,18 @@ function fire(
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
 
   if (showVfx && scene) {
-    const from = attacker.position.clone();
-    if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + (coax ? 0.95 : 1);
+    const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
     const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
     const to = { x: impact.x, y: toY, z: impact.z };
-    spawnMuzzleFlash(scene, from, to, vfxType);
+    spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
+    if (
+      attacker.def.type === 'infantry' ||
+      attacker.def.type === 'paratrooper' ||
+      attacker.def.type === 'sniper'
+    ) {
+      markInfantryFireAim(attacker, 0.55);
+    }
   }
 
   if (onFire) {

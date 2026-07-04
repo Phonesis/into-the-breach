@@ -342,22 +342,24 @@ export function updateCombatEffects(dt) {
   }
 }
 
-export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle') {
+export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {}) {
   if (!scene) return;
 
   const fromV = toVec3(from);
   const toV = toVec3(to);
   const pos = fromV.clone();
-  pos.y +=
-    weaponType === 'artillery'
-      ? 1.4
-      : weaponType === 'tank'
-        ? 1.2
-        : weaponType === 'paratrooperAt'
-          ? 1.05
-          : weaponType === 'mortar'
-            ? 0.9
-            : 0.85;
+  if (!opts.exactOrigin) {
+    pos.y +=
+      weaponType === 'artillery'
+        ? 1.4
+        : weaponType === 'tank'
+          ? 1.2
+          : weaponType === 'paratrooperAt'
+            ? 1.05
+            : weaponType === 'mortar'
+              ? 0.9
+              : 0.85;
+  }
 
   if (SMALL_ARMS_TRACERS.has(weaponType)) {
     spawnBulletTracer(scene, pos, toV, weaponType);

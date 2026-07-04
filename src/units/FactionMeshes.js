@@ -453,27 +453,34 @@ export function buildFactionParatrooper(group, _body, dark, factionId) {
       withRifle: !lead,
       extraMeshes: lead
         ? (soldier) => {
+            const weapon = new THREE.Group();
+            weapon.name = 'infantryWeapon';
+            weapon.userData.infantryPart = 'weapon';
+            weapon.userData.weaponKind = 'atLauncher';
+            weapon.position.set(0.06, 0.36, 0.06);
+
             const tubeLen = factionId === 'uk' ? 0.72 : 0.78;
             const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, tubeLen, 8), dark);
             tube.name = 'atTube';
+            tube.userData.infantryPart = 'barrel';
             tube.rotation.z = Math.PI / 2;
-            tube.rotation.y = 0.35;
-            tube.position.set(0.22, 0.44, 0.14);
-            soldier.add(tube);
+            tube.position.set(0.16, 0.08, 0.08);
+            weapon.add(tube);
 
             const warhead = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), mat(0x2a2a28, { metal: 0.35 }));
             warhead.name = 'atWarhead';
-            warhead.position.set(0.58, 0.48, 0.18);
-            soldier.add(warhead);
+            warhead.position.set(0.52, 0.12, 0.12);
+            weapon.add(warhead);
 
             if (factionId === 'uk') {
               const piatStock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.22), dark);
               piatStock.name = 'atStock';
-              piatStock.position.set(-0.08, 0.38, -0.06);
-              soldier.add(piatStock);
+              piatStock.position.set(-0.14, -0.02, -0.12);
+              weapon.add(piatStock);
             }
 
-            soldier.userData.atLauncher = { tube, warhead };
+            soldier.add(weapon);
+            soldier.userData.atLauncher = { tube, warhead, weapon };
           }
         : undefined,
     });
@@ -493,16 +500,25 @@ export function buildFactionSniper(group, _body, _detail, dark, factionId, ghill
     withPack: false,
     withRifle: false,
     extraMeshes: (_soldier, mats) => {
+      const weapon = new THREE.Group();
+      weapon.name = 'infantryWeapon';
+      weapon.userData.infantryPart = 'weapon';
+      weapon.userData.weaponKind = 'sniperRifle';
+      weapon.position.set(0.05, 0.34, 0.05);
+
       const rifleLen = factionId === 'usa' ? 0.82 : 0.75;
       const rifle = new THREE.Mesh(new THREE.BoxGeometry(rifleLen, 0.05, 0.05), mats.dark);
-      rifle.position.set(0.2, 0.38, 0.1);
+      rifle.userData.infantryPart = 'barrel';
+      rifle.position.set(0.14, 0.04, 0.05);
       rifle.rotation.y = 0.2;
-      _soldier.add(rifle);
+      weapon.add(rifle);
 
       const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.24, 8), mats.dark);
       scope.rotation.z = Math.PI / 2;
-      scope.position.set(0.42, 0.42, 0.08);
-      _soldier.add(scope);
+      scope.position.set(0.36, 0.08, 0.03);
+      weapon.add(scope);
+
+      _soldier.add(weapon);
     },
   });
 

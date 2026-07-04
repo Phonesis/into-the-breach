@@ -1,0 +1,9 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - heading "Into the Breach" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Command historically accurate forces. Capture strategic points, build your army, and break the enemy line.
+  - generic [ref=e8]:
+    - button "Begin" [ref=e9] [cursor=pointer]
+    - button "Load Saved Game" [ref=e10] [cursor=pointer]
+    - button "Field Manual" [ref=e11] [cursor=pointer]
+    - button "About" [ref=e12] [cursor=pointer]
