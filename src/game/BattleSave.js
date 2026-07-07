@@ -264,6 +264,7 @@ export function captureBattleSave(game, { id = null } = {}) {
     },
     matchTime: game.matchTime,
     paused: game.paused,
+    autoBuildMode: !!game.autoBuildMode,
     resources: { ...game.resources },
     camera: {
       targetX: game.cameraTarget.x,
@@ -691,6 +692,8 @@ export function applyBattleSave(game, snapshot) {
   game.matchTime = snapshot.matchTime ?? 0;
   game.paused = !!snapshot.paused;
   game.ui?.setGamePaused(game.paused);
+  game.autoBuildMode = !!snapshot.autoBuildMode;
+  game.ui?.setAutoBuildMode(game.autoBuildMode);
   game.resources = { ...snapshot.resources };
 
   if (snapshot.camera) {

@@ -199,6 +199,7 @@ import {
   loadBattleSaveData,
   deleteBattleSave,
 } from './BattleSave.js';
+import { updateAutoBuild } from './AutoBuild.js';
 
 const PLAYER_TEAM = 'player';
 const ENEMY_TEAM = 'enemy';
@@ -250,6 +251,7 @@ export class Game {
     this._minimapUiAccum = 0;
     this.showUnitFieldIcons = true;
     this.seekCoverMode = false;
+    this.autoBuildMode = false;
     this.showFrontline = true;
     this.matchTime = 0;
     this._hqThreat = null;
@@ -1032,6 +1034,7 @@ export class Game {
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.seekCoverMode = this.ui.seekCoverMode;
+    this.autoBuildMode = this.ui.autoBuildMode;
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
     if (isBaseBuildingCampaign(this)) {
@@ -1044,6 +1047,7 @@ export class Game {
     }
     this.ui.syncProductionPanel?.(this);
     this.ui.updateProduction(this);
+    if (this.autoBuildMode) updateAutoBuild(this);
     this.ui.setCheatHud(this.cheatMode);
     if (this.cheatMode) this.ui.showCheatToast(true);
     this.ui.updateBaseBuild(this);
@@ -1316,6 +1320,13 @@ export class Game {
 
   setSeekCoverMode(enabled) {
     this.seekCoverMode = !!enabled;
+  }
+
+  setAutoBuildMode(enabled) {
+    this.autoBuildMode = !!enabled;
+    if (this.autoBuildMode && this.running && !this.gameOver) {
+      updateAutoBuild(this);
+    }
   }
 
   dismountSelectedTankRiders() {
@@ -1957,8 +1968,11 @@ export class Game {
       return true;
     }
 
-    const ok = this.production.enqueue(PLAYER_TEAM, unitType, (cost) =>
-      this.spendResources(PLAYER_TEAM, cost)
+    const ok = this.production.enqueue(
+      PLAYER_TEAM,
+      unitType,
+      (cost) => this.spendResources(PLAYER_TEAM, cost),
+      { resources: this.resources.player }
     );
     if (ok) {
       sounds.play('produce');
@@ -2198,8 +2212,14 @@ export class Game {
     if (queue > 0) {
       return `Your forces: 0 · ${queue} reinforcement${queue === 1 ? '' : 's'} building`;
     }
-    if (this.production.canAffordAny(PLAYER_TEAM, this.resources.player)) {
-      return `Your forces: 0 · ${res} supplies — train reinforcements in the panel below`;
+    if (
+      this.production.canAffordAny(PLAYER_TEAM, this.resources.player, {
+        ignoreSelection: this.autoBuildMode,
+      })
+    ) {
+      return this.autoBuildMode
+        ? `Your forces: 0 · ${res} supplies — auto build will queue reinforcements`
+        : `Your forces: 0 · ${res} supplies — train reinforcements in the panel below`;
     }
     const income = estimateTeamIncomePerSec(PLAYER_TEAM, this);
     if (income > 0) {
@@ -2568,6 +2588,7 @@ export class Game {
         } else if (!this.towerDefense) {
           this.updateCapturePoints(dt);
           this.production.update(dt, this.units);
+          updateAutoBuild(this);
         } else {
           updateTowerDefenseMode(this, dt);
           if (isTdHqDefenseStyle(this.towerDefense)) {

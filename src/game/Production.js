@@ -49,15 +49,18 @@ export class ProductionManager {
     this.buildTimeMult = mult ?? 1;
   }
 
-  canEnqueue(team, unitType, resources) {
+  canEnqueue(team, unitType, resources, options = {}) {
     const faction = this.getFaction(team);
     if (!faction) return false;
     const def = faction.units[unitType];
     if (!def) return false;
-    if (team === 'player' && this.getPlayerProductionUnits) {
+    if (team === 'player' && this.getPlayerProductionUnits && !options.ignoreSelection) {
       const allowed = this.getPlayerProductionUnits(team);
       if (allowed && !allowed.includes(unitType)) return false;
-    } else {
+    } else if (team === 'player' && options.ignoreSelection && this.getUnlockedUnits) {
+      const unlocked = this.getUnlockedUnits(team);
+      if (unlocked && !unlocked.has(unitType)) return false;
+    } else if (team !== 'player') {
       const unlocked = this.getUnlockedUnits?.(team);
       if (unlocked && !unlocked.has(unitType)) return false;
     }
@@ -68,16 +71,21 @@ export class ProductionManager {
     return supply >= def.cost;
   }
 
-  canAffordAny(team, resources) {
+  canAffordAny(team, resources, options = {}) {
     if (this.cheatMode && team === 'player') {
       return this.queues.player.length < MAX_QUEUE;
     }
     const faction = this.getFaction(team);
     if (!faction?.units) return false;
     let types;
-    if (team === 'player' && this.getPlayerProductionUnits) {
+    if (team === 'player' && this.getPlayerProductionUnits && !options.ignoreSelection) {
       const allowed = this.getPlayerProductionUnits(team);
       types = allowed?.length ? allowed.filter((t) => faction.units[t]) : [];
+    } else if (team === 'player' && options.ignoreSelection && this.getUnlockedUnits) {
+      const unlocked = this.getUnlockedUnits(team);
+      types = unlocked
+        ? [...unlocked].filter((t) => faction.units[t])
+        : Object.keys(faction.units);
     } else {
       const unlocked = this.getUnlockedUnits?.(team);
       types = unlocked
@@ -85,12 +93,16 @@ export class ProductionManager {
         : Object.keys(faction.units);
     }
     for (const unitType of types) {
-      if (this.canEnqueue(team, unitType, resources)) return true;
+      if (this.canEnqueue(team, unitType, resources, options)) return true;
     }
     return false;
   }
 
-  enqueue(team, unitType, spendResources) {
+  enqueue(team, unitType, spendResources, options = {}) {
+    const resources = options.resources;
+    if (resources !== undefined && !this.canEnqueue(team, unitType, resources, options)) {
+      return false;
+    }
     const faction = this.getFaction(team);
     const def = faction?.units[unitType];
     if (!def || this.queues[team].length >= MAX_QUEUE) return false;

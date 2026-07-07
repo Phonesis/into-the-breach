@@ -145,6 +145,9 @@ const ui = new UIManager(uiRoot, {
   onToggleSeekCover(enabled) {
     game?.setSeekCoverMode(enabled);
   },
+  onToggleAutoBuild(enabled) {
+    game?.setAutoBuildMode(enabled);
+  },
   onDismountTankRiders() {
     game?.dismountSelectedTankRiders();
   },

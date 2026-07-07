@@ -64,7 +64,13 @@ export function teamIsEliminated(team, game, aliveCount) {
     team === 'player' ? game.resources.player : game.resources.enemy;
 
   if (production.getQueue(team).length > 0) return false;
-  if (production.canAffordAny(team, resources)) return false;
+  if (
+    production.canAffordAny(team, resources, {
+      ignoreSelection: team === 'player' && game.autoBuildMode,
+    })
+  ) {
+    return false;
+  }
 
   // Training: only HQ destruction ends the practice.
   if (game.tutorial) {

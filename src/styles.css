@@ -1403,11 +1403,50 @@ body,
   min-width: 200px;
 }
 
+.production-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
 .production-panel h3 {
   font-size: 0.85rem;
   font-weight: 700;
   color: #c9a227;
-  margin-bottom: 0.4rem;
+  margin: 0;
+}
+
+.auto-build-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #b8b0a0;
+  background: rgba(30, 38, 48, 0.9);
+  border: 1px solid rgba(201, 162, 39, 0.28);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.auto-build-toggle:hover {
+  border-color: rgba(201, 162, 39, 0.5);
+  color: #e8e4dc;
+}
+
+.auto-build-toggle.auto-build-on {
+  color: #c9f0d4;
+  border-color: rgba(74, 180, 110, 0.55);
+  background: rgba(30, 60, 42, 0.85);
+}
+
+.auto-build-state {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
 }
 
 .hud-command-panels {

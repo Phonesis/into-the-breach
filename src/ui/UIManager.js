@@ -94,6 +94,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
 const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
+const AUTO_BUILD_MODE_KEY = 'ww2-rts-auto-build-mode';
 
 
 const FACTION_ROSTER_LABELS = {
@@ -130,6 +131,8 @@ export class UIManager {
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
+    this.autoBuildMode = localStorage.getItem(AUTO_BUILD_MODE_KEY) === '1';
+    this._hudAutoBuildAvailable = false;
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
@@ -524,7 +527,19 @@ export class UIManager {
             </div>
           </div>
           <div class="production-panel interactive hidden" id="production-panel">
-            <h3>Reinforcements</h3>
+            <div class="production-header">
+              <h3>Reinforcements</h3>
+              <button
+                type="button"
+                class="auto-build-toggle interactive hidden"
+                id="btn-toggle-auto-build"
+                title="Automatically queue a balanced mix of units"
+                aria-pressed="false"
+              >
+                <span class="auto-build-label">Auto Build</span>
+                <span class="auto-build-state">Off</span>
+              </button>
+            </div>
             <div class="produce-btns" id="produce-btns"></div>
             <p class="queue-text" id="queue-text">Queue empty</p>
           </div>
@@ -1110,6 +1125,13 @@ export class UIManager {
       this.callbacks.onProduce?.(btn.dataset.type);
     });
 
+    this.root.querySelector('#btn-toggle-auto-build')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.setAutoBuildMode(!this.autoBuildMode);
+      this.callbacks.onToggleAutoBuild?.(this.autoBuildMode);
+    });
+
     const tabletTargetBtn = this.root.querySelector('#btn-tablet-target');
     const tabletFireBtn = this.root.querySelector('#btn-tablet-fire');
     const stopTabletPointer = (e) => e.stopPropagation();
@@ -1313,6 +1335,7 @@ export class UIManager {
     const baseBuilding =
       gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
     this._hudBaseBuilding = baseBuilding;
+    this._hudAutoBuildAvailable = gameMode === 'campaign';
     this._hudLastStand = lastStand;
     this._hudLastStandDeploy = lastStand;
     const banner = this.root.querySelector('#tutorial-banner');
@@ -1352,6 +1375,7 @@ export class UIManager {
     this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
+    this._syncAutoBuildToggle();
 
     const surrenderBtn = this.root.querySelector('#btn-surrender');
     if (surrenderBtn) {
@@ -1475,6 +1499,27 @@ export class UIManager {
     this.seekCoverMode = !!on;
     localStorage.setItem(SEEK_COVER_MODE_KEY, on ? '1' : '0');
     this._syncSeekCoverToggle();
+  }
+
+  setAutoBuildMode(on) {
+    this.autoBuildMode = !!on;
+    localStorage.setItem(AUTO_BUILD_MODE_KEY, on ? '1' : '0');
+    this._syncAutoBuildToggle();
+  }
+
+  _syncAutoBuildToggle() {
+    const btn = this.root.querySelector('#btn-toggle-auto-build');
+    if (!btn) return;
+    const available = this._hudAutoBuildAvailable;
+    btn.classList.toggle('hidden', !available);
+    if (!available) return;
+    btn.classList.toggle('auto-build-on', this.autoBuildMode);
+    btn.setAttribute('aria-pressed', this.autoBuildMode ? 'true' : 'false');
+    btn.title = this.autoBuildMode
+      ? 'Auto build on — queue fills with a balanced mix (click to disable)'
+      : 'Auto build off — click to queue infantry, armor, and support automatically';
+    const stateEl = btn.querySelector('.auto-build-state');
+    if (stateEl) stateEl.textContent = this.autoBuildMode ? 'On' : 'Off';
   }
 
   _syncSeekCoverToggle() {
@@ -2692,16 +2737,22 @@ export class UIManager {
 
     const qEl = this.root.querySelector('#queue-text');
     if (qEl) {
+      const autoHint = this.autoBuildMode && this._hudAutoBuildAvailable;
       if (progress) {
         const pct =
           progress.total <= 0
             ? 100
             : Math.round((1 - progress.remaining / progress.total) * 100);
-        qEl.textContent = `Building ${progress.def.name}… ${pct}% (${queue.length} queued)`;
+        const autoNote = autoHint ? ' · auto build' : '';
+        qEl.textContent = `Building ${progress.def.name}… ${pct}% (${queue.length} queued${autoNote})`;
       } else if (queue.length > 0) {
-        qEl.textContent = `${queue.length} in queue`;
+        qEl.textContent = autoHint
+          ? `${queue.length} in queue · auto build filling slots`
+          : `${queue.length} in queue`;
       } else {
-        qEl.textContent = 'Queue empty — click to train';
+        qEl.textContent = autoHint
+          ? 'Auto build on — queue will fill when supplies allow'
+          : 'Queue empty — click to train';
       }
     }
 
