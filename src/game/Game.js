@@ -68,6 +68,7 @@ import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavio
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
+import { dismountAllRiders, updateTankRiders } from './TankRiders.js';
 import {
   isBaseBuildingCampaign,
   getPlayerProductionUnitTypes,
@@ -248,6 +249,7 @@ export class Game {
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
     this.showUnitFieldIcons = true;
+    this.seekCoverMode = false;
     this.showFrontline = true;
     this.matchTime = 0;
     this._hqThreat = null;
@@ -429,6 +431,9 @@ export class Game {
         this._syncBattleCursor();
       },
       onBattleCursorChange: () => this._syncBattleCursor(),
+      getCoverSystem: () => this.coverSystem,
+      getSeekCoverMode: () => this.seekCoverMode,
+      getGarrisonSources: () => this,
     });
 
     this._placementLayer = document.getElementById('placement-layer');
@@ -1026,6 +1031,7 @@ export class Game {
       this.setTabletTargetMode(true);
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
+    this.seekCoverMode = this.ui.seekCoverMode;
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
     if (isBaseBuildingCampaign(this)) {
@@ -1306,6 +1312,22 @@ export class Game {
     this.showUnitFieldIcons = !!enabled;
     syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
     syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
+  }
+
+  setSeekCoverMode(enabled) {
+    this.seekCoverMode = !!enabled;
+  }
+
+  dismountSelectedTankRiders() {
+    const selected = this._playerAlive.filter((u) => u.selected);
+    for (const tank of selected) {
+      if (!tank.moveTarget) {
+        dismountAllRiders(tank, this.units, this.mapDef);
+      }
+    }
+    this._selectionUiKey = '';
+    const sel = this._playerAlive.filter((u) => u.selected);
+    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
   }
 
   setShowFrontlineEnabled(enabled) {
@@ -2577,6 +2599,13 @@ export class Game {
             : null,
           scenery: this.scenery,
         });
+        if (
+          this._aliveUnits.some(
+            (u) => u._mountedOnTankId || u._pendingMountTankId || u._tankRiderIds?.length
+          )
+        ) {
+          updateTankRiders(this._aliveUnits, dt, this.mapDef, this);
+        }
         if (isTdHqDefenseStyle(this.towerDefense)) {
           enforcePlayerFrontlineClamp(this);
         }

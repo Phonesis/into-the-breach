@@ -13,6 +13,11 @@ const GENERAL_ORDER_CANCEL_LABELS = {
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
+import {
+  canDismountRiders,
+  canHostRiders,
+  getTankRiderIds,
+} from '../game/TankRiders.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
 import {
   DEFENSE_TYPE_LIST,
@@ -88,6 +93,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
+const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
 
 
 const FACTION_ROSTER_LABELS = {
@@ -123,6 +129,7 @@ export class UIManager {
     this._hudBaseBuilding = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
+    this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
@@ -492,6 +499,14 @@ export class UIManager {
               </button>
               <p class="smoke-shell-hint" id="smoke-shell-hint">
                 Alt+Shift+LMB on ground — smoke lasts 60s and blocks enemy line of sight
+              </p>
+            </div>
+            <div class="tank-rider-actions hidden" id="tank-rider-actions">
+              <button type="button" class="btn btn-secondary interactive" id="btn-dismount-riders">
+                Dismount infantry
+              </button>
+              <p class="tank-rider-hint" id="tank-rider-hint">
+                Riders bail out beside the tank. Under fire they dismount automatically.
               </p>
             </div>
             <div class="engineer-build-actions hidden" id="engineer-build-actions">
@@ -884,6 +899,9 @@ export class UIManager {
       if (this.callbacks.onToggleUnitFieldIcons) {
         this.callbacks.onToggleUnitFieldIcons(this.showUnitFieldIcons);
       }
+    });
+    this.root.querySelector('#btn-dismount-riders')?.addEventListener('click', () => {
+      this.callbacks.onDismountTankRiders?.();
     });
     this.root.querySelector('#btn-toggle-frontline')?.addEventListener('click', () => {
       this.setFrontlineVisible(!this.showFrontline);
@@ -1434,6 +1452,7 @@ export class UIManager {
     if (baseBuilding) this.renderBaseBuildButtons();
     this._bindUnitRoster();
     this._syncFieldIconToggle();
+    this._syncSeekCoverToggle();
   }
 
   setUnitFieldIconsEnabled(on) {
@@ -1450,6 +1469,53 @@ export class UIManager {
     btn.title = this.showUnitFieldIcons
       ? 'Hide unit type icons above your forces'
       : 'Show unit type icons above your forces';
+  }
+
+  setSeekCoverMode(on) {
+    this.seekCoverMode = !!on;
+    localStorage.setItem(SEEK_COVER_MODE_KEY, on ? '1' : '0');
+    this._syncSeekCoverToggle();
+  }
+
+  _syncSeekCoverToggle() {
+    const btn = this.root.querySelector('#btn-toggle-seek-cover');
+    if (!btn) return;
+    btn.classList.toggle('order-running', this.seekCoverMode);
+    btn.setAttribute('aria-pressed', this.seekCoverMode ? 'true' : 'false');
+    btn.title = this.seekCoverMode
+      ? 'Infantry move orders seek nearest cover (click to disable)'
+      : 'Move orders go to clicked ground — click to seek nearest cover for infantry';
+    const stateEl = btn.querySelector('.seek-cover-state');
+    if (stateEl) stateEl.textContent = this.seekCoverMode ? 'On' : 'Off';
+    this._syncGeneralOrdersHint();
+  }
+
+  _syncGeneralOrdersHint() {
+    const hint = this.root.querySelector('#generalorders-hint');
+    if (!hint) return;
+    const base = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
+    hint.textContent = this.seekCoverMode
+      ? `${base} · Seek Cover routes infantry to nearby hedges, pits, and bunkers`
+      : base;
+  }
+
+  updateTankRiderActions(units) {
+    const panel = this.root.querySelector('#tank-rider-actions');
+    const hint = this.root.querySelector('#tank-rider-hint');
+    if (!panel) return;
+
+    const tanks = (units ?? []).filter(
+      (u) => canHostRiders(u.def?.type) && canDismountRiders(u)
+    );
+    const riderCount = tanks.reduce((n, t) => n + getTankRiderIds(t).length, 0);
+    const show = tanks.length > 0 && riderCount > 0;
+    panel.classList.toggle('hidden', !show);
+    if (hint && show) {
+      hint.textContent =
+        riderCount === 1
+          ? '1 rider aboard — they will bail out if the tank is hit.'
+          : `${riderCount} riders aboard — they bail out automatically if the tank is hit.`;
+    }
   }
 
   setFrontlineVisible(on) {
@@ -2031,7 +2097,7 @@ export class UIManager {
   renderGeneralOrdersButtons() {
     const wrap = this.root.querySelector('#generalorders-btns');
     if (!wrap) return;
-    wrap.innerHTML = GENERAL_ORDER_LIST.map(
+    const orderBtns = GENERAL_ORDER_LIST.map(
       (order) => `
       <button type="button" class="generalorders-btn interactive" data-go="${order.id}" title="${order.label}">
         <span class="go-name">${order.short}</span>
@@ -2039,12 +2105,35 @@ export class UIManager {
       </button>
     `
     ).join('');
+    const seekCoverBtn = `
+      <button
+        type="button"
+        class="generalorders-btn interactive seek-cover-toggle"
+        id="btn-toggle-seek-cover"
+        title="Move orders seek nearest cover"
+        aria-pressed="false"
+      >
+        <span class="go-name">Seek Cover</span>
+        <span class="go-cd seek-cover-state">Off</span>
+      </button>
+    `;
+    wrap.innerHTML = orderBtns + seekCoverBtn;
 
-    wrap.querySelectorAll('.generalorders-btn').forEach((btn) => {
+    wrap.querySelectorAll('.generalorders-btn[data-go]').forEach((btn) => {
       btn.onclick = () => {
         if (this.callbacks.onGeneralOrder) this.callbacks.onGeneralOrder(btn.dataset.go);
       };
     });
+    const seekBtn = wrap.querySelector('#btn-toggle-seek-cover');
+    if (seekBtn) {
+      seekBtn.onclick = () => {
+        this.setSeekCoverMode(!this.seekCoverMode);
+        if (this.callbacks.onToggleSeekCover) {
+          this.callbacks.onToggleSeekCover(this.seekCoverMode);
+        }
+      };
+    }
+    this._syncSeekCoverToggle();
   }
 
   updateGeneralOrders(manager) {
@@ -2094,7 +2183,7 @@ export class UIManager {
       } else if (activeType === 'holdGround') {
         hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
       } else {
-        hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
+        this._syncGeneralOrdersHint();
       }
     }
   }
@@ -2725,6 +2814,7 @@ export class UIManager {
       `;
       this.updateEngineerBuild(game);
       this.updateSmokeShell(game);
+      this.updateTankRiderActions([]);
       return;
     }
 
@@ -2748,6 +2838,7 @@ export class UIManager {
       `;
       this.updateEngineerBuild(game);
       this.updateSmokeShell(game);
+      this.updateTankRiderActions(units);
       return;
     }
 
@@ -2759,6 +2850,7 @@ export class UIManager {
       this._renderCoverBanner([]);
       this.updateEngineerBuild(game);
       this.updateSmokeShell(game);
+      this.updateTankRiderActions(units);
       return;
     }
 
@@ -2806,20 +2898,30 @@ export class UIManager {
       const surrenderBlock = u.surrendered
         ? '<p class="unit-surrender-status"><strong>Surrendered</strong> — move a friendly unit within ~11 m to liberate; enemy contact captures them.</p>'
         : '';
+      const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
+      const riderBlock =
+        riderN > 0
+          ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — RMB friendly infantry onto this tank to mount more; dismount when stationary.</p>`
+          : canHostRiders(u.def?.type)
+            ? '<p class="unit-support-status">RMB with infantry selected to mount riders on this tank.</p>'
+            : '';
       body.innerHTML = `
         <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
         ${surrenderBlock}
+        ${riderBlock}
         ${coverBlock}
       `;
       this.updateEngineerBuild(game);
       this.updateSmokeShell(game);
+      this.updateTankRiderActions([u]);
       return;
     }
 
     this.updateEngineerBuild(game);
     this.updateSmokeShell(game);
+    this.updateTankRiderActions(units);
 
     const types = {};
     for (const u of units) types[u.type] = (types[u.type] || 0) + 1;

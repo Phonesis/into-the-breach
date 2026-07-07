@@ -31,6 +31,7 @@ import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
+import { isUnitMounted } from './TankRiders.js';
 import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
 import {
   getInfantryMuzzleWorldPosition,
@@ -577,6 +578,7 @@ function applySplashDamage(
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit) continue;
+    if (isUnitMounted(unit)) continue;
 
     if (unit.retreating) {
       const hq = hqs.find((h) => h.team === unit.team && !h.dead);

@@ -142,6 +142,12 @@ const ui = new UIManager(uiRoot, {
   onToggleFrontline(enabled) {
     game?.setShowFrontlineEnabled(enabled);
   },
+  onToggleSeekCover(enabled) {
+    game?.setSeekCoverMode(enabled);
+  },
+  onDismountTankRiders() {
+    game?.dismountSelectedTankRiders();
+  },
   onMinimapPan(x, z) {
     game?.panCameraTo(x, z);
   },

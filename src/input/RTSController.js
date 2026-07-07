@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import { spreadGroupMoveDestinations } from '../game/GroupMovement.js';
+import {
+  canHostRiders,
+  canRideTanks,
+  issueMountOrder,
+} from '../game/TankRiders.js';
+import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder, canSmokeShellOrder } from './BattleCursor.js';
@@ -44,6 +50,9 @@ export class RTSController {
     onHoverTarget,
     onOrder,
     onBattleCursorChange,
+    getCoverSystem,
+    getSeekCoverMode,
+    getGarrisonSources,
   }) {
     this.camera = camera;
     this.domElement = domElement;
@@ -79,6 +88,9 @@ export class RTSController {
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
     this.onBattleCursorChange = onBattleCursorChange;
+    this.getCoverSystem = getCoverSystem ?? (() => null);
+    this.getSeekCoverMode = getSeekCoverMode ?? (() => false);
+    this.getGarrisonSources = getGarrisonSources ?? (() => null);
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -831,16 +843,46 @@ export class RTSController {
       }
     }
 
+    const player = this.getPlayerTeam();
+    const friendlyTarget = this.raycastUnit(player);
+    const riders = selected.filter((u) => canRideTanks(u.def?.type));
+    if (
+      friendlyTarget &&
+      canHostRiders(friendlyTarget.def?.type) &&
+      riders.length > 0 &&
+      riders.length === selected.length
+    ) {
+      const mounted = issueMountOrder(
+        riders,
+        friendlyTarget,
+        this.getUnits(),
+        this.getGarrisonSources?.()
+      );
+      if (mounted > 0) {
+        if (this.onOrder) this.onOrder('mount', riders);
+        return;
+      }
+    }
+
     const ground = this.raycastGround();
     if (!ground) return;
 
     const clamped = this.clampDeployPoint(ground.x, ground.z);
 
     const mapDef = this.getMapDef();
+    const coverSystem = this.getCoverSystem?.();
+    const seekCover = !!this.getSeekCoverMode?.();
     const destinations = spreadGroupMoveDestinations(selected, clamped.x, clamped.z);
     for (const { unit, x, z } of destinations) {
       unit.clearAttackOrder();
-      const pt = this.clampDeployPoint(x, z);
+      let destX = x;
+      let destZ = z;
+      if (seekCover && coverSystem) {
+        const coverDest = resolveSeekCoverDestination(unit, x, z, coverSystem);
+        destX = coverDest.x;
+        destZ = coverDest.z;
+      }
+      const pt = this.clampDeployPoint(destX, destZ);
       unit.moveTo(pt.x, pt.z, mapDef, true);
     }
     if (this.onOrder) this.onOrder('move', selected);

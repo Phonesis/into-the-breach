@@ -16,6 +16,7 @@ import {
   peekEngineerSiteNextId,
 } from './EngineerSandbags.js';
 import { exportAIState, importAIState } from './AI.js';
+import { restoreTankRiderLinks } from './TankRiders.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { createSandbagEmplacementGroup } from '../world/SandbagEmplacement.js';
 import {
@@ -227,6 +228,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       retreating: u.retreating,
       surrendered: u.surrendered,
       _garrisonBunkerId: u._garrisonBunkerId ?? null,
+      _mountedOnTankId: u._mountedOnTankId ?? null,
+      _pendingMountTankId: u._pendingMountTankId ?? null,
+      _tankRiderIds: u._tankRiderIds?.length ? [...u._tankRiderIds] : null,
       _sandbagSite: u._sandbagSite ?? null,
       attackCooldown: u.attackCooldown ?? 0,
       mgCooldown: u.mgCooldown ?? 0,
@@ -861,6 +865,9 @@ export function applyBattleSave(game, snapshot) {
     unit.retreating = !!uData.retreating;
     unit.surrendered = !!uData.surrendered;
     unit._garrisonBunkerId = null;
+    unit._mountedOnTankId = null;
+    unit._pendingMountTankId = null;
+    unit._tankRiderIds = uData._tankRiderIds ? [...uData._tankRiderIds] : null;
     unit._sandbagSite = uData._sandbagSite ?? null;
     unit.attackCooldown = uData.attackCooldown ?? 0;
     unit.mgCooldown = uData.mgCooldown ?? 0;
@@ -910,6 +917,15 @@ export function applyBattleSave(game, snapshot) {
     unit._movePath = null;
     if (unit.mesh) unit.mesh.visible = false;
   }
+
+  for (const uData of snapshot.units ?? []) {
+    if (!uData._mountedOnTankId && !uData._pendingMountTankId) continue;
+    const unit = unitById.get(uData.id);
+    if (!unit) continue;
+    unit._mountedOnTankId = uData._mountedOnTankId ?? null;
+    unit._pendingMountTankId = uData._pendingMountTankId ?? null;
+  }
+  restoreTankRiderLinks(game.units, game.mapDef);
 
   if (snapshot.selectedHqTeam) {
     const hq = game.hqs.find((h) => h.team === snapshot.selectedHqTeam && !h.dead);

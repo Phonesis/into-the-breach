@@ -521,9 +521,18 @@ function animateSoldierWalk(soldier, phase, blend) {
   });
 }
 
+export function resetInfantryWalkPose(unit) {
+  if (!unit?.mesh) return;
+  unit._walkBlend = 0;
+  unit.mesh.traverse((child) => {
+    if (child.name === 'squadMember') restoreWalkRest(child);
+  });
+}
+
 /** Procedural march cycle for foot units while repositioning. */
 export function updateInfantryWalkAnimation(unit, dt) {
   if (!unit?.mesh || unit.dead || unit.surrendered || unit._captureExit || unit._dropping) return;
+  if (unit._mountedOnTankId) return;
   if (!INFANTRY_WALK_TYPES.has(unit.def?.type)) return;
 
   const wantsMove = !!unit.moveTarget;

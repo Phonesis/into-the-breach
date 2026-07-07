@@ -118,6 +118,15 @@ export class CoverSystem {
 
   updateUnits(units) {
     for (const u of units) {
+      if (u._mountedOnTankId) {
+        u.inCover = false;
+        u.coverMult = 1;
+        u.coverLabel = null;
+        u.coverTier = null;
+        setCoverVisual(u.mesh, false);
+        removeCoverMarker(u);
+        continue;
+      }
       if (u.dead || !COVER_UNIT_TYPES.has(u.def?.type)) {
         u.inCover = false;
         u.coverMult = 1;

@@ -174,6 +174,7 @@ export class Unit {
     this.clearAttackOrder();
     this._userMoveOrder = playerOrder;
     this._chasingAttack = false;
+    if (playerOrder) this._pendingMountTankId = null;
 
     if (mapDef && playerOrder) {
       const { pathSegment } = getMoveReachConfig(this.def.type);

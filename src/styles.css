@@ -886,6 +886,27 @@ body,
   color: rgba(200, 210, 220, 0.82);
 }
 
+.tank-rider-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(120, 150, 180, 0.28);
+}
+
+.tank-rider-actions.hidden {
+  display: none;
+}
+
+.tank-rider-actions .btn {
+  width: 100%;
+}
+
+.tank-rider-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: rgba(200, 210, 220, 0.82);
+}
+
 .engineer-build-actions {
   margin-top: 0.55rem;
   padding-top: 0.5rem;
