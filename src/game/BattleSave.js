@@ -693,7 +693,7 @@ export function applyBattleSave(game, snapshot) {
   game.paused = !!snapshot.paused;
   game.ui?.setGamePaused(game.paused);
   game.autoBuildMode = !!snapshot.autoBuildMode;
-  game.ui?.setAutoBuildMode(game.autoBuildMode);
+  game.ui?.setAutoBuildMode(game.autoBuildMode, game.campaignStyle);
   game.resources = { ...snapshot.resources };
 
   if (snapshot.camera) {

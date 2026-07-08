@@ -66,6 +66,11 @@ export function getDeployRadius(mapDef) {
   return Math.round(32 * (mapDef?.sizeScale ?? 1));
 }
 
+/** Tighter radius for staging move orders — keeps troops near HQ, not toward capture points. */
+export function getStagingMoveRadius(mapDef) {
+  return Math.round(14 * (mapDef?.sizeScale ?? 1));
+}
+
 export function formatMapHudLabel(mapDef) {
   if (!mapDef) return '—';
   const preset = getMapSizePreset(mapDef.mapSize ?? 'medium');

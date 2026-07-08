@@ -17,6 +17,7 @@ import {
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
+import { isTeamStagingPhase } from './OpeningDeployZone.js';
 
 let nextId = 1;
 
@@ -101,6 +102,7 @@ export class BaseBuildingManager {
   arm(typeId) {
     const def = BASE_BUILDING_TYPES[typeId];
     if (!def || !this.active) return false;
+    if (isTeamStagingPhase(this.game, 'player')) return false;
     this.game.fireSupport?.cancel();
     this.game.engineerSandbags?.cancel();
     this.game.defenses?.cancelPending?.();
@@ -155,8 +157,10 @@ export class BaseBuildingManager {
     const def = BASE_BUILDING_TYPES[typeId];
     if (!def) return 'Unknown structure.';
 
-    if (this.game._isPlayerDeployZoneActive?.() && team === 'player') {
-      return 'Wait for battle launch before expanding the base.';
+    if (isTeamStagingPhase(this.game, team)) {
+      return team === 'player'
+        ? 'Wait for battle launch before expanding the base.'
+        : 'Staging phase';
     }
 
     const hq = this._hqPos(team);
@@ -397,6 +401,12 @@ export class BaseBuildingManager {
 
     const finished = [];
     for (const site of this.sites) {
+      if (isTeamStagingPhase(this.game, site.team)) {
+        if (site.marker) {
+          updateBaseBuildingConstructionVisual(site.marker, site.progress, 0);
+        }
+        continue;
+      }
       site.progress += dt / Math.max(site.def.buildTime, 1);
       if (site.marker) {
         updateBaseBuildingConstructionVisual(site.marker, site.progress, dt);
@@ -414,10 +424,12 @@ export class BaseBuildingManager {
       this.game.ui?.updateBaseBuild?.(this.game);
     }
 
-    this._enemyBuildTimer -= dt;
-    if (this._enemyBuildTimer <= 0) {
-      this._enemyBuildTimer = 18 + Math.random() * 14;
-      this._tryEnemyBuild();
+    if (!isTeamStagingPhase(this.game, 'enemy')) {
+      this._enemyBuildTimer -= dt;
+      if (this._enemyBuildTimer <= 0) {
+        this._enemyBuildTimer = 18 + Math.random() * 14;
+        this._tryEnemyBuild();
+      }
     }
   }
 

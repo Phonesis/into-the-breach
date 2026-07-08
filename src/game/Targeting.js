@@ -2,6 +2,11 @@
 
 import { isTankType } from '../units/VehicleTypes.js';
 
+/** Enemy or friendly headquarters (not a unit def, not ground fire). */
+export function isHqTarget(target) {
+  return !!(target && !target.dead && target.mesh?.userData?.hq === target);
+}
+
 /** Soft targets tanks engage with coax MG (main gun reserved for armor / structures). */
 export const COAX_SOFT_TARGET_TYPES = new Set([
   'infantry',
@@ -77,6 +82,10 @@ export function isSmokeShellTarget(target) {
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;
   if (target.isGround || target.isSmokeShell) return isPointInRange(unit, target.position);
+  if (isHqTarget(target)) {
+    if (isInRange(unit, target)) return true;
+    return isTankType(unit.def?.type) && !!unit.def?.coaxMG && isInCoaxRange(unit, target);
+  }
   return tankCanEngageTarget(unit, target);
 }
 
@@ -101,7 +110,7 @@ export function getStandoffPosition(attacker, target, fraction = null) {
   const dz = tz - attacker.position.z;
   const dist = Math.sqrt(dx * dx + dz * dz) || 1;
   const desired = fraction ?? getStandoffRange(attacker, target);
-  const inset = target.isScenery ? (target.hitRadius ?? 2) : 0;
+  const inset = target.isScenery ? (target.hitRadius ?? 2) : isHqTarget(target) ? 5.5 : 0;
   const stopDist = Math.max(desired, 3 + inset);
   const ratio = dist > stopDist ? (dist - stopDist) / dist : 0;
   return {

@@ -40,7 +40,7 @@ export function updateAI({
   clearance,
   campaign,
   difficulty,
-  openingCeasefire = false,
+  enemyStagingPhase = false,
   lastStand = false,
   lastStandTactic = null,
   lastStandFlankSide = 1,
@@ -48,11 +48,11 @@ export function updateAI({
   const d = difficulty ?? { aiTickMult: 1, aiProdMult: 1, captureChanceMult: 1, attackAggressionMult: 1 };
 
   aiTimer -= dt;
-  if (!openingCeasefire) {
+  if (!enemyStagingPhase) {
     aiProdTimer -= dt;
   }
 
-  if (!openingCeasefire && !clearance && aiProdTimer <= 0 && production && enemyResources !== undefined) {
+  if (!enemyStagingPhase && !clearance && aiProdTimer <= 0 && production && enemyResources !== undefined) {
     const prodDelayMult = Math.min(d.aiProdMult ?? 1, 1.25);
     aiProdTimer =
       (AI_PROD_MIN + Math.random() * (AI_PROD_MAX - AI_PROD_MIN)) * prodDelayMult;
@@ -102,7 +102,7 @@ export function updateAI({
       continue;
     }
 
-    if (openingCeasefire) {
+    if (enemyStagingPhase) {
       unit.clearAttackOrder();
       unit.moveTarget = null;
       continue;

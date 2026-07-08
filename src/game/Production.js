@@ -15,12 +15,14 @@ export class ProductionManager {
     onQueueChange,
     getUnlockedUnits = null,
     getPlayerProductionUnits = null,
+    isProductionBlocked = null,
   }) {
     this.getFaction = getFaction;
     this.getTeam = getTeam;
     this.getSpawnPos = getSpawnPos;
     this.getUnlockedUnits = getUnlockedUnits;
     this.getPlayerProductionUnits = getPlayerProductionUnits;
+    this.isProductionBlocked = isProductionBlocked;
     this.getScene = getScene;
     this.getMapDef = getMapDef;
     this.onSpawn = onSpawn;
@@ -50,6 +52,7 @@ export class ProductionManager {
   }
 
   canEnqueue(team, unitType, resources, options = {}) {
+    if (this.isProductionBlocked?.(team)) return false;
     const faction = this.getFaction(team);
     if (!faction) return false;
     const def = faction.units[unitType];
@@ -123,6 +126,7 @@ export class ProductionManager {
     if (!unitsArray || !Array.isArray(unitsArray)) return;
 
     for (const team of ['player', 'enemy']) {
+      if (this.isProductionBlocked?.(team)) continue;
       const q = this.queues[team];
       if (q.length === 0) continue;
 

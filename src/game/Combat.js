@@ -18,6 +18,7 @@ import {
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
   isSmokeShellTarget,
+  isHqTarget,
 } from './Targeting.js';
 import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
@@ -243,6 +244,7 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
         !isSceneryTarget(attacker.attackOrder) &&
         !isDefenseTarget(attacker.attackOrder) &&
         !isBaseBuildingTarget(attacker.attackOrder) &&
+        !isHqTarget(attacker.attackOrder) &&
         (attacker.attackOrder.team === attacker.team ||
           attacker.attackOrder.surrendered ||
           attacker.attackOrder._captureExit)
@@ -405,6 +407,9 @@ function fire(
     damage *= getDefenseDamageMultForAttacker(attackerType);
   }
   if (isBaseBuildingTarget(target)) {
+    damage *= getStructureDamageMultiplier(attackerType);
+  }
+  if (isHqTarget(target)) {
     damage *= getStructureDamageMultiplier(attackerType);
   }
 
@@ -622,7 +627,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         const rangeSlack =
           unit.attackOrder.isScenery ||
           isDefenseTarget(unit.attackOrder) ||
-          isBaseBuildingTarget(unit.attackOrder)
+          isBaseBuildingTarget(unit.attackOrder) ||
+          isHqTarget(unit.attackOrder)
             ? 1.05
             : 0.88;
         const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG

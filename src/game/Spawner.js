@@ -62,35 +62,13 @@ const TUTORIAL_ARMY = [
   { type: 'artillery', count: 1, spread: 4 },
 ];
 
-const CAMPAIGN_PLAYER_ARMY = [
-  { type: 'infantry', count: 5, spread: 6 },
-  { type: 'machineGun', count: 1, spread: 5 },
-  { type: 'sniper', count: 1, spread: 5 },
-  { type: 'mortar', count: 1, spread: 5 },
-  { type: 'armoredCar', count: 1, spread: 5 },
-  { type: 'antiTankGun', count: 1, spread: 4 },
-  { type: 'tank', count: 2, spread: 5 },
-  { type: 'artillery', count: 1, spread: 4 },
-];
-
-const CAMPAIGN_ENEMY_ARMY = [
-  { type: 'infantry', count: 5, spread: 6 },
-  { type: 'machineGun', count: 1, spread: 5 },
-  { type: 'sniper', count: 1, spread: 5 },
-  { type: 'mortar', count: 1, spread: 5 },
-  { type: 'armoredCar', count: 1, spread: 5 },
-  { type: 'antiTankGun', count: 1, spread: 4 },
-  { type: 'tank', count: 2, spread: 5 },
-  { type: 'artillery', count: 1, spread: 4 },
-];
-
 function resolveLayout({ roster, tutorial, team, campaign, baseBuilding }) {
   if (Array.isArray(roster)) return roster;
   if (roster === 'assaultAttack') return ASSAULT_ATTACKER_ARMY;
   if (roster === 'assaultDefend') return ASSAULT_DEFENDER_ARMY;
   if (tutorial) return TUTORIAL_ARMY;
   if (baseBuilding) return BASE_BUILDING_STARTING_ARMY;
-  if (campaign) return team === 'enemy' ? CAMPAIGN_ENEMY_ARMY : CAMPAIGN_PLAYER_ARMY;
+  if (campaign) return BASE_BUILDING_STARTING_ARMY;
   return team === 'enemy' ? ENEMY_ARMY : PLAYER_ARMY;
 }
 

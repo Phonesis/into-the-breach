@@ -1,5 +1,6 @@
 import { UNIT_TYPE_ORDER, getProducibleUnits } from '../data/gameModes.js';
 import { HQ_BASE_UNITS, isBaseBuildingCampaign } from '../data/baseBuildings.js';
+import { isPlayerStagingPhase } from './OpeningDeployZone.js';
 
 const PLAYER_TEAM = 'player';
 const MAX_QUEUE = 4;
@@ -96,6 +97,7 @@ export function pickAutoBuildUnit(game) {
 export function updateAutoBuild(game) {
   if (!game?.autoBuildMode || !isAutoBuildAvailable(game)) return;
   if (!game.running || game.gameOver || game.paused) return;
+  if (isPlayerStagingPhase(game)) return;
 
   const prod = game.production;
   let queued = 0;

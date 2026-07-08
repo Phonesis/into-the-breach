@@ -1,7 +1,36 @@
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { BATTLE_OPENING_TIME } from '../data/gameModes.js';
+import { CLEARANCE_CEASEFIRE_TIME } from './ClearanceMode.js';
 
 /** Max distance from team HQ during opening / clearance ceasefire (world units). */
 export const HQ_DEPLOY_RADIUS = 32;
+
+/** True while the player must stay in the HQ ring before battle begins. */
+export function isPlayerStagingPhase(game) {
+  if (!game || game.tutorial || game.towerDefense || game.lastStand) return false;
+  if (game.clearance) return game.matchTime < CLEARANCE_CEASEFIRE_TIME;
+  return game.matchTime < BATTLE_OPENING_TIME;
+}
+
+/** True while the enemy must stay in the HQ ring (Standard / Assault quiet sector). */
+export function isEnemyStagingPhase(game) {
+  if (!game || game.tutorial || game.towerDefense || game.lastStand || game.clearance) {
+    return false;
+  }
+  return game.matchTime < BATTLE_OPENING_TIME;
+}
+
+/** True while capture points and full battle economy should stay frozen. */
+export function isBattleStagingPhase(game) {
+  return isPlayerStagingPhase(game) || isEnemyStagingPhase(game);
+}
+
+export function isTeamStagingPhase(game, team) {
+  if (team === 'player') return isPlayerStagingPhase(game);
+  if (team === 'enemy') return isEnemyStagingPhase(game);
+  return false;
+}
+
 /** Allow slight ring overrun on slopes before hard snap (reduces hill-edge sticking). */
 const DEPLOY_ZONE_SNAP_BUFFER = 2.5;
 
@@ -26,11 +55,22 @@ export function clampPointToHqZone(x, z, hq, radius = HQ_DEPLOY_RADIUS) {
  * Keep unit inside the staging ring during quiet sector / clearance ceasefire.
  * Does not cancel move orders — avoids units "sticking" on sloped ring edges.
  */
-export function containUnitToDeployZone(unit, hq, mapDef, radius = HQ_DEPLOY_RADIUS) {
+export function containUnitToDeployZone(
+  unit,
+  hq,
+  mapDef,
+  radius = HQ_DEPLOY_RADIUS,
+  moveRadius = radius
+) {
   if (!hq || unit.dead) return;
 
   if (unit.moveTarget) {
-    const clampedTarget = clampPointToHqZone(unit.moveTarget.x, unit.moveTarget.z, hq, radius);
+    const clampedTarget = clampPointToHqZone(
+      unit.moveTarget.x,
+      unit.moveTarget.z,
+      hq,
+      moveRadius
+    );
     unit.moveTarget.x = clampedTarget.x;
     unit.moveTarget.z = clampedTarget.z;
   }
@@ -45,12 +85,19 @@ export function containUnitToDeployZone(unit, hq, mapDef, radius = HQ_DEPLOY_RAD
   }
 }
 
-export function containTeamsToDeployZone(units, hqs, mapDef, teams, radius = HQ_DEPLOY_RADIUS) {
+export function containTeamsToDeployZone(
+  units,
+  hqs,
+  mapDef,
+  teams,
+  radius = HQ_DEPLOY_RADIUS,
+  moveRadius = radius
+) {
   const teamSet = teams ? new Set(teams) : null;
   for (const unit of units) {
     if (unit.dead) continue;
     if (teamSet && !teamSet.has(unit.team)) continue;
     const hq = hqs.find((h) => h.team === unit.team && !h.dead);
-    containUnitToDeployZone(unit, hq, mapDef, radius);
+    containUnitToDeployZone(unit, hq, mapDef, radius, moveRadius);
   }
 }

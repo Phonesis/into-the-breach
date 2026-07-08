@@ -19,6 +19,7 @@ import {
   getTankRiderIds,
 } from '../game/TankRiders.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
+import { isPlayerStagingPhase } from '../game/OpeningDeployZone.js';
 import {
   DEFENSE_TYPE_LIST,
   DEFENSE_UPGRADES,
@@ -94,7 +95,28 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
 const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
-const AUTO_BUILD_MODE_KEY = 'ww2-rts-auto-build-mode';
+const AUTO_BUILD_MODE_KEYS = {
+  classic: 'ww2-rts-auto-build-mode-classic',
+  baseBuilding: 'ww2-rts-auto-build-mode-base-building',
+};
+const AUTO_BUILD_MODE_KEY_LEGACY = 'ww2-rts-auto-build-mode';
+
+function getAutoBuildStorageKey(campaignStyle = 'classic') {
+  return campaignStyle === 'baseBuilding'
+    ? AUTO_BUILD_MODE_KEYS.baseBuilding
+    : AUTO_BUILD_MODE_KEYS.classic;
+}
+
+function loadAutoBuildPreference(campaignStyle = 'classic') {
+  const key = getAutoBuildStorageKey(campaignStyle);
+  const stored = localStorage.getItem(key);
+  if (stored !== null) return stored === '1';
+  if (campaignStyle !== 'baseBuilding') {
+    const legacy = localStorage.getItem(AUTO_BUILD_MODE_KEY_LEGACY);
+    if (legacy !== null) return legacy === '1';
+  }
+  return false;
+}
 
 
 const FACTION_ROSTER_LABELS = {
@@ -131,7 +153,8 @@ export class UIManager {
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
-    this.autoBuildMode = localStorage.getItem(AUTO_BUILD_MODE_KEY) === '1';
+    this.autoBuildMode = false;
+    this._hudCampaignStyle = 'classic';
     this._hudAutoBuildAvailable = false;
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
@@ -930,6 +953,8 @@ export class UIManager {
     this.root.querySelector('#btn-toggle-generalorders')?.addEventListener('click', () => {
       this.setGeneralOrdersExpanded(!this.generalOrdersExpanded);
     });
+    this._onDocumentPointerDown = (e) => this._collapseCommandPanelsOnOutsideClick(e);
+    document.addEventListener('pointerdown', this._onDocumentPointerDown, true);
     this.root.querySelector('#btn-toggle-defense')?.addEventListener('click', () => {
       this.setDefenseExpanded(!this.defenseExpanded);
     });
@@ -1335,6 +1360,7 @@ export class UIManager {
     const baseBuilding =
       gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
     this._hudBaseBuilding = baseBuilding;
+    this._hudCampaignStyle = options.campaignStyle ?? 'classic';
     this._hudAutoBuildAvailable = gameMode === 'campaign';
     this._hudLastStand = lastStand;
     this._hudLastStandDeploy = lastStand;
@@ -1375,7 +1401,7 @@ export class UIManager {
     this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
-    this._syncAutoBuildToggle();
+    this.syncAutoBuildForCampaign(this._hudCampaignStyle);
 
     const surrenderBtn = this.root.querySelector('#btn-surrender');
     if (surrenderBtn) {
@@ -1501,9 +1527,16 @@ export class UIManager {
     this._syncSeekCoverToggle();
   }
 
-  setAutoBuildMode(on) {
+  syncAutoBuildForCampaign(campaignStyle = 'classic') {
+    this._hudCampaignStyle = campaignStyle;
+    this.autoBuildMode = loadAutoBuildPreference(campaignStyle);
+    this._syncAutoBuildToggle();
+    return this.autoBuildMode;
+  }
+
+  setAutoBuildMode(on, campaignStyle = this._hudCampaignStyle ?? 'classic') {
     this.autoBuildMode = !!on;
-    localStorage.setItem(AUTO_BUILD_MODE_KEY, on ? '1' : '0');
+    localStorage.setItem(getAutoBuildStorageKey(campaignStyle), on ? '1' : '0');
     this._syncAutoBuildToggle();
   }
 
@@ -2039,6 +2072,25 @@ export class UIManager {
       .join('');
   }
 
+  _collapseCommandPanelsOnOutsideClick(e) {
+    const hud = this.root.querySelector('#hud');
+    if (!hud || hud.classList.contains('hidden')) return;
+
+    const fsPanel = this.root.querySelector('#firesupport-panel');
+    const goPanel = this.root.querySelector('#generalorders-panel');
+    if (fsPanel?.classList.contains('hidden') && goPanel?.classList.contains('hidden')) return;
+
+    const target = e.target;
+    if (!(target instanceof Node)) return;
+
+    if (this.fireSupportExpanded && fsPanel && !fsPanel.contains(target)) {
+      this.setFireSupportExpanded(false);
+    }
+    if (this.generalOrdersExpanded && goPanel && !goPanel.contains(target)) {
+      this.setGeneralOrdersExpanded(false);
+    }
+  }
+
   setFireSupportExpanded(on) {
     this.fireSupportExpanded = !!on;
     this._syncFireSupportCollapse();
@@ -2082,8 +2134,12 @@ export class UIManager {
     const hint = this.root.querySelector('#firesupport-hint');
     if (!panel || !manager) return;
 
-    if (manager.pending && !this.fireSupportExpanded) {
-      this.setFireSupportExpanded(true);
+    const pending = manager.pending ?? null;
+    if (pending !== this._lastFireSupportPending) {
+      if (pending && !this.fireSupportExpanded) {
+        this.setFireSupportExpanded(true);
+      }
+      this._lastFireSupportPending = pending;
     }
 
     panel.classList.toggle('targeting', !!manager.pending);
@@ -2735,21 +2791,26 @@ export class UIManager {
     this.updateResources(resources, game.capturePoints, game.cheatMode);
     this.setCheatHud(game.cheatMode);
 
+    const staging = isPlayerStagingPhase(game);
     const qEl = this.root.querySelector('#queue-text');
     if (qEl) {
-      const autoHint = this.autoBuildMode && this._hudAutoBuildAvailable;
-      if (progress) {
+      if (staging) {
+        qEl.textContent = 'Quiet sector — launch battle to queue reinforcements';
+      } else if (progress) {
         const pct =
           progress.total <= 0
             ? 100
             : Math.round((1 - progress.remaining / progress.total) * 100);
+        const autoHint = this.autoBuildMode && this._hudAutoBuildAvailable;
         const autoNote = autoHint ? ' · auto build' : '';
         qEl.textContent = `Building ${progress.def.name}… ${pct}% (${queue.length} queued${autoNote})`;
       } else if (queue.length > 0) {
+        const autoHint = this.autoBuildMode && this._hudAutoBuildAvailable;
         qEl.textContent = autoHint
           ? `${queue.length} in queue · auto build filling slots`
           : `${queue.length} in queue`;
       } else {
+        const autoHint = this.autoBuildMode && this._hudAutoBuildAvailable;
         qEl.textContent = autoHint
           ? 'Auto build on — queue will fill when supplies allow'
           : 'Queue empty — click to train';
@@ -2767,13 +2828,16 @@ export class UIManager {
       if (!def) return;
       const locked = unlocked && !unlocked.has(type);
       const can =
+        !staging &&
         !locked &&
         game.production.canEnqueue('player', type, game.resources.player) &&
         game.running;
       btn.disabled = !can;
       btn.classList.toggle('locked', !!locked);
       btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
-      if (locked) {
+      if (staging) {
+        btn.title = `${def.name} — launch battle to begin training`;
+      } else if (locked) {
         const buildingId = getSpawnBuildingForUnit(type);
         const buildingName = buildingId ? BASE_BUILDING_TYPES[buildingId]?.name : null;
         btn.title = buildingName

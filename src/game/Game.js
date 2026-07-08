@@ -107,7 +107,7 @@ import { buildCoverSites } from '../world/CoverSites.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 import { CoverSystem } from './CoverSystem.js';
 import { MAPS, buildMapDef } from '../data/maps.js';
-import { getDeployRadius, formatMapHudLabel } from '../data/mapSizes.js';
+import { getDeployRadius, getStagingMoveRadius, formatMapHudLabel } from '../data/mapSizes.js';
 import { getDifficulty, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import {
   isCampaignMode,
@@ -152,7 +152,13 @@ import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../
 import { spawnArmy } from './Spawner.js';
 import { updateCombat, updateMovement, tickUnitCooldowns } from './Combat.js';
 import { updateAI, resetAI } from './AI.js';
-import { containTeamsToDeployZone, clampPointToHqZone } from './OpeningDeployZone.js';
+import {
+  containTeamsToDeployZone,
+  clampPointToHqZone,
+  isPlayerStagingPhase,
+  isEnemyStagingPhase,
+  isBattleStagingPhase,
+} from './OpeningDeployZone.js';
 import { createDeployZoneRings, disposeDeployZoneRings } from '../visual/DeployZoneRing.js';
 import { RTSController } from '../input/RTSController.js';
 import {
@@ -299,6 +305,8 @@ export class Game {
         if (team !== PLAYER_TEAM || !isBaseBuildingCampaign(this)) return null;
         return getPlayerProductionUnitTypes(this);
       },
+      isProductionBlocked: (team) =>
+        team === PLAYER_TEAM ? isPlayerStagingPhase(this) : isEnemyStagingPhase(this),
       getSpawnPos: (team, unitType) => {
         if (team === PLAYER_TEAM && isBaseBuildingCampaign(this)) {
           const need = getSpawnBuildingForUnit(unitType);
@@ -862,18 +870,6 @@ export class Game {
         cp.owner = null;
         cp.progress = 0;
       }
-      if (this.capturePoints[0]) {
-        this.capturePoints[0].owner = PLAYER_TEAM;
-        this.capturePoints[0].progress = 1;
-      }
-      if (this.capturePoints[1]) {
-        this.capturePoints[1].owner = ENEMY_TEAM;
-        this.capturePoints[1].progress = 1;
-      }
-      if (this.capturePoints[2]) {
-        this.capturePoints[2].owner = PLAYER_TEAM;
-        this.capturePoints[2].progress = 1;
-      }
     }
     for (const cp of this.capturePoints) cp._updateVisuals();
 
@@ -979,9 +975,17 @@ export class Game {
 
     const deployTeams = restoreSnapshot ? this._getDeployZoneTeamsAt(this.matchTime) : this._getDeployZoneTeamsAt(0);
     const deployRadius = getDeployRadius(this.mapDef);
+    const stagingMoveRadius = getStagingMoveRadius(this.mapDef);
     if (deployTeams.length) {
       if (!restoreSnapshot) {
-        containTeamsToDeployZone(this.units, this.hqs, this.mapDef, deployTeams, deployRadius);
+        containTeamsToDeployZone(
+          this.units,
+          this.hqs,
+          this.mapDef,
+          deployTeams,
+          deployRadius,
+          stagingMoveRadius
+        );
       }
       this._showDeployZoneRings(deployTeams);
     }
@@ -1034,7 +1038,7 @@ export class Game {
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.seekCoverMode = this.ui.seekCoverMode;
-    this.autoBuildMode = this.ui.autoBuildMode;
+    this.autoBuildMode = this.ui.syncAutoBuildForCampaign(this.campaignStyle);
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
     if (isBaseBuildingCampaign(this)) {
@@ -1179,7 +1183,7 @@ export class Game {
       return { x, z };
     }
     const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
-    return clampPointToHqZone(x, z, hq, getDeployRadius(this.mapDef));
+    return clampPointToHqZone(x, z, hq, getStagingMoveRadius(this.mapDef));
   }
 
   _syncBattleCursor() {
@@ -1251,6 +1255,8 @@ export class Game {
     this.ui?.updateDeployCountdown(null);
     this.ui?.updateBattleOpening(0);
     this.ui?.updateBaseBuild(this);
+    this.ui?.updateProduction(this);
+    if (this.autoBuildMode) updateAutoBuild(this);
     this._syncBattleCursor();
     sounds.play('order');
   }
@@ -1952,6 +1958,7 @@ export class Game {
     if (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense)) return false;
 
     if (this.paused) return false;
+    if (isPlayerStagingPhase(this)) return false;
 
     if (this.lastStand) {
       if (isLastStandPresetDeployMode(this.lastStand.deployMode)) return false;
@@ -2008,6 +2015,7 @@ export class Game {
   }
 
   updateCapturePoints(dt) {
+    if (isBattleStagingPhase(this)) return;
     const alive = this._aliveUnits;
     for (const cp of this.capturePoints) {
       cp.update(alive, dt, (point, owner) => {
@@ -2638,7 +2646,8 @@ export class Game {
             this.hqs,
             this.mapDef,
             stagingTeams,
-            getDeployRadius(this.mapDef)
+            getDeployRadius(this.mapDef),
+            getStagingMoveRadius(this.mapDef)
           );
         }
         this._syncDeployZoneVisuals();
@@ -2795,8 +2804,7 @@ export class Game {
               lastStand: !!this.lastStand && this.lastStand.phase === 'battle',
               lastStandTactic: this.lastStand?.enemyTactic ?? null,
               lastStandFlankSide: this.lastStand?.flankSide ?? 1,
-              openingCeasefire:
-                !this.lastStand && this.matchTime < BATTLE_OPENING_TIME,
+              enemyStagingPhase: isEnemyStagingPhase(this),
               difficulty: this.campaign
                 ? getCampaignDifficulty(this.difficulty)
                 : this.difficulty,

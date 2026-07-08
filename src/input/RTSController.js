@@ -14,6 +14,8 @@ import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 
 const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _groundHit = new THREE.Vector3();
+/** Ground click within this radius of an enemy HQ counts as targeting the HQ. */
+const HQ_ATTACK_PROXIMITY = 18;
 
 export class RTSController {
   constructor({
@@ -295,19 +297,52 @@ export class RTSController {
     return null;
   }
 
+  _hqFromRaycastHit(hit) {
+    let obj = hit.object;
+    while (obj && !obj.userData?.hq) obj = obj.parent;
+    const hq = obj?.userData?.hq;
+    return hq && !hq.dead ? hq : null;
+  }
+
+  _findEnemyHQNearPoint(x, z) {
+    const player = this.getPlayerTeam();
+    let best = null;
+    let bestDist = HQ_ATTACK_PROXIMITY;
+    for (const hq of this.getHqs()) {
+      if (hq.dead || hq.team === player) continue;
+      const d = Math.hypot(x - hq.position.x, z - hq.position.z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = hq;
+      }
+    }
+    return best;
+  }
+
+  _pickEnemyHQNearCursor() {
+    const ground = this._raycastGroundHit();
+    if (!ground) return null;
+    return this._findEnemyHQNearPoint(ground.point.x, ground.point.z);
+  }
+
   raycastEnemyHQ() {
     const player = this.getPlayerTeam();
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hqs = this.getHqs().filter((h) => !h.dead && h.team !== player);
-    const meshes = hqs.map((h) => this._hqPickMesh(h)).filter(Boolean);
-    const hits = this.raycaster.intersectObjects(meshes, false);
-    for (const hit of hits) {
-      let obj = hit.object;
-      while (obj && !obj.userData?.hq) obj = obj.parent;
-      const hq = obj?.userData?.hq;
-      if (hq && !hq.dead) return hq;
+    let best = null;
+    let bestDist = Infinity;
+    for (const hq of hqs) {
+      if (!hq.mesh) continue;
+      const hits = this.raycaster.intersectObject(hq.mesh, true);
+      for (const hit of hits) {
+        const found = this._hqFromRaycastHit(hit);
+        if (found && hit.distance < bestDist) {
+          bestDist = hit.distance;
+          best = found;
+        }
+      }
     }
-    return null;
+    return best ?? this._pickEnemyHQNearCursor();
   }
 
   _raycastGroundHit() {
@@ -421,6 +456,12 @@ export class RTSController {
       combat.push({ target: structure, dist: hits[0]?.distance ?? Infinity });
     }
 
+    const nearHq = this._pickEnemyHQNearCursor();
+    if (nearHq && !combat.some((c) => c.target === nearHq)) {
+      const groundHit = this._raycastGroundHit();
+      combat.push({ target: nearHq, dist: groundHit?.distance ?? Infinity });
+    }
+
     if (combat.length) {
       combat.sort((a, b) => a.dist - b.dist);
       return combat[0].target;
@@ -505,6 +546,7 @@ export class RTSController {
   /** Shift+LMB ground fire — units move into range if needed; cleared on RMB move. */
   issueGroundFireAt(point) {
     if (this._inputBlocked()) return false;
+    if (this.getDeployZoneActive()) return false;
 
     const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
     if (selected.length === 0) return false;
