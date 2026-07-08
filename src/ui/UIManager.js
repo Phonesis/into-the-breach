@@ -38,6 +38,8 @@ import {
   CAMPAIGN_STYLE_LIST,
   BASE_BUILDING_TYPE_LIST,
   BASE_BUILDING_TYPES,
+  BASE_BUILDING_MIN_MAP_SIZE,
+  canUseBaseBuildingOnMap,
   getSpawnBuildingForUnit,
   getPlayerProductionUnitTypes,
 } from '../data/baseBuildings.js';
@@ -149,7 +151,9 @@ export class UIManager {
     this.selectedLastStandDeployMode = 'manual';
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
+    this._baseBuildUiKey = '';
     this._hudBaseBuilding = false;
+    this._hudStandardCampaign = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
@@ -159,6 +163,8 @@ export class UIManager {
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
+    this.baseBuildExpanded = false;
+    this._hudCheatMode = false;
     this.render();
     this.tabletCamera = new TabletCameraControls(this.root);
     this.minimap = new BattleMinimap(this.root, {
@@ -173,6 +179,7 @@ export class UIManager {
     this._syncFireSupportCollapse();
     this._syncGeneralOrdersCollapse();
     this._syncDefenseCollapse();
+    this._syncBaseBuildCollapse();
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -276,6 +283,9 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="campaign-style-block">
             <h2>Standard Style</h2>
             <div class="campaign-style-grid" id="campaign-style-grid"></div>
+            <p class="campaign-style-note hidden" id="campaign-style-note">
+              Base Building requires a <strong>Large</strong> map.
+            </p>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
             <h2>Wave Mode</h2>
@@ -311,7 +321,7 @@ export class UIManager {
               <span class="assault-timer" id="assault-timer">—</span>
             </div>
             <div class="clearance-banner hidden" id="clearance-banner">
-              Clear all dug-in defenders — no enemy HQ
+              Clear all dug-in defenders — fixed force, no reinforcements
             </div>
             <div class="td-banner hidden" id="td-banner">
               <span class="td-wave" id="td-wave-label">Wave 0 / 12</span>
@@ -591,12 +601,25 @@ export class UIManager {
               <p class="defense-hint" id="defense-hint">Click a structure, then click behind the frontline to build.</p>
             </div>
           </div>
-          <div class="base-build-panel interactive hidden" id="base-build-panel">
-            <h3>Base Construction</h3>
-            <div class="base-build-btns" id="base-build-btns"></div>
-            <p class="base-build-hint" id="base-build-hint">
-              Build depots near HQ to unlock units. LMB place · Esc cancel.
-            </p>
+          <div class="base-build-panel interactive hidden collapsed" id="base-build-panel">
+            <div class="base-build-header">
+              <button
+                type="button"
+                class="base-build-header-toggle interactive"
+                id="btn-toggle-base-build"
+                aria-expanded="false"
+                title="Expand base construction panel"
+              >
+                <span class="base-build-title">Base Construction</span>
+                <span class="base-build-chevron" aria-hidden="true">▼</span>
+              </button>
+            </div>
+            <div class="base-build-body" id="base-build-body">
+              <div class="base-build-btns" id="base-build-btns"></div>
+              <p class="base-build-hint" id="base-build-hint">
+                Build near HQ or a sector you control. LMB place · Esc cancel.
+              </p>
+            </div>
           </div>
           <div class="hud-command-panels">
             <div class="firesupport-panel interactive collapsed" id="firesupport-panel">
@@ -744,14 +767,32 @@ export class UIManager {
   renderCampaignStyles() {
     const grid = this.root.querySelector('#campaign-style-grid');
     if (!grid) return;
-    grid.innerHTML = CAMPAIGN_STYLE_LIST.map(
-      (s) => `
-      <button type="button" class="card-btn interactive campaign-style-card${s.id === this.selectedCampaignStyle ? ' selected' : ''}" data-id="${s.id}">
+    const onLargeMap = canUseBaseBuildingOnMap(this.selectedMapSize ?? 'medium');
+    grid.innerHTML = CAMPAIGN_STYLE_LIST.map((s) => {
+      const selected = s.id === this.selectedCampaignStyle;
+      let meta = s.subtitle;
+      if (s.id === 'baseBuilding' && !onLargeMap) {
+        meta = 'Selects Large map automatically · garrison, depots & sector building';
+      }
+      return `
+      <button type="button" class="card-btn interactive campaign-style-card${selected ? ' selected' : ''}" data-id="${s.id}">
         <span class="name">${s.name}</span>
-        <span class="meta">${s.subtitle}</span>
+        <span class="meta">${meta}</span>
       </button>
-    `
-    ).join('');
+    `;
+    }).join('');
+  }
+
+  updateCampaignStyleMapSizeLock() {
+    const lockBaseBuilding =
+      this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
+    const note = this.root.querySelector('#campaign-style-note');
+    if (note) note.classList.toggle('hidden', !lockBaseBuilding);
+    if (lockBaseBuilding && this.selectedMapSize !== BASE_BUILDING_MIN_MAP_SIZE) {
+      this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
+    }
+    this.renderCampaignStyles();
+    this.renderMapSizes();
   }
 
   renderTdWaveModes() {
@@ -819,7 +860,10 @@ export class UIManager {
     if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
     if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
     this.renderDifficulties();
-    if (isCampaign) this.renderCampaignStyles();
+    if (isCampaign) {
+      this.renderCampaignStyles();
+      this.updateCampaignStyleMapSizeLock();
+    }
     if (isTowerDefense) {
       this.renderTdWaveModes();
       this.renderTdStyles();
@@ -897,13 +941,23 @@ export class UIManager {
     if (!grid) return;
     const lockPreset =
       this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
+    const lockBaseBuilding =
+      this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
     grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
       const selected = preset.id === this.selectedMapSize;
-      const disabled = lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE;
+      const disabled =
+        (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) ||
+        (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
+      let meta = preset.subtitle;
+      if (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
+        meta = 'Preset battle groups need a large theater';
+      } else if (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE) {
+        meta = 'Base Building needs a large theater';
+      }
       return `
       <button type="button" class="card-btn interactive map-size-card${selected ? ' selected' : ''}${disabled ? ' map-size-card--disabled' : ''}" data-id="${preset.id}"${disabled ? ' disabled' : ''}>
         <span class="name">${preset.name}</span>
-        <span class="meta">${disabled ? 'Preset battle groups need a large theater' : preset.subtitle}</span>
+        <span class="meta">${meta}</span>
       </button>
     `;
     }).join('');
@@ -957,6 +1011,9 @@ export class UIManager {
     document.addEventListener('pointerdown', this._onDocumentPointerDown, true);
     this.root.querySelector('#btn-toggle-defense')?.addEventListener('click', () => {
       this.setDefenseExpanded(!this.defenseExpanded);
+    });
+    this.root.querySelector('#btn-toggle-base-build')?.addEventListener('click', () => {
+      this.setBaseBuildExpanded(!this.baseBuildExpanded);
     });
     this.root.querySelector('#btn-guide-close').onclick = () => this.closeGuide();
     this.root.querySelector('#btn-back-title').onclick = () => show('title');
@@ -1016,6 +1073,14 @@ export class UIManager {
       this.root.querySelectorAll('.map-size-card').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
       this.selectedMapSize = btn.dataset.id;
+      if (
+        this.selectedGameMode === 'campaign' &&
+        !canUseBaseBuildingOnMap(this.selectedMapSize) &&
+        this.selectedCampaignStyle === 'baseBuilding'
+      ) {
+        this.selectedCampaignStyle = 'classic';
+      }
+      this.updateCampaignStyleMapSizeLock();
     });
 
     this.root.querySelector('#difficulty-grid')?.addEventListener('click', (e) => {
@@ -1028,8 +1093,14 @@ export class UIManager {
 
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
-      if (!btn || btn.classList.contains('td-wave-mode-card') || btn.classList.contains('td-style-card'))
+      if (
+        !btn ||
+        btn.disabled ||
+        btn.classList.contains('td-wave-mode-card') ||
+        btn.classList.contains('td-style-card')
+      ) {
         return;
+      }
       this.root.querySelectorAll('.campaign-style-card').forEach((b) => {
         if (!b.classList.contains('td-wave-mode-card') && !b.classList.contains('td-style-card')) {
           b.classList.remove('selected');
@@ -1037,6 +1108,10 @@ export class UIManager {
       });
       btn.classList.add('selected');
       this.selectedCampaignStyle = btn.dataset.id;
+      if (this.selectedCampaignStyle === 'baseBuilding') {
+        this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
+      }
+      this.updateCampaignStyleMapSizeLock();
     });
 
     this.root.querySelector('#td-wave-mode-grid')?.addEventListener('click', (e) => {
@@ -1077,10 +1152,15 @@ export class UIManager {
       if (!this.selectedFaction || !this.selectedMap || !this.selectedGameMode) return;
       if (this.selectedGameMode === 'assault' && !this.selectedAssaultRole) return;
       if (this.callbacks.onStartGame) {
+        const baseBuildingStyle =
+          this.selectedGameMode === 'campaign' &&
+          this.selectedCampaignStyle === 'baseBuilding';
         this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
-          mapSize: this.selectedMapSize ?? 'medium',
+          mapSize: baseBuildingStyle
+            ? BASE_BUILDING_MIN_MAP_SIZE
+            : this.selectedMapSize ?? 'medium',
           campaignStyle:
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
           tdWaveMode:
@@ -1153,6 +1233,7 @@ export class UIManager {
     this.root.querySelector('#btn-toggle-auto-build')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (this._hudCheatMode) return;
       this.setAutoBuildMode(!this.autoBuildMode);
       this.callbacks.onToggleAutoBuild?.(this.autoBuildMode);
     });
@@ -1360,6 +1441,7 @@ export class UIManager {
     const baseBuilding =
       gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
     this._hudBaseBuilding = baseBuilding;
+    this._hudStandardCampaign = gameMode === 'campaign';
     this._hudCampaignStyle = options.campaignStyle ?? 'classic';
     this._hudAutoBuildAvailable = gameMode === 'campaign';
     this._hudLastStand = lastStand;
@@ -1391,14 +1473,17 @@ export class UIManager {
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
+    this.baseBuildExpanded = false;
     this._syncFireSupportCollapse();
     this._syncGeneralOrdersCollapse();
     this._syncDefenseCollapse();
+    this._syncBaseBuildCollapse();
     this.root.querySelector('#unit-roster')?.classList.toggle('hidden', towerDefense && !tdHqDefense);
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
     this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
     this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
-    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand);
+    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance);
+    this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
     this.syncAutoBuildForCampaign(this._hudCampaignStyle);
@@ -1423,7 +1508,7 @@ export class UIManager {
           'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
         this._defaultHudHint =
-          'Clear Defenses: wipe out all enemy units · capture points for supplies · enemy holds the line';
+          'Clear Defenses: wipe all defenders · fixed force — no HQ, no reinforcements';
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
@@ -1443,13 +1528,13 @@ export class UIManager {
           'Battle Simulation: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
       } else if (baseBuilding) {
         this._defaultHudHint =
-          'Base Building: click HQ for infantry · click depots to train specialized units · Base Construction panel places new structures';
+          'Victory: destroy the enemy HQ · Base Construction unlocks armor & artillery · garrison trains infantry';
       } else if (tabletOn) {
         this._defaultHudHint =
-          'Tap to select · Target: tap enemy twice or Engage · Fire: tap ground/cover · Long-press = move/attack';
+          'Victory: destroy the enemy HQ · Tap select · Engage/Fire buttons · Long-press = move/attack';
       } else {
         this._defaultHudHint =
-          'WASD pan · ↑↓ move in/out · ←→ rotate view · Wheel zoom · LMB/RMB orders · Shift+LMB fire ground/cover';
+          'Victory: destroy the enemy HQ · WASD pan · wheel zoom · LMB/RMB orders · Shift+LMB fire';
       }
       hint.textContent = this._defaultHudHint;
       if (tabletOn && tutorial) {
@@ -1476,7 +1561,7 @@ export class UIManager {
     }
 
     const btns = this.root.querySelector('#produce-btns');
-    if (baseBuilding) {
+    if (baseBuilding || clearance) {
       btns.innerHTML = '';
     } else {
       const types = getProducibleUnits(faction);
@@ -1534,9 +1619,12 @@ export class UIManager {
     return this.autoBuildMode;
   }
 
-  setAutoBuildMode(on, campaignStyle = this._hudCampaignStyle ?? 'classic') {
+  setAutoBuildMode(on, campaignStyle = this._hudCampaignStyle ?? 'classic', options = {}) {
+    if (this._hudCheatMode && on) return;
     this.autoBuildMode = !!on;
-    localStorage.setItem(getAutoBuildStorageKey(campaignStyle), on ? '1' : '0');
+    if (options.persist !== false) {
+      localStorage.setItem(getAutoBuildStorageKey(campaignStyle), on ? '1' : '0');
+    }
     this._syncAutoBuildToggle();
   }
 
@@ -1546,13 +1634,19 @@ export class UIManager {
     const available = this._hudAutoBuildAvailable;
     btn.classList.toggle('hidden', !available);
     if (!available) return;
-    btn.classList.toggle('auto-build-on', this.autoBuildMode);
-    btn.setAttribute('aria-pressed', this.autoBuildMode ? 'true' : 'false');
-    btn.title = this.autoBuildMode
-      ? 'Auto build on — queue fills with a balanced mix (click to disable)'
-      : 'Auto build off — click to queue infantry, armor, and support automatically';
+    const cheatBlocked = this._hudCheatMode;
+    btn.disabled = cheatBlocked;
+    btn.classList.toggle('auto-build-on', this.autoBuildMode && !cheatBlocked);
+    btn.setAttribute('aria-pressed', this.autoBuildMode && !cheatBlocked ? 'true' : 'false');
+    if (cheatBlocked) {
+      btn.title = 'Auto build disabled while cheat mode is on';
+    } else {
+      btn.title = this.autoBuildMode
+        ? 'Auto build on — queue fills with a balanced mix (click to disable)'
+        : 'Auto build off — click to queue infantry, armor, and support automatically';
+    }
     const stateEl = btn.querySelector('.auto-build-state');
-    if (stateEl) stateEl.textContent = this.autoBuildMode ? 'On' : 'Off';
+    if (stateEl) stateEl.textContent = this.autoBuildMode && !cheatBlocked ? 'On' : 'Off';
   }
 
   _syncSeekCoverToggle() {
@@ -1701,27 +1795,71 @@ export class UIManager {
       hint.classList.remove('base-build-hint-error');
       if (this._hudBaseBuilding) {
         hint.textContent =
-          'Build depots near HQ to unlock units. LMB place · Esc cancel.';
+          'Build near HQ or a sector you control. LMB place · Esc cancel.';
       }
     }, 2800);
   }
 
+  _baseBuildUiKeyFor(game) {
+    const supplies = Math.floor(game.resources.player);
+    const pending = game.baseBuildings.getPending() ?? '';
+    const deployActive = game._isPlayerDeployZoneActive?.() ?? false;
+    const counts = BASE_BUILDING_TYPE_LIST.map((t) =>
+      game.baseBuildings.countType('player', t.id)
+    ).join(',');
+    return `${supplies}|${pending}|${deployActive}|${game.cheatMode}|${counts}`;
+  }
+
+  setBaseBuildExpanded(on) {
+    this.baseBuildExpanded = !!on;
+    this._syncBaseBuildCollapse();
+  }
+
+  _syncBaseBuildCollapse() {
+    const panel = this.root.querySelector('#base-build-panel');
+    const toggle = this.root.querySelector('#btn-toggle-base-build');
+    if (!panel) return;
+
+    panel.classList.toggle('collapsed', !this.baseBuildExpanded);
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', this.baseBuildExpanded ? 'true' : 'false');
+      toggle.title = this.baseBuildExpanded
+        ? 'Collapse base construction panel'
+        : 'Expand base construction panel';
+    }
+  }
+
   updateBaseBuild(game) {
     if (!this._hudBaseBuilding || !game?.baseBuildings?.active) return;
-    const supplies = Math.floor(game.resources.player);
+
+    const panel = this.root.querySelector('#base-build-panel');
     const pending = game.baseBuildings.getPending();
+    panel?.classList.toggle('placing', !!pending);
+    if (pending && !this.baseBuildExpanded) {
+      this.setBaseBuildExpanded(true);
+    }
+
+    const uiKey = this._baseBuildUiKeyFor(game);
+    if (uiKey === this._baseBuildUiKey) return;
+    this._baseBuildUiKey = uiKey;
+
+    const supplies = Math.floor(game.resources.player);
     const hint = this.root.querySelector('#base-build-hint');
     const deployActive = game._isPlayerDeployZoneActive?.() ?? false;
+    const typeCounts = new Map(
+      BASE_BUILDING_TYPE_LIST.map((t) => [t.id, game.baseBuildings.countType('player', t.id)])
+    );
 
     if (hint && !hint.classList.contains('base-build-hint-error')) {
       if (deployActive) {
-        hint.textContent = 'Quiet sector — launch battle before expanding the base.';
+        hint.textContent =
+          'Quiet sector — destroy enemy HQ to win · launch battle before expanding the base';
       } else if (pending) {
         const def = BASE_BUILDING_TYPES[pending];
-        hint.textContent = `Placing ${def?.name ?? pending} — click the ring around HQ. Esc to cancel.`;
+        hint.textContent = `Placing ${def?.name ?? pending} — click within build range of HQ or a sector you hold. Esc to cancel.`;
       } else {
         hint.textContent =
-          'Build depots near HQ to unlock units. LMB place · Esc cancel.';
+          'Build near HQ or a sector you control. LMB place · Esc cancel.';
       }
     }
 
@@ -1729,7 +1867,7 @@ export class UIManager {
       const id = btn.dataset.id;
       const def = BASE_BUILDING_TYPES[id];
       if (!def) return;
-      const count = game.baseBuildings.countType('player', id);
+      const count = typeCounts.get(id) ?? 0;
       const atMax = count >= (def.maxPerTeam ?? 99);
       const canAfford = game.cheatMode || supplies >= def.cost;
       btn.disabled = deployActive || atMax || (!canAfford && pending !== id);
@@ -2078,7 +2216,14 @@ export class UIManager {
 
     const fsPanel = this.root.querySelector('#firesupport-panel');
     const goPanel = this.root.querySelector('#generalorders-panel');
-    if (fsPanel?.classList.contains('hidden') && goPanel?.classList.contains('hidden')) return;
+    const bbPanel = this.root.querySelector('#base-build-panel');
+    if (
+      fsPanel?.classList.contains('hidden') &&
+      goPanel?.classList.contains('hidden') &&
+      bbPanel?.classList.contains('hidden')
+    ) {
+      return;
+    }
 
     const target = e.target;
     if (!(target instanceof Node)) return;
@@ -2088,6 +2233,9 @@ export class UIManager {
     }
     if (this.generalOrdersExpanded && goPanel && !goPanel.contains(target)) {
       this.setGeneralOrdersExpanded(false);
+    }
+    if (this.baseBuildExpanded && bbPanel && !bbPanel.contains(target)) {
+      this.setBaseBuildExpanded(false);
     }
   }
 
@@ -2418,9 +2566,14 @@ export class UIManager {
   }
 
   setCheatHud(active) {
+    this._hudCheatMode = !!active;
     const badge = this.root.querySelector('#hud-cheat-badge');
     if (badge) badge.classList.toggle('hidden', !active);
     this.root.classList.toggle('cheat-mode-active', !!active);
+    if (active && this.autoBuildMode) {
+      this.setAutoBuildMode(false, this._hudCampaignStyle, { persist: false });
+    }
+    this._syncAutoBuildToggle();
   }
 
   showCheatToast(active) {
@@ -2620,7 +2773,9 @@ export class UIManager {
     if (!hint || !this._defaultHudHint) return;
     if (secondsLeft > 0.5) {
       const s = Math.ceil(secondsLeft);
-      hint.textContent = `Staging only — ${s}s until combat (stay inside HQ ring)`;
+      hint.textContent = this._hudStandardCampaign
+        ? `Destroy the enemy HQ to win — staging ${s}s (stay inside your HQ ring)`
+        : `Staging only — ${s}s until combat (stay inside HQ ring)`;
       hint.classList.add('hud-hint-opening');
     } else {
       hint.textContent = this._defaultHudHint;
@@ -2720,8 +2875,7 @@ export class UIManager {
     if (!this._hudBaseBuilding) return 'classic';
     const types = getPlayerProductionUnitTypes(game) ?? [];
     const entry = game.selectedBaseBuilding;
-    const hqSel = game.selectedHq?.team === 'player' && !game.selectedHq.dead;
-    return `${hqSel ? 'hq' : entry?.id ?? 'none'}|${types.join(',')}`;
+    return `${entry?.id ?? 'none'}|${types.join(',')}`;
   }
 
   syncProductionPanel(game) {
@@ -2739,8 +2893,7 @@ export class UIManager {
 
     const types = getPlayerProductionUnitTypes(game) ?? [];
     const entry = game.selectedBaseBuilding;
-    const hqSel = game.selectedHq?.team === 'player' && !game.selectedHq.dead;
-    const showPanel = hqSel || (entry?.def?.spawns?.length ?? 0) > 0;
+    const showPanel = (entry?.def?.spawns?.length ?? 0) > 0;
 
     this._setProductionPanelVisible(showPanel);
     if (!showPanel) {
@@ -2749,7 +2902,7 @@ export class UIManager {
     }
 
     if (title) {
-      title.textContent = hqSel ? 'Headquarters' : (entry?.def?.name ?? 'Depot');
+      title.textContent = entry?.def?.name ?? 'Depot';
     }
 
     const panelKey = this._productionPanelKeyFor(game);
@@ -2773,7 +2926,7 @@ export class UIManager {
       .join('');
   }
 
-  updateProduction(game) {
+  updateProduction(game, options = {}) {
     if (!game?.playerFaction) return;
     if (game.lastStand) {
       this.updateLastStandDeploy(game);
@@ -2788,14 +2941,18 @@ export class UIManager {
     const progress = game.production.getQueueProgress('player');
     const queue = game.production.getQueue('player');
 
-    this.updateResources(resources, game.capturePoints, game.cheatMode);
+    if (!options.skipResources) {
+      this.updateResources(resources, game.capturePoints, game.cheatMode);
+    }
     this.setCheatHud(game.cheatMode);
 
     const staging = isPlayerStagingPhase(game);
     const qEl = this.root.querySelector('#queue-text');
     if (qEl) {
       if (staging) {
-        qEl.textContent = 'Quiet sector — launch battle to queue reinforcements';
+        qEl.textContent = this._hudStandardCampaign
+          ? 'Quiet sector — launch battle to reinforce · Victory: destroy enemy HQ'
+          : 'Quiet sector — launch battle to queue reinforcements';
       } else if (progress) {
         const pct =
           progress.total <= 0
@@ -2888,8 +3045,7 @@ export class UIManager {
     if (!body) return;
 
     const showProduction = this._hudBaseBuilding
-      ? (hq && !hq.dead && hq.team === 'player') ||
-        (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
+      ? (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
       : this._hudLastStand
         ? this._hudLastStandDeploy
         : hq && !hq.dead && hq.team === 'player';
@@ -2918,7 +3074,7 @@ export class UIManager {
         : '';
       const trainHint =
         this._hudBaseBuilding && hq.team === 'player'
-          ? '<p class="hq-selected-hint">Train <strong>infantry squads</strong> from the panel — click completed depots on the map for other unit types.</p>'
+          ? '<p class="hq-selected-hint">Use <strong>Base Construction</strong> below to place structures near HQ or <strong>captured sectors</strong> — garrison for infantry, depots for other units.</p>'
           : '<p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>';
       body.innerHTML = `
         <h3 class="hq-selected-title">${hq.name ?? 'Headquarters'}</h3>
@@ -2959,7 +3115,7 @@ export class UIManager {
 
     if (units.length === 0) {
       const emptyHint = this._hudBaseBuilding
-        ? 'Click your HQ to train infantry, or click a completed depot to train specialized units.'
+        ? 'Click HQ to build structures. After your garrison or depots are complete, click them on the map to train units.'
         : 'Click or drag to select units. Click your HQ for status.';
       body.innerHTML = `<h3>No selection</h3><p>${emptyHint}</p>`;
       this._renderCoverBanner([]);

@@ -67,7 +67,17 @@ export function isEnemyHalfPosition(x, z, mapDef) {
   return (x - midX) * ax + (z - midZ) * az > 0.5;
 }
 
-/** Assembly area for the player's starting force — well behind the HQ, away from contact. */
+/** Rally / staging anchor for the attacker — no HQ in Clear Defenses. */
+export function getClearanceStagingAnchor(mapDef) {
+  const base = getClearancePlayerSpawnBase(mapDef);
+  return {
+    team: 'player',
+    dead: false,
+    position: { x: base.x, z: base.z },
+  };
+}
+
+/** Assembly area for the player's starting force — well behind the line, away from contact. */
 export function getClearancePlayerSpawnBase(mapDef) {
   const { ax, az, pb } = axisFromPlayerToEnemy(mapDef);
   const half = (mapDef.size ?? 120) * 0.5 - 6;
@@ -204,20 +214,14 @@ export function setupClearanceCapturePoints(capturePoints, mapDef) {
   }
 }
 
-import { teamIsEliminated } from './EliminationRules.js';
-
 export function checkClearanceVictory(game) {
   const enemyAlive = game.units.filter((u) => u.team === 'enemy' && !u.dead).length;
   const playerAlive = game.units.filter((u) => u.team === 'player' && !u.dead).length;
-  const playerHQ = game.hqs.find((h) => h.team === 'player');
 
   if (enemyAlive === 0) {
     return { victory: true, detail: 'All enemy defensive positions cleared!' };
   }
-  if (playerHQ?.dead) {
-    return { victory: false, detail: 'Your headquarters has fallen!' };
-  }
-  if (teamIsEliminated('player', game, playerAlive)) {
+  if (playerAlive === 0) {
     return { victory: false, detail: 'All your units have been lost!' };
   }
   return null;

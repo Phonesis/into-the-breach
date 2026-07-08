@@ -37,6 +37,7 @@ export class BaseBuildingManager {
     this.sites = [];
     this.pendingType = null;
     this._enemyBuildTimer = 14;
+    this._attackTargetsCache = null;
   }
 
   reset() {
@@ -50,6 +51,36 @@ export class BaseBuildingManager {
     this.active = true;
   }
 
+  _addCompletedEntry({ typeId, team, x, z, y, id }) {
+    const def = BASE_BUILDING_TYPES[typeId];
+    if (!def) return null;
+    const entry = {
+      id: id ?? nextId++,
+      typeId,
+      def,
+      team,
+      x,
+      z,
+      y,
+      hp: def.hp,
+      maxHp: def.hp,
+      destroyed: false,
+      building: false,
+      garrison: [],
+      mesh: null,
+      manager: this,
+    };
+    const mesh = createBaseBuildingMesh(typeId, this.getFactionId(team));
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = this._facingYaw(team, x, z);
+    this.game.scene.add(mesh);
+    entry.mesh = mesh;
+    this._tagEntryHitbox(entry);
+    this.entries.push(entry);
+    this._invalidateAttackTargetsCache();
+    return entry;
+  }
+
   _clearAll() {
     for (const site of this.sites) {
       disposeBaseBuildingConstructionVisual(site.marker);
@@ -61,6 +92,16 @@ export class BaseBuildingManager {
     }
     this.entries = [];
     this.sites = [];
+    this._attackTargetsCache = null;
+  }
+
+  _invalidateAttackTargetsCache() {
+    this._attackTargetsCache = null;
+  }
+
+  _tagEntryHitbox(entry) {
+    const hitbox = entry.mesh?.getObjectByName?.('baseBuildingHitbox');
+    if (hitbox) hitbox.userData.baseBuildingEntryId = entry.id;
   }
 
   _disposeMesh(mesh) {
@@ -137,7 +178,7 @@ export class BaseBuildingManager {
     return best;
   }
 
-  pickBunkerAt(x, z, team, maxDist = 4.5) {
+  pickBunkerAt(x, z, team, maxDist = 6.5) {
     const e = this.pickAt(x, z, team, maxDist);
     return e?.typeId === 'bunker' ? e : null;
   }
@@ -152,6 +193,42 @@ export class BaseBuildingManager {
     return this.countType(team, typeId);
   }
 
+  _controlledSectors(team) {
+    return (this.game.capturePoints ?? []).filter((cp) => cp.owner === team);
+  }
+
+  _placementValidAtAnchor(x, z, anchorX, anchorZ, def) {
+    const dist = Math.hypot(x - anchorX, z - anchorZ);
+    return dist >= def.placementMinFromHq && dist <= def.placementMaxFromHq;
+  }
+
+  _canPlaceAt(x, z, team, def) {
+    const hq = this._hqPos(team);
+    if (this._placementValidAtAnchor(x, z, hq.x, hq.z, def)) return true;
+    for (const cp of this._controlledSectors(team)) {
+      if (this._placementValidAtAnchor(x, z, cp.x, cp.z, def)) return true;
+    }
+    return false;
+  }
+
+  _tooCloseToBuildAnchor(x, z, team, def) {
+    const hq = this._hqPos(team);
+    if (Math.hypot(x - hq.x, z - hq.z) < def.placementMinFromHq) return true;
+    for (const cp of this._controlledSectors(team)) {
+      if (Math.hypot(x - cp.x, z - cp.z) < def.placementMinFromHq) return true;
+    }
+    return false;
+  }
+
+  _buildAnchors(team) {
+    const hq = this._hqPos(team);
+    const anchors = [{ x: hq.x, z: hq.z }];
+    for (const cp of this._controlledSectors(team)) {
+      anchors.push({ x: cp.x, z: cp.z });
+    }
+    return anchors;
+  }
+
   getPlacementRejectReason(x, z, team, typeId = this.pendingType) {
     if (!this.active || !typeId) return 'No structure selected.';
     const def = BASE_BUILDING_TYPES[typeId];
@@ -163,10 +240,15 @@ export class BaseBuildingManager {
         : 'Staging phase';
     }
 
-    const hq = this._hqPos(team);
-    const distHq = Math.hypot(x - hq.x, z - hq.z);
-    if (distHq < def.placementMinFromHq) return 'Too close to headquarters.';
-    if (distHq > def.placementMaxFromHq) return 'Too far from headquarters.';
+    if (!this._canPlaceAt(x, z, team, def)) {
+      if (this._tooCloseToBuildAnchor(x, z, team, def)) {
+        return 'Too close to headquarters or a controlled sector.';
+      }
+      const hasSectors = this._controlledSectors(team).length > 0;
+      return hasSectors
+        ? 'Place within build range of HQ or a sector you control.'
+        : 'Place within build range of HQ — capture sectors to build forward bases.';
+    }
 
     if (this._countType(team, typeId) >= (def.maxPerTeam ?? 99)) {
       return `Maximum ${def.maxPerTeam} ${def.name} per base.`;
@@ -261,37 +343,23 @@ export class BaseBuildingManager {
     mesh.rotation.y = this._facingYaw(team, x, z);
     this.game.scene.add(mesh);
     entry.mesh = mesh;
+    this._tagEntryHitbox(entry);
     this.entries.push(entry);
+    this._invalidateAttackTargetsCache();
     return entry;
   }
 
   _completeSite(site) {
     disposeBaseBuildingConstructionVisual(site.marker);
     site.marker = null;
-
-    const entry = {
-      id: site.id,
+    this._addCompletedEntry({
       typeId: site.typeId,
-      def: site.def,
       team: site.team,
       x: site.x,
       z: site.z,
       y: site.y,
-      hp: site.def.hp,
-      maxHp: site.def.hp,
-      destroyed: false,
-      building: false,
-      garrison: [],
-      mesh: null,
-      manager: this,
-    };
-
-    const mesh = createBaseBuildingMesh(site.typeId, this.getFactionId(site.team));
-    mesh.position.set(site.x, site.y, site.z);
-    mesh.rotation.y = this._facingYaw(site.team, site.x, site.z);
-    this.game.scene.add(mesh);
-    entry.mesh = mesh;
-    this.entries.push(entry);
+      id: site.id,
+    });
   }
 
   destroyEntry(entry) {
@@ -309,6 +377,7 @@ export class BaseBuildingManager {
     if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
     this._disposeMesh(entry.mesh);
     entry.mesh = null;
+    this._invalidateAttackTargetsCache();
     this.game.ui?.updateBaseBuild?.(this.game);
     this.game.ui?.updateProduction?.(this.game);
   }
@@ -340,26 +409,26 @@ export class BaseBuildingManager {
   getSpawnPosition(team, unitType) {
     if (!this.active) return null;
     const buildingType = getSpawnBuildingForUnit(unitType);
-    if (buildingType) {
-      const entry = this.entries.find(
-        (e) =>
-          !e.destroyed &&
-          !e.building &&
-          e.team === team &&
-          e.typeId === buildingType
-      );
-      if (entry) return { x: entry.x, z: entry.z };
-    }
-    return this._hqPos(team);
+    if (!buildingType) return null;
+    const entry = this.entries.find(
+      (e) =>
+        !e.destroyed &&
+        !e.building &&
+        e.team === team &&
+        e.typeId === buildingType
+    );
+    return entry ? { x: entry.x, z: entry.z } : null;
   }
 
   getAttackTargets() {
+    if (this._attackTargetsCache) return this._attackTargetsCache;
     const out = [];
     for (const entry of this.entries) {
       if (entry.destroyed || entry.building) continue;
       const t = wrapBaseBuildingTarget(entry, this);
       if (t) out.push(t);
     }
+    this._attackTargetsCache = out;
     return out;
   }
 
@@ -372,28 +441,16 @@ export class BaseBuildingManager {
     const entries = this.getPlayerEntries();
     if (!entries.length) return null;
     raycaster.setFromCamera(pointer, camera);
-    const meshes = entries.map((e) => e.mesh).filter(Boolean);
-    if (!meshes.length) return null;
-    const hits = raycaster.intersectObjects(meshes, true);
-    let best = null;
-    let bestDist = Infinity;
-    for (const hit of hits) {
-      for (const entry of entries) {
-        if (!entry.mesh) continue;
-        let obj = hit.object;
-        while (obj) {
-          if (obj === entry.mesh) {
-            if (hit.distance < bestDist) {
-              bestDist = hit.distance;
-              best = entry;
-            }
-            break;
-          }
-          obj = obj.parent;
-        }
-      }
+    const hitboxes = [];
+    for (const entry of entries) {
+      const hitbox = entry.mesh?.getObjectByName?.('baseBuildingHitbox');
+      if (hitbox) hitboxes.push(hitbox);
     }
-    return best;
+    if (!hitboxes.length) return null;
+    const hits = raycaster.intersectObjects(hitboxes, false);
+    if (!hits.length) return null;
+    const id = hits[0].object.userData.baseBuildingEntryId;
+    return entries.find((e) => e.id === id) ?? null;
   }
 
   update(dt) {
@@ -402,9 +459,6 @@ export class BaseBuildingManager {
     const finished = [];
     for (const site of this.sites) {
       if (isTeamStagingPhase(this.game, site.team)) {
-        if (site.marker) {
-          updateBaseBuildingConstructionVisual(site.marker, site.progress, 0);
-        }
         continue;
       }
       site.progress += dt / Math.max(site.def.buildTime, 1);
@@ -437,7 +491,7 @@ export class BaseBuildingManager {
     if (this.game.tutorial || this.game.clearance) return;
     const team = 'enemy';
     const res = this.game.resources?.enemy ?? 0;
-    const order = ['ordnanceYard', 'motorPool', 'hospital', 'bunker', 'bunker'];
+    const order = ['infantryGarrison', 'ordnanceYard', 'motorPool', 'hospital', 'bunker', 'bunker'];
     for (const typeId of order) {
       const def = BASE_BUILDING_TYPES[typeId];
       if (this._countType(team, typeId) >= (def.maxPerTeam ?? 99)) continue;
@@ -467,17 +521,19 @@ export class BaseBuildingManager {
   }
 
   _randomBuildPos(team, typeId) {
-    const hq = this._hqPos(team);
     const def = BASE_BUILDING_TYPES[typeId];
-    for (let i = 0; i < 12; i++) {
+    const anchors = this._buildAnchors(team);
+    for (let i = 0; i < 24; i++) {
+      const anchor = anchors[Math.floor(Math.random() * anchors.length)];
       const angle = Math.random() * Math.PI * 2;
       const dist =
         def.placementMinFromHq +
         Math.random() * (def.placementMaxFromHq - def.placementMinFromHq);
-      return {
-        x: hq.x + Math.cos(angle) * dist,
-        z: hq.z + Math.sin(angle) * dist,
+      const pos = {
+        x: anchor.x + Math.cos(angle) * dist,
+        z: anchor.z + Math.sin(angle) * dist,
       };
+      if (!this.getPlacementRejectReason(pos.x, pos.z, team, typeId)) return pos;
     }
     return null;
   }

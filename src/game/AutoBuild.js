@@ -95,7 +95,7 @@ export function pickAutoBuildUnit(game) {
 
 /** Fill the production queue up to capacity when auto-build is enabled. */
 export function updateAutoBuild(game) {
-  if (!game?.autoBuildMode || !isAutoBuildAvailable(game)) return;
+  if (!game?.autoBuildMode || game.cheatMode || !isAutoBuildAvailable(game)) return;
   if (!game.running || game.gameOver || game.paused) return;
   if (isPlayerStagingPhase(game)) return;
 

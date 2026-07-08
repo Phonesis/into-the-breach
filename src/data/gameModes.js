@@ -3,7 +3,7 @@ export const GAME_MODES = {
     id: 'campaign',
     name: 'Standard',
     subtitle:
-      'Full battle vs AI — Classic (all units from HQ) or Base Building (construct depots to unlock armor & artillery).',
+      'Destroy the enemy HQ to win — Classic (train at HQ) or Base Building (construct depots for armor & artillery).',
   },
   tutorial: {
     id: 'tutorial',
@@ -19,7 +19,8 @@ export const GAME_MODES = {
   clearance: {
     id: 'clearance',
     name: 'Clear Defenses',
-    subtitle: 'Enemy forces are dug in across the map — no enemy HQ. Destroy every defender to win.',
+    subtitle:
+      'Fixed attack force vs dug-in defenders — no HQ, no reinforcements. Wipe every defender to win.',
   },
   towerDefense: {
     id: 'towerDefense',

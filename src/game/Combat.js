@@ -129,7 +129,7 @@ export function updateCombat(
       attacker.def.damage <= 0
     )
       continue;
-    if (openingCeasefire) continue;
+    if (openingCeasefire && !attacker.attackOrder) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
 
     const acquire =
@@ -140,9 +140,16 @@ export function updateCombat(
 
     attacker.target = target;
 
+    const structureTarget =
+      isHqTarget(target) ||
+      isSceneryTarget(target) ||
+      isDefenseTarget(target) ||
+      isBaseBuildingTarget(target);
     const canFireMain = target.isGround || isSmokeShellTarget(target)
       ? isPointInRange(attacker, target.position)
-      : isInRange(attacker, target);
+      : structureTarget
+        ? isInRange(attacker, target, 1.05)
+        : isInRange(attacker, target);
     if (
       canFireMain &&
       (attacker.def.type === 'infantry' ||
@@ -336,6 +343,7 @@ function fire(
     !isSceneryTarget(target) &&
     !isDefenseTarget(target) &&
     !isBaseBuildingTarget(target) &&
+    !isHqTarget(target) &&
     options.smokeScreens?.isLosObscured?.(attacker.position.x, attacker.position.z, impact.x, impact.z)
   ) {
     if (Math.random() < SMOKE_MISS_CHANCE) {
@@ -457,8 +465,13 @@ function fire(
 
   if (target.isGround) {
     applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options, livingUnits);
-  } else if (isSceneryTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target)) {
-    target.takeDamage(damage);
+  } else if (
+    isSceneryTarget(target) ||
+    isDefenseTarget(target) ||
+    isBaseBuildingTarget(target) ||
+    isHqTarget(target)
+  ) {
+    target.takeDamage(isHqTarget(target) ? scalePracticeHqDamage(target, damage, options) : damage);
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
     if (!target.surrendered) {

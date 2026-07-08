@@ -45,6 +45,7 @@ export class Unit {
     this.moveTarget = null;
     this._movePath = null;
     this._userMoveOrder = false;
+    this._bunkerEntryId = null;
     this.attackCooldown = 0;
     this.mgCooldown = 0;
     this.dead = false;
@@ -106,6 +107,8 @@ export class Unit {
     this.target = target;
     this._manualFireMission = manualFire;
     this._chasingAttack = true;
+    this._userMoveOrder = false;
+    this._movePath = null;
     if (target && !target.dead) {
       this.moveTarget = getStandoffPosition(this, target);
     }
@@ -116,6 +119,7 @@ export class Unit {
     this.target = null;
     this._chasingAttack = false;
     this._manualFireMission = false;
+    this._bunkerEntryId = null;
   }
 
   cancelManualFireMission() {

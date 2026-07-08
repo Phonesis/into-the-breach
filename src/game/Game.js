@@ -20,7 +20,7 @@ import {
   isLastStandMode,
   LAST_STAND_SUPPLIES,
   TD_STARTING_POINTS,
-  CLEARANCE_STARTING_RESOURCES,
+
   getProducibleUnits,
 } from '../data/gameModes.js';
 import { TD_HQ_DEFENSE_STARTING_SUPPLIES, isTdHqDefenseStyle } from '../data/towerDefense.js';
@@ -58,6 +58,7 @@ import {
   setupClearanceCapturePoints,
   checkClearanceVictory,
   getClearancePlayerSpawnBase,
+  getClearanceStagingAnchor,
   CLEARANCE_CEASEFIRE_TIME,
 } from './ClearanceMode.js';
 import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
@@ -73,6 +74,8 @@ import {
   isBaseBuildingCampaign,
   getPlayerProductionUnitTypes,
   getSpawnBuildingForUnit,
+  canUseBaseBuildingOnMap,
+  baseBuildingRequiresLargeMap,
 } from '../data/baseBuildings.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import {
@@ -81,6 +84,8 @@ import {
   syncUnitFieldIcon,
 } from '../visual/UnitFieldIcons.js';
 import { syncHealMarkers } from '../visual/HealMarkers.js';
+import { getActiveHospitals } from './HospitalBehavior.js';
+import { getActiveMotorPools } from './MotorPoolBehavior.js';
 import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
 import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
 import { updateSurrenderState, syncSurrenderMarkers } from './SurrenderBehavior.js';
@@ -238,6 +243,8 @@ export class Game {
     this._captureUiAccum = 0;
     this._selectionUiAccum = 0;
     this._selectionUiKey = '';
+    this._healMarkerAccum = 0;
+    this._combatBuildingTargets = [];
     this._hoverUiId = '';
     this._coverUiAccum = 0;
     this._terrainMesh = null;
@@ -306,15 +313,16 @@ export class Game {
         return getPlayerProductionUnitTypes(this);
       },
       isProductionBlocked: (team) =>
-        team === PLAYER_TEAM ? isPlayerStagingPhase(this) : isEnemyStagingPhase(this),
+        this.clearance
+          ? true
+          : team === PLAYER_TEAM
+            ? isPlayerStagingPhase(this)
+            : isEnemyStagingPhase(this),
       getSpawnPos: (team, unitType) => {
-        if (team === PLAYER_TEAM && isBaseBuildingCampaign(this)) {
+        if (isBaseBuildingCampaign(this)) {
           const need = getSpawnBuildingForUnit(unitType);
-          if (!need && this.selectedHq && !this.selectedHq.dead) {
-            const p = this.selectedHq.position;
-            return { x: p.x, z: p.z };
-          }
           if (
+            team === PLAYER_TEAM &&
             need &&
             this.selectedBaseBuilding &&
             !this.selectedBaseBuilding.destroyed &&
@@ -325,8 +333,9 @@ export class Game {
               z: this.selectedBaseBuilding.z,
             };
           }
-          const fromSelected = this.baseBuildings?.getSpawnPosition(team, unitType);
-          if (fromSelected) return fromSelected;
+          const fromBuilding = this.baseBuildings?.getSpawnPosition(team, unitType);
+          if (fromBuilding) return fromBuilding;
+          return null;
         }
         const fromBuilding = this.baseBuildings?.getSpawnPosition(team, unitType);
         if (fromBuilding) return fromBuilding;
@@ -672,17 +681,23 @@ export class Game {
       ? createLastStandState(startOptions.lastStandDeployMode ?? 'manual')
       : null;
     this.campaign = isCampaignMode(gameMode);
-    this.campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
+    let campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
     this.assaultRole = startOptions.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(
       this.tutorial ? DEFAULT_DIFFICULTY : (startOptions.difficulty ?? DEFAULT_DIFFICULTY)
     );
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
-    const mapSizeId =
-      this.lastStand && isLastStandPresetDeployMode(this.lastStand.deployMode)
-        ? 'large'
-        : (startOptions.mapSize ?? 'medium');
+    let mapSizeId = startOptions.mapSize ?? 'medium';
+    if (this.lastStand && isLastStandPresetDeployMode(this.lastStand.deployMode)) {
+      mapSizeId = 'large';
+    } else if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
+      mapSizeId = 'large';
+    }
+    if (campaignStyle === 'baseBuilding' && !canUseBaseBuildingOnMap(mapSizeId)) {
+      campaignStyle = 'classic';
+    }
+    this.campaignStyle = campaignStyle;
     this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
@@ -700,7 +715,7 @@ export class Game {
                 ? TD_HQ_DEFENSE_STARTING_SUPPLIES
                 : TD_STARTING_POINTS)
             : this.clearance
-              ? CLEARANCE_STARTING_RESOURCES
+              ? 0
               : assault
                 ? ASSAULT_STARTING_RESOURCES
                 : this.campaign
@@ -728,7 +743,7 @@ export class Game {
     this.smokeShellTargeting = false;
     this.engineerSandbags.reset();
     this.baseBuildings.reset();
-    if (this.campaignStyle === 'baseBuilding') {
+    if (isBaseBuildingCampaign(this)) {
       this.baseBuildings.enable();
     }
 
@@ -777,17 +792,19 @@ export class Game {
     const hqHp = this.campaign ? CAMPAIGN_BALANCE.hqMaxHp : 800;
     this.hqs = [];
     if (!this.lastStand) {
-      this.hqs.push(
-        new HQ({
-          team: PLAYER_TEAM,
-          position: playerBasePos,
-          mapDef: this.mapDef,
-          scene: this.scene,
-          label: playerHqLabel,
-          maxHp: hqHp,
-          faction: this.playerFaction,
-        })
-      );
+      if (!this.clearance) {
+        this.hqs.push(
+          new HQ({
+            team: PLAYER_TEAM,
+            position: playerBasePos,
+            mapDef: this.mapDef,
+            scene: this.scene,
+            label: playerHqLabel,
+            maxHp: hqHp,
+            faction: this.playerFaction,
+          })
+        );
+      }
       if (!this.clearance && !this.towerDefense) {
         this.hqs.push(
           new HQ({
@@ -1039,6 +1056,10 @@ export class Game {
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.seekCoverMode = this.ui.seekCoverMode;
     this.autoBuildMode = this.ui.syncAutoBuildForCampaign(this.campaignStyle);
+    if (this.cheatMode) {
+      this.autoBuildMode = false;
+      this.ui.setAutoBuildMode(false, this.campaignStyle, { persist: false });
+    }
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
     if (isBaseBuildingCampaign(this)) {
@@ -1155,16 +1176,19 @@ export class Game {
         secondsLeft: CLEARANCE_CEASEFIRE_TIME - this.matchTime,
         total: CLEARANCE_CEASEFIRE_TIME,
         title: 'Defenders hold fire',
-        subtitle: 'Stay inside the blue HQ ring — or launch early when ready',
+        subtitle: 'Stay inside the blue assembly ring — or launch early when ready',
         canLaunchEarly: true,
       };
     }
     if (!this.clearance && this.matchTime < BATTLE_OPENING_TIME) {
+      const assault = !!this.assault;
       return {
         secondsLeft: BATTLE_OPENING_TIME - this.matchTime,
         total: BATTLE_OPENING_TIME,
         title: 'Quiet sector',
-        subtitle: 'Stay inside your HQ ring — or launch early when ready',
+        subtitle: assault
+          ? 'Stay inside your HQ ring — capture the frontline or destroy the enemy HQ'
+          : 'Victory: destroy the enemy headquarters · Stay in your HQ ring — launch when ready',
         canLaunchEarly: true,
       };
     }
@@ -1182,7 +1206,9 @@ export class Game {
       }
       return { x, z };
     }
-    const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
+    const hq = this.clearance
+      ? getClearanceStagingAnchor(this.mapDef)
+      : this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
     return clampPointToHqZone(x, z, hq, getStagingMoveRadius(this.mapDef));
   }
 
@@ -1218,7 +1244,17 @@ export class Game {
   _showDeployZoneRings(teams) {
     disposeDeployZoneRings(this._deployZoneRings, this.scene);
     const hqs = this.hqs.filter((h) => teams.includes(h.team) && !h.dead);
-    this._deployZoneRings = createDeployZoneRings(hqs, this.mapDef, this.scene);
+    const rings = createDeployZoneRings(hqs, this.mapDef, this.scene);
+    if (
+      this.clearance &&
+      teams.includes(PLAYER_TEAM) &&
+      !hqs.some((h) => h.team === PLAYER_TEAM)
+    ) {
+      rings.push(
+        ...createDeployZoneRings([getClearanceStagingAnchor(this.mapDef)], this.mapDef, this.scene)
+      );
+    }
+    this._deployZoneRings = rings;
   }
 
   _syncDeployZoneVisuals() {
@@ -1329,6 +1365,7 @@ export class Game {
   }
 
   setAutoBuildMode(enabled) {
+    if (this.cheatMode && enabled) return;
     this.autoBuildMode = !!enabled;
     if (this.autoBuildMode && this.running && !this.gameOver) {
       updateAutoBuild(this);
@@ -1637,6 +1674,10 @@ export class Game {
   toggleCheatMode() {
     this.cheatMode = !this.cheatMode;
     this.production?.setCheatMode(this.cheatMode);
+    if (this.cheatMode) {
+      this.autoBuildMode = false;
+      this.ui?.setAutoBuildMode(false, this.campaignStyle, { persist: false });
+    }
     this.ui?.setCheatHud(this.cheatMode);
     if (this.running) {
       this.ui?.updateProduction(this);
@@ -1955,6 +1996,7 @@ export class Game {
 
   tryProduce(unitType) {
     if (!this.running || this.gameOver) return false;
+    if (this.clearance) return false;
     if (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense)) return false;
 
     if (this.paused) return false;
@@ -1990,7 +2032,7 @@ export class Game {
   }
 
   tickEconomy(dt) {
-    if (this.lastStand) return;
+    if (this.lastStand || this.clearance) return;
     if (this.towerDefense) {
       if (isTdHqDefenseStyle(this.towerDefense)) {
         this.resources.player += HQ_INCOME_RATE * dt;
@@ -2002,13 +2044,13 @@ export class Game {
     const hqRate = this.campaign ? CAMPAIGN_BALANCE.hqIncomeRate : HQ_INCOME_RATE;
     const cpRate = this.campaign ? CAMPAIGN_BALANCE.captureIncomeRate : CAPTURE_POINT_INCOME;
     this.resources.player += hqRate * dt;
-    if (!this.tutorial && !this.clearance) {
+    if (!this.tutorial) {
       this.resources.enemy += hqRate * dt * this.difficulty.enemyIncomeMult;
     }
 
     for (const cp of this.capturePoints) {
       if (cp.owner === PLAYER_TEAM) this.resources.player += cpRate * dt;
-      if (!this.tutorial && !this.clearance && cp.owner === ENEMY_TEAM) {
+      if (!this.tutorial && cp.owner === ENEMY_TEAM) {
         this.resources.enemy += cpRate * dt * this.difficulty.enemyIncomeMult;
       }
     }
@@ -2123,7 +2165,7 @@ export class Game {
     });
     this.ui.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
     if (!this.towerDefense) this.ui.updateCapturePoints(this.capturePoints);
-    if (!this.towerDefense || tdHqDefense) this.ui.updateProduction(this);
+    if (!this.towerDefense || tdHqDefense) this.ui.updateProduction(this, { skipResources: true });
     if (this.baseBuildings?.active) this.ui.updateBaseBuild(this);
     if (this.towerDefense && !tdHqDefense) {
       this.ui.updateDefenses(this);
@@ -2560,8 +2602,6 @@ export class Game {
         updateDetachedCorpseFalls(dt);
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
-        updateHospitalHealing(this.baseBuildings, this._aliveUnits, dt);
-        updateMotorPoolHealing(this.baseBuildings, this._aliveUnits, dt);
         updateEngineerHealing(this._aliveUnits, dt);
         updateEngineerHqRepair(this.hqs, this._aliveUnits, dt);
         this.engineerSandbags?.update(dt);
@@ -2569,13 +2609,32 @@ export class Game {
           this.ui?.updateEngineerBuild(this);
         }
         this.baseBuildings?.update(dt);
-        if (
-          getGarrisonBunkerSources(this).length > 0 ||
-          this._aliveUnits.some((u) => u._garrisonBunkerId)
-        ) {
-          updateBunkerGarrison(this._aliveUnits, this);
+        this._healMarkerAccum += dt;
+        if (this._healMarkerAccum >= 0.1) {
+          const depotDt = this._healMarkerAccum;
+          this._healMarkerAccum = 0;
+          const depotCache = this.baseBuildings?.active
+            ? {
+                hospitals: getActiveHospitals(this.baseBuildings),
+                motorPools: getActiveMotorPools(this.baseBuildings),
+              }
+            : null;
+          syncHealMarkers(this._aliveUnits, this.baseBuildings, this.hqs, depotCache);
+          if (depotCache) {
+            updateHospitalHealing(
+              this.baseBuildings,
+              this._aliveUnits,
+              depotDt,
+              depotCache.hospitals
+            );
+            updateMotorPoolHealing(
+              this.baseBuildings,
+              this._aliveUnits,
+              depotDt,
+              depotCache.motorPools
+            );
+          }
         }
-        syncHealMarkers(this._aliveUnits, this.baseBuildings, this.hqs);
         syncDamageSmoke(this._aliveUnits);
         updateDamageSmoke(this._aliveUnits, dt);
         syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
@@ -2629,6 +2688,12 @@ export class Game {
           scenery: this.scenery,
         });
         if (
+          getGarrisonBunkerSources(this).length > 0 ||
+          this._aliveUnits.some((u) => u._garrisonBunkerId || u._bunkerEntryId)
+        ) {
+          updateBunkerGarrison(this._aliveUnits, this);
+        }
+        if (
           this._aliveUnits.some(
             (u) => u._mountedOnTankId || u._pendingMountTankId || u._tankRiderIds?.length
           )
@@ -2641,13 +2706,17 @@ export class Game {
 
         const stagingTeams = this._getDeployZoneTeamsAt();
         if (stagingTeams.length) {
+          const stagingAnchors = this.clearance
+            ? { player: getClearanceStagingAnchor(this.mapDef) }
+            : null;
           containTeamsToDeployZone(
             this._aliveUnits,
             this.hqs,
             this.mapDef,
             stagingTeams,
             getDeployRadius(this.mapDef),
-            getStagingMoveRadius(this.mapDef)
+            getStagingMoveRadius(this.mapDef),
+            stagingAnchors
           );
         }
         this._syncDeployZoneVisuals();
@@ -2655,7 +2724,10 @@ export class Game {
         sounds.updateVehicleEngines(this._aliveUnits, dt);
         for (const u of this._aliveUnits) {
           if (u.retreating) {
-            const hq = this.hqs.find((h) => h.team === u.team && !h.dead);
+            const hq =
+              u.team === PLAYER_TEAM && this.clearance
+                ? getClearanceStagingAnchor(this.mapDef)
+                : this.hqs.find((h) => h.team === u.team && !h.dead);
             updateRetreatState(u, hq, this.mapDef);
           }
         }
@@ -2681,6 +2753,16 @@ export class Game {
         if (this._aliveUnits.length > 0 && this._combatAccum >= combatStep) {
           const cdt = this._combatAccum;
           this._combatAccum = 0;
+          const combatBuildings = this._combatBuildingTargets;
+          combatBuildings.length = 0;
+          const baseTargets = this.baseBuildings?.getAttackTargets();
+          if (baseTargets?.length) {
+            for (let i = 0; i < baseTargets.length; i++) combatBuildings.push(baseTargets[i]);
+          }
+          const sandTargets = this.engineerSandbags?.getAttackTargets();
+          if (sandTargets?.length) {
+            for (let i = 0; i < sandTargets.length; i++) combatBuildings.push(sandTargets[i]);
+          }
           updateCombat(
             this._aliveUnits,
             this.hqs,
@@ -2693,7 +2775,7 @@ export class Game {
             this.difficulty.enemyDamageMult,
             this.scenery,
             {
-              protectPlayerHq: this.clearance || this.towerDefense,
+              protectPlayerHq: this.towerDefense,
               tutorialPassiveNoHq: this.tutorial,
               practiceHqDamageMult: this.tutorial ? PRACTICE_TARGET_HQ_DAMAGE_MULT : 1,
               openingCeasefire:
@@ -2704,10 +2786,7 @@ export class Game {
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
-              baseBuildingTargets: [
-                ...(this.baseBuildings?.getAttackTargets() ?? []),
-                ...(this.engineerSandbags?.getAttackTargets() ?? []),
-              ],
+              baseBuildingTargets: combatBuildings,
               clearance: this.clearance,
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,

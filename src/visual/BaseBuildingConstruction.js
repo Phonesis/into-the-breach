@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 const GHOST_DIMS = {
+  infantryGarrison: [6.2, 2.8, 5.2],
   hospital: [6.5, 3.2, 5],
   ordnanceYard: [7.5, 2.6, 6.2],
   motorPool: [8.5, 3, 6.8],
@@ -55,12 +56,15 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function setProgressArc(mesh, radius, progress) {
+function setProgressArc(mesh, radius, progress, lastBucket = -1) {
+  const bucket = Math.min(200, Math.floor(Math.max(0, Math.min(1, progress)) * 200));
+  if (bucket === lastBucket) return lastBucket;
   const inner = radius * 0.72;
   const outer = radius * 0.92;
-  const theta = Math.max(0.05, Math.min(1, progress)) * Math.PI * 2;
+  const theta = Math.max(0.05, bucket / 200) * Math.PI * 2;
   if (mesh.geometry) mesh.geometry.dispose();
-  mesh.geometry = new THREE.RingGeometry(inner, outer, 40, 1, 0, theta);
+  mesh.geometry = new THREE.RingGeometry(inner, outer, 32, 1, 0, theta);
+  return bucket;
 }
 
 export function createBaseBuildingConstructionVisual({ def, team }) {
@@ -126,7 +130,7 @@ export function createBaseBuildingConstructionVisual({ def, team }) {
   ]) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, poleH, 6), scaffoldMat);
     pole.position.set(px, poleH * 0.5, pz);
-    pole.castShadow = true;
+    pole.castShadow = false;
     scaffold.add(pole);
   }
   for (const z of [-spread, spread]) {
@@ -149,7 +153,7 @@ export function createBaseBuildingConstructionVisual({ def, team }) {
   ghost.name = 'ghost';
   ghost.position.y = 0.15;
   ghost.scale.y = 0.12;
-  ghost.castShadow = true;
+  ghost.castShadow = false;
   group.add(ghost);
 
   const beaconMat = new THREE.MeshBasicMaterial({
@@ -192,6 +196,7 @@ export function createBaseBuildingConstructionVisual({ def, team }) {
     labelMat,
     labelTex,
     lastLabelPct: -1,
+    lastArcBucket: -1,
     phase: Math.random() * Math.PI * 2,
   };
 
@@ -205,7 +210,7 @@ export function updateBaseBuildingConstructionVisual(group, progress, dt = 0) {
   const p = Math.max(0, Math.min(1, progress));
   data.phase += dt * 3.2;
 
-  setProgressArc(data.progressArc, data.radius, p);
+  data.lastArcBucket = setProgressArc(data.progressArc, data.radius, p, data.lastArcBucket);
 
   const pulse = 0.55 + Math.sin(data.phase) * 0.22;
   data.outerRing.material.opacity = 0.5 + pulse * 0.35;

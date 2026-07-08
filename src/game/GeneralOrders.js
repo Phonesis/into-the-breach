@@ -5,6 +5,7 @@ import {
   HOLD_GROUND_RETREAT_MULT,
 } from '../data/generalOrders.js';
 import { startRetreat, clearRetreat } from './RetreatBehavior.js';
+import { getClearanceStagingAnchor } from './ClearanceMode.js';
 
 const PLAYER = 'player';
 const HQ_REACHED_DIST = 18;
@@ -20,6 +21,7 @@ function canReceiveOrder(unit) {
 }
 
 function playerHq(game) {
+  if (game.clearance) return getClearanceStagingAnchor(game.mapDef);
   return game.hqs.find((h) => h.team === PLAYER && !h.dead);
 }
 

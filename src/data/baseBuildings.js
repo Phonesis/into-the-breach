@@ -10,19 +10,46 @@ export const CAMPAIGN_STYLES = {
     id: 'baseBuilding',
     name: 'Base Building',
     subtitle:
-      'Construct depots to unlock vehicles, artillery, and medics. Bunkers garrison infantry.',
+      'Large map — train infantry at the garrison; build forward bases at captured sectors.',
   },
 };
 
+/** Base Building requires the grand theater scale. */
+export const BASE_BUILDING_MIN_MAP_SIZE = 'large';
+
+export function canUseBaseBuildingOnMap(mapSizeId = 'medium') {
+  return mapSizeId === BASE_BUILDING_MIN_MAP_SIZE;
+}
+
+export function baseBuildingRequiresLargeMap(campaignStyle) {
+  return campaignStyle === 'baseBuilding';
+}
+
 export const CAMPAIGN_STYLE_LIST = Object.values(CAMPAIGN_STYLES);
 
-/** Units trainable from HQ in base-building mode. */
-export const HQ_BASE_UNITS = ['infantry'];
+/** HQ does not train units in base-building mode — use Infantry Garrison and depots. */
+export const HQ_BASE_UNITS = [];
 
 /** Opening force per side in base-building campaign — one rifle squad only. */
 export const BASE_BUILDING_STARTING_ARMY = [{ type: 'infantry', count: 1, spread: 4 }];
 
 export const BASE_BUILDING_TYPES = {
+  infantryGarrison: {
+    id: 'infantryGarrison',
+    name: 'Infantry Garrison',
+    subtitle: 'Click to train infantry squads',
+    cost: 130,
+    buildTime: 38,
+    hp: 320,
+    radius: 3.6,
+    hitRadius: 4,
+    unlocks: ['infantry'],
+    spawns: ['infantry'],
+    maxPerTeam: 1,
+    placementMinFromHq: 10,
+    placementMaxFromHq: 48,
+    minSpacing: 9,
+  },
   hospital: {
     id: 'hospital',
     name: 'Field Hospital',
@@ -97,6 +124,7 @@ export const BASE_BUILDING_TYPES = {
 };
 
 export const BASE_BUILDING_TYPE_LIST = [
+  BASE_BUILDING_TYPES.infantryGarrison,
   BASE_BUILDING_TYPES.hospital,
   BASE_BUILDING_TYPES.ordnanceYard,
   BASE_BUILDING_TYPES.motorPool,
@@ -104,6 +132,7 @@ export const BASE_BUILDING_TYPE_LIST = [
 ];
 
 const SPAWN_BUILDING_FOR_UNIT = {
+  infantry: 'infantryGarrison',
   medic: 'hospital',
   machineGun: 'ordnanceYard',
   mortar: 'ordnanceYard',
@@ -121,15 +150,16 @@ export function getSpawnBuildingForUnit(unitType) {
 }
 
 export function isBaseBuildingCampaign(game) {
-  return !!game?.campaign && game.campaignStyle === 'baseBuilding';
+  return (
+    !!game?.campaign &&
+    game.campaignStyle === 'baseBuilding' &&
+    canUseBaseBuildingOnMap(game.mapDef?.mapSize)
+  );
 }
 
 /** Unit types shown in the player production panel for the current selection. */
 export function getPlayerProductionUnitTypes(game) {
   if (!isBaseBuildingCampaign(game)) return null;
-  if (game.selectedHq?.team === 'player' && !game.selectedHq.dead) {
-    return [...HQ_BASE_UNITS];
-  }
   const entry = game.selectedBaseBuilding;
   if (entry?.team === 'player' && !entry.destroyed && (entry.def?.spawns?.length ?? 0) > 0) {
     return [...entry.def.spawns];

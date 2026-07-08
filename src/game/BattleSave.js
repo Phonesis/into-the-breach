@@ -693,7 +693,12 @@ export function applyBattleSave(game, snapshot) {
   game.paused = !!snapshot.paused;
   game.ui?.setGamePaused(game.paused);
   game.autoBuildMode = !!snapshot.autoBuildMode;
-  game.ui?.setAutoBuildMode(game.autoBuildMode, game.campaignStyle);
+  if (game.cheatMode) {
+    game.autoBuildMode = false;
+    game.ui?.setAutoBuildMode(false, game.campaignStyle, { persist: false });
+  } else {
+    game.ui?.setAutoBuildMode(game.autoBuildMode, game.campaignStyle);
+  }
   game.resources = { ...snapshot.resources };
 
   if (snapshot.camera) {

@@ -7,6 +7,7 @@ import {
 } from '../game/TankRiders.js';
 import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
+import { getGarrisonBunkerSources } from '../game/BunkerGarrison.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder, canSmokeShellOrder } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
@@ -417,28 +418,19 @@ export class RTSController {
     const targets = this.getBaseBuildingAttackTargets?.() ?? [];
     if (!targets.length) return null;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const meshes = targets.map((t) => t.mesh).filter(Boolean);
-    if (!meshes.length) return null;
-    const hits = this.raycaster.intersectObjects(meshes, true);
-    let best = null;
-    let bestDist = Infinity;
-    for (const hit of hits) {
-      for (const t of targets) {
-        if (t.dead || !t.mesh) continue;
-        let obj = hit.object;
-        while (obj) {
-          if (obj === t.mesh) {
-            if (hit.distance < bestDist) {
-              bestDist = hit.distance;
-              best = t;
-            }
-            break;
-          }
-          obj = obj.parent;
-        }
-      }
+    const hitboxes = [];
+    for (const t of targets) {
+      if (t.dead || !t.mesh) continue;
+      const hitbox = t.mesh.getObjectByName?.('baseBuildingHitbox');
+      if (hitbox) hitboxes.push(hitbox);
     }
-    return best;
+    if (!hitboxes.length) return null;
+    const hits = this.raycaster.intersectObjects(hitboxes, false);
+    if (!hits.length) return null;
+    const id = hits[0].object.userData.baseBuildingEntryId;
+    const target = targets.find((t) => t.entry?.id === id) ?? null;
+    this._baseBuildingPickDist = target ? hits[0].distance : Infinity;
+    return target;
   }
 
   /** Enemy unit or HQ under cursor (cover/scenery uses Shift+LMB manual fire). */
@@ -451,9 +443,7 @@ export class RTSController {
     if (unit) combat.push({ target: unit, dist: this._raycastHitDistance(this._unitPickMesh(unit)) });
     if (hq) combat.push({ target: hq, dist: this._raycastHitDistance(this._hqPickMesh(hq)) });
     if (structure) {
-      this.raycaster.setFromCamera(this.pointer, this.camera);
-      const hits = this.raycaster.intersectObject(structure.mesh, true);
-      combat.push({ target: structure, dist: hits[0]?.distance ?? Infinity });
+      combat.push({ target: structure, dist: this._baseBuildingPickDist ?? Infinity });
     }
 
     const nearHq = this._pickEnemyHQNearCursor();
@@ -914,18 +904,35 @@ export class RTSController {
     const mapDef = this.getMapDef();
     const coverSystem = this.getCoverSystem?.();
     const seekCover = !!this.getSeekCoverMode?.();
-    const destinations = spreadGroupMoveDestinations(selected, clamped.x, clamped.z);
+    const garrisonSources = getGarrisonBunkerSources(this.getGarrisonSources?.());
+    let snapX = clamped.x;
+    let snapZ = clamped.z;
+    let bunkerSnap = null;
+    for (const src of garrisonSources) {
+      const bunker = src.pickBunkerAt?.(clamped.x, clamped.z, player, 6.5);
+      if (bunker) {
+        snapX = bunker.x;
+        snapZ = bunker.z;
+        bunkerSnap = bunker;
+        break;
+      }
+    }
+
+    const destinations = bunkerSnap
+      ? selected.map((unit) => ({ unit, x: snapX, z: snapZ }))
+      : spreadGroupMoveDestinations(selected, snapX, snapZ);
     for (const { unit, x, z } of destinations) {
       unit.clearAttackOrder();
       let destX = x;
       let destZ = z;
-      if (seekCover && coverSystem) {
+      if (seekCover && coverSystem && !bunkerSnap) {
         const coverDest = resolveSeekCoverDestination(unit, x, z, coverSystem);
         destX = coverDest.x;
         destZ = coverDest.z;
       }
       const pt = this.clampDeployPoint(destX, destZ);
       unit.moveTo(pt.x, pt.z, mapDef, true);
+      unit._bunkerEntryId = bunkerSnap?.id ?? null;
     }
     if (this.onOrder) this.onOrder('move', selected);
   }

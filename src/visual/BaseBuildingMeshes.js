@@ -169,6 +169,56 @@ export function createMotorPoolMesh(factionId) {
   return g;
 }
 
+export function createInfantryGarrisonMesh(factionId) {
+  const g = new THREE.Group();
+  g.name = 'base-infantry-garrison';
+  const MAT = matsForFaction(factionId);
+
+  const base = new THREE.Mesh(new THREE.BoxGeometry(6.5, 2.2, 5), MAT.wall);
+  base.position.y = 1.1;
+  base.castShadow = true;
+  base.receiveShadow = true;
+  g.add(base);
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(7, 0.35, 5.4), MAT.roof);
+  roof.position.y = 2.35;
+  roof.castShadow = true;
+  g.add(roof);
+
+  const porch = new THREE.Mesh(new THREE.BoxGeometry(2.8, 2.4, 1.2), MAT.wallDark);
+  porch.position.set(0, 1.2, 3.1);
+  porch.castShadow = true;
+  g.add(porch);
+
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2, 0.15), MAT.wood);
+  door.position.set(0, 1.05, 3.75);
+  g.add(door);
+
+  const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.6, 8), MAT.wood);
+  flagPole.position.set(-2.6, 1.8, 2.4);
+  flagPole.castShadow = true;
+  g.add(flagPole);
+
+  const flag = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.05), MAT.crossRed);
+  flag.position.set(-2.05, 3.1, 2.4);
+  g.add(flag);
+
+  for (const [x, z] of [
+    [-3, 2.6],
+    [3, 2.6],
+    [-3.4, -1.8],
+    [3.4, -1.8],
+  ]) {
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.48, 0.85), MAT.sandbag);
+    bag.position.set(x, 0.24, z);
+    bag.castShadow = true;
+    g.add(bag);
+  }
+
+  addHitbox(g, 3.6);
+  return g;
+}
+
 export function createCampaignBunkerMesh(factionId) {
   const g = new THREE.Group();
   g.name = 'base-bunker';
@@ -190,6 +240,8 @@ export function createBaseBuildingMesh(typeId, factionId) {
       return createMotorPoolMesh(factionId);
     case 'bunker':
       return createCampaignBunkerMesh(factionId);
+    case 'infantryGarrison':
+      return createInfantryGarrisonMesh(factionId);
     default:
       return createHospitalMesh(factionId);
   }

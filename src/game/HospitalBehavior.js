@@ -37,24 +37,31 @@ export function isUnitNearHospital(unit, hospitals) {
   return false;
 }
 
-export function updateHospitalHealing(baseBuildings, units, dt) {
+export function updateHospitalHealing(baseBuildings, units, dt, hospitalsIn = null) {
   if (dt <= 0 || !baseBuildings?.active) return;
 
-  const hospitals = getActiveHospitals(baseBuildings);
+  const hospitals = hospitalsIn ?? getActiveHospitals(baseBuildings);
   if (!hospitals.length) return;
 
   for (const hospital of hospitals) {
     const range = hospital.def?.healRange ?? HOSPITAL_AURA_RANGE;
+    const rangeSq = range * range;
     const healRate = hospital.def?.healPerSec ?? HOSPITAL_HEAL_PER_SEC;
+    const team = hospital.team;
+    const hx = hospital.x;
+    const hz = hospital.z;
 
     for (const ally of units) {
-      if (ally.dead || ally.team !== hospital.team) continue;
+      if (ally.dead || ally.team !== team) continue;
       if (!canReceiveHospitalHeal(ally)) continue;
 
-      const dist = distanceToPoint(ally, hospital.x, hospital.z);
-      if (dist > range) continue;
+      const dx = ally.position.x - hx;
+      const dz = ally.position.z - hz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq > rangeSq) continue;
 
       const before = ally.hp;
+      const dist = Math.sqrt(distSq);
       const proximity = 1 - (dist / range) * 0.5;
       ally.hp = Math.min(ally.maxHp, ally.hp + healRate * proximity * dt);
       if (ally.hp > before) updateSquadCasualtyVisual(ally);

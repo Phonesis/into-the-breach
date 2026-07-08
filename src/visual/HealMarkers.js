@@ -130,7 +130,7 @@ function engineerIsWorking(unit, units, hqs) {
   return false;
 }
 
-function getHealKind(unit, units, baseBuildings, hqs = null) {
+function getHealKind(unit, units, baseBuildings, hqs = null, depotCache = null) {
   if (!unit || unit.dead) return null;
 
   if (unit.def?.type === 'engineer' && engineerIsWorking(unit, units, hqs)) {
@@ -143,10 +143,10 @@ function getHealKind(unit, units, baseBuildings, hqs = null) {
     if (distanceBetween(unit, medic) <= MEDIC_AURA_RANGE) return 'medic';
   }
 
-  const hospitals = getActiveHospitals(baseBuildings);
+  const hospitals = depotCache?.hospitals ?? getActiveHospitals(baseBuildings);
   if (isUnitNearHospital(unit, hospitals)) return 'medic';
 
-  const motorPools = getActiveMotorPools(baseBuildings);
+  const motorPools = depotCache?.motorPools ?? getActiveMotorPools(baseBuildings);
   if (isUnitNearMotorPool(unit, motorPools)) return 'engineer';
 
   for (const engineer of units) {
@@ -230,14 +230,18 @@ export function removeHqRepairMarker(hq) {
   hq.repairMarker = null;
 }
 
-export function syncHealMarkers(units, baseBuildings = null, hqs = null) {
+export function syncHealMarkers(units, baseBuildings = null, hqs = null, depotCache = null) {
+  const hospitals = depotCache?.hospitals ?? getActiveHospitals(baseBuildings);
+  const motorPools = depotCache?.motorPools ?? getActiveMotorPools(baseBuildings);
+  const cache = depotCache ?? { hospitals, motorPools };
+
   for (const unit of units) {
     if (unit.dead || !unit.mesh) {
       removeHealMarker(unit);
       continue;
     }
 
-    const kind = getHealKind(unit, units, baseBuildings, hqs);
+    const kind = getHealKind(unit, units, baseBuildings, hqs, cache);
     if (!kind) {
       removeHealMarker(unit);
       continue;

@@ -91,13 +91,15 @@ export function containTeamsToDeployZone(
   mapDef,
   teams,
   radius = HQ_DEPLOY_RADIUS,
-  moveRadius = radius
+  moveRadius = radius,
+  stagingAnchors = null
 ) {
   const teamSet = teams ? new Set(teams) : null;
   for (const unit of units) {
     if (unit.dead) continue;
     if (teamSet && !teamSet.has(unit.team)) continue;
-    const hq = hqs.find((h) => h.team === unit.team && !h.dead);
+    let hq = hqs.find((h) => h.team === unit.team && !h.dead);
+    if (!hq && stagingAnchors?.[unit.team]) hq = stagingAnchors[unit.team];
     containUnitToDeployZone(unit, hq, mapDef, radius, moveRadius);
   }
 }

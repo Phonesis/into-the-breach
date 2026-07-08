@@ -1,7 +1,7 @@
-import { distanceBetween } from './Targeting.js';
+import { distanceBetween, distanceToPoint } from './Targeting.js';
+import { isUnitMounted } from './TankRiders.js';
 
 export const BUNKER_GARRISON_COVER_MULT = 0.22;
-export const BUNKER_ENTER_RANGE = 3.8;
 
 const GARRISON_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer']);
 
@@ -15,6 +15,12 @@ export function isUnitGarrisoned(unit) {
 
 export function getGarrisonCoverMultiplier(unit) {
   return isUnitGarrisoned(unit) ? BUNKER_GARRISON_COVER_MULT : 1;
+}
+
+/** How close a unit must be to a bunker center to enter (uses building footprint). */
+export function getBunkerEnterRange(bunker) {
+  const footprint = bunker?.def?.hitRadius ?? bunker?.def?.radius ?? 3.4;
+  return footprint + 1.1;
 }
 
 /** Collect managers that own garrison-capable bunkers / shelters. */
@@ -58,6 +64,17 @@ function pickBunkerAtAny(x, z, team, sources, maxDist = 4.5) {
   return best;
 }
 
+function bunkerCenter(bunker) {
+  return { x: bunker.x, z: bunker.z };
+}
+
+function finishGarrisonEnter(unit) {
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._userMoveOrder = false;
+  unit._bunkerEntryId = null;
+}
+
 export function releaseFromBunker(unit, sources) {
   if (!unit?._garrisonBunkerId) return;
   const list = normalizeGarrisonSources(sources);
@@ -73,7 +90,9 @@ export function releaseFromBunker(unit, sources) {
 }
 
 export function tryEnterBunker(unit, bunker, sources) {
-  if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
+  if (!unit || unit.dead || unit.surrendered || unit._captureExit || isUnitMounted(unit)) {
+    return false;
+  }
   if (!bunker || bunker.destroyed || bunker.building || !bunker.def?.garrison) return false;
   if (!canGarrisonType(unit.def?.type)) return false;
   if (bunker.neutralGarrison) {
@@ -84,18 +103,20 @@ export function tryEnterBunker(unit, bunker, sources) {
 
   const cap = bunker.def.garrisonCapacity ?? 2;
   if ((bunker.garrison?.length ?? 0) >= cap) return false;
-  if (distanceBetween(unit, { position: { x: bunker.x, z: bunker.z } }) > BUNKER_ENTER_RANGE) {
-    return false;
-  }
+
+  const enterRange = getBunkerEnterRange(bunker);
+  if (distanceToPoint(unit, bunkerCenter(bunker)) > enterRange) return false;
 
   releaseFromBunker(unit, sources);
   bunker.garrison = bunker.garrison ?? [];
   if (bunker.neutralGarrison) bunker.garrisonTeam = unit.team;
   bunker.garrison.push(unit.id);
   unit._garrisonBunkerId = bunker.id;
-  unit.clearAttackOrder();
-  unit.moveTarget = null;
-  unit._movePath = null;
+  unit.attackOrder = null;
+  unit.target = null;
+  unit._chasingAttack = false;
+  unit._manualFireMission = false;
+  finishGarrisonEnter(unit);
   unit.retreating = false;
   unit.position.x = bunker.x + (bunker.garrison.length - 1) * 0.35 - 0.35;
   unit.position.z = bunker.z;
@@ -108,6 +129,7 @@ export function updateBunkerGarrison(units, sources) {
   if (!list.length) {
     for (const unit of units) {
       if (unit._garrisonBunkerId) releaseFromBunker(unit, list);
+      unit._bunkerEntryId = null;
     }
     return;
   }
@@ -133,15 +155,30 @@ export function updateBunkerGarrison(units, sources) {
       continue;
     }
 
-    if (!unit.moveTarget || unit.retreating || unit.surrendered) continue;
-    const dest = unit.moveTarget;
-    const bunker = pickBunkerAtAny(dest.x, dest.z, unit.team, list, 4.5);
-    if (!bunker) continue;
-    if (distanceBetween(unit, { position: dest }) <= BUNKER_ENTER_RANGE + 0.5) {
-      if (tryEnterBunker(unit, bunker, list)) {
-        unit.moveTarget = null;
-        unit._movePath = null;
-      }
+    if (unit.retreating || unit.surrendered || isUnitMounted(unit)) continue;
+
+    let bunker = null;
+    if (unit._bunkerEntryId) {
+      bunker = findBunkerEntry(unit._bunkerEntryId, list)?.entry ?? null;
+      if (!bunker) unit._bunkerEntryId = null;
     }
+
+    if (!bunker && unit.moveTarget) {
+      bunker = pickBunkerAtAny(unit.moveTarget.x, unit.moveTarget.z, unit.team, list, 6.5);
+    }
+
+    if (!bunker) continue;
+
+    const enterRange = getBunkerEnterRange(bunker);
+    const distToBunker = distanceToPoint(unit, bunkerCenter(bunker));
+    const distToDest = unit.moveTarget ? distanceToPoint(unit, unit.moveTarget) : Infinity;
+    const closeEnough =
+      distToBunker <= enterRange ||
+      distToDest <= enterRange + 0.6 ||
+      (!unit.moveTarget && distToBunker <= enterRange + 0.4);
+
+    if (!closeEnough) continue;
+
+    tryEnterBunker(unit, bunker, list);
   }
 }

@@ -2245,20 +2245,74 @@ body,
 }
 
 .base-build-panel {
+  pointer-events: auto;
   background: rgba(18, 24, 32, 0.92);
   border: 1px solid rgba(201, 162, 39, 0.35);
   border-radius: 8px;
-  padding: 0.85rem 1rem;
+  padding: 0.45rem 0.65rem 0.55rem;
   min-width: 200px;
   max-width: 300px;
 }
 
-.base-build-panel h3 {
+.base-build-panel.collapsed {
+  padding-bottom: 0.4rem;
+}
+
+.base-build-panel.placing {
+  border-color: rgba(220, 190, 90, 0.75);
+  box-shadow: 0 0 10px rgba(201, 162, 39, 0.22);
+}
+
+.base-build-header {
+  display: flex;
+  align-items: center;
+}
+
+.base-build-header-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.base-build-header-toggle:hover .base-build-title {
+  color: #e8c860;
+}
+
+.base-build-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.2rem;
-  letter-spacing: 0.08em;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  font-weight: 700;
   color: #c9a227;
-  margin-bottom: 0.6rem;
+  line-height: 1.2;
+}
+
+.base-build-chevron {
+  font-size: 0.62rem;
+  color: rgba(201, 162, 39, 0.75);
+  transition: transform 0.15s ease;
+}
+
+.base-build-panel.collapsed .base-build-chevron {
+  transform: rotate(-90deg);
+}
+
+.base-build-body {
+  margin-top: 0.45rem;
+}
+
+.base-build-panel.collapsed .base-build-body {
+  display: none;
 }
 
 .base-build-btns {
@@ -3382,7 +3436,8 @@ body,
   display: none !important;
 }
 
-.laststand-deploy-note {
+.laststand-deploy-note,
+.campaign-style-note {
   font-size: 0.88rem;
   opacity: 0.85;
   margin: 0.5rem 0 0;

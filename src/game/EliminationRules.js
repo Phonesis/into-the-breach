@@ -7,7 +7,8 @@ import { HQ_INCOME_RATE, CAPTURE_POINT_INCOME } from '../data/factions.js';
 import { CAMPAIGN_BALANCE, isCampaignMode } from '../data/campaignPace.js';
 
 export function teamHasProduction(team, game) {
-  if (team === 'enemy' && (game.tutorial || game.clearance)) return false;
+  if (game.clearance) return false;
+  if (team === 'enemy' && game.tutorial) return false;
   return !!game.production;
 }
 
@@ -29,9 +30,7 @@ export function estimateTeamIncomePerSec(team, game) {
   if (game.tutorial) {
     return team === 'player' ? HQ_INCOME_RATE : 0;
   }
-  if (game.clearance) {
-    return team === 'player' ? HQ_INCOME_RATE : 0;
-  }
+  if (game.clearance) return 0;
 
   const hq = game.hqs?.find((h) => h.team === team && !h.dead);
   if (!hq) return 0;
@@ -77,8 +76,8 @@ export function teamIsEliminated(team, game, aliveCount) {
     return team !== 'player' && resources <= 0;
   }
 
-  // Clear Defenses: empty field with no affordable reinforcements is a loss.
-  if (game.clearance && team === 'player') return true;
+  // Clear Defenses: no HQ — wipe the attack force and the mission fails.
+  if (game.clearance) return true;
 
   // Campaign / assault: field wipe only sticks if the team cannot reinforce from HQ.
   if (!game.tutorial && !game.clearance) {

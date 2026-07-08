@@ -34,23 +34,30 @@ export function isUnitNearMotorPool(unit, motorPools) {
   return false;
 }
 
-export function updateMotorPoolHealing(baseBuildings, units, dt) {
+export function updateMotorPoolHealing(baseBuildings, units, dt, motorPoolsIn = null) {
   if (dt <= 0 || !baseBuildings?.active) return;
 
-  const motorPools = getActiveMotorPools(baseBuildings);
+  const motorPools = motorPoolsIn ?? getActiveMotorPools(baseBuildings);
   if (!motorPools.length) return;
 
   for (const pool of motorPools) {
     const range = pool.def?.healRange ?? MOTOR_POOL_AURA_RANGE;
+    const rangeSq = range * range;
     const healRate = pool.def?.healPerSec ?? MOTOR_POOL_HEAL_PER_SEC;
+    const team = pool.team;
+    const px = pool.x;
+    const pz = pool.z;
 
     for (const ally of units) {
-      if (ally.dead || ally.team !== pool.team) continue;
+      if (ally.dead || ally.team !== team) continue;
       if (!canReceiveMotorPoolHeal(ally)) continue;
 
-      const dist = distanceToPoint(ally, pool.x, pool.z);
-      if (dist > range) continue;
+      const dx = ally.position.x - px;
+      const dz = ally.position.z - pz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq > rangeSq) continue;
 
+      const dist = Math.sqrt(distSq);
       const proximity = 1 - (dist / range) * 0.5;
       ally.hp = Math.min(ally.maxHp, ally.hp + healRate * proximity * dt);
     }
