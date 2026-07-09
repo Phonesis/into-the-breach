@@ -5,6 +5,7 @@ import {
   getGarrisonCoverMultiplier,
   isUnitGarrisoned,
 } from './BunkerGarrison.js';
+import { getTrenchCoverMultiplier, isUnitInTrench } from './InfantryTrench.js';
 
 /** Infantry / MG cover — reduces incoming damage while near cover sites. */
 
@@ -29,6 +30,13 @@ export const COVER_TYPES = {
     label: 'Light cover',
     shortLabel: 'Light',
     detail: 'Fighting pits & scrub — ~45% less damage',
+  },
+  trench: {
+    radius: 3.6,
+    mult: 0.42,
+    label: 'Trench',
+    shortLabel: 'Trench',
+    detail: 'Dug fighting trench — ~58% less damage',
   },
   garrison: {
     radius: 0,
@@ -63,6 +71,24 @@ export function getCoverStatus(unit) {
       reduction,
       detail: COVER_TYPES.garrison.detail,
       note: 'Garrisoned — order a move to leave the building. Heavy cover while inside.',
+    };
+  }
+
+  if (isUnitInTrench(unit)) {
+    const mult = getTrenchCoverMultiplier(unit);
+    const reduction = formatCoverReduction(mult);
+    return {
+      inCover: true,
+      garrisoned: false,
+      inTrench: true,
+      unitName: unit.name,
+      label: 'In trench',
+      shortLabel: 'Trench',
+      tier: 'trench',
+      mult,
+      reduction,
+      detail: COVER_TYPES.trench.detail,
+      note: 'Dug in — order a move to leave the trench.',
     };
   }
 
@@ -183,6 +209,17 @@ export class CoverSystem {
         continue;
       }
 
+      if (isUnitInTrench(u)) {
+        u.coverMult = getTrenchCoverMultiplier(u);
+        u.coverLabel = 'In trench';
+        u.coverTier = 'trench';
+        u.inCover = true;
+        u.garrisoned = false;
+        setCoverVisual(u.mesh, true, u.coverMult, 'trench');
+        syncCoverMarker(u);
+        continue;
+      }
+
       u.garrisoned = false;
       const { mult, label, tier } = this.getCoverForUnit(u);
       u.coverMult = mult;
@@ -199,8 +236,10 @@ export function getIncomingDamageMultiplier(target, coverSystem) {
   if (!coverSystem || !target?.def) return 1;
   if (!COVER_UNIT_TYPES.has(target.def.type)) return 1;
   const garrisonMult = getGarrisonCoverMultiplier(target);
+  const trenchMult = getTrenchCoverMultiplier(target);
   let mult = target.coverMult != null ? target.coverMult : coverSystem.getCoverForUnit(target).mult;
   if (garrisonMult < mult) mult = garrisonMult;
+  if (trenchMult < mult) mult = trenchMult;
   return mult;
 }
 
@@ -208,6 +247,7 @@ const COVER_RING_COLORS = {
   heavy: 0x5a9fd4,
   medium: 0x6b8cae,
   light: 0x7aa8b8,
+  trench: 0x9a7a3a,
 };
 
 export function setCoverVisual(mesh, inCover, mult = 0.5, tier = 'medium') {

@@ -1,0 +1,10 @@
+Battle ambience
+===============
+
+Generated via ElevenLabs text-to-sound-effects API (eleven_text_to_sound_v2):
+  battle-atmos.wav       — 3 × 30s distant beds soft-stitched
+  battle-atmos-close.wav — 3 × 30s mid-distance beds soft-stitched
+
+Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-atmos
+
+Subject to ElevenLabs Terms of Service and your plan.

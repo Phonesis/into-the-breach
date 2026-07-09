@@ -10,6 +10,11 @@ import { spawnExplosion } from '../effects/CombatEffects.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
 import { distanceBetween } from './Targeting.js';
+import {
+  createFieldConstructionVisual,
+  updateFieldConstructionVisual,
+  disposeFieldConstructionVisual,
+} from '../visual/FieldConstructionVisual.js';
 
 export const SANDBAG_BUILD_TIME = 11;
 export const BUNKER_BUILD_TIME = 28;
@@ -191,11 +196,14 @@ export class EngineerSandbagManager {
 
   canUse() {
     const g = this.game;
-    if (!g?.running || g.gameOver || g.towerDefense) return false;
+    if (!g?.running || g.gameOver) return false;
+    // Available in all modes (including Tower Defence HQ Defense). Emplacements
+    // style has no player army, so the UI never offers the buttons.
     return true;
   }
 
   canBuildSandbags() {
+    // Base Building uses HQ bunkers for permanent works; field sandbags stay off there
     return this.canUse() && !isBaseBuildingCampaign(this.game);
   }
 
@@ -239,11 +247,20 @@ export class EngineerSandbagManager {
 
   _clearSiteMarkers() {
     for (const site of this.sites) {
-      if (site.marker?.parent) site.marker.parent.remove(site.marker);
-      site.marker?.geometry?.dispose();
-      site.marker?.material?.dispose();
-      site.marker = null;
+      this._disposeSiteMarker(site);
     }
+  }
+
+  _disposeSiteMarker(site) {
+    if (!site?.marker) return;
+    if (site.marker.userData?.fieldConstruction) {
+      disposeFieldConstructionVisual(site.marker);
+    } else {
+      if (site.marker.parent) site.marker.parent.remove(site.marker);
+      site.marker.geometry?.dispose();
+      site.marker.material?.dispose();
+    }
+    site.marker = null;
   }
 
   _teamBuiltCount(team, buildType) {
@@ -398,31 +415,24 @@ export class EngineerSandbagManager {
   }
 
   _attachSiteMarker(site) {
-    const preset = this._buildPreset(site.buildType);
-    const mat = new THREE.MeshBasicMaterial({
-      color: preset?.markerColor ?? 0xc9a84a,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
+    const kind = site.buildType === 'bunker' ? 'bunker' : 'sandbags';
+    const visual = createFieldConstructionVisual({
+      kind,
+      team: site.team,
+      label: kind === 'bunker' ? 'Bunker' : 'Sandbags',
+      verb: 'Building',
     });
-    const inner = preset?.markerInner ?? 2.2;
-    const outer = preset?.markerOuter ?? 2.65;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 24), mat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(site.x, site.y + 0.12, site.z);
-    ring.renderOrder = 9;
-    this.game.scene.add(ring);
-    site.marker = ring;
+    visual.position.set(site.x, site.y, site.z);
+    this.game.scene.add(visual);
+    site.marker = visual;
+    updateFieldConstructionVisual(visual, site.progress ?? 0, 0);
   }
 
   _completeSite(site) {
     const engineer = this.game.units.find((u) => u.id === site.engineerId);
     if (engineer) engineer._sandbagSite = null;
 
-    if (site.marker?.parent) site.marker.parent.remove(site.marker);
-    site.marker?.geometry?.dispose();
-    site.marker?.material?.dispose();
-    site.marker = null;
+    this._disposeSiteMarker(site);
 
     const preset = this._buildPreset(site.buildType);
     const factionId =
@@ -485,10 +495,7 @@ export class EngineerSandbagManager {
   _cancelSite(site) {
     const engineer = this.game.units.find((u) => u.id === site.engineerId);
     if (engineer) engineer._sandbagSite = null;
-    if (site.marker?.parent) site.marker.parent.remove(site.marker);
-    site.marker?.geometry?.dispose();
-    site.marker?.material?.dispose();
-    site.marker = null;
+    this._disposeSiteMarker(site);
   }
 
   update(dt) {
@@ -508,13 +515,13 @@ export class EngineerSandbagManager {
       const dist = Math.hypot(engineer.position.x - site.x, engineer.position.z - site.z);
       if (dist > SANDBAG_BUILD_RANGE) {
         engineer.moveTo(site.x, site.z, this.game.mapDef, true);
+        // Still pulse the marker while engineer is en route
+        if (site.marker) updateFieldConstructionVisual(site.marker, site.progress ?? 0, dt);
       } else {
         engineer.moveTarget = null;
         engineer._movePath = null;
         site.progress += dt / buildTime;
-        if (site.marker?.material) {
-          site.marker.material.opacity = 0.35 + Math.min(site.progress, 1) * 0.45;
-        }
+        if (site.marker) updateFieldConstructionVisual(site.marker, site.progress, dt);
         if (site.progress >= 1) {
           this._completeSite(site);
           finished.push(site.id);

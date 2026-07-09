@@ -535,6 +535,35 @@ export function updateInfantryWalkAnimation(unit, dt) {
   if (unit._mountedOnTankId) return;
   if (!INFANTRY_WALK_TYPES.has(unit.def?.type)) return;
 
+  // Dug into a trench / actively digging — hold crouch pose, no march cycle
+  if (unit._trenchId || unit._diggingTrench) {
+    unit._walkBlend = 0;
+    unit.mesh.traverse((child) => {
+      if (child.name !== 'squadMember' || !child.visible) return;
+      if (!child.userData.walkPose) child.userData.walkPose = {};
+      child.userData.walkPose.crouching = true;
+      restoreWalkRest(child);
+      // Compact crouch: sink torso
+      const torso = child.children.find((c) => c.userData.infantryPart === 'torso');
+      const rest = child.userData.walkRest;
+      if (torso && rest?.torso) {
+        torso.position.y = rest.torso.position.y - 0.12;
+        torso.rotation.x = rest.torso.rotation.x + 0.28;
+      }
+      const legL = child.children.find((c) => c.userData.infantryPart === 'legL');
+      const legR = child.children.find((c) => c.userData.infantryPart === 'legR');
+      if (legL && rest?.legL) {
+        legL.rotation.x = rest.legL.rotation.x + 0.85;
+        legL.position.y = rest.legL.position.y + 0.06;
+      }
+      if (legR && rest?.legR) {
+        legR.rotation.x = rest.legR.rotation.x + 0.85;
+        legR.position.y = rest.legR.position.y + 0.06;
+      }
+    });
+    return;
+  }
+
   const wantsMove = !!unit.moveTarget;
   const lastX = unit._walkLastX ?? unit.position.x;
   const lastZ = unit._walkLastZ ?? unit.position.z;

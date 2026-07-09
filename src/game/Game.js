@@ -67,6 +67,7 @@ import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
+import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
 import { dismountAllRiders, updateTankRiders } from './TankRiders.js';
@@ -376,6 +377,7 @@ export class Game {
     this.smokeScreens = new SmokeScreenManager(this);
     this.smokeShellTargeting = false;
     this.engineerSandbags = new EngineerSandbagManager(this);
+    this.infantryTrenches = new InfantryTrenchManager(this);
     this.baseBuildings = new BaseBuildingManager(this);
     this.campaignStyle = 'classic';
 
@@ -400,6 +402,7 @@ export class Game {
           ? this.lastStand?.pendingType ?? null
           : null,
       getPendingSandbagPlacement: () => this.engineerSandbags?.getPending() ?? null,
+      getPendingTrenchPlacement: () => this.infantryTrenches?.getPending() ?? null,
       getPendingBaseBuildingPlacement: () => this.baseBuildings?.getPending() ?? null,
       getBaseBuildingAttackTargets: () => {
         if (!this.running || this.gameOver || !this.baseBuildings?.active) return [];
@@ -424,6 +427,7 @@ export class Game {
       onDefensePlacement: (mode, x, z) => this.handleDefensePlacement(mode, x, z),
       onLastStandPlacement: (mode, x, z) => this.handleLastStandPlacement(mode, x, z),
       onSandbagPlacement: (mode, x, z) => this.handleSandbagPlacement(mode, x, z),
+      onTrenchPlacement: (mode, x, z) => this.handleTrenchPlacement(mode, x, z),
       onBaseBuildingPlacement: (mode, x, z) => this.handleBaseBuildingPlacement(mode, x, z),
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
         this.selectedHq = hq;
@@ -486,6 +490,10 @@ export class Game {
         this.placeSandbagAtScreen(e.clientX, e.clientY);
         return;
       }
+      if (this.infantryTrenches?.getPending()) {
+        this.placeTrenchAtScreen(e.clientX, e.clientY);
+        return;
+      }
       if (this.baseBuildings?.getPending()) {
         this.placeBaseBuildingAtScreen(e.clientX, e.clientY);
         return;
@@ -546,6 +554,12 @@ export class Game {
       if (e.code === 'Escape' && this.engineerSandbags?.getPending()) {
         this.engineerSandbags.cancel();
         this.ui?.updateEngineerBuild(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+      }
+      if (e.code === 'Escape' && this.infantryTrenches?.getPending()) {
+        this.infantryTrenches.cancel();
+        this.ui?.updateInfantryTrench(this);
         this._syncPlacementCapture();
         this._syncBattleCursor();
       }
@@ -762,6 +776,7 @@ export class Game {
     this.smokeScreens.reset();
     this.smokeShellTargeting = false;
     this.engineerSandbags.reset();
+    this.infantryTrenches?.reset();
     this.baseBuildings.reset();
     if (isBaseBuildingCampaign(this)) {
       this.baseBuildings.enable();
@@ -1247,6 +1262,7 @@ export class Game {
     const defensePending = !!this.defenses?.getPending();
     const deployPending = !!(this.lastStand?.pendingType && isLastStandDeployPhase(this));
     const sandbagPending = !!this.engineerSandbags?.getPending();
+    const trenchPending = !!this.infantryTrenches?.getPending();
     const baseBuildPending = !!this.baseBuildings?.getPending();
     this.canvas.style.cursor = resolveBattleCursor({
       fireSupportPending:
@@ -1254,6 +1270,7 @@ export class Game {
         defensePending ||
         deployPending ||
         sandbagPending ||
+        trenchPending ||
         baseBuildPending,
       smokeShellPending: !!this.smokeShellTargeting,
       shiftHeld,
@@ -1846,6 +1863,7 @@ export class Game {
     const active =
       (this.running && !this.gameOver && !!this.defenses?.getPending()) ||
       (this.running && !this.gameOver && !!this.engineerSandbags?.getPending()) ||
+      (this.running && !this.gameOver && !!this.infantryTrenches?.getPending()) ||
       (this.running && !this.gameOver && !!this.baseBuildings?.getPending()) ||
       (this.running &&
         !this.gameOver &&
@@ -1861,6 +1879,7 @@ export class Game {
     if (buildType === 'sandbags' && !mgr.canBuildSandbags()) return;
     if (buildType === 'bunker' && !mgr.canBuildBunker()) return;
     if (this._isPlayerDeployZoneActive()) return;
+    this.infantryTrenches?.cancel?.();
     const hasEngineer = this._playerAlive.some(
       (u) => u.selected && u.def?.type === 'engineer' && !u.dead && !u._sandbagSite
     );
@@ -1883,6 +1902,55 @@ export class Game {
 
   armBunkerBuild() {
     this.armEngineerBuild('bunker');
+  }
+
+  armTrenchDig() {
+    if (!this.running || this.gameOver) return;
+    const mgr = this.infantryTrenches;
+    if (!mgr?.canUse()) return;
+    if (this._isPlayerDeployZoneActive()) return;
+    const hasDigger = this._playerAlive.some(
+      (u) =>
+        u.selected &&
+        !u.dead &&
+        !u._trenchDigSite &&
+        !u._trenchId &&
+        (u.def?.type === 'infantry' ||
+          u.def?.type === 'machineGun' ||
+          u.def?.type === 'sniper')
+    );
+    if (!hasDigger) return;
+    sounds.unlock();
+    this.engineerSandbags?.cancel?.();
+    if (!mgr.arm()) {
+      this.ui?.updateInfantryTrench(this);
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+      return;
+    }
+    this.ui?.updateInfantryTrench(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  handleTrenchPlacement(mode, x, z) {
+    if (!this.running || this.gameOver || !this.infantryTrenches?.getPending()) return;
+    if (mode === 'preview') return;
+    const placed = this.infantryTrenches.tryPlace(x, z, PLAYER_TEAM);
+    if (placed) sounds.play('select');
+    else {
+      const reason = this.infantryTrenches.getPlacementRejectReason(x, z, PLAYER_TEAM);
+      if (reason) this.ui?.showInfantryTrenchHint(reason);
+    }
+    this.ui?.updateInfantryTrench(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  placeTrenchAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !this.infantryTrenches?.getPending()) return;
+    const ground = this._screenToGround(clientX, clientY);
+    if (ground) this.handleTrenchPlacement('place', ground.x, ground.z);
   }
 
   handleSandbagPlacement(mode, x, z) {
@@ -2663,6 +2731,10 @@ export class Game {
         if (this.engineerSandbags?.sites?.length) {
           this.ui?.updateEngineerBuild(this);
         }
+        this.infantryTrenches?.update(dt);
+        if (this.infantryTrenches?.sites?.length) {
+          this.ui?.updateInfantryTrench(this);
+        }
         this.baseBuildings?.update(dt);
         this._healMarkerAccum += dt;
         if (this._healMarkerAccum >= 0.1) {
@@ -2748,6 +2820,11 @@ export class Game {
           this._aliveUnits.some((u) => u._garrisonBunkerId || u._bunkerEntryId)
         ) {
           updateBunkerGarrison(this._aliveUnits, this);
+        }
+        for (const u of this._aliveUnits) {
+          if (u._trenchId || u._diggingTrench || u.mesh?.userData?.trenchSink) {
+            updateTrenchVisuals(u, dt);
+          }
         }
         if (
           this._aliveUnits.some(

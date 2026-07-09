@@ -114,25 +114,8 @@ const CATALOG = [
     text: `Short heavy machine gun burst outdoors, four distinct deep gunshots, powder reports, open field, ${REAL}`,
   },
 
-  // —— Atmosphere (looped quietly in battle) ——
-  {
-    file: 'battle-atmos.wav',
-    duration: 10,
-    influence: 0.4,
-    loop: true,
-    atmos: true,
-    text:
-      'Seamless loop of distant World War Two battlefield atmosphere, far-off muffled artillery rumbles, faint wind over open fields, very soft distant gunfire pops, no close explosions, no voices, no music, continuous low outdoor ambience',
-  },
-  {
-    file: 'battle-atmos-close.wav',
-    duration: 8,
-    influence: 0.4,
-    loop: true,
-    atmos: true,
-    text:
-      'Seamless loop of mid-distance battlefield ambience, occasional soft thumps of distant guns, wind, sparse far rifle cracks, low outdoor bed, no voices, no music, continuous',
-  },
+  // Atmosphere: use dedicated long bake (max 30s/seg, stitched to ≥60s)
+  //   ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-atmos
 ];
 
 function sleep(ms) {

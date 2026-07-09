@@ -13,8 +13,10 @@
     "bake-sounds": "node scripts/bake-gun-sounds.mjs",
     "bake-elevenlabs-sfx": "node scripts/bake-elevenlabs-sfx.mjs",
     "bake-elevenlabs-extra": "node scripts/bake-elevenlabs-extra.mjs",
+    "bake-elevenlabs-atmos": "node scripts/bake-elevenlabs-atmos.mjs",
     "bake-elevenlabs-smallarms": "node scripts/bake-elevenlabs-smallarms.mjs",
     "bake-elevenlabs-mg-long": "node scripts/bake-elevenlabs-mg-long.mjs",
+    "bake-elevenlabs-mg-extra": "node scripts/bake-elevenlabs-mg-extra.mjs",
     "bake-elevenlabs-smg": "node scripts/bake-elevenlabs-smg.mjs",
     "bake-elevenlabs-more-sfx": "node scripts/bake-elevenlabs-more-sfx.mjs",
     "bake-elevenlabs-underfire": "node scripts/bake-elevenlabs-underfire.mjs",
@@ -24,6 +26,7 @@
     "bake-unit-select": "node scripts/bake-unit-select.mjs",
     "bake-unit-under-fire": "node scripts/bake-unit-under-fire.mjs",
     "bake-commander-order": "node scripts/bake-commander-order.mjs",
+    "extend-battle-atmos": "node scripts/extend-battle-atmos.mjs",
     "expand-gun-variety": "node scripts/expand-gun-variety.mjs",
     "generate-menu-music": "python3 scripts/generate-menu-music.py && ffmpeg -y -i public/music/menu-theme.wav -c:a libvorbis -q:a 6 public/music/menu-theme.ogg"
   },

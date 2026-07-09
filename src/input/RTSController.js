@@ -34,6 +34,7 @@ export class RTSController {
     getPendingDefensePlacement,
     getPendingLastStandDeploy,
     getPendingSandbagPlacement,
+    getPendingTrenchPlacement,
     getPendingBaseBuildingPlacement,
     getBaseBuildingAttackTargets,
     getIsTowerDefense,
@@ -48,6 +49,7 @@ export class RTSController {
     onDefensePlacement,
     onLastStandPlacement,
     onSandbagPlacement,
+    onTrenchPlacement,
     onBaseBuildingPlacement,
     onSelectionChange,
     onHoverTarget,
@@ -71,6 +73,7 @@ export class RTSController {
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
     this.getPendingSandbagPlacement = getPendingSandbagPlacement ?? (() => null);
+    this.getPendingTrenchPlacement = getPendingTrenchPlacement ?? (() => null);
     this.getPendingBaseBuildingPlacement =
       getPendingBaseBuildingPlacement ?? (() => null);
     this.getBaseBuildingAttackTargets = getBaseBuildingAttackTargets ?? (() => []);
@@ -86,6 +89,7 @@ export class RTSController {
     this.onDefensePlacement = onDefensePlacement;
     this.onLastStandPlacement = onLastStandPlacement;
     this.onSandbagPlacement = onSandbagPlacement;
+    this.onTrenchPlacement = onTrenchPlacement;
     this.onBaseBuildingPlacement = onBaseBuildingPlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
@@ -489,6 +493,7 @@ export class RTSController {
       this.getPendingDefensePlacement?.() ||
       this.getPendingLastStandDeploy?.() ||
       this.getPendingSandbagPlacement?.() ||
+      this.getPendingTrenchPlacement?.() ||
       this.getPendingBaseBuildingPlacement?.()
     ) {
       this.setHoveredTarget(null);
@@ -609,8 +614,16 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
+    const pendingTrench = this.getPendingTrenchPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
-    if (pendingFs || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
+    if (
+      pendingFs ||
+      pendingDef ||
+      pendingDeploy ||
+      pendingSandbags ||
+      pendingTrench ||
+      pendingBaseBuild
+    ) {
       return;
     }
 
@@ -626,6 +639,7 @@ export class RTSController {
       !this.getPendingDefensePlacement?.() &&
       !this.getPendingLastStandDeploy?.() &&
       !this.getPendingSandbagPlacement?.() &&
+      !this.getPendingTrenchPlacement?.() &&
       !this.getPendingBaseBuildingPlacement?.() &&
       !this._tabletFireMode
     ) {
@@ -649,8 +663,17 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
+    const pendingTrench = this.getPendingTrenchPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
-    if (pendingFs || pendingSmoke || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
+    if (
+      pendingFs ||
+      pendingSmoke ||
+      pendingDef ||
+      pendingDeploy ||
+      pendingSandbags ||
+      pendingTrench ||
+      pendingBaseBuild
+    ) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -703,8 +726,17 @@ export class RTSController {
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
+    const pendingTrench = this.getPendingTrenchPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
-    if (pendingFs || pendingSmoke || pendingDef || pendingDeploy || pendingSandbags || pendingBaseBuild) {
+    if (
+      pendingFs ||
+      pendingSmoke ||
+      pendingDef ||
+      pendingDeploy ||
+      pendingSandbags ||
+      pendingTrench ||
+      pendingBaseBuild
+    ) {
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -721,6 +753,9 @@ export class RTSController {
         }
         if (pendingSandbags && this.onSandbagPlacement) {
           this.onSandbagPlacement('place', ground.x, ground.z);
+        }
+        if (pendingTrench && this.onTrenchPlacement) {
+          this.onTrenchPlacement('place', ground.x, ground.z);
         }
         if (pendingBaseBuild && this.onBaseBuildingPlacement) {
           this.onBaseBuildingPlacement('place', ground.x, ground.z);

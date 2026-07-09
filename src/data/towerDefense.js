@@ -54,8 +54,14 @@ export const TD_FRONTLINE_RETREAT_STEP = 16;
 /** Minimum distance from HQ the frontline can retreat to. */
 export const TD_MIN_FRONTLINE_FROM_HQ = 14;
 
-/** Seconds between automatic frontline retreats after a breach. */
+/** Seconds between automatic frontline retreats after a confirmed breach. */
 export const TD_FRONTLINE_SHIFT_COOLDOWN = 12;
+
+/**
+ * Seconds enemy units must remain past the frontline before HQ Defense
+ * retreats the line toward HQ. Brief crossings do not move the line.
+ */
+export const TD_FRONTLINE_RETREAT_GRACE_TIME = 10;
 
 /** Player units may not move past the frontline beyond this margin (m). */
 export const TD_PLAYER_FRONTLINE_MARGIN = 2;

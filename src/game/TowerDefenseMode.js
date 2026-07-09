@@ -19,6 +19,7 @@ import {
   TD_FRONTLINE_RETREAT_STEP,
   TD_MIN_FRONTLINE_FROM_HQ,
   TD_FRONTLINE_SHIFT_COOLDOWN,
+  TD_FRONTLINE_RETREAT_GRACE_TIME,
   TD_PLAYER_FRONTLINE_MARGIN,
   isTdHqDefenseStyle,
 } from '../data/towerDefense.js';
@@ -203,24 +204,41 @@ export function updateHqDefenseFrontlineRetreat(game, dt) {
   if (!td || !isTdHqDefenseStyle(td)) return;
 
   td.frontlineShiftCooldown = Math.max(0, (td.frontlineShiftCooldown ?? 0) - dt);
-  if (td.frontlineShiftCooldown > 0) return;
 
   const { fl, pb } = getTdFrontlineBasis(game);
   const toPlayerX = pb.x - fl.x;
   const toPlayerZ = pb.z - fl.z;
+  const len = Math.hypot(toPlayerX, toPlayerZ) || 1;
 
-  let breached = false;
+  // Any enemy past the line toward HQ (same margin as emplacement breach defeat)
+  let pastLine = false;
   for (const u of game._enemyAlive) {
     const vx = u.position.x - fl.x;
     const vz = u.position.z - fl.z;
-    if (vx * toPlayerX + vz * toPlayerZ > 0) {
-      breached = true;
+    const towardPlayer = (vx * toPlayerX + vz * toPlayerZ) / len;
+    if (towardPlayer > TD_BREACH_MARGIN) {
+      pastLine = true;
       break;
     }
   }
 
-  if (breached && retreatTowerDefenseFrontline(game)) {
+  if (!pastLine) {
+    td.frontlineRetreatGraceTimer = 0;
+    return;
+  }
+
+  // After a retreat, wait for the cooldown before another grace countdown can start
+  if (td.frontlineShiftCooldown > 0) {
+    td.frontlineRetreatGraceTimer = 0;
+    return;
+  }
+
+  td.frontlineRetreatGraceTimer = (td.frontlineRetreatGraceTimer ?? 0) + dt;
+  if (td.frontlineRetreatGraceTimer < TD_FRONTLINE_RETREAT_GRACE_TIME) return;
+
+  if (retreatTowerDefenseFrontline(game)) {
     td.frontlineShiftCooldown = TD_FRONTLINE_SHIFT_COOLDOWN;
+    td.frontlineRetreatGraceTimer = 0;
   }
 }
 
@@ -336,6 +354,8 @@ export function createTowerDefenseState({
     frontlineZ: fl.z,
     frontlineShifts: 0,
     frontlineShiftCooldown: 0,
+    /** Continuous seconds enemies have been past the line (HQ Defense retreat). */
+    frontlineRetreatGraceTimer: 0,
     assaultProfile: null,
     assaultSectors: [],
     assaultBrief: null,
@@ -674,21 +694,30 @@ export function formatTowerDefenseHud(td) {
   const secondsLeft = Math.max(0, td.phaseTimer);
   const prepareTotal =
     td.wave <= 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
-  const breachGraceLeft =
-    !hqDefense && !td.breached && (td.breachGraceTimer ?? 0) > 0
-      ? Math.max(1, Math.ceil(TD_BREACH_GRACE_TIME - td.breachGraceTimer))
-      : 0;
-  const breachGraceProgress =
-    breachGraceLeft > 0
-      ? Math.max(0, 1 - (td.breachGraceTimer ?? 0) / TD_BREACH_GRACE_TIME)
-      : 0;
+  let breachGraceLeft = 0;
+  let breachGraceProgress = 0;
+  if (hqDefense) {
+    const t = td.frontlineRetreatGraceTimer ?? 0;
+    if (t > 0 && (td.frontlineShiftCooldown ?? 0) <= 0) {
+      breachGraceLeft = Math.max(
+        1,
+        Math.ceil(TD_FRONTLINE_RETREAT_GRACE_TIME - t)
+      );
+      breachGraceProgress = Math.max(0, 1 - t / TD_FRONTLINE_RETREAT_GRACE_TIME);
+    }
+  } else if (!td.breached && (td.breachGraceTimer ?? 0) > 0) {
+    breachGraceLeft = Math.max(1, Math.ceil(TD_BREACH_GRACE_TIME - td.breachGraceTimer));
+    breachGraceProgress = Math.max(0, 1 - (td.breachGraceTimer ?? 0) / TD_BREACH_GRACE_TIME);
+  }
   const phaseLabel =
     td.phase === 'prepare'
       ? hqDefense
         ? `Prepare forces — ${Math.ceil(secondsLeft)}s`
         : `Prepare defenses — ${Math.ceil(secondsLeft)}s`
       : breachGraceLeft
-        ? `Wave ${td.wave} — BREACH ${breachGraceLeft}s`
+        ? hqDefense
+          ? `Wave ${td.wave} — LINE RETREAT ${breachGraceLeft}s`
+          : `Wave ${td.wave} — BREACH ${breachGraceLeft}s`
         : `Wave ${td.wave} — ${td.spawned}/${td.totalToSpawn} deployed`;
   const countdownTitle =
     td.phase === 'prepare'

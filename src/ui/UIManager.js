@@ -158,6 +158,8 @@ export class UIManager {
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
+    /** When true, all in-battle HUD chrome is hidden (toggle from pause menu). */
+    this.hudHidden = false;
     this.autoBuildMode = false;
     this._hudCampaignStyle = 'classic';
     this._hudAutoBuildAvailable = false;
@@ -395,9 +397,21 @@ export class UIManager {
         </div>
 
         <div id="pause-overlay" class="pause-overlay hidden" aria-hidden="true">
-          <div class="pause-overlay-card">
+          <div class="pause-overlay-card interactive">
             <p class="pause-overlay-title">Paused</p>
             <p class="pause-overlay-sub">Press <kbd>P</kbd> to resume</p>
+            <button
+              type="button"
+              class="btn btn-secondary pause-hud-toggle interactive"
+              id="btn-toggle-hud-visibility"
+              aria-pressed="false"
+              title="Hide all on-screen HUD elements (minimap, panels, banners). Press P again to pause and show this menu."
+            >
+              Hide HUD
+            </button>
+            <p class="pause-overlay-hud-hint" id="pause-hud-toggle-hint">
+              Hides minimap, panels, and status banners for a clear view
+            </p>
           </div>
         </div>
 
@@ -557,6 +571,16 @@ export class UIManager {
               </div>
               <p class="engineer-build-hint" id="engineer-build-hint">
                 Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.
+              </p>
+            </div>
+            <div class="infantry-trench-actions hidden" id="infantry-trench-actions">
+              <div class="engineer-build-btns">
+                <button type="button" class="btn btn-primary interactive" id="btn-dig-trench">
+                  Dig trench
+                </button>
+              </div>
+              <p class="engineer-build-hint" id="infantry-trench-hint">
+                Infantry / MG / sniper dig a fighting trench (~14 s). Move onto it to dig in.
               </p>
             </div>
           </div>
@@ -1002,6 +1026,9 @@ export class UIManager {
         this.callbacks.onToggleFrontline(this.showFrontline);
       }
     });
+    this.root.querySelector('#btn-toggle-hud-visibility')?.addEventListener('click', () => {
+      this.setHudHidden(!this.hudHidden);
+    });
     this.root.querySelector('#btn-toggle-firesupport')?.addEventListener('click', () => {
       this.setFireSupportExpanded(!this.fireSupportExpanded);
     });
@@ -1222,6 +1249,9 @@ export class UIManager {
     this.root.querySelector('#btn-build-bunker')?.addEventListener('click', () => {
       this.callbacks.onArmBunker?.();
     });
+    this.root.querySelector('#btn-dig-trench')?.addEventListener('click', () => {
+      this.callbacks.onArmTrenchDig?.();
+    });
 
     this.root.querySelector('#produce-btns')?.addEventListener('pointerdown', (e) => {
       const btn = e.target.closest?.('.produce-btn');
@@ -1357,6 +1387,38 @@ export class UIManager {
       overlay.setAttribute('aria-hidden', paused ? 'false' : 'true');
     }
     hud?.classList.toggle('game-paused', !!paused);
+    this._syncHudVisibility();
+  }
+
+  /**
+   * Hide / show all battle HUD chrome (minimap, panels, banners).
+   * Pause overlay stays available so the player can unhide or resume with P.
+   */
+  setHudHidden(hidden) {
+    this.hudHidden = !!hidden;
+    this._syncHudVisibility();
+  }
+
+  _syncHudVisibility() {
+    const hud = this.root.querySelector('#hud');
+    hud?.classList.toggle('hud-chrome-hidden', !!this.hudHidden);
+
+    const btn = this.root.querySelector('#btn-toggle-hud-visibility');
+    if (btn) {
+      btn.textContent = this.hudHidden ? 'Show HUD' : 'Hide HUD';
+      btn.setAttribute('aria-pressed', this.hudHidden ? 'true' : 'false');
+      btn.classList.toggle('is-active', !!this.hudHidden);
+      btn.title = this.hudHidden
+        ? 'Show all HUD elements again'
+        : 'Hide all on-screen HUD elements (minimap, panels, banners)';
+    }
+
+    const hint = this.root.querySelector('#pause-hud-toggle-hint');
+    if (hint) {
+      hint.textContent = this.hudHidden
+        ? 'HUD hidden — press P to resume, or Show HUD to restore the interface'
+        : 'Hides minimap, panels, and status banners for a clear view';
+    }
   }
 
   refreshTitleSaveButton() {
@@ -1428,7 +1490,9 @@ export class UIManager {
     this.closeGuide();
     if (this.callbacks.onMenuVisible) this.callbacks.onMenuVisible(false);
     this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+    this.hudHidden = false;
     this.root.querySelector('#hud').classList.remove('hidden');
+    this._syncHudVisibility();
     this.root.querySelector('#hud-faction').textContent = faction.name;
     const diffLabel = options.difficulty ? ` · ${options.difficulty.name}` : '';
     this.root.querySelector('#hud-map').textContent = `${formatMapHudLabel(mapDef)}${diffLabel}`;
@@ -1517,7 +1581,7 @@ export class UIManager {
       } else if (towerDefense && tdHqDefense) {
         this._defaultHudHint = options.tdEndless
           ? 'Tower Defence (HQ Defense · Endless): train any unit at HQ · hold your side of the frontline · lose if HQ falls'
-          : 'Tower Defence (HQ Defense): spawn reinforcements from HQ · units cannot cross the frontline · line retreats if breached · lose if HQ falls';
+          : 'Tower Defence (HQ Defense): spawn reinforcements from HQ · units cannot cross the frontline · line retreats if enemy stays past it for 10s · lose if HQ falls';
       } else if (towerDefense) {
         this._defaultHudHint = options.tdEndless
           ? 'Tower Defence (Endless): build behind the frontline · survive escalating waves · see how long you last'
@@ -2048,10 +2112,10 @@ export class UIManager {
     const breachCard = this.root.querySelector('#td-breach-alert-card');
     const breachValue = this.root.querySelector('#td-breach-alert-value');
     const breachFill = this.root.querySelector('#td-breach-alert-fill');
+    // Emplacements: sector-lost countdown. HQ Defense: frontline will retreat if breach holds.
     const showBreach =
       !game?.gameOver &&
       this._hudTowerDefense &&
-      !hud.hqDefense &&
       (hud.breachGraceLeft ?? 0) > 0;
     breachAlert?.classList.toggle('hidden', !showBreach);
     if (showBreach) {
@@ -2060,6 +2124,23 @@ export class UIManager {
       if (breachValue) breachValue.textContent = String(left);
       if (breachFill) breachFill.style.width = `${pctLeft}%`;
       breachCard?.classList.toggle('td-breach-alert-critical', left <= 3);
+      const eyebrow = breachCard?.querySelector('.td-breach-alert-eyebrow');
+      const title = breachCard?.querySelector('.td-breach-alert-title');
+      const sub = this.root.querySelector('#td-breach-alert-sub');
+      if (hud.hqDefense) {
+        if (eyebrow) eyebrow.textContent = 'Frontline under pressure';
+        if (title) title.textContent = 'Push them back';
+        if (sub) {
+          sub.textContent =
+            'Enemy past the line — hold them off or the frontline retreats toward HQ';
+        }
+      } else {
+        if (eyebrow) eyebrow.textContent = 'Sector overrun imminent';
+        if (title) title.textContent = 'Clear the frontline';
+        if (sub) {
+          sub.textContent = 'Enemy past the line — destroy them before time runs out';
+        }
+      }
     } else {
       breachCard?.classList.remove('td-breach-alert-critical');
     }
@@ -2114,7 +2195,10 @@ export class UIManager {
     panel.classList.toggle('hidden', !show);
     sandbagBtn.classList.toggle('hidden', !canSandbags);
     bunkerBtn.classList.toggle('hidden', !canBunker);
-    if (!show) return;
+    if (!show) {
+      this.updateInfantryTrench(game);
+      return;
+    }
 
     const pending = mgr?.getPending?.() ?? null;
     sandbagBtn.classList.toggle('btn-armed', pending === 'sandbags');
@@ -2130,6 +2214,64 @@ export class UIManager {
         hint.textContent = 'Selected engineer is already building field works.';
       } else {
         hint.textContent = this._defaultEngineerBuildHint(game);
+      }
+    }
+    this.updateInfantryTrench(game);
+  }
+
+  showInfantryTrenchHint(message) {
+    const hint = this.root.querySelector('#infantry-trench-hint');
+    if (!hint || !message) return;
+    hint.textContent = message;
+    hint.classList.add('engineer-build-hint-error');
+    clearTimeout(this._trenchHintTimer);
+    this._trenchHintTimer = setTimeout(() => {
+      hint.classList.remove('engineer-build-hint-error');
+      const game = this._lastEngineerBuildGame;
+      if (game) this.updateInfantryTrench(game);
+    }, 3200);
+  }
+
+  updateInfantryTrench(game) {
+    const panel = this.root.querySelector('#infantry-trench-actions');
+    const digBtn = this.root.querySelector('#btn-dig-trench');
+    const hint = this.root.querySelector('#infantry-trench-hint');
+    if (!panel || !digBtn) return;
+
+    this._lastEngineerBuildGame = game;
+    const mgr = game?.infantryTrenches;
+    const canDig = mgr?.canUse?.() ?? false;
+    const diggers =
+      game?.units?.filter(
+        (u) =>
+          u.selected &&
+          u.team === 'player' &&
+          !u.dead &&
+          !u.surrendered &&
+          (u.def?.type === 'infantry' ||
+            u.def?.type === 'machineGun' ||
+            u.def?.type === 'sniper')
+      ) ?? [];
+    const free = diggers.filter((u) => !u._trenchDigSite && !u._trenchId);
+    const show = canDig && diggers.length > 0;
+
+    panel.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    const pending = !!mgr?.getPending?.();
+    digBtn.classList.toggle('btn-armed', pending);
+    digBtn.disabled = free.length === 0 && !pending;
+    digBtn.textContent = pending ? 'Placing trench…' : 'Dig trench';
+
+    if (hint && !hint.classList.contains('engineer-build-hint-error')) {
+      if (pending) {
+        hint.textContent =
+          'Click the map within ~18 m of your infantry to dig. Esc to cancel.';
+      } else if (free.length === 0) {
+        hint.textContent = 'Selected troops are already digging or dug in.';
+      } else {
+        hint.textContent =
+          'Infantry / MG / sniper dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
       }
     }
   }
@@ -2463,6 +2605,7 @@ export class UIManager {
   }
 
   hideHUD() {
+    this.hudHidden = false;
     this.setGamePaused(false);
     this.hideLastStandBriefing();
     this.closeGuide();
@@ -2471,6 +2614,7 @@ export class UIManager {
     this.callbacks.onTabletFireMode?.(false);
     this.updateHqThreat(null);
     this.root.querySelector('#hud').classList.add('hidden');
+    this.root.querySelector('#hud')?.classList.remove('hud-chrome-hidden');
     this.hideTdBreachAlert();
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
@@ -3160,20 +3304,24 @@ export class UIManager {
         : '';
       const cover = getCoverStatus(u);
       const garrisoned = isUnitGarrisoned(u) || !!cover.garrisoned;
+      const dig = game?.infantryTrenches?.getDiggerStatus?.(u);
+      const engBuild = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
       let coverBlock = '';
       if (garrisoned) {
         coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.22) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Look for the green <strong>INSIDE</strong> marker over the roof.</p>`;
+      } else if (engBuild) {
+        coverBlock = `<p class="unit-support-status unit-building-status"><strong>Building ${engBuild.label}</strong> — ${engBuild.pct}% complete — watch the site marker on the map</p>`;
+      } else if (dig) {
+        coverBlock = `<p class="unit-support-status unit-building-status"><strong>${dig.label}</strong> — ${Math.round(dig.progress * 100)}% complete — watch the dig site marker</p>`;
+      } else if (u._trenchId || cover.inTrench) {
+        coverBlock = `<p class="unit-cover-status in-cover"><strong>In trench</strong> — dug in with cover (takes only <strong>${Math.round((cover.mult ?? 0.42) * 100)}%</strong> damage). Order a <strong>move</strong> to leave.</p>`;
       } else if (cover.inCover) {
         coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
       } else if (u.def?.type === 'engineer') {
-        const build = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
-        const buildLine = build
-          ? `<p class="unit-support-status"><strong>Building ${build.label}</strong> — ${build.pct}%</p>`
-          : '';
         const fieldWorks = game?.baseBuildings?.active
           ? 'can erect <strong>garrison bunkers</strong> in the field (Build bunker).'
           : 'can erect <strong>sandbags</strong> or <strong>bunkers</strong> — move infantry onto a bunker to garrison inside.';
-        coverBlock = `${buildLine}<p class="unit-support-status">Support — repairs vehicles within ~16 m; ${fieldWorks}</p>`;
+        coverBlock = `<p class="unit-support-status">Support — repairs vehicles within ~16 m; ${fieldWorks}</p>`;
       } else if (u.def?.type === 'medic') {
         coverBlock =
           '<p class="unit-support-status">Support — heals infantry within ~14 m; nearby troops retreat less often.</p>';
@@ -3183,7 +3331,7 @@ export class UIManager {
         u.def?.type === 'sniper'
       ) {
         coverBlock =
-          '<p class="unit-cover-status exposed"><strong>Exposed</strong> — no cover bonus. Move into sandbags, hedges, or fighting pits.</p>';
+          '<p class="unit-cover-status exposed"><strong>Exposed</strong> — dig a trench or move into sandbags / hedges for cover.</p>';
       }
       const surrenderBlock = u.surrendered
         ? '<p class="unit-surrender-status"><strong>Surrendered</strong> — move a friendly unit within ~11 m to liberate; enemy contact captures them.</p>'

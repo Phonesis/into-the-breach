@@ -121,6 +121,9 @@ const ui = new UIManager(uiRoot, {
   onArmBunker() {
     game?.armBunkerBuild();
   },
+  onArmTrenchDig() {
+    game?.armTrenchDig();
+  },
   onArmBaseBuilding(typeId) {
     game?.armBaseBuilding(typeId);
   },

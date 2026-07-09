@@ -36,8 +36,10 @@ export function isMasterSfxFile(file) {
   if (letter === 'f' || letter === 'g') return true;
   // SMG packs: all lettered variants are pure ElevenLabs gens
   if (/^smg/i.test(stem)) return true;
-  // Extra original ElevenLabs rifle gens beyond f/g
-  if ((letter === 'h' || letter === 'i') && /^rifle/i.test(stem)) return true;
+  // Extra original ElevenLabs rifle / MG gens beyond f/g
+  if ((letter === 'h' || letter === 'i') && /^(rifle|mg)/i.test(stem)) return true;
+  // Sustained full-auto MG concentrations (mg-*-long-a/b, mg-extra-long-*)
+  if (/-long/i.test(stem) && /^mg/i.test(stem)) return true;
 
   // Offline pitch clones: -c / -d / -e on rifles, MGs, tanks, AT, mortars, howitzers
   if (letter === 'c' || letter === 'd' || letter === 'e') return false;
@@ -77,7 +79,21 @@ export const WEAPON_SAMPLE_FILES = {
     'smg-russia-c.wav',
     'smg-russia-d.wav',
     'smg-russia-e.wav'],
-  mg: ['mg.wav', 'mg-c.wav', 'mg-d.wav', 'mg-extra-a.wav', 'mg-extra-b.wav'],
+  mg: [
+    'mg.wav',
+    'mg-c.wav',
+    'mg-d.wav',
+    'mg-h.wav',
+    'mg-i.wav',
+    'mg-long-a.wav',
+    'mg-long-b.wav',
+    'mg-extra-a.wav',
+    'mg-extra-b.wav',
+    'mg-extra-c.wav',
+    'mg-extra-d.wav',
+    'mg-extra-long-a.wav',
+    'mg-extra-long-b.wav',
+  ],
   tank_75: ['tank.wav', 'tank-c.wav', 'tank-d.wav'],
   tank_57: ['tank.wav', 'tank-c.wav', 'tank-d.wav'],
   howitzer_105: ['artillery.wav', 'artillery-c.wav', 'artillery-d.wav'],
@@ -148,8 +164,17 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-germany-e.wav',
     'mg-germany-f.wav',
     'mg-germany-g.wav',
+    'mg-germany-h.wav',
+    'mg-germany-i.wav',
+    'mg-germany-long-a.wav',
+    'mg-germany-long-b.wav',
     'mg-extra-a.wav',
-    'mg-extra-b.wav'],
+    'mg-extra-b.wav',
+    'mg-extra-c.wav',
+    'mg-extra-d.wav',
+    'mg-extra-long-a.wav',
+    'mg-extra-long-b.wav',
+  ],
   mg_usa: [
     'mg-usa.wav',
     'mg-usa-b.wav',
@@ -158,8 +183,17 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-usa-e.wav',
     'mg-usa-f.wav',
     'mg-usa-g.wav',
+    'mg-usa-h.wav',
+    'mg-usa-i.wav',
+    'mg-usa-long-a.wav',
+    'mg-usa-long-b.wav',
     'mg-extra-a.wav',
-    'mg-extra-b.wav'],
+    'mg-extra-b.wav',
+    'mg-extra-c.wav',
+    'mg-extra-d.wav',
+    'mg-extra-long-a.wav',
+    'mg-extra-long-b.wav',
+  ],
   mg_uk: [
     'mg-uk.wav',
     'mg-uk-b.wav',
@@ -168,8 +202,17 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-uk-e.wav',
     'mg-uk-f.wav',
     'mg-uk-g.wav',
+    'mg-uk-h.wav',
+    'mg-uk-i.wav',
+    'mg-uk-long-a.wav',
+    'mg-uk-long-b.wav',
     'mg-extra-a.wav',
-    'mg-extra-b.wav'],
+    'mg-extra-b.wav',
+    'mg-extra-c.wav',
+    'mg-extra-d.wav',
+    'mg-extra-long-a.wav',
+    'mg-extra-long-b.wav',
+  ],
   mg_russia: [
     'mg-russia.wav',
     'mg-russia-b.wav',
@@ -178,8 +221,17 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-russia-e.wav',
     'mg-russia-f.wav',
     'mg-russia-g.wav',
+    'mg-russia-h.wav',
+    'mg-russia-i.wav',
+    'mg-russia-long-a.wav',
+    'mg-russia-long-b.wav',
     'mg-extra-a.wav',
-    'mg-extra-b.wav'],
+    'mg-extra-b.wav',
+    'mg-extra-c.wav',
+    'mg-extra-d.wav',
+    'mg-extra-long-a.wav',
+    'mg-extra-long-b.wav',
+  ],
 
   tank_75_germany: [
     'tank-75-germany.wav',
@@ -413,6 +465,9 @@ const _lastSampleByProfile = new Map();
  */
 export function sampleWeight(file) {
   const stem = file.replace(/\.wav$/i, '');
+  // Longer full-auto concentrations — common enough to hear in firefights
+  if (/-long/i.test(stem) && /^mg/i.test(stem)) return 2.6;
+  if (/-extra-long/i.test(stem)) return 2.2;
   if (/-extra/i.test(stem)) return 1.2;
   const m = stem.match(/-([a-z])$/i);
   if (!m) return 8; // primary master
