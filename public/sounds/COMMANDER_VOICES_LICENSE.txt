@@ -1,0 +1,12 @@
+Commander order voice lines (fire support + general orders)
+============================================================
+
+Spoken via Microsoft Edge neural TTS (edge-tts):
+  usa — en-US RogerNeural
+  uk — en-GB RyanNeural
+  germany — de-DE ConradNeural
+  russia — ru-RU DmitryNeural
+
+Files: commander-{faction}-{kind}.wav
+  kinds: strafe, barrage, creepingBarrage, airborneDrop, fullRetreat, holdGround
+Regenerate: npm run bake-commander-order

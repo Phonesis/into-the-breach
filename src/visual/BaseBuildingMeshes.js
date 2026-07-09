@@ -276,3 +276,131 @@ export function setBaseBuildingHpVisual(mesh, ratio, accent = 0x5a9fd4) {
     ring.material.opacity = 0.2 + wear * 0.45;
   }
 }
+
+/**
+ * Permanent rubble pile left after a base structure is destroyed.
+ * Scale roughly matches each structure's footprint.
+ */
+export function createBaseBuildingRubble(typeId, radius = 3.6) {
+  const g = new THREE.Group();
+  g.name = `base-rubble-${typeId ?? 'generic'}`;
+  g.userData.isBaseBuildingRubble = true;
+
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: 0x4a453d,
+    roughness: 0.94,
+    metalness: 0.04,
+    envMapIntensity: 0.28,
+  });
+  const timberMat = new THREE.MeshStandardMaterial({
+    color: 0x2f241c,
+    roughness: 0.9,
+    envMapIntensity: 0.22,
+  });
+  const concreteMat = new THREE.MeshStandardMaterial({
+    color: 0x5a5650,
+    roughness: 0.92,
+    metalness: 0.06,
+    envMapIntensity: 0.24,
+  });
+  const scorchMat = new THREE.MeshStandardMaterial({
+    color: 0x17120f,
+    roughness: 0.98,
+    envMapIntensity: 0.12,
+  });
+  const steelMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3a38,
+    roughness: 0.55,
+    metalness: 0.45,
+    envMapIntensity: 0.35,
+  });
+
+  const r = Math.max(2.4, radius * 0.95);
+  const isBunker = typeId === 'bunker';
+  const isMotor = typeId === 'motorPool' || typeId === 'ordnanceYard';
+
+  // Scorched pad / foundation
+  const pad = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 0.88, r * 1.08, 0.28, 14),
+    scorchMat
+  );
+  pad.position.y = 0.06;
+  pad.scale.set(1, 1, isBunker ? 0.85 : 0.78);
+  pad.receiveShadow = true;
+  g.add(pad);
+
+  // Collapsed wall slab
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(r * 1.15, 0.35 + Math.random() * 0.25, r * 0.55),
+    isBunker ? concreteMat : timberMat
+  );
+  wall.position.set((Math.random() - 0.5) * 0.6, 0.28, (Math.random() - 0.5) * 0.5);
+  wall.rotation.set(0.15 + Math.random() * 0.25, Math.random() * 0.4, 0.08);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  g.add(wall);
+
+  // Partial upright ruin chunk
+  const upright = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55 + Math.random() * 0.5, 0.9 + Math.random() * 0.7, 0.45),
+    isBunker ? concreteMat : stoneMat
+  );
+  upright.position.set(-r * 0.35, 0.55, r * 0.2);
+  upright.rotation.set(0.05, Math.random() * 0.5, 0.12 + Math.random() * 0.2);
+  upright.castShadow = true;
+  upright.receiveShadow = true;
+  g.add(upright);
+
+  const chunkCount = isBunker ? 14 : isMotor ? 13 : 11;
+  for (let i = 0; i < chunkCount; i++) {
+    const roll = Math.random();
+    const mat =
+      roll < 0.2 ? steelMat : roll < 0.45 ? timberMat : roll < 0.75 ? stoneMat : concreteMat;
+    const chunk = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        0.3 + Math.random() * 0.95,
+        0.16 + Math.random() * 0.48,
+        0.28 + Math.random() * 0.9
+      ),
+      mat
+    );
+    const ang = Math.random() * Math.PI * 2;
+    const dist = Math.sqrt(Math.random()) * r * 0.78;
+    chunk.position.set(
+      Math.cos(ang) * dist,
+      0.18 + Math.random() * 0.35,
+      Math.sin(ang) * dist
+    );
+    chunk.rotation.set(Math.random() * 0.7, Math.random() * Math.PI, Math.random() * 0.45);
+    chunk.castShadow = true;
+    chunk.receiveShadow = true;
+    g.add(chunk);
+  }
+
+  // Broken beams / girders for motor pool / ordnance
+  if (isMotor) {
+    for (let i = 0; i < 3; i++) {
+      const beam = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6 + Math.random() * 1.4, 0.12, 0.18),
+        steelMat
+      );
+      beam.position.set((Math.random() - 0.5) * r * 0.9, 0.2 + Math.random() * 0.25, (Math.random() - 0.5) * r * 0.7);
+      beam.rotation.set(0.1, Math.random() * Math.PI, 0.15 + Math.random() * 0.3);
+      beam.castShadow = true;
+      g.add(beam);
+    }
+  }
+
+  // Hospital: charred timber + faint red cross fragment
+  if (typeId === 'hospital') {
+    const cross = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.12, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0x6a2020, roughness: 0.85 })
+    );
+    cross.position.set(0.4, 0.35, 0.2);
+    cross.rotation.y = 0.6;
+    g.add(cross);
+  }
+
+  return g;
+}

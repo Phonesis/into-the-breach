@@ -30,8 +30,8 @@ export const CAMPAIGN_STYLE_LIST = Object.values(CAMPAIGN_STYLES);
 /** HQ does not train units in base-building mode — use Infantry Garrison and depots. */
 export const HQ_BASE_UNITS = [];
 
-/** Opening force per side in base-building campaign — one rifle squad only. */
-export const BASE_BUILDING_STARTING_ARMY = [{ type: 'infantry', count: 1, spread: 4 }];
+/** Opening force per side in Standard campaign — one rifle squad only (spread keeps it clear of HQ). */
+export const BASE_BUILDING_STARTING_ARMY = [{ type: 'infantry', count: 1, spread: 16 }];
 
 export const BASE_BUILDING_TYPES = {
   infantryGarrison: {

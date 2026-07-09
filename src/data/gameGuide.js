@@ -111,7 +111,7 @@ export const GAME_GUIDE_SECTIONS = [
       'Open the <strong>Base Construction</strong> panel (bottom HUD), pick a structure, then <strong>LMB</strong> the map in the build ring around your <strong>HQ</strong> or any <strong>capture sector you control</strong> — secure flanks to erect forward depots and bunkers. During <strong>quiet sector</strong> neither side may start or progress base construction — launch battle first. Structures cost supplies upfront and take time to finish once the battle is underway. Enemy AI expands the same way at HQ and sectors it holds.',
       'Units spawn at the structure you selected when queuing them. Engineers can erect <strong>field bunkers</strong> (no supply cost) that garrison troops like HQ-built bunkers — sandbags are disabled in this mode.',
       '<strong>Auto Build</strong> works here too: once depots are online it queues from every unlocked building (not only the one you last clicked), spawning at the correct depot automatically.',
-      'Enemy depots and bunkers can be attacked like any other target — click to order fire, or let units auto-acquire in range.',
+      'Enemy depots and bunkers can be attacked like any other target — click to order fire, or let units auto-acquire in range. Destroyed structures leave <strong>rubble and scorched foundations</strong> on the map; you can rebuild nearby (destroyed buildings no longer count toward caps).',
     ],
   },
   {

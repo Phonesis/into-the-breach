@@ -366,20 +366,19 @@ export function captureBattleSave(game, { id = null } = {}) {
             y: s.y,
             progress: s.progress,
           })),
-          entries: game.baseBuildings.entries
-            .filter((e) => !e.destroyed)
-            .map((e) => ({
-              id: e.id,
-              typeId: e.typeId,
-              team: e.team,
-              x: e.x,
-              z: e.z,
-              y: e.y,
-              hp: e.hp,
-              maxHp: e.maxHp,
-              garrison: [...(e.garrison ?? [])],
-              engineerBuilt: !!e.engineerBuilt,
-            })),
+          entries: game.baseBuildings.entries.map((e) => ({
+            id: e.id,
+            typeId: e.typeId,
+            team: e.team,
+            x: e.x,
+            z: e.z,
+            y: e.y,
+            hp: e.hp,
+            maxHp: e.maxHp,
+            destroyed: !!e.destroyed,
+            garrison: e.destroyed ? [] : [...(e.garrison ?? [])],
+            engineerBuilt: !!e.engineerBuilt,
+          })),
         }
       : null,
     engineerSandbags: {
@@ -532,6 +531,7 @@ function restoreBaseBuildingSite(manager, siteData) {
 function restoreBaseBuildingEntry(manager, data) {
   const def = BASE_BUILDING_TYPES[data.typeId];
   if (!def) return null;
+  const destroyed = !!data.destroyed;
   const entry = {
     id: data.id,
     typeId: data.typeId,
@@ -540,16 +540,24 @@ function restoreBaseBuildingEntry(manager, data) {
     x: data.x,
     z: data.z,
     y: data.y,
-    hp: data.hp,
+    hp: destroyed ? 0 : data.hp,
     maxHp: data.maxHp,
-    destroyed: false,
+    destroyed,
     building: false,
-    garrison: [...(data.garrison ?? [])],
+    garrison: destroyed ? [] : [...(data.garrison ?? [])],
     mesh: null,
+    rubbleMesh: null,
     manager,
     engineerBuilt: !!data.engineerBuilt,
     _attackTarget: null,
   };
+
+  if (destroyed) {
+    manager.entries.push(entry);
+    manager.restoreDestroyedRubble(entry);
+    return entry;
+  }
+
   const mesh = data.engineerBuilt
     ? createCampaignBunkerMesh(manager.getFactionId(data.team))
     : createBaseBuildingMesh(data.typeId, manager.getFactionId(data.team));

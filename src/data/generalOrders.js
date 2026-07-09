@@ -10,7 +10,7 @@ export const GENERAL_ORDER_LIST = [
   {
     id: 'fullRetreat',
     short: 'Full Retreat',
-    label: 'All units withdraw to HQ for 30 seconds',
+    label: 'All units withdraw to HQ (or starting zone in Clear Defenses) for 30 seconds',
   },
   {
     id: 'holdGround',

@@ -61,7 +61,7 @@ import {
   getClearanceStagingAnchor,
   CLEARANCE_CEASEFIRE_TIME,
 } from './ClearanceMode.js';
-import { updateRetreatState, removeRetreatMarker } from './RetreatBehavior.js';
+import { updateRetreatState, removeRetreatMarker, resolveRetreatHq } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
@@ -134,6 +134,12 @@ import {
   clearWreckEffects,
   removeWreckEffect,
 } from '../effects/WreckEffects.js';
+import {
+  triggerVehicleKillFx,
+  updateVehicleCookOffs,
+  clearVehicleCookOffs,
+  isArmoredCombatVehicle,
+} from '../effects/VehicleDestruction.js';
 import { clearHqBurnEffects, updateHqBurnEffects } from '../effects/HqBurnEffects.js';
 import {
   setupRenderer,
@@ -181,6 +187,7 @@ import {
   sounds,
   resolveWeaponProfile,
   mgProfileForFaction,
+  smgProfileForFaction,
   isInfantryUnitType,
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
@@ -237,6 +244,8 @@ export class Game {
     this.paused = false;
     this._endOverlayShown = false;
     this._pendingEnd = null;
+    /** @type {{x:number,y:number,z:number,t:number,tier:string,unit?:object,done?:boolean}[]} */
+    this._pendingCookOffs = [];
     this._teardownPending = false;
     this._hudUiAccum = 0;
     this._victoryCheckAccum = 0;
@@ -419,7 +428,18 @@ export class Game {
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
         this.selectedHq = hq;
         this.selectedBaseBuilding = baseBuilding;
-        if (sel.length > 0 || hq || baseBuilding) sounds.play('select');
+        if (sel.length > 0) {
+          sounds.play('select');
+          const sample = sel[Math.floor(Math.random() * sel.length)];
+          const factionId = sample?.faction?.id ?? this.playerFaction?.id;
+          const pos = sample?.position
+            ? { x: sample.position.x, z: sample.position.z }
+            : null;
+          // All unit radio acks use radio static (squad + AFV nets)
+          sounds.playUnitSelect(factionId, pos, { radio: true });
+        } else if (hq || baseBuilding) {
+          sounds.play('select');
+        }
         this.ui?.updateSelection(sel, this.controller.hoveredTarget, hq, this);
         this.ui?.syncProductionPanel?.(this);
         this._syncUnitRoster();
@@ -1018,6 +1038,7 @@ export class Game {
     }
     this._endOverlayShown = false;
     this._pendingEnd = null;
+    this._pendingCookOffs = [];
     this._teardownPending = false;
     this.viewingBattlefield = false;
     this._hudUiAccum = 0;
@@ -1615,6 +1636,7 @@ export class Game {
     clearTerrainDamage(this.scene);
     clearCombatEffects();
     clearWreckEffects();
+    clearVehicleCookOffs(this);
     clearDetachedCorpseFalls();
     clearHqBurnEffects();
     this.scenery?.clear();
@@ -1706,6 +1728,10 @@ export class Game {
     if (!this.fireSupport.isReady(type) && this.fireSupport.pending !== type) return;
     this.cancelSmokeShellTargeting();
     this.fireSupport.arm(type);
+    // Commander radio when arming (not when clicking again to cancel arm)
+    if (this.fireSupport.pending === type) {
+      this._playCommanderOrder(type);
+    }
     this._syncBattleCursor();
     this.ui?.updateFireSupport(this.fireSupport);
   }
@@ -1713,7 +1739,24 @@ export class Game {
   tryGeneralOrder(type) {
     if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
     if (!this.generalOrders.issue(type)) return;
+    // Commander radio when issuing (not when cancelling an active order)
+    if (this.generalOrders.getActiveType() === type) {
+      this._playCommanderOrder(type);
+    }
     this.ui?.updateGeneralOrders(this.generalOrders);
+  }
+
+  /** Faction HQ general over radio for fire support / general orders. */
+  _playCommanderOrder(kind) {
+    const factionId = this.playerFaction?.id ?? null;
+    const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
+    const pos = hq?.position
+      ?? (this.clearance && this.mapDef
+        ? getClearanceStagingAnchor(this.mapDef).position
+        : this.cameraTarget
+          ? { x: this.cameraTarget.x, z: this.cameraTarget.z }
+          : null);
+    sounds.playCommanderOrder(kind, factionId, pos);
   }
 
   armSmokeShell() {
@@ -2348,6 +2391,7 @@ export class Game {
     clearHqBurnEffects();
     clearCombatEffects();
     clearWreckEffects();
+    clearVehicleCookOffs(this);
     clearFireSupportEffects();
     clearActiveParachuteDrops(this.scene);
     clearTerrainDamage(this.scene);
@@ -2403,8 +2447,12 @@ export class Game {
     for (const u of this.units) {
       if (!u.dead || !u.mesh?.parent || u.mesh.userData?.deathVisualApplied) continue;
       applyUnitDeathVisual(u);
-      if (isTankType(u.def?.type) && u.mesh.userData?.wreckApplied && !u.wreckFire) {
-        u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+      if (isArmoredCombatVehicle(u.def?.type) && u.mesh.userData?.wreckApplied) {
+        if (!u._vehicleKillFxDone) {
+          triggerVehicleKillFx(this, u, { x: u.position.x, y: u.position.y, z: u.position.z });
+        } else if (!u.wreckFire) {
+          u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+        }
       }
     }
     this._rebuildUnitCaches();
@@ -2462,11 +2510,15 @@ export class Game {
 
     if (coaxFire) {
       sounds.playWeapon(mgProfileForFaction(factionId), pos, {
-        rate: 1.04 + Math.random() * 0.08,
+        rate: 0.995 + Math.random() * 0.02,
         volume: 0.82,
       });
       if (killed && target?.def && isInfantryUnitType(target.def.type)) {
-        sounds.playInfantryDeath({ x: to.x, z: to.z }, target.faction?.id);
+        sounds.playInfantryDeath(
+          { x: to.x, z: to.z },
+          target.faction?.id,
+          { team: target.team }
+        );
       } else if (killed) {
         sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 320);
       }
@@ -2474,28 +2526,30 @@ export class Game {
     }
 
     let profile = resolveWeaponProfile(def, factionId);
-    let rate = 0.94 + Math.random() * 0.1;
+    // Keep base rate near 1.0 — sample pools provide variety; big pitch swings sound fake
+    let rate = 0.99 + Math.random() * 0.02;
     let volume = 1;
     if (def.type === 'infantry') {
-      attacker._mgVolley = (attacker._mgVolley ?? 0) + 1;
-      const useMg = def.usesMG && attacker._mgVolley % 2 !== 0;
-      if (useMg) profile = mgProfileForFaction(factionId);
-      rate = useMg ? 1.02 : 0.98 + Math.random() * 0.06;
+      // Squad mix: rifles + SMGs (not dedicated MG-team LMG samples)
+      attacker._infVolley = (attacker._infVolley ?? 0) + 1;
+      const useSmg = attacker._infVolley % 3 === 0; // ~1/3 SMG bursts
+      profile = useSmg ? smgProfileForFaction(factionId) : `rifle_${factionId}`;
+      rate = 0.99 + Math.random() * 0.025;
     } else if (def.type === 'paratrooper' && !paratrooperAtFire) {
       const useMg = def.usesMG && (attacker._mgVolley ?? 0) % 2 !== 0;
       profile = useMg ? mgProfileForFaction(factionId) : `rifle_${factionId}`;
-      rate = useMg ? 1.02 : 0.98 + Math.random() * 0.06;
+      rate = 0.99 + Math.random() * 0.025;
       volume = 0.88;
     } else if (def.type === 'sniper') {
-      rate = 0.92 + Math.random() * 0.04;
+      rate = 0.99 + Math.random() * 0.02;
       volume = 0.9;
     } else if (def.type === 'machineGun' || def.type === 'armoredCar') {
-      rate = def.type === 'armoredCar' ? 1.05 + Math.random() * 0.06 : 0.98 + Math.random() * 0.08;
+      rate = 0.99 + Math.random() * 0.025;
     } else if (def.type === 'mortar') {
-      rate = 0.72 + Math.random() * 0.1;
-      volume = 0.75;
+      rate = 0.985 + Math.random() * 0.03;
+      volume = 1.05;
     } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
-      rate = def.type === 'paratrooper' ? 0.88 + Math.random() * 0.06 : 0.96 + Math.random() * 0.08;
+      rate = 0.99 + Math.random() * 0.02;
       volume = def.type === 'paratrooper' ? 0.92 : volume;
     }
 
@@ -2508,13 +2562,18 @@ export class Game {
       sounds.playImpact('tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
-        sounds.playInfantryDeath({ x: to.x, z: to.z }, target.faction?.id);
+        sounds.playInfantryDeath(
+          { x: to.x, z: to.z },
+          target.faction?.id,
+          { team: target.team }
+        );
       } else {
         sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 350);
       }
     }
 
-    const targetIsTank = killed && target?.def && isTankType(target.def.type);
+    const targetIsArmored =
+      killed && target?.def && isArmoredCombatVehicle(target.def.type);
 
     if (
       killed ||
@@ -2525,14 +2584,8 @@ export class Game {
           def.type === 'antiTankGun' ||
           isTankType(def.type)))
     ) {
-      if (targetIsTank) {
-        spawnSmokePuff(this.scene, to, 1.1);
-        spawnSmokePuff(this.scene, to, 0.75);
-        if (target?.mesh?.parent && !target.wreckFire) {
-          target.wreckFire = spawnTankWreckFire(this.scene, target.position, target.mesh);
-          sounds.play('explosion');
-        }
-        this._spawnExplosionCrater(to.x, to.z, 'medium');
+      if (targetIsArmored) {
+        triggerVehicleKillFx(this, target, to);
       } else if (def.type === 'artillery') {
         spawnShellExplosion(this.scene, to, 'heavy');
         this._spawnExplosionCrater(to.x, to.z, 'heavy');
@@ -2543,7 +2596,7 @@ export class Game {
         spawnExplosion(this.scene, to);
         this._spawnExplosionCrater(to.x, to.z, groundImpact ? 'medium' : 'light');
       }
-      if (!targetIsTank) {
+      if (!targetIsArmored) {
         sounds.playImpact(
           targetIsHQ || targetIsScenery || groundImpact ? 'shell' : 'explosion',
           { x: to.x, z: to.z },
@@ -2576,7 +2629,9 @@ export class Game {
       if (this.viewingBattlefield) {
         this.updateCamera(dt);
         updateWreckEffects(dt, this.camera);
+        updateVehicleCookOffs(this, dt);
         updateHqBurnEffects(dt, this.camera, this.hqs);
+        updateCombatEffects(dt);
         updateDetachedCorpseFalls(dt);
         this._renderFrame();
         return;
@@ -2686,6 +2741,7 @@ export class Game {
             ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
             : null,
           scenery: this.scenery,
+          clearance: this.clearance,
         });
         if (
           getGarrisonBunkerSources(this).length > 0 ||
@@ -2724,10 +2780,10 @@ export class Game {
         sounds.updateVehicleEngines(this._aliveUnits, dt);
         for (const u of this._aliveUnits) {
           if (u.retreating) {
-            const hq =
-              u.team === PLAYER_TEAM && this.clearance
-                ? getClearanceStagingAnchor(this.mapDef)
-                : this.hqs.find((h) => h.team === u.team && !h.dead);
+            const hq = resolveRetreatHq(u, this.hqs, {
+              clearance: this.clearance,
+              mapDef: this.mapDef,
+            });
             updateRetreatState(u, hq, this.mapDef);
           }
         }
@@ -2854,6 +2910,7 @@ export class Game {
 
         if (fieldHasUnits || hasCorpses) {
           updateWreckEffects(dt, this.camera);
+          updateVehicleCookOffs(this, dt);
           updateHqBurnEffects(dt, this.camera, this.hqs);
           this.rangeRings.updateForUnits(this._aliveUnits);
           this.targetIndicators.update(playerSelected, this._playerAlive);
@@ -2949,8 +3006,16 @@ export class Game {
         continue;
       }
 
-      if (isTankType(u.def.type) && u.mesh.userData?.wreckApplied && !u.wreckFire) {
-        u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+      if (isArmoredCombatVehicle(u.def.type) && u.mesh.userData?.wreckApplied) {
+        if (!u._vehicleKillFxDone) {
+          triggerVehicleKillFx(this, u, {
+            x: u.position.x,
+            y: u.position.y,
+            z: u.position.z,
+          });
+        } else if (!u.wreckFire) {
+          u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+        }
       }
     }
     this.units = this.units.filter(

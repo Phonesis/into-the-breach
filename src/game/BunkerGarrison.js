@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { distanceBetween, distanceToPoint } from './Targeting.js';
 import { isUnitMounted } from './TankRiders.js';
 
@@ -84,9 +85,71 @@ export function releaseFromBunker(unit, sources) {
     if (found.entry.garrison.length === 0 && found.entry.neutralGarrison) {
       found.entry.garrisonTeam = null;
     }
+    syncBunkerOccupancyVisual(found.entry);
   }
   unit._garrisonBunkerId = null;
+  unit._garrisonSlotIndex = null;
+  unit.garrisoned = false;
   if (unit.mesh) unit.mesh.visible = true;
+}
+
+/** Green roof badge showing how many troops are inside a bunker. */
+export function syncBunkerOccupancyVisual(bunker) {
+  if (!bunker?.mesh) return;
+  const n = bunker.garrison?.length ?? 0;
+  const cap = bunker.def?.garrisonCapacity ?? 2;
+  let badge = bunker.mesh.getObjectByName('garrisonOccupancyBadge');
+
+  if (n <= 0) {
+    if (badge) {
+      badge.visible = false;
+    }
+    return;
+  }
+
+  if (!badge) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.userData.canvas = canvas;
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    badge = new THREE.Sprite(mat);
+    badge.name = 'garrisonOccupancyBadge';
+    badge.scale.set(3.8, 1.9, 1);
+    badge.renderOrder = 28;
+    badge.position.set(0, 4.2, 0);
+    bunker.mesh.add(badge);
+  }
+
+  const canvas = badge.material.map.userData.canvas;
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 128, 64);
+    ctx.fillStyle = 'rgba(18, 42, 24, 0.94)';
+    ctx.beginPath();
+    ctx.roundRect(6, 8, 116, 48, 10);
+    ctx.fill();
+    ctx.strokeStyle = '#6bcf7a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#b8f0c0';
+    ctx.font = 'bold 16px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('INSIDE', 64, 24);
+    ctx.fillStyle = '#e8ffe8';
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.fillText(`${n}/${cap}`, 64, 44);
+    badge.material.map.needsUpdate = true;
+  }
+  badge.visible = true;
+  badge.position.y = 4.2 + Math.min(n, 3) * 0.15;
 }
 
 export function tryEnterBunker(unit, bunker, sources) {
@@ -112,6 +175,8 @@ export function tryEnterBunker(unit, bunker, sources) {
   if (bunker.neutralGarrison) bunker.garrisonTeam = unit.team;
   bunker.garrison.push(unit.id);
   unit._garrisonBunkerId = bunker.id;
+  unit._garrisonSlotIndex = bunker.garrison.length - 1;
+  unit.garrisoned = true;
   unit.attackOrder = null;
   unit.target = null;
   unit._chasingAttack = false;
@@ -120,7 +185,9 @@ export function tryEnterBunker(unit, bunker, sources) {
   unit.retreating = false;
   unit.position.x = bunker.x + (bunker.garrison.length - 1) * 0.35 - 0.35;
   unit.position.z = bunker.z;
-  if (unit.mesh) unit.mesh.visible = bunker.hideGarrisoned !== true;
+  // Always hide the unit mesh while inside — field icons + INSIDE banner show occupancy
+  if (unit.mesh) unit.mesh.visible = false;
+  syncBunkerOccupancyVisual(bunker);
   return true;
 }
 
@@ -149,9 +216,12 @@ export function updateBunkerGarrison(units, sources) {
         continue;
       }
       const idx = bunker.garrison.indexOf(unit.id);
-      unit.position.x = bunker.x + (idx >= 0 ? idx : 0) * 0.35 - 0.35;
+      unit._garrisonSlotIndex = idx >= 0 ? idx : 0;
+      unit.position.x = bunker.x + unit._garrisonSlotIndex * 0.35 - 0.35;
       unit.position.z = bunker.z;
-      if (unit.mesh) unit.mesh.visible = bunker.hideGarrisoned !== true;
+      unit.garrisoned = true;
+      if (unit.mesh) unit.mesh.visible = false;
+      syncBunkerOccupancyVisual(bunker);
       continue;
     }
 

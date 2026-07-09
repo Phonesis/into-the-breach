@@ -7,6 +7,7 @@ import {
 } from '../data/baseBuildings.js';
 import {
   createBaseBuildingMesh,
+  createBaseBuildingRubble,
   setBaseBuildingHpVisual,
 } from '../visual/BaseBuildingMeshes.js';
 import {
@@ -16,8 +17,9 @@ import {
 } from '../visual/BaseBuildingConstruction.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
-import { spawnExplosion } from '../effects/CombatEffects.js';
+import { spawnExplosion, spawnShellExplosion, spawnSmokePuff } from '../effects/CombatEffects.js';
 import { isTeamStagingPhase } from './OpeningDeployZone.js';
+import { addExplosionCrater } from '../world/TerrainDamage.js';
 
 let nextId = 1;
 
@@ -68,6 +70,7 @@ export class BaseBuildingManager {
       building: false,
       garrison: [],
       mesh: null,
+      rubbleMesh: null,
       manager: this,
     };
     const mesh = createBaseBuildingMesh(typeId, this.getFactionId(team));
@@ -89,6 +92,10 @@ export class BaseBuildingManager {
     for (const entry of this.entries) {
       if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
       this._disposeMesh(entry.mesh);
+      if (entry.rubbleMesh?.parent) entry.rubbleMesh.parent.remove(entry.rubbleMesh);
+      this._disposeMesh(entry.rubbleMesh);
+      entry.mesh = null;
+      entry.rubbleMesh = null;
     }
     this.entries = [];
     this.sites = [];
@@ -334,6 +341,7 @@ export class BaseBuildingManager {
       building: false,
       garrison: [],
       mesh: null,
+      rubbleMesh: null,
       manager: this,
       engineerBuilt: true,
     };
@@ -373,13 +381,58 @@ export class BaseBuildingManager {
     }
 
     if (entry._attackTarget) entry._attackTarget.dead = true;
-    spawnExplosion(this.game.scene, { x: entry.x, y: entry.y + 1, z: entry.z });
+
+    const pos = { x: entry.x, y: (entry.y ?? 0) + 1, z: entry.z };
+    const yaw = entry.mesh?.rotation?.y ?? this._facingYaw(entry.team, entry.x, entry.z);
+
+    // Heavier collapse FX than a small infantry puff
+    spawnShellExplosion(this.game.scene, pos, entry.typeId === 'bunker' ? 'medium' : 'heavy');
+    spawnSmokePuff(this.game.scene, pos, 1.1);
+    spawnSmokePuff(this.game.scene, { x: pos.x + 0.8, y: pos.y, z: pos.z - 0.4 }, 0.75);
+    spawnExplosion(this.game.scene, pos);
+
+    if (this.game.mapDef) {
+      addExplosionCrater(
+        this.game.scene,
+        this.game.mapDef,
+        entry.x,
+        entry.z,
+        entry.typeId === 'bunker' ? 'medium' : 'heavy',
+        this.game._terrainMesh
+      );
+    }
+
     if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
     this._disposeMesh(entry.mesh);
     entry.mesh = null;
+
+    // Leave permanent rubble where the structure stood
+    this._spawnRubble(entry, yaw);
+
     this._invalidateAttackTargetsCache();
     this.game.ui?.updateBaseBuild?.(this.game);
     this.game.ui?.updateProduction?.(this.game);
+  }
+
+  /**
+   * Place a lasting rubble pile for a destroyed base structure.
+   * Kept on the entry so battle teardown can dispose it.
+   */
+  _spawnRubble(entry, yaw = 0) {
+    if (!entry || entry.rubbleMesh) return;
+    const radius = entry.def?.radius ?? entry.def?.hitRadius ?? 3.6;
+    const rubble = createBaseBuildingRubble(entry.typeId, radius);
+    rubble.position.set(entry.x, entry.y ?? 0, entry.z);
+    rubble.rotation.y = yaw + (Math.random() - 0.5) * 0.35;
+    this.game.scene.add(rubble);
+    entry.rubbleMesh = rubble;
+  }
+
+  /** Restore rubble for a previously destroyed building (battle load). */
+  restoreDestroyedRubble(entry) {
+    if (!entry?.destroyed) return;
+    const yaw = this._facingYaw(entry.team, entry.x, entry.z);
+    this._spawnRubble(entry, yaw);
   }
 
   onDamaged(entry) {

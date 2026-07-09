@@ -23,7 +23,7 @@ import {
 import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
-import { maybeTriggerRetreat, clearRetreat } from './RetreatBehavior.js';
+import { maybeTriggerRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
 import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
 import { getRankDamageMultiplier, recordEnemyKill } from './EliteBehavior.js';
 import { isSceneryTarget } from './SceneryTarget.js';
@@ -40,6 +40,10 @@ import {
   updateInfantryWalkAnimation,
   usesInfantryMuzzleOrigin,
 } from '../units/InfantryVisuals.js';
+import {
+  getVehicleCannonMuzzleWorldPosition,
+  usesVehicleCannonMuzzleOrigin,
+} from '../units/VehicleMeshKit.js';
 
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
@@ -84,6 +88,8 @@ export function updateCombat(
   scenery = null,
   options = {}
 ) {
+  // Retreat / panic paths need mapDef for Clear Defenses staging rally
+  options = { ...options, mapDef };
   const protectPlayerHq = options.protectPlayerHq === true;
   const enemyCeasefire = options.enemyCeasefire === true;
   const openingCeasefire = options.openingCeasefire === true;
@@ -274,6 +280,11 @@ function resolveMuzzleFrom(attacker, map, vfxType, coax) {
     getInfantryMuzzleWorldPosition(attacker, vfxType, _muzzleFrom);
     return { from: _muzzleFrom, exactOrigin: true };
   }
+  // Main gun flash from the cannon tip (follows turret/barrel aim)
+  if (usesVehicleCannonMuzzleOrigin(attacker, coax)) {
+    getVehicleCannonMuzzleWorldPosition(attacker, _muzzleFrom);
+    return { from: _muzzleFrom, exactOrigin: true };
+  }
   _muzzleFrom.copy(attacker.position);
   if (map) _muzzleFrom.y = sampleTerrainHeight(_muzzleFrom.x, _muzzleFrom.z, map) + (coax ? 0.95 : 1);
   return { from: _muzzleFrom, exactOrigin: false };
@@ -427,11 +438,10 @@ function fire(
     const showSmokeVfx =
       attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
     if (showSmokeVfx && scene) {
-      const from = attacker.position.clone();
-      if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + 1;
+      const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, 'artillery', false);
       const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
       const to = { x: impact.x, y: toY, z: impact.z };
-      spawnMuzzleFlash(scene, from, to, 'artillery');
+      spawnMuzzleFlash(scene, from, to, 'artillery', { exactOrigin });
       for (let i = 0; i < 8; i++) {
         spawnSmokePuff(
           scene,
@@ -479,7 +489,11 @@ function fire(
       target.takeDamage(scalePracticeHqDamage(target, damage, options));
       if (!target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
-          maybeTriggerRetreat(target, hqs, livingUnits, attacker, options.generalOrders);
+          maybeTriggerRetreat(target, hqs, livingUnits, attacker, {
+            generalOrders: options.generalOrders,
+            clearance: options.clearance,
+            mapDef,
+          });
         }
       }
       if (target.dead && target.def) recordEnemyKill(attacker, target);
@@ -585,7 +599,11 @@ function applySplashDamage(
       other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
       if (!other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
-          maybeTriggerRetreat(other, hqs, units, attacker, options.generalOrders);
+          maybeTriggerRetreat(other, hqs, units, attacker, {
+            generalOrders: options.generalOrders,
+            clearance: options.clearance,
+            mapDef: options.mapDef,
+          });
         }
       }
       if (other.dead && other.def) recordEnemyKill(attacker, other);
@@ -599,7 +617,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     if (isUnitMounted(unit)) continue;
 
     if (unit.retreating) {
-      const hq = hqs.find((h) => h.team === unit.team && !h.dead);
+      // Clear Defenses: no player HQ — rally to starting/staging zone instead
+      const hq = resolveRetreatHq(unit, hqs, {
+        clearance: options.clearance,
+        mapDef,
+      });
       if (!hq) {
         clearRetreat(unit);
         unit.moveTarget = null;

@@ -4,8 +4,23 @@ import { getMedicRetreatMultiplier } from './MedicBehavior.js';
 import { getEngineerRetreatMultiplier } from './EngineerBehavior.js';
 import { getRankMoralePressure, getRankRetreatMultiplier } from './EliteBehavior.js';
 import { getCommanderRetreatMultiplier } from './GeneralOrders.js';
+import { getClearanceStagingAnchor } from './ClearanceMode.js';
 
 const _retreatTex = { tex: null };
+
+/**
+ * Resolve the rally point for a retreating unit.
+ * Clear Defenses has no player HQ — fall back to the starting/staging zone.
+ * @param {object} unit
+ * @param {object[]} hqs
+ * @param {{ clearance?: boolean, mapDef?: object|null }} [opts]
+ */
+export function resolveRetreatHq(unit, hqs, opts = {}) {
+  if (opts.clearance && unit?.team === 'player' && opts.mapDef) {
+    return getClearanceStagingAnchor(opts.mapDef);
+  }
+  return hqs?.find((h) => h.team === unit.team && !h.dead) ?? null;
+}
 
 function getRetreatTexture() {
   if (_retreatTex.tex) return _retreatTex.tex;
@@ -74,11 +89,23 @@ export function clearRetreat(unit) {
   removeRetreatMarker(unit);
 }
 
-/** Random panic retreat toward friendly HQ after taking fire. */
-export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, generalOrders = null) {
+/**
+ * Random panic retreat toward friendly HQ (or clearance staging) after taking fire.
+ * @param {object|null} [opts] — { generalOrders, clearance, mapDef } or a GeneralOrdersManager (legacy)
+ */
+export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts = null) {
   if (unit.dead || unit.retreating || unit.defensiveHold) return;
 
-  const hq = hqs.find((h) => h.team === unit.team && !h.dead);
+  // Back-compat: fifth arg used to be generalOrders manager directly
+  const options =
+    opts && typeof opts === 'object' && ('generalOrders' in opts || 'clearance' in opts || 'mapDef' in opts)
+      ? opts
+      : { generalOrders: opts };
+
+  const hq = resolveRetreatHq(unit, hqs, {
+    clearance: options.clearance,
+    mapDef: options.mapDef,
+  });
   if (!hq) return;
 
   const ratio = unit.hp / unit.maxHp;
@@ -95,7 +122,7 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, gene
   chance *= getEngineerRetreatMultiplier(unit, units);
   chance *= getRankRetreatMultiplier(unit);
   chance *= getRankMoralePressure(unit, units, attacker);
-  chance *= getCommanderRetreatMultiplier(unit, generalOrders);
+  chance *= getCommanderRetreatMultiplier(unit, options.generalOrders);
 
   if (Math.random() < chance) {
     startRetreat(unit, hq);

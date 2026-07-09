@@ -20,6 +20,7 @@ import {
 } from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
+import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
 
 let nextId = 1;
 
@@ -215,8 +216,34 @@ export class Unit {
 
   takeDamage(amount) {
     if (this.dead || this.surrendered || this._captureExit) return;
+    if (amount <= 0) return;
     this.hp -= amount;
     updateSquadCasualtyVisual(this);
+
+    // Foot troops yell when hit (not on the killing blow — death lines handle that)
+    if (this.hp > 0 && isInfantryUnitType(this.def?.type)) {
+      const now = performance.now();
+      // Per-unit cooldown so one squad doesn't spam every bullet
+      if (now - (this._lastUnderFireVoiceAt ?? 0) > 2400) {
+        this._lastUnderFireVoiceAt = now;
+        // Panic lines — frequent enough to hear emotion, not a wall of shouts
+        if (Math.random() < 0.55) {
+          // Prefer faction.id; fall back to nested fields if a save/restore ever strips id
+          const factionId =
+            this.faction?.id ?? this.faction?.factionId ?? this.def?.factionId ?? null;
+          sounds.playUnderFire(
+            { x: this.position.x, z: this.position.z },
+            factionId,
+            {
+              team: this.team,
+              // Friendly panic over radio; enemy yells are open-field ambient (quieter)
+              radio: this.team === 'player',
+            }
+          );
+        }
+      }
+    }
+
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;

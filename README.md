@@ -15,12 +15,27 @@ npm run dev
 
 Open the URL Vite prints (typically `http://localhost:5173`). Choose a game mode, faction, and map from the main menu.
 
-Optional — regenerate procedural SFX (used when present under `public/sounds/`):
+Optional — regenerate SFX (used when present under `public/sounds/`):
 
 ```bash
-npm run bake-sounds      # gunfire, impacts, explosions, aircraft fly-by
-npm run bake-engines     # vehicle engine loops
+npm run bake-sounds           # procedural gunfire / impacts / explosions / aircraft
+npm run bake-elevenlabs-sfx   # AI gunfire + explosions via ElevenLabs (needs ELEVENLABS_API_KEY + ffmpeg)
+npm run bake-elevenlabs-extra # extra explosion/impact/gun/atmos pool for the mix
+npm run bake-elevenlabs-smallarms # faction rifle + MG extras (ElevenLabs)
+npm run bake-engines          # vehicle engine loops
 npm run bake-infantry-death
+npm run bake-unit-select      # faction selection radio acks (edge-tts + ffmpeg)
+npm run bake-unit-under-fire  # panicked under-fire shouts (edge-tts + ffmpeg)
+npm run expand-gun-variety    # extra pitch/EQ variants of gunfire (no API)
+```
+
+ElevenLabs bake (gunfire, mortars, tank/AT guns, howitzers, impact, explosion):
+
+```bash
+export ELEVENLABS_API_KEY=sk_…   # https://elevenlabs.io/app/developers/api-keys
+npm run bake-elevenlabs-sfx          # skip files that already exist
+npm run bake-elevenlabs-sfx -- --force
+npm run bake-elevenlabs-sfx -- --only explosion,rifle,mg
 ```
 
 Optional — regenerate procedural menu theme (`public/music/`):

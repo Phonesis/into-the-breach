@@ -315,6 +315,36 @@ export function updateCombatEffects(dt) {
       fx.mesh.scale.multiplyScalar(1 + dt * 2.5);
       fx.material.opacity = Math.max(0, fx.material.opacity - dt * 1.8);
       fx.mesh.position.y += dt * 0.8;
+    } else if (fx.type === 'tankMuzzle') {
+      const t = 1 - fx.life / fx.maxLife;
+      // Fire core expands then fades fast
+      if (fx.core) {
+        const s = (2.4 + t * 2.8) * (fx.scale ?? 1);
+        fx.core.scale.set(s, s, 1);
+        fx.core.material.opacity = Math.max(0, 1 - t * 2.4);
+      }
+      if (fx.fire) {
+        const s = (3.6 + t * 3.5) * (fx.scale ?? 1);
+        fx.fire.scale.set(s, s, 1);
+        fx.fire.material.opacity = Math.max(0, 0.95 - t * 2.1);
+      }
+      for (const jet of fx.jetSprites ?? []) {
+        jet.scale.multiplyScalar(1 + dt * 4.5);
+        jet.material.opacity = Math.max(0, jet.material.opacity - dt * 4.2);
+      }
+      if (fx.light) {
+        fx.light.intensity = Math.max(0, fx.light.intensity * (1 - dt * 5.5));
+      }
+      for (const puff of fx.smokePuffs ?? []) {
+        puff.mesh.position.x += puff.vx * dt;
+        puff.mesh.position.y += puff.vy * dt;
+        puff.mesh.position.z += puff.vz * dt;
+        puff.mesh.scale.multiplyScalar(1 + dt * 2.8);
+        puff.mat.opacity = Math.max(0, puff.mat.opacity - dt * 0.85);
+        // Slow horizontal drift as cloud rises
+        puff.vx *= 1 - dt * 0.6;
+        puff.vz *= 1 - dt * 0.6;
+      }
     } else if (fx.type === 'explosion' || fx.type === 'shellExplosion') {
       const grow = fx.type === 'shellExplosion' ? 2.4 : 1.2;
       fx.group.scale.multiplyScalar(1 + dt * grow);
@@ -342,6 +372,150 @@ export function updateCombatEffects(dt) {
   }
 }
 
+const CANNON_MUZZLE_TYPES = new Set(['tank', 'superHeavyTank', 'antiTankGun', 'artillery']);
+
+function isCannonMuzzle(weaponType) {
+  return CANNON_MUZZLE_TYPES.has(weaponType);
+}
+
+/**
+ * Big muzzle fire + smoke for tank / super-heavy / AT gun main guns.
+ * Directional fire jet along the shot axis + expanding smoke cloud.
+ */
+function spawnTankMuzzleBlast(scene, pos, toV, weaponType) {
+  if (!canSpawnEffect(6)) return;
+
+  const heavy = weaponType === 'superHeavyTank' || weaponType === 'artillery';
+  const scale = heavy ? 1.45 : weaponType === 'antiTankGun' ? 0.85 : 1.1;
+
+  _shotDir.set(toV.x - pos.x, (toV.y ?? pos.y) - pos.y, toV.z - pos.z);
+  if (_shotDir.lengthSq() < 0.01) _shotDir.set(0, 0, 1);
+  else _shotDir.normalize();
+
+  const group = new THREE.Group();
+  group.position.copy(pos);
+  scene.add(group);
+
+  const geos = [];
+  const mats = [];
+
+  // Core white-hot flash
+  const coreMat = new THREE.SpriteMaterial({
+    map: getFlashTexture(0xfff0c0),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    opacity: 1,
+  });
+  const core = new THREE.Sprite(coreMat);
+  const coreSize = 2.4 * scale;
+  core.scale.set(coreSize, coreSize, 1);
+  core.renderOrder = 15;
+  group.add(core);
+  mats.push(coreMat);
+
+  // Outer orange fire ball
+  const fireMat = new THREE.SpriteMaterial({
+    map: getFlashTexture(0xff6622),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    opacity: 0.95,
+  });
+  const fire = new THREE.Sprite(fireMat);
+  const fireSize = 3.6 * scale;
+  fire.scale.set(fireSize, fireSize, 1);
+  fire.position.copy(_shotDir).multiplyScalar(0.35 * scale);
+  fire.renderOrder = 14;
+  group.add(fire);
+  mats.push(fireMat);
+
+  // Directional fire jet along barrel (short cones as sprites stacked forward)
+  const jetSprites = [];
+  for (let i = 0; i < 3; i++) {
+    const jetMat = new THREE.SpriteMaterial({
+      map: getFlashTexture(i === 0 ? 0xffaa44 : 0xff5500),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      opacity: 0.9 - i * 0.2,
+    });
+    const jet = new THREE.Sprite(jetMat);
+    const s = (1.8 - i * 0.35) * scale;
+    jet.scale.set(s, s * 0.85, 1);
+    jet.position.copy(_shotDir).multiplyScalar((0.55 + i * 0.55) * scale);
+    jet.renderOrder = 14;
+    group.add(jet);
+    mats.push(jetMat);
+    jetSprites.push(jet);
+  }
+
+  // Brief dynamic light at the muzzle
+  const light = new THREE.PointLight(0xff8833, heavy ? 10 : 7, heavy ? 18 : 14, 1.6);
+  light.position.set(0, 0.2, 0);
+  group.add(light);
+
+  // Smoke puffs billowing from muzzle (grey + dark)
+  const smokePuffs = [];
+  const puffCount = heavy ? 5 : 4;
+  for (let i = 0; i < puffCount; i++) {
+    const sGeo = new THREE.SphereGeometry((0.35 + Math.random() * 0.35) * scale, 6, 6);
+    const sMat = new THREE.MeshBasicMaterial({
+      color: i % 2 ? 0x666666 : 0x3a3a38,
+      transparent: true,
+      opacity: 0.48 + Math.random() * 0.12,
+      depthWrite: false,
+    });
+    const puff = new THREE.Mesh(sGeo, sMat);
+    const side = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.8,
+      0.15 + Math.random() * 0.45,
+      (Math.random() - 0.5) * 0.8
+    );
+    // Drift mostly forward + up from the barrel
+    puff.position
+      .copy(_shotDir)
+      .multiplyScalar((0.4 + i * 0.35) * scale)
+      .add(side);
+    group.add(puff);
+    geos.push(sGeo);
+    mats.push(sMat);
+    smokePuffs.push({
+      mesh: puff,
+      mat: sMat,
+      vx: _shotDir.x * (0.8 + Math.random() * 1.2) + (Math.random() - 0.5) * 0.6,
+      vy: 1.1 + Math.random() * 1.4,
+      vz: _shotDir.z * (0.8 + Math.random() * 1.2) + (Math.random() - 0.5) * 0.6,
+    });
+  }
+
+  // Extra free-floating smoke slightly behind/up for lingering cloud
+  for (let i = 0; i < 2; i++) {
+    const delayed = pos.clone().addScaledVector(_shotDir, 0.2 * scale);
+    delayed.y += 0.15;
+    spawnSmokePuff(scene, delayed, (0.7 + i * 0.25) * scale);
+  }
+
+  const life = heavy ? 0.55 : 0.42;
+  registerEffect({
+    type: 'tankMuzzle',
+    group,
+    light,
+    core,
+    fire,
+    jetSprites,
+    smokePuffs,
+    geometries: geos,
+    materials: mats,
+    life,
+    maxLife: life,
+    scale,
+  });
+}
+
 export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {}) {
   if (!scene) return;
 
@@ -352,44 +526,46 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {
     pos.y +=
       weaponType === 'artillery'
         ? 1.4
-        : weaponType === 'tank'
-          ? 1.2
-          : weaponType === 'paratrooperAt'
+        : weaponType === 'tank' || weaponType === 'superHeavyTank'
+          ? 1.25
+          : weaponType === 'antiTankGun'
             ? 1.05
-            : weaponType === 'mortar'
-              ? 0.9
-              : 0.85;
+            : weaponType === 'paratrooperAt'
+              ? 1.05
+              : weaponType === 'mortar'
+                ? 0.9
+                : 0.85;
   }
 
   if (SMALL_ARMS_TRACERS.has(weaponType)) {
     spawnBulletTracer(scene, pos, toV, weaponType);
   }
 
+  // Tank / super heavy / AT / artillery — dedicated fire + smoke blast
+  if (isCannonMuzzle(weaponType)) {
+    spawnTankMuzzleBlast(scene, pos, toV, weaponType);
+    return;
+  }
+
   if (!canSpawnEffect()) return;
 
   const flashColor =
-    weaponType === 'artillery' || weaponType === 'mortar'
+    weaponType === 'mortar'
       ? 0xff6622
       : weaponType === 'paratrooperAt'
         ? 0xff8833
-        : weaponType === 'tank'
-          ? 0xffaa55
-          : weaponType === 'machineGun'
-            ? 0xffcc66
-            : 0xffdd88;
+        : weaponType === 'machineGun'
+          ? 0xffcc66
+          : 0xffdd88;
 
   const flashSize =
-    weaponType === 'artillery'
-      ? 1.1
-      : weaponType === 'mortar'
-        ? 0.5
-        : weaponType === 'paratrooperAt'
-          ? 0.9
-          : weaponType === 'tank'
-            ? 0.65
-            : weaponType === 'machineGun'
-              ? 0.32
-              : 0.22;
+    weaponType === 'mortar'
+      ? 0.5
+      : weaponType === 'paratrooperAt'
+        ? 0.9
+        : weaponType === 'machineGun'
+          ? 0.32
+          : 0.22;
 
   const mat = new THREE.SpriteMaterial({
     map: getFlashTexture(flashColor),
@@ -410,18 +586,11 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {
     mesh: sprite,
     material: mat,
     materials: [mat],
-    life:
-      weaponType === 'artillery' || weaponType === 'mortar'
-        ? 0.14
-        : weaponType === 'paratrooperAt'
-          ? 0.12
-          : 0.07,
+    life: weaponType === 'mortar' ? 0.14 : weaponType === 'paratrooperAt' ? 0.12 : 0.07,
     maxLife: 0.14,
   });
 
-  if (weaponType === 'tank' || weaponType === 'artillery') {
-    spawnSmokePuff(scene, pos, 0.35);
-  } else if (weaponType === 'paratrooperAt') {
+  if (weaponType === 'paratrooperAt') {
     spawnSmokePuff(scene, pos, 0.55);
     const backblast = pos.clone();
     backblast.x -= (toV.x - fromV.x) * 0.04;

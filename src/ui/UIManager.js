@@ -13,6 +13,7 @@ const GENERAL_ORDER_CANCEL_LABELS = {
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
+import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import {
   canDismountRiders,
   canHostRiders,
@@ -1452,6 +1453,7 @@ export class UIManager {
     const assaultBanner = this.root.querySelector('#assault-banner');
     if (assaultBanner) assaultBanner.classList.toggle('hidden', !assault);
 
+    this._hudClearance = clearance;
     const clearanceBanner = this.root.querySelector('#clearance-banner');
     if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
 
@@ -2428,7 +2430,8 @@ export class UIManager {
 
     if (hint) {
       if (activeType === 'fullRetreat') {
-        hint.textContent = `Full Retreat — units withdrawing (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
+        const retreatDest = this._hudClearance ? 'starting zone' : 'HQ';
+        hint.textContent = `Full Retreat — units withdrawing to ${retreatDest} (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
       } else if (activeType === 'holdGround') {
         hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
       } else {
@@ -2835,12 +2838,13 @@ export class UIManager {
 
     if (covered.length === 1) {
       const { unit, cover } = covered[0];
-      el.className = `selection-cover cover-tier-${cover.tier}`;
+      const inside = !!cover.garrisoned;
+      el.className = `selection-cover cover-tier-${inside ? 'garrison' : cover.tier}`;
       el.innerHTML = `
         <div class="cover-banner-inner">
-          <span class="cover-banner-icon" aria-hidden="true">⛨</span>
+          <span class="cover-banner-icon" aria-hidden="true">${inside ? '⌂' : '⛨'}</span>
           <div class="cover-banner-text">
-            <strong class="cover-banner-title">${unit.name} — IN COVER</strong>
+            <strong class="cover-banner-title">${unit.name} — ${inside ? 'INSIDE BUILDING' : 'IN COVER'}</strong>
             <span class="cover-banner-sub">${cover.label} · ${cover.reduction}% damage reduction</span>
             <span class="cover-banner-detail">${cover.note}</span>
           </div>
@@ -2849,13 +2853,22 @@ export class UIManager {
       return;
     }
 
-    el.className = 'selection-cover cover-tier-mixed';
-    const parts = covered.map(({ cover }) => `${cover.shortLabel} (${cover.reduction}%)`);
+    const insideN = covered.filter((x) => x.cover.garrisoned).length;
+    el.className = `selection-cover cover-tier-${insideN > 0 ? 'garrison' : 'mixed'}`;
+    const parts = covered.map(({ cover }) =>
+      cover.garrisoned
+        ? `Inside (${cover.reduction}%)`
+        : `${cover.shortLabel} (${cover.reduction}%)`
+    );
     el.innerHTML = `
       <div class="cover-banner-inner">
-        <span class="cover-banner-icon" aria-hidden="true">⛨</span>
+        <span class="cover-banner-icon" aria-hidden="true">${insideN > 0 ? '⌂' : '⛨'}</span>
         <div class="cover-banner-text">
-          <strong class="cover-banner-title">${covered.length} of ${units.length} in cover</strong>
+          <strong class="cover-banner-title">${
+            insideN === covered.length
+              ? `${covered.length} inside buildings`
+              : `${covered.length} of ${units.length} in cover${insideN ? ` (${insideN} inside)` : ''}`
+          }</strong>
           <span class="cover-banner-detail">${parts.join(' · ')}</span>
         </div>
       </div>
@@ -3096,8 +3109,11 @@ export class UIManager {
       const garrisonN = baseEntry.garrison?.length ?? 0;
       const cap = baseEntry.def.garrisonCapacity ?? 0;
       let detail = baseEntry.def.subtitle ?? '';
-      if (baseEntry.typeId === 'bunker') {
-        detail = `Garrison ${garrisonN}/${cap} — move foot troops onto the bunker to enter heavy cover.`;
+      if (baseEntry.typeId === 'bunker' || baseEntry.def?.garrison) {
+        detail =
+          garrisonN > 0
+            ? `<strong>${garrisonN}/${cap} inside</strong> — troops are garrisoned in this building (heavy cover). Order them to move to leave.`
+            : `Garrison ${garrisonN}/${cap} — move foot troops onto the bunker to enter. Units inside are hidden and show an <strong>INSIDE</strong> marker above the roof.`;
       } else if ((baseEntry.def.spawns?.length ?? 0) > 0) {
         detail = `Train units from this depot using the panel on the right.`;
       }
@@ -3143,8 +3159,11 @@ export class UIManager {
             : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
         : '';
       const cover = getCoverStatus(u);
+      const garrisoned = isUnitGarrisoned(u) || !!cover.garrisoned;
       let coverBlock = '';
-      if (cover.inCover) {
+      if (garrisoned) {
+        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.22) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Look for the green <strong>INSIDE</strong> marker over the roof.</p>`;
+      } else if (cover.inCover) {
         coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
       } else if (u.def?.type === 'engineer') {
         const build = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
@@ -3177,7 +3196,13 @@ export class UIManager {
             ? '<p class="unit-support-status">RMB with infantry selected to mount riders on this tank.</p>'
             : '';
       body.innerHTML = `
-        <h3>${u.name}${cover.inCover ? ' <span class="cover-tag">COVER</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}</h3>
+        <h3>${u.name}${
+          garrisoned
+            ? ' <span class="cover-tag garrison-tag">INSIDE</span>'
+            : cover.inCover
+              ? ' <span class="cover-tag">COVER</span>'
+              : ''
+        }${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
         ${surrenderBlock}

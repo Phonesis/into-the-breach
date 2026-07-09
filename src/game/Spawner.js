@@ -117,7 +117,7 @@ export function spawnArmy({
     if (!def) continue;
 
     for (let i = 0; i < slot.count; i++) {
-      const angle = (i / slot.count) * Math.PI * 0.6 - Math.PI * 0.3;
+      const angle = (i / Math.max(slot.count, 1)) * Math.PI * 0.6 - Math.PI * 0.3;
       const dist = slot.spread + (i % 2) * 2;
       let x;
       let z;
@@ -132,6 +132,13 @@ export function spawnArmy({
           backAz * alongBack +
           Math.sin(angle) * dist +
           (i - slot.count / 2) * 2.2;
+      } else if (campaign || baseBuilding) {
+        // Standard campaign: one rifle squad starts well clear of the HQ mesh
+        // so it is easy to click (was ~2–4 m under/beside HQ).
+        const ring = Math.max(dist, 14);
+        const lateral = (i - (slot.count - 1) / 2) * 3.4;
+        x = base.x + Math.cos(angle) * ring * 0.65 + offsetSign * (row * 4.5 + 14);
+        z = base.z + Math.sin(angle) * ring * 0.85 + lateral;
       } else {
         x = base.x + Math.cos(angle) * dist * 0.4 + offsetSign * (row * 3 + 2);
         z = base.z + Math.sin(angle) * dist + (i - slot.count / 2) * 2.5;

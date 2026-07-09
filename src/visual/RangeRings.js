@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
 const SEGMENTS = 64;
+/** Lift above unit feet so flat rings clear local terrain; depthTest off handles slopes. */
+const RING_Y_OFFSET = 0.35;
 
 export class RangeRingManager {
   constructor(scene) {
@@ -14,13 +16,23 @@ export class RangeRingManager {
 
     for (const unit of selected) {
       activeIds.add(unit.id);
+      const range = unit.def?.range ?? 10;
       let ring = this.rings.get(unit.id);
       if (!ring) {
-        ring = this._createRing(unit.def.range);
+        ring = this._createRing(range);
+        this.scene.add(ring);
+        this.rings.set(unit.id, ring);
+      } else if (Math.abs((ring.userData.range ?? 0) - range) > 0.01) {
+        // Unit type/range changed — rebuild geometry
+        this.scene.remove(ring);
+        ring.geometry.dispose();
+        ring.material.dispose();
+        ring = this._createRing(range);
         this.scene.add(ring);
         this.rings.set(unit.id, ring);
       }
-      const y = unit.position.y + 0.15;
+      // Always sit on unit height; material ignores depth so slopes don't bury the ring
+      const y = (unit.position.y ?? 0) + RING_Y_OFFSET;
       ring.position.set(unit.position.x, y, unit.position.z);
       ring.visible = true;
     }
@@ -41,13 +53,18 @@ export class RangeRingManager {
     const mat = new THREE.MeshBasicMaterial({
       color: 0x4ade80,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.38,
       side: THREE.DoubleSide,
+      depthTest: false,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = 'rangeRing';
-    mesh.renderOrder = 1;
+    mesh.renderOrder = 20;
+    mesh.userData.range = radius;
+    // Don't cast/receive shadows that would hide it
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
     return mesh;
   }
 

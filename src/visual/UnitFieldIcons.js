@@ -52,6 +52,12 @@ function needsWorldSpaceIcon(unit) {
   );
 }
 
+function garrisonIconLift(unit) {
+  // Stack multiple garrisoned icons above the roof so each is readable
+  const idx = unit._garrisonSlotIndex ?? 0;
+  return 6.2 + idx * 1.35;
+}
+
 function reparentFieldIcon(unit) {
   if (!unit.fieldIcon || !unit.mesh) return;
   const sprite = unit.fieldIcon;
@@ -65,17 +71,26 @@ function reparentFieldIcon(unit) {
 function updateFieldIconTransform(unit) {
   if (!unit.fieldIcon) return;
   const yOff = iconYOffset(unit);
+  const garrisoned = isUnitGarrisoned(unit);
   if (unit.fieldIcon.userData.worldSpace) {
     const yBase = unit._mapDef
       ? sampleTerrainHeight(unit.position.x, unit.position.z, unit._mapDef)
       : unit.position.y;
-    const lift = Math.max(yOff, 4.6);
-    unit.fieldIcon.position.set(unit.position.x, yBase + lift, unit.position.z);
+    const lift = garrisoned ? garrisonIconLift(unit) : Math.max(yOff, 4.6);
+    // Slight lateral offset so stacked garrison icons don't fully overlap
+    const slot = unit._garrisonSlotIndex ?? 0;
+    const lat = garrisoned ? (slot - 0.5) * 0.85 : 0;
+    unit.fieldIcon.position.set(unit.position.x + lat, yBase + lift, unit.position.z);
   } else {
     unit.fieldIcon.position.set(0, yOff, 0);
   }
-  unit.fieldIcon.scale.set(ICON_SCALE, ICON_SCALE, 1);
+  const scale = garrisoned ? ICON_SCALE * 1.25 : ICON_SCALE;
+  unit.fieldIcon.scale.set(scale, scale, 1);
   unit.fieldIcon.visible = true;
+  // Green tint while inside a building
+  if (unit.fieldIcon.material) {
+    unit.fieldIcon.material.color?.setHex?.(garrisoned ? 0xb8ffc8 : 0xffffff);
+  }
 }
 
 function toSvgBlobUrl(type) {
@@ -202,7 +217,9 @@ export function syncUnitFieldIcon(unit, enabled) {
     return;
   }
 
-  if (!enabled) {
+  // Always show icons while garrisoned (mesh is hidden inside the building)
+  const mustShow = enabled || isUnitGarrisoned(unit);
+  if (!mustShow) {
     removeFieldIcon(unit);
     return;
   }

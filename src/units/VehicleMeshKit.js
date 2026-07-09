@@ -2,6 +2,103 @@ import * as THREE from 'three';
 
 /** Shared mesh parts for faction vehicles — driven by vehicleDesigns.js proportions. */
 
+const _cannonMuzzleTip = new THREE.Vector3();
+const CANNON_MUZZLE_UNIT_TYPES = new Set([
+  'tank',
+  'superHeavyTank',
+  'antiTankGun',
+  'artillery',
+  'armoredCar',
+]);
+
+/** Main-gun / AT / artillery fire VFX should use the barrel tip, not the hull center. */
+export function usesVehicleCannonMuzzleOrigin(unit, coax = false) {
+  if (coax) return false;
+  return CANNON_MUZZLE_UNIT_TYPES.has(unit?.def?.type);
+}
+
+/**
+ * World-space tip of the main cannon (or muzzle brake if present).
+ * Cylinders are oriented with local +Y along the bore after mesh rotation.
+ */
+export function getVehicleCannonMuzzleWorldPosition(unit, out = new THREE.Vector3()) {
+  const root = unit?.mesh;
+  if (!root) {
+    out.copy(unit?.position ?? { x: 0, y: 0, z: 0 });
+    out.y += 1.25;
+    return out;
+  }
+
+  root.updateWorldMatrix(true, true);
+
+  let muzzleBrake = null;
+  /** @type {{ mesh: THREE.Mesh, len: number, cylindrical: boolean }[]} */
+  const barrels = [];
+
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const part = obj.userData.tankPart;
+    if (part === 'muzzle') {
+      muzzleBrake = obj;
+      return;
+    }
+    if (part !== 'barrel') return;
+    const p = obj.geometry?.parameters;
+    if (p && p.height != null && p.radiusTop != null) {
+      barrels.push({ mesh: obj, len: p.height, cylindrical: true });
+    } else if (p && p.width != null) {
+      // Coax / secondary box barrels — only used if no cylinder main gun found
+      barrels.push({
+        mesh: obj,
+        len: Math.max(p.width, p.height ?? 0, p.depth ?? 0),
+        cylindrical: false,
+      });
+    }
+  });
+
+  if (muzzleBrake) {
+    return meshGunTipWorldPos(muzzleBrake, out);
+  }
+
+  barrels.sort((a, b) => {
+    if (a.cylindrical !== b.cylindrical) return a.cylindrical ? -1 : 1;
+    return b.len - a.len;
+  });
+
+  if (barrels[0]) {
+    return meshGunTipWorldPos(barrels[0].mesh, out);
+  }
+
+  // Fallback: hull origin + forward along facing (turret/hull yaw)
+  out.copy(unit.position);
+  const yaw = root.rotation?.y ?? 0;
+  const pivot = root.userData?.turretPivot;
+  const gunYaw = yaw + (pivot?.rotation?.y ?? 0);
+  const reach = unit.def?.type === 'superHeavyTank' ? 3.2 : unit.def?.type === 'artillery' ? 2.8 : 2.4;
+  out.x += Math.sin(gunYaw) * reach;
+  out.z += Math.cos(gunYaw) * reach;
+  out.y += unit.def?.type === 'antiTankGun' || unit.def?.type === 'artillery' ? 1.05 : 1.35;
+  return out;
+}
+
+function meshGunTipWorldPos(mesh, out) {
+  mesh.updateWorldMatrix(true, false);
+  const params = mesh.geometry?.parameters;
+  if (params && params.height != null && params.radiusTop != null) {
+    // CylinderGeometry: bore along local +Y (tanks/AT rotate this to world bore axis)
+    _cannonMuzzleTip.set(0, params.height / 2, 0);
+  } else if (params && params.width != null) {
+    // Box coax: length along local +X
+    _cannonMuzzleTip.set(params.width / 2, 0, 0);
+  } else {
+    mesh.getWorldPosition(out);
+    return out;
+  }
+  mesh.localToWorld(_cannonMuzzleTip);
+  out.copy(_cannonMuzzleTip);
+  return out;
+}
+
 export function addBox(group, geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, part = null }) {
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
@@ -298,6 +395,7 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     mb.rotation.x = Math.PI / 2;
     mb.position.set(0, b.y, b.z + b.len * 0.48);
+    mb.userData.tankPart = 'muzzle';
     turretPivot.add(mb);
   }
 
@@ -605,6 +703,7 @@ function addGunTube(group, body, dark, tube, mount, part = null) {
     );
     mb.rotation.x = Math.PI / 2;
     mb.position.set(0, 0, breechLen / 2 + len + 0.08);
+    mb.userData.tankPart = 'muzzle';
     gun.add(mb);
   }
 
@@ -652,7 +751,7 @@ export function buildArtilleryFromDesign(group, body, detail, dark, d) {
     });
   }
 
-  addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ });
+  addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
 
   if (sh.style !== 'box') {
     const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.05), dark);

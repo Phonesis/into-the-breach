@@ -1,0 +1,18 @@
+Weapon & explosion SFX
+======================
+
+Gunfire, mortar, tank/AT, howitzer, impact, and explosion samples may be
+regenerated in two ways:
+
+1) Procedural (npm run bake-sounds)
+   Synthesized offline in scripts/bake-gun-sounds.mjs — no third-party license.
+
+2) ElevenLabs Sound Effects (npm run bake-elevenlabs-sfx)
+   Generated via the ElevenLabs text-to-sound-effects API from text prompts.
+   Subject to ElevenLabs Terms of Service and your plan (Free vs commercial).
+   API key is never stored in this repo — set ELEVENLABS_API_KEY in your shell.
+   Docs: https://elevenlabs.io/docs/overview/capabilities/sound-effects
+
+Aircraft fly-by and vehicle engine loops remain procedural
+(bake-gun-sounds / bake-engine-sounds).
+Infantry death voices: see VOICES_LICENSE.txt.

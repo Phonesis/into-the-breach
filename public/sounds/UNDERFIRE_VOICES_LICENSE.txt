@@ -1,0 +1,11 @@
+Unit under-fire panic shouts
+=============================
+
+Spoken via Microsoft Edge neural TTS (edge-tts), urgent rate/pitch:
+  usa — en-US Guy / Christopher / Roger
+  uk — en-GB Ryan / Thomas
+  germany — de-DE Conrad / Killian
+  russia — ru-RU Dmitry
+
+Files: unit-underfire-{faction}-01.wav … 08.wav
+Regenerate: npm run bake-unit-under-fire

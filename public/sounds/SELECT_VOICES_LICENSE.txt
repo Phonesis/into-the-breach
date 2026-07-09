@@ -1,0 +1,11 @@
+Unit selection voice lines
+=========================
+
+Spoken via Microsoft Edge neural TTS (edge-tts):
+  usa — en-US voices (Guy / Christopher / Roger)
+  uk — en-GB voices (Ryan / Thomas)
+  germany — de-DE Conrad / Killian
+  russia — ru-RU Dmitry
+
+Files: unit-select-{faction}-01.wav … 06.wav
+Regenerate: npm run bake-unit-select

@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { removeCoverMarker, syncCoverMarker } from '../visual/CoverMarkers.js';
-import { getGarrisonCoverMultiplier } from './BunkerGarrison.js';
+import {
+  BUNKER_GARRISON_COVER_MULT,
+  getGarrisonCoverMultiplier,
+  isUnitGarrisoned,
+} from './BunkerGarrison.js';
 
 /** Infantry / MG cover — reduces incoming damage while near cover sites. */
 
@@ -26,6 +30,13 @@ export const COVER_TYPES = {
     shortLabel: 'Light',
     detail: 'Fighting pits & scrub — ~45% less damage',
   },
+  garrison: {
+    radius: 0,
+    mult: BUNKER_GARRISON_COVER_MULT,
+    label: 'Inside building',
+    shortLabel: 'Inside',
+    detail: 'Garrisoned in a bunker or shelter — ~78% less damage',
+  },
 };
 
 export function formatCoverReduction(mult) {
@@ -36,6 +47,25 @@ export function getCoverStatus(unit) {
   if (!unit || unit.dead || !COVER_UNIT_TYPES.has(unit.def?.type)) {
     return { inCover: false };
   }
+
+  // Garrisoned troops are inside a building — always report that clearly
+  if (isUnitGarrisoned(unit)) {
+    const mult = BUNKER_GARRISON_COVER_MULT;
+    const reduction = formatCoverReduction(mult);
+    return {
+      inCover: true,
+      garrisoned: true,
+      unitName: unit.name,
+      label: 'Inside building',
+      shortLabel: 'Inside',
+      tier: 'heavy',
+      mult,
+      reduction,
+      detail: COVER_TYPES.garrison.detail,
+      note: 'Garrisoned — order a move to leave the building. Heavy cover while inside.',
+    };
+  }
+
   const mult = unit.coverMult ?? 1;
   const inCover = unit.inCover && mult < 0.95;
   if (!inCover) return { inCover: false };
@@ -44,6 +74,7 @@ export function getCoverStatus(unit) {
   const meta = COVER_TYPES[tier] ?? COVER_TYPES.medium;
   return {
     inCover: true,
+    garrisoned: false,
     unitName: unit.name,
     label: unit.coverLabel ?? meta.label,
     shortLabel: meta.shortLabel,
@@ -123,6 +154,7 @@ export class CoverSystem {
         u.coverMult = 1;
         u.coverLabel = null;
         u.coverTier = null;
+        u.garrisoned = false;
         setCoverVisual(u.mesh, false);
         removeCoverMarker(u);
         continue;
@@ -132,10 +164,26 @@ export class CoverSystem {
         u.coverMult = 1;
         u.coverLabel = null;
         u.coverTier = null;
+        u.garrisoned = false;
         setCoverVisual(u.mesh, false);
         removeCoverMarker(u);
         continue;
       }
+
+      // Inside bunker / building garrison — treat as heavy building cover
+      if (isUnitGarrisoned(u)) {
+        u.coverMult = BUNKER_GARRISON_COVER_MULT;
+        u.coverLabel = 'Inside building';
+        u.coverTier = 'heavy';
+        u.inCover = true;
+        u.garrisoned = true;
+        // Mesh is hidden while garrisoned — no ground cover ring
+        setCoverVisual(u.mesh, false);
+        syncCoverMarker(u);
+        continue;
+      }
+
+      u.garrisoned = false;
       const { mult, label, tier } = this.getCoverForUnit(u);
       u.coverMult = mult;
       u.coverLabel = label;

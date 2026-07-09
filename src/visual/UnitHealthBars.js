@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
 
 const BAR_Y = {
   infantry: 2.2,
@@ -35,6 +37,10 @@ function barYOffset(unit) {
   if (unit.fieldIcon?.visible) y += 1.1;
   if (unit.healMarker?.visible) y -= 0.55;
   return y;
+}
+
+function needsWorldSpaceBar(unit) {
+  return isUnitGarrisoned(unit) && unit.mesh && !unit.mesh.visible && !!unit.mesh.parent;
 }
 
 function barWidth(unit) {
@@ -132,7 +138,21 @@ function attachHealthBar(unit) {
   }
 
   hb.sprite.visible = true;
-  hb.sprite.position.y = barYOffset(unit);
+  const worldSpace = needsWorldSpaceBar(unit);
+  const desiredParent = worldSpace ? unit.mesh.parent : unit.mesh;
+  if (desiredParent && hb.sprite.parent !== desiredParent) desiredParent.add(hb.sprite);
+
+  if (worldSpace) {
+    const yBase = unit._mapDef
+      ? sampleTerrainHeight(unit.position.x, unit.position.z, unit._mapDef)
+      : unit.position.y;
+    const slot = unit._garrisonSlotIndex ?? 0;
+    const lat = (slot - 0.5) * 0.85;
+    // Just under the INSIDE / field-icon stack
+    hb.sprite.position.set(unit.position.x + lat, yBase + 5.5 + slot * 1.35, unit.position.z);
+  } else {
+    hb.sprite.position.set(0, barYOffset(unit), 0);
+  }
   hb.sprite.scale.set(width, width * 0.22, 1);
 }
 

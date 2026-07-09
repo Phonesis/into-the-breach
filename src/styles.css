@@ -645,6 +645,24 @@ body,
   background: rgba(35, 60, 70, 0.5);
 }
 
+.selection-cover.cover-tier-garrison {
+  border-color: rgba(107, 207, 122, 0.7);
+  background: rgba(22, 48, 28, 0.72);
+}
+
+.selection-cover.cover-tier-garrison .cover-banner-icon,
+.selection-cover.cover-tier-garrison .cover-banner-title {
+  color: #b8f0c0;
+}
+
+.selection-cover.cover-tier-garrison .cover-banner-sub {
+  color: #d4ffd8;
+}
+
+.selection-cover.cover-tier-garrison .cover-banner-detail {
+  color: #8fd99a;
+}
+
 .cover-banner-inner {
   display: flex;
   align-items: center;
@@ -690,6 +708,17 @@ body,
   padding: 0.1rem 0.35rem;
   border-radius: 3px;
   vertical-align: middle;
+}
+
+.cover-tag.garrison-tag {
+  background: #6bcf7a;
+  color: #0a1a0c;
+}
+
+.unit-cover-status.in-garrison {
+  background: rgba(22, 48, 28, 0.72);
+  border: 1px solid rgba(107, 207, 122, 0.55);
+  color: #c8f5d0;
 }
 
 .unit-cover-status {
