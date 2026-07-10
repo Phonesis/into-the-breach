@@ -8,12 +8,61 @@ import {
 } from '../units/VehicleMeshKit.js';
 
 function addSandbag(group, mat, x, y, z, ry, w = 1.55, h = 0.52, d = 0.88) {
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const bag = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 6), mat);
+  bag.scale.set(w, h, d);
   bag.position.set(x, y, z);
   bag.rotation.y = ry;
   bag.castShadow = true;
   bag.receiveShadow = true;
   group.add(bag);
+}
+
+function addAmmoCrate(group, mat, dark, x, y, z, ry = 0, w = 0.72, h = 0.42, d = 0.5) {
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  crate.position.set(x, y, z);
+  crate.rotation.y = ry;
+  crate.castShadow = true;
+  crate.receiveShadow = true;
+  group.add(crate);
+
+  const slat = new THREE.Mesh(new THREE.BoxGeometry(w * 0.88, 0.035, 0.045), dark);
+  slat.position.set(x, y + h * 0.5 + 0.018, z - d * 0.18);
+  slat.rotation.y = ry;
+  group.add(slat);
+  const slat2 = slat.clone();
+  slat2.position.z = z + d * 0.18;
+  group.add(slat2);
+}
+
+function addFieldStake(group, mat, x, z, height = 0.8, ry = 0) {
+  const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, height, 6), mat);
+  stake.position.set(x, height / 2, z);
+  stake.rotation.y = ry;
+  stake.castShadow = true;
+  group.add(stake);
+}
+
+function addBunkerFittings(group, mats, d, roofY) {
+  const ventMat = mats.steel;
+  const ventPositions = d.ventPositions ?? [[-0.75, -0.55], [0.75, -0.55]];
+  for (const [x, z] of ventPositions) {
+    const vent = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.08, 8), ventMat);
+    vent.position.set(x, roofY + 0.08, z);
+    vent.castShadow = true;
+    group.add(vent);
+    for (let i = -1; i <= 1; i++) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.025, 0.24), mats.dark);
+      slat.position.set(x + i * 0.06, roofY + 0.13, z);
+      group.add(slat);
+    }
+  }
+  const periscope = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.48, 8), ventMat);
+  periscope.position.set(d.periscopeX ?? 0.58, roofY + 0.3, d.periscopeZ ?? -0.2);
+  periscope.castShadow = true;
+  group.add(periscope);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.12), ventMat);
+  head.position.set(periscope.position.x, roofY + 0.55, periscope.position.z + 0.03);
+  group.add(head);
 }
 
 function addSandbagRing(group, mat, { count, radius, y = 0.3, arc = Math.PI * 1.35, centerAngle = 0 }) {
@@ -129,6 +178,7 @@ function buildHexBunker(group, mats, d) {
   addEmbrasure(group, concrete, mats.dark, mats.steel, d.embrasure, embY);
   mountBunkerWeapon(group, mats, d, embY);
   if (d.sandbagRing) addSandbagRing(group, sandbag, d.sandbagRing);
+  addBunkerFittings(group, mats, d, d.height + d.wall * 0.5);
 }
 
 function buildEarthBunker(group, mats, d) {
@@ -163,6 +213,7 @@ function buildEarthBunker(group, mats, d) {
   addEmbrasure(group, concrete, mats.dark, mats.steel, d.embrasure, embY);
   mountBunkerWeapon(group, mats, d, embY);
   if (d.sandbagRing) addSandbagRing(group, sandbag, d.sandbagRing);
+  addBunkerFittings(group, mats, d, d.height * 0.98);
 }
 
 function buildWedgeBunker(group, mats, d) {
@@ -190,6 +241,7 @@ function buildWedgeBunker(group, mats, d) {
   addEmbrasure(group, concrete, mats.dark, mats.steel, d.embrasure, y);
   mountBunkerWeapon(group, mats, d, y);
   if (d.sandbagRing) addSandbagRing(group, sandbag, d.sandbagRing);
+  addBunkerFittings(group, mats, d, d.height + 0.08);
 }
 
 function buildLogBunker(group, mats, d) {
@@ -219,6 +271,8 @@ function buildLogBunker(group, mats, d) {
   addEmbrasure(group, sandbag, mats.dark, mats.steel, d.embrasure, embY);
   mountBunkerWeapon(group, mats, d, embY);
   if (d.sandbagRing) addSandbagRing(group, sandbag, d.sandbagRing);
+  addFieldStake(group, wood, -d.width * 0.48, -d.depth * 0.42, 0.75, -0.12);
+  addFieldStake(group, wood, d.width * 0.48, -d.depth * 0.42, 0.75, 0.12);
 }
 
 export function buildBunkerFromDesign(group, mats, design) {
@@ -258,6 +312,10 @@ function addMgOnTripod(group, steel, gun, aimPivot = null) {
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.14), steel);
   receiver.position.set(0, gun.y, 0.05);
   gunMount.add(receiver);
+  const traverse = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, spread * 2.1, 8), steel);
+  traverse.rotation.z = Math.PI / 2;
+  traverse.position.set(0, 0.52, 0);
+  group.add(traverse);
   const barrel = new THREE.Mesh(
     new THREE.CylinderGeometry(gun.barrelR, gun.barrelR * 1.1, gun.barrelLen, 8),
     steel
@@ -323,12 +381,11 @@ export function buildMortarNestFromDesign(group, mats, design) {
   ];
   for (let i = 0; i < design.ammoBoxes; i++) {
     const [bx, by, bz] = boxOffsets[i];
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.28, 0.32), sandbagAlt);
-    box.position.set(bx, by, bz);
-    box.rotation.y = bx < 0 ? 0.35 : -0.3;
-    box.castShadow = true;
-    group.add(box);
+    addAmmoCrate(group, sandbagAlt, camoDark, bx, by, bz, bx < 0 ? 0.35 : -0.3, 0.42, 0.28, 0.32);
   }
+
+  addFieldStake(group, mats.wood, -design.base.r * 1.7, -design.base.r * 1.7, 0.62, -0.2);
+  addFieldStake(group, mats.wood, design.base.r * 1.7, -design.base.r * 1.7, 0.62, 0.2);
 
   group.userData.hitRadius = design.hitRadius;
 }
@@ -347,6 +404,8 @@ export function buildMgNestFromDesign(group, mats, design) {
   const aimPivot = new THREE.Group();
   group.add(aimPivot);
   addMgOnTripod(group, mats.camoDark, design.gun, aimPivot);
+  addAmmoCrate(group, sandbagAlt, mats.camoDark, -1.15, 0.28, -0.55, 0.22, 0.62, 0.36, 0.46);
+  addAmmoCrate(group, sandbag, mats.camoDark, 1.1, 0.25, -0.62, -0.18, 0.62, 0.36, 0.46);
   group.userData.defenseAimPivot = aimPivot;
   group.userData.hitRadius = design.hitRadius;
 }
@@ -407,6 +466,9 @@ function addGunRevetment(group, mats, revetment) {
       0.82
     );
   }
+  addFieldStake(group, mats.wood, -revetment.radius * 0.72, -revetment.radius * 0.82, 0.7, -0.18);
+  addFieldStake(group, mats.wood, revetment.radius * 0.72, -revetment.radius * 0.82, 0.7, 0.18);
+  addAmmoCrate(group, sandbagAlt, mats.camoDark, -revetment.radius * 0.45, 0.36, -revetment.radius * 0.48, 0.18, 0.72, 0.42, 0.5);
 }
 
 export function buildAtEmplacement(group, mats, factionId, design, heavy) {
@@ -424,6 +486,7 @@ export function buildAtEmplacement(group, mats, factionId, design, heavy) {
     gunDesign
   );
   group.add(gunGroup);
+  addAmmoCrate(group, mats.sandbagAlt, mats.camoDark, design.revetment.radius * 0.42, 0.38, -design.revetment.radius * 0.5, -0.16, 0.78, 0.44, 0.52);
   group.userData.defenseAimPivot = gunGroup;
   group.userData.hitRadius = design.hitRadius;
 }
@@ -469,6 +532,8 @@ export function buildArtilleryPit(group, mats, factionId, design) {
     gunDesign
   );
   group.add(gunGroup);
+  addAmmoCrate(group, sandbagAlt, mats.camoDark, -pit.radius * 0.48, 0.42, -pit.radius * 0.48, 0.2, 0.8, 0.44, 0.54);
+  addAmmoCrate(group, sandbag, mats.camoDark, pit.radius * 0.48, 0.4, -pit.radius * 0.42, -0.2, 0.8, 0.44, 0.54);
   group.userData.defenseAimPivot = gunGroup;
   group.userData.hitRadius = design.hitRadius;
 }
