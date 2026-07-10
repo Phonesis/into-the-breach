@@ -855,7 +855,7 @@ export class Game {
       }
     }
 
-    this.capturePoints = createCapturePoints(this.mapDef, this.scene);
+    this.capturePoints = this.lastStand ? [] : createCapturePoints(this.mapDef, this.scene);
 
     if (this.clearance) {
       setupClearanceCapturePoints(this.capturePoints, this.mapDef);
