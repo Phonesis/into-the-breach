@@ -253,6 +253,18 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
       return attacker.attackOrder;
     }
     if (!attacker.attackOrder.dead) {
+      if (attacker.attackOrder._dropping) {
+        attacker.clearAttackOrder();
+        return null;
+      }
+      if (
+        attacker.def.type === 'sniper' &&
+        attacker.attackOrder.def &&
+        isTankType(attacker.attackOrder.def.type)
+      ) {
+        attacker.clearAttackOrder();
+        return null;
+      }
       if (
         !isSceneryTarget(attacker.attackOrder) &&
         !isDefenseTarget(attacker.attackOrder) &&
@@ -270,7 +282,11 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
     attacker.clearAttackOrder();
   }
 
-  return findNearestEnemyInRange(attacker, acquireTargets, 1);
+  const validAcquireTargets =
+    attacker.def.type === 'sniper'
+      ? acquireTargets.filter((target) => !target.def || !isTankType(target.def.type))
+      : acquireTargets;
+  return findNearestEnemyInRange(attacker, validAcquireTargets, 1);
 }
 
 const _muzzleFrom = new THREE.Vector3();
