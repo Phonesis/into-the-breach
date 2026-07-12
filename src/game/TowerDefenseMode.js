@@ -6,6 +6,7 @@ import { getFrontlineDef } from './AssaultMode.js';
 import {
   TD_PREPARE_TIME,
   TD_PREPARE_TIME_BETWEEN,
+  TD_ACTIVE_POINT_RATE,
   TD_WAVES_TO_WIN,
   TD_BREACH_MARGIN,
   TD_BREACH_GRACE_TIME,
@@ -455,6 +456,10 @@ export function updateTowerDefenseMode(game, dt) {
   }
 
   if (td.phase === 'active') {
+    if (!isTdHqDefenseStyle(td)) {
+      game.resources.player += TD_ACTIVE_POINT_RATE * dt;
+    }
+
     td.spawnTimer = (td.spawnTimer ?? 0) - dt;
     while (td.spawnTimer <= 0 && td.spawnQueue.length > 0) {
       const type = td.spawnQueue.shift();
@@ -498,7 +503,9 @@ function spawnWaveUnit(game, type) {
 }
 
 function onWaveCleared(game, td) {
-  game.resources.player += TD_WAVE_CLEAR_BONUS + td.wave * 12;
+  if (isTdHqDefenseStyle(td)) {
+    game.resources.player += TD_WAVE_CLEAR_BONUS + td.wave * 12;
+  }
   td.wavesCleared = td.wave;
   game.ui?.updateTowerDefense?.(game);
 

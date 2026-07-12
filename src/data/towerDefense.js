@@ -1,6 +1,9 @@
 /** Tower Defence mode — wave pacing, defense build catalog, upgrades, economy. */
 
-export const TD_STARTING_POINTS = 200;
+/** Opening allowance covers one MG nest and one bunker; later points come from kills. */
+export const TD_STARTING_POINTS = 82;
+/** Emplacements earn a small amount while an assault is active, never during preparation. */
+export const TD_ACTIVE_POINT_RATE = 0.75;
 export const TD_PREPARE_TIME = 38;
 export const TD_PREPARE_TIME_BETWEEN = 30;
 export const TD_WAVES_TO_WIN = 12;
@@ -79,17 +82,17 @@ export const TD_SPAWN_PAST_ENEMY_BASE_MAX = 10;
 export const TD_SPAWN_ENEMY_BLEND_MIN = 0.78;
 export const TD_SPAWN_ENEMY_BLEND_MAX = 0.97;
 export const TD_KILL_REWARD = {
-  infantry: 8,
-  machineGun: 10,
-  sniper: 12,
-  mortar: 14,
-  antiTankGun: 16,
-  armoredCar: 16,
-  tank: 22,
-  superHeavyTank: 28,
-  artillery: 18,
+  infantry: 5,
+  machineGun: 9,
+  sniper: 10,
+  mortar: 12,
+  antiTankGun: 20,
+  armoredCar: 18,
+  tank: 30,
+  superHeavyTank: 45,
+  artillery: 25,
 };
-export const TD_WAVE_CLEAR_BONUS = 35;
+export const TD_WAVE_CLEAR_BONUS = 0;
 
 /** Vehicle types that trigger anti-tank mines. */
 export const MINE_VEHICLE_TYPES = new Set([

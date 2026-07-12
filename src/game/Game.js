@@ -78,6 +78,10 @@ import {
   canUseBaseBuildingOnMap,
   baseBuildingRequiresLargeMap,
 } from '../data/baseBuildings.js';
+
+const TD_ENEMY_CORPSE_LINGER_SEC = 28;
+const TD_ENEMY_WRECK_LINGER_SEC = 42;
+
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import {
   preloadUnitFieldIcons,
@@ -195,7 +199,6 @@ import { isTankType } from '../units/VehicleTypes.js';
 import { snapUnitYaw } from '../units/VehicleRotation.js';
 import {
   applyUnitDeathVisual,
-  unitHasCorpseLinger,
   updateDetachedCorpseFalls,
   clearDetachedCorpseFalls,
 } from '../units/UnitMeshes.js';
@@ -2147,8 +2150,6 @@ export class Game {
     if (this.towerDefense) {
       if (isTdHqDefenseStyle(this.towerDefense)) {
         this.resources.player += HQ_INCOME_RATE * dt;
-      } else {
-        this.resources.player += 0.4 * dt;
       }
       return;
     }
@@ -3068,13 +3069,41 @@ export class Game {
 
     let cachesDirty = false;
     const unitsBefore = this.units.length;
+    const towerDefenseCleanup = !!this.towerDefense;
 
     for (const u of this.units) {
       if (!u.dead) continue;
+      if (towerDefenseCleanup && u.team === ENEMY_TEAM && !u._tdLingerCapped) {
+        u.corpseTimeLeft = Math.min(
+          u.corpseTimeLeft || TD_ENEMY_CORPSE_LINGER_SEC,
+          TD_ENEMY_CORPSE_LINGER_SEC
+        );
+        u.wreckTimeLeft = Math.min(
+          u.wreckTimeLeft || TD_ENEMY_WRECK_LINGER_SEC,
+          TD_ENEMY_WRECK_LINGER_SEC
+        );
+        u._tdLingerCapped = true;
+      }
+      if (towerDefenseCleanup) {
+        if (u.corpseTimeLeft > 0) u.corpseTimeLeft = Math.max(0, u.corpseTimeLeft - dt);
+        if (u.wreckTimeLeft > 0) u.wreckTimeLeft = Math.max(0, u.wreckTimeLeft - dt);
+      }
       if (!u._lossRecorded) {
         if (this.towerDefense && u.team === ENEMY_TEAM) rewardTowerDefenseKill(this, u);
         this.battleStats.recordUnit(u);
       }
+      const corpseLingerExpired =
+        (u.corpseTimeLeft ?? 0) <= 0 && (u.wreckTimeLeft ?? 0) <= 0;
+      if (towerDefenseCleanup && corpseLingerExpired && u.mesh?.userData?.deathVisualApplied) {
+        if (u.wreckFire) {
+          removeWreckEffect(u.wreckFire);
+          u.wreckFire = null;
+        }
+        u.dispose(this.scene);
+        cachesDirty = true;
+        continue;
+      }
+
       if (!u.mesh?.parent) continue;
 
       if (!u.mesh.userData?.deathVisualApplied) {
@@ -3096,7 +3125,10 @@ export class Game {
       }
     }
     this.units = this.units.filter(
-      (u) => !u.dead || (unitHasCorpseLinger(u) && u.mesh?.parent)
+      (u) =>
+        !u.dead ||
+        !towerDefenseCleanup ||
+        (((u.corpseTimeLeft ?? 0) > 0 || (u.wreckTimeLeft ?? 0) > 0) && u.mesh?.parent)
     );
     if (this.units.length !== unitsBefore) cachesDirty = true;
     if (cachesDirty) this._rebuildUnitCaches();

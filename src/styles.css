@@ -1844,10 +1844,10 @@ body,
 
 /* Compact side panel — keeps the battlefield clear for placing defenses between waves */
 .td-wave-countdown.td-wave-countdown-side {
-  top: 5.75rem;
+  top: auto;
   left: auto;
   right: 1rem;
-  bottom: auto;
+  bottom: 22rem;
   transform: none;
   width: min(17.5rem, 26vw);
 }

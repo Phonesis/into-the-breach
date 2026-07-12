@@ -386,7 +386,7 @@ export class DefenseStructureManager {
       const d = Math.hypot(u.position.x - x, u.position.z - z);
       if (d <= barrage.radius) {
         const fall = Math.max(0.5, 1 - d / barrage.radius);
-        u.takeDamage(barrage.damage * fall);
+        u.takeDamage(barrage.damage * fall, { explosive: true });
       }
     }
     const y = sampleTerrainHeight(x, z, this.mapDef);

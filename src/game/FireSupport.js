@@ -328,7 +328,7 @@ export class FireSupportManager {
       const t = 1 - d / radius;
       let dmg = unitDamage * t * t;
       dmg *= getIncomingDamageMultiplier(u, cover);
-      u.takeDamage(dmg);
+      u.takeDamage(dmg, { explosive: true });
     }
 
     for (const h of this.game.hqs) {

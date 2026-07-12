@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   applyUnitDeathVisual,
   createUnitMesh,
+  disposeUnitCorpseVisuals,
   setSelectionRing,
   updateSquadCasualtyVisual,
 } from './UnitMeshes.js';
@@ -214,7 +215,12 @@ export class Unit {
     return distanceBetween(this, other);
   }
 
-  takeDamage(amount) {
+  /**
+   * @param {number} amount
+   * @param {object} [opts]
+   * @param {boolean} [opts.explosive] — shell / blast kill (enables occasional gibs)
+   */
+  takeDamage(amount, opts = {}) {
     if (this.dead || this.surrendered || this._captureExit) return;
     if (amount <= 0) return;
     this.hp -= amount;
@@ -247,6 +253,9 @@ export class Unit {
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
+      if (opts.explosive || opts.cause === 'explosion') {
+        this._deathCause = 'explosion';
+      }
       clearRetreat(this);
       clearSurrender(this);
       removeCoverMarker(this);
@@ -261,6 +270,7 @@ export class Unit {
   }
 
   dispose(scene) {
+    disposeUnitCorpseVisuals(this, scene);
     removeRetreatMarker(this);
     removeSurrenderMarker(this);
     removeCoverMarker(this);

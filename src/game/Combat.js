@@ -486,7 +486,17 @@ function fire(
   } else {
     if (!target.surrendered) {
       markUnderFire(target);
-      target.takeDamage(scalePracticeHqDamage(target, damage, options));
+      // Shells / HE can gib; coax MG and small arms do not
+      const explosiveKill =
+        !coax &&
+        (attacker.def.type === 'artillery' ||
+          attacker.def.type === 'mortar' ||
+          attacker.def.type === 'antiTankGun' ||
+          isTankType(attacker.def.type) ||
+          paratrooperAt);
+      target.takeDamage(scalePracticeHqDamage(target, damage, options), {
+        explosive: explosiveKill,
+      });
       if (!target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
           maybeTriggerRetreat(target, hqs, livingUnits, attacker, {
@@ -596,7 +606,7 @@ function applySplashDamage(
     splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
     if (!other.surrendered) {
       markUnderFire(other);
-      other.takeDamage(scalePracticeHqDamage(other, splashDmg, options));
+      other.takeDamage(scalePracticeHqDamage(other, splashDmg, options), { explosive: true });
       if (!other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
           maybeTriggerRetreat(other, hqs, units, attacker, {
