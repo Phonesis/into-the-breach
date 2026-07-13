@@ -431,7 +431,7 @@ function fire(
   }
 
   if (!target.isGround && !isSceneryTarget(target)) {
-    damage *= getIncomingDamageMultiplier(target, coverSystem);
+    damage *= getIncomingDamageMultiplier(target, coverSystem, attacker.def.type);
     damage *= getArmorDamageMultiplier(attackerType, target);
   }
   if (isSceneryTarget(target)) {

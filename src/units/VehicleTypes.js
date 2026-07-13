@@ -5,6 +5,7 @@ export const TANK_TYPES = new Set(['tank', 'superHeavyTank']);
 /** Infantry-scale units that medics can treat (excludes towed guns and vehicles). */
 export const FOOT_SOLDIER_TYPES = new Set([
   'infantry',
+  'paratrooper',
   'machineGun',
   'sniper',
   'mortar',

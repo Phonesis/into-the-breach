@@ -232,7 +232,7 @@ export class CoverSystem {
   }
 }
 
-export function getIncomingDamageMultiplier(target, coverSystem) {
+export function getIncomingDamageMultiplier(target, coverSystem, attackerType = null) {
   if (!coverSystem || !target?.def) return 1;
   if (!COVER_UNIT_TYPES.has(target.def.type)) return 1;
   const garrisonMult = getGarrisonCoverMultiplier(target);
@@ -240,6 +240,7 @@ export function getIncomingDamageMultiplier(target, coverSystem) {
   let mult = target.coverMult != null ? target.coverMult : coverSystem.getCoverForUnit(target).mult;
   if (garrisonMult < mult) mult = garrisonMult;
   if (trenchMult < mult) mult = trenchMult;
+  if (attackerType === 'sniper' && mult < 1) mult *= 0.65;
   return mult;
 }
 
