@@ -15,7 +15,7 @@ import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
-const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS + 16;
+const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS * 2;
 
 function makeCooldowns() {
   return Object.fromEntries(
@@ -153,26 +153,30 @@ export class FireSupportManager {
     this.preview.material.color.setHex(previewColor);
   }
 
-  _targetHq() {
-    return this.game.hqs.find((h) => h.team === this.targetTeam && !h.dead) ?? null;
+  _airborneHqConflict(x, z) {
+    return (
+      this.game.hqs.find((h) => {
+        if (h.dead || h.team !== this.targetTeam) return false;
+        return Math.hypot(x - h.position.x, z - h.position.z) < AIRBORNE_HQ_MIN_DISTANCE;
+      }) ?? null
+    );
   }
 
   isAirborneTargetAllowed(x, z) {
-    const hq = this._targetHq();
-    if (!hq) return true;
-    return Math.hypot(x - hq.position.x, z - hq.position.z) >= AIRBORNE_HQ_MIN_DISTANCE;
+    return !this._airborneHqConflict(x, z);
   }
 
   getSafeAirborneTarget(x, z) {
-    const hq = this._targetHq();
+    const hq = this._airborneHqConflict(x, z);
     if (!hq || this.isAirborneTargetAllowed(x, z)) return { x, z };
 
     let dx = x - hq.position.x;
     let dz = z - hq.position.z;
     let distance = Math.hypot(dx, dz);
     if (distance < 0.001) {
-      dx = this.ownerBase.x - hq.position.x;
-      dz = this.ownerBase.z - hq.position.z;
+      const otherHq = this.game.hqs.find((candidate) => candidate !== hq && !candidate.dead);
+      dx = (otherHq?.position.x ?? this.ownerBase.x) - hq.position.x;
+      dz = (otherHq?.position.z ?? this.ownerBase.z) - hq.position.z;
       distance = Math.hypot(dx, dz) || 1;
     }
 
@@ -212,6 +216,7 @@ export class FireSupportManager {
   }
 
   scheduleStrike(type, tx, tz) {
+    if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(tx, tz)) return false;
     const def = this.getDef(type);
     const scene = this.game.scene;
     const mapDef = this.game.mapDef;

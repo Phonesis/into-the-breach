@@ -48,6 +48,7 @@ import {
 
 const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 
 function isParatrooperAtShot(attacker, target, fireOpts = {}) {
   if (attacker.def.type !== 'paratrooper') return false;
@@ -150,11 +151,14 @@ export function updateCombat(
       isSceneryTarget(target) ||
       isDefenseTarget(target) ||
       isBaseBuildingTarget(target);
-    const canFireMain = target.isGround || isSmokeShellTarget(target)
+    const inMainGunRange = target.isGround || isSmokeShellTarget(target)
       ? isPointInRange(attacker, target.position)
       : structureTarget
         ? isInRange(attacker, target, 1.05)
         : isInRange(attacker, target);
+    const canFireMain =
+      inMainGunRange &&
+      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget);
     if (
       canFireMain &&
       (attacker.def.type === 'infantry' ||

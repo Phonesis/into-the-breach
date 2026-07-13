@@ -327,7 +327,15 @@ export function addTerrainCrater(scene, mapDef, x, z, opts = {}) {
   const y = sampleTerrainHeight(x, z, mapDef);
   const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
 
-  const entry = { meshes, scene };
+  const entry = {
+    meshes,
+    scene,
+    kind: 'decal',
+    x,
+    z,
+    radius,
+    heavy,
+  };
   craters.push(entry);
 
   while (craters.length > MAX_CRATERS) {
@@ -345,7 +353,8 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
   if (now - lastCraterAt < minGap) return null;
   lastCraterAt = now;
 
-  if (terrainMesh && opts.deformTerrain !== false) {
+  const deformTerrain = opts.deformTerrain !== false;
+  if (terrainMesh && deformTerrain) {
     deformTerrainAt(terrainMesh, mapDef, x, z, profile.radius, profile.depth);
   }
 
@@ -354,7 +363,17 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
   const y = sampleTerrainHeight(x, z, mapDef);
   const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
 
-  const entry = { meshes, scene };
+  const entry = {
+    meshes,
+    scene,
+    kind: 'explosion',
+    x,
+    z,
+    tier,
+    radius,
+    heavy,
+    deformTerrain,
+  };
   craters.push(entry);
 
   while (craters.length > MAX_CRATERS) {
@@ -362,6 +381,47 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
   }
 
   return entry;
+}
+
+export function serializeTerrainDamage() {
+  return craters.map((entry) => ({
+    kind: entry.kind,
+    x: entry.x,
+    z: entry.z,
+    tier: entry.tier,
+    radius: entry.radius,
+    heavy: entry.heavy,
+    deformTerrain: entry.deformTerrain,
+  }));
+}
+
+export function restoreTerrainDamage(scene, mapDef, terrainMesh, savedCraters) {
+  if (!Array.isArray(savedCraters)) return;
+  for (const crater of savedCraters) {
+    if (!Number.isFinite(crater?.x) || !Number.isFinite(crater?.z)) continue;
+    if (crater.kind === 'decal') {
+      addTerrainCrater(scene, mapDef, crater.x, crater.z, {
+        minGap: 0,
+        radius: crater.radius,
+        heavy: crater.heavy,
+      });
+      continue;
+    }
+    addExplosionCrater(
+      scene,
+      mapDef,
+      crater.x,
+      crater.z,
+      crater.tier ?? 'medium',
+      terrainMesh,
+      {
+        minGap: 0,
+        radius: crater.radius,
+        heavy: crater.heavy,
+        deformTerrain: crater.deformTerrain !== false,
+      }
+    );
+  }
 }
 
 function disposeCrater(entry) {

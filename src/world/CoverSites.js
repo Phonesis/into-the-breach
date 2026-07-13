@@ -1,5 +1,6 @@
 import { sampleTerrainHeight } from './Terrain.js';
 import { createSandbagEmplacementGroup } from './SandbagEmplacement.js';
+import { createMapRandom } from './MapRandom.js';
 
 function factionForPosition(x, z, mapDef, factions) {
   if (!factions?.player) return null;
@@ -15,6 +16,7 @@ function factionForPosition(x, z, mapDef, factions) {
 /** Place sandbag fighting positions and return cover zone data. */
 export function buildCoverSites(mapDef, scene, scenery = null, factions = null, options = {}) {
   const zones = [];
+  const random = createMapRandom(mapDef, 'cover');
 
   const addBunker = (x, z, type = 'medium') => {
     const y = sampleTerrainHeight(x, z, mapDef);
@@ -26,7 +28,7 @@ export function buildCoverSites(mapDef, scene, scenery = null, factions = null, 
     g.position.set(x, y, z);
 
     if (scenery) {
-      scenery.register(g, { x, z, kind: 'bunker', coverType: type });
+      scenery.register(g, { x, z, kind: 'bunker', coverType: type, source: 'map' });
     } else {
       scene.add(g);
       zones.push({ x, z, type });
@@ -38,24 +40,24 @@ export function buildCoverSites(mapDef, scene, scenery = null, factions = null, 
   const count = Math.round(baseCount * sizeScale * (sizeScale > 1 ? 1.1 : 1));
 
   for (let i = 0; i < count; i++) {
-    const x = (Math.random() - 0.5) * mapDef.size * 0.75;
-    const z = (Math.random() - 0.5) * mapDef.size * 0.75;
+    const x = (random() - 0.5) * mapDef.size * 0.75;
+    const z = (random() - 0.5) * mapDef.size * 0.75;
     if (Math.abs(x) < 10 * sizeScale && Math.abs(z) < 8 * sizeScale) continue;
-    const t = Math.random() < 0.25 ? 'heavy' : 'medium';
+    const t = random() < 0.25 ? 'heavy' : 'medium';
     addBunker(x, z, t);
   }
 
   if (mapDef.terrain === 'bocage') {
     for (let i = 0; i < Math.round(35 * sizeScale * (sizeScale > 1 ? 1.1 : 1)); i++) {
-      const hx = (Math.random() - 0.5) * mapDef.size * 0.55;
-      const hz = (Math.random() - 0.5) * mapDef.size * 0.55;
+      const hx = (random() - 0.5) * mapDef.size * 0.55;
+      const hz = (random() - 0.5) * mapDef.size * 0.55;
       zones.push({ x: hx, z: hz, type: 'heavy' });
     }
   }
 
   for (let i = 0; i < 25; i++) {
-    const x = (Math.random() - 0.5) * mapDef.size * 0.8;
-    const z = (Math.random() - 0.5) * mapDef.size * 0.8;
+    const x = (random() - 0.5) * mapDef.size * 0.8;
+    const z = (random() - 0.5) * mapDef.size * 0.8;
     const h = sampleTerrainHeight(x, z, mapDef);
     if (h > 2.5) {
       zones.push({ x, z, type: 'light' });

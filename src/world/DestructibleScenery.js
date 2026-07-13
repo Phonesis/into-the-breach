@@ -92,6 +92,7 @@ export class DestructibleScenery {
     this.objects = [];
     this.rubble = [];
     this.coverSystem = null;
+    this._mapObjectIndex = 0;
   }
 
   setCoverSystem(coverSystem) {
@@ -113,7 +114,10 @@ export class DestructibleScenery {
     if (radius != null) entry.coverRadius = radius;
   }
 
-  register(group, { x, z, kind = 'bush', coverType = null, coverRadius = null, hp }) {
+  register(
+    group,
+    { x, z, kind = 'bush', coverType = null, coverRadius = null, hp, source = 'dynamic' }
+  ) {
     cloneSceneryMaterials(group);
     const spec = KIND_COVER[kind];
     const resolvedType = coverType ?? spec?.type ?? null;
@@ -142,6 +146,11 @@ export class DestructibleScenery {
       hideGarrisoned: canGarrison,
       garrison: canGarrison ? [] : null,
       garrisonTeam: null,
+      source,
+      mapKey:
+        source === 'map'
+          ? `${this.mapDef?.id ?? 'map'}:${this.mapDef?.size ?? 0}:${this._mapObjectIndex++}`
+          : null,
     };
     group.userData.destructible = entry;
     this.objects.push(entry);
@@ -244,12 +253,12 @@ export class DestructibleScenery {
     obj.group.scale.set(s, s * (0.88 + ratio * 0.12), s);
   }
 
-  destroyObject(obj) {
+  destroyObject(obj, { effects = true } = {}) {
     if (obj.destroyed) return;
     obj.destroyed = true;
     const y = obj.group.position.y + 0.5;
-    spawnExplosion(this.scene, { x: obj.x, y, z: obj.z });
-    if (this.mapDef) {
+    if (effects) spawnExplosion(this.scene, { x: obj.x, y, z: obj.z });
+    if (effects && this.mapDef) {
       addExplosionCrater(this.scene, this.mapDef, obj.x, obj.z, 'light', this.getTerrainMesh());
     }
 

@@ -7,6 +7,10 @@ import {
   createNormalMap,
   createRoughnessMap,
 } from './proceduralTextures.js';
+import { createMapRandom } from './MapRandom.js';
+
+let activeMapRandom = null;
+const mapRandom = () => (activeMapRandom ? activeMapRandom() : Math.random());
 
 export function buildTerrain(mapDef, scene, scenery = null) {
   const size = mapDef.size;
@@ -61,7 +65,13 @@ export function buildTerrain(mapDef, scene, scenery = null) {
   ground.name = 'terrain';
   scene.add(ground);
 
-  addDecorations(mapDef, scene, size, seed, scenery);
+  const previousRandom = activeMapRandom;
+  activeMapRandom = createMapRandom(mapDef, 'terrain');
+  try {
+    addDecorations(mapDef, scene, size, seed, scenery);
+  } finally {
+    activeMapRandom = previousRandom;
+  }
 
   return { ground, size };
 }
@@ -137,36 +147,36 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
   const centerExclusionZ = 10 * decorScale;
 
   for (let i = 0; i < count; i++) {
-    const x = (Math.random() - 0.5) * size * 0.82;
-    const z = (Math.random() - 0.5) * size * 0.82;
+    const x = (mapRandom() - 0.5) * size * 0.82;
+    const z = (mapRandom() - 0.5) * size * 0.82;
     if (Math.abs(x) < centerExclusionX && Math.abs(z) < centerExclusionZ) continue;
 
     const y = heightAt(x, z, mapDef, seed);
 
     if (mapDef.terrain === 'desert') {
-      const g = createRockCluster(rockMat, 0.9 + Math.random() * 0.8);
+      const g = createRockCluster(rockMat, 0.9 + mapRandom() * 0.8);
       g.position.set(x, y, z);
-      if (scenery) scenery.register(g, { x, z, kind: 'rock' });
+      if (scenery) scenery.register(g, { x, z, kind: 'rock', source: 'map' });
       else scene.add(g);
     } else {
       const g = createTreeGroup(trunkMat, leafMat, darkLeafMat, mapDef.terrain);
       g.position.set(x, y, z);
-      g.rotation.y = Math.random() * Math.PI * 2;
-      if (scenery) scenery.register(g, { x, z, kind: 'tree' });
+      g.rotation.y = mapRandom() * Math.PI * 2;
+      if (scenery) scenery.register(g, { x, z, kind: 'tree', source: 'map' });
       else scene.add(g);
     }
   }
 
   const bushCount = Math.round((mapDef.terrain === 'bocage' ? 40 : 28) * decorScale * (decorScale > 1 ? 1.1 : 1));
   for (let i = 0; i < bushCount; i++) {
-    const x = (Math.random() - 0.5) * size * 0.78;
-    const z = (Math.random() - 0.5) * size * 0.78;
+    const x = (mapRandom() - 0.5) * size * 0.78;
+    const z = (mapRandom() - 0.5) * size * 0.78;
     if (Math.abs(x) < 12 && Math.abs(z) < 8) continue;
     const y = heightAt(x, z, mapDef, seed);
     const g = createBushGroup(mapDef.terrain === 'desert' ? dryBushMat : bushMat, dryBushMat);
     g.position.set(x, y, z);
-    g.rotation.y = Math.random() * Math.PI * 2;
-    if (scenery) scenery.register(g, { x, z, kind: 'bush' });
+    g.rotation.y = mapRandom() * Math.PI * 2;
+    if (scenery) scenery.register(g, { x, z, kind: 'bush', source: 'map' });
     else scene.add(g);
   }
 
@@ -177,13 +187,13 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       envMapIntensity: 0.4,
     });
     for (let i = 0; i < 32; i++) {
-      const hx = (Math.random() - 0.5) * size * 0.55;
-      const hz = (Math.random() - 0.5) * size * 0.55;
+      const hx = (mapRandom() - 0.5) * size * 0.55;
+      const hz = (mapRandom() - 0.5) * size * 0.55;
       const hy = heightAt(hx, hz, mapDef, seed);
       const g = createHedgeGroup(hedgeMat, bushMat);
       g.position.set(hx, hy, hz);
-      g.rotation.y = Math.random() * Math.PI;
-      if (scenery) scenery.register(g, { x: hx, z: hz, kind: 'hedge' });
+      g.rotation.y = mapRandom() * Math.PI;
+      if (scenery) scenery.register(g, { x: hx, z: hz, kind: 'hedge', source: 'map' });
       else scene.add(g);
     }
   }
@@ -194,10 +204,10 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
 
 function createTreeGroup(trunkMat, leafMat, darkLeafMat, terrain) {
   const g = new THREE.Group();
-  const height = terrain === 'hills' ? 2.6 + Math.random() * 1.3 : 2.1 + Math.random() * 1.1;
+  const height = terrain === 'hills' ? 2.6 + mapRandom() * 1.3 : 2.1 + mapRandom() * 1.1;
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.24, height, 9), trunkMat);
   trunk.position.y = height * 0.5;
-  trunk.rotation.z = (Math.random() - 0.5) * 0.12;
+  trunk.rotation.z = (mapRandom() - 0.5) * 0.12;
   trunk.castShadow = true;
   trunk.receiveShadow = true;
   g.add(trunk);
@@ -205,23 +215,23 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, terrain) {
   const crownCount = terrain === 'steppe' ? 3 : 4;
   for (let i = 0; i < crownCount; i++) {
     const crown = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.68 + Math.random() * 0.35, 2),
+      new THREE.IcosahedronGeometry(0.68 + mapRandom() * 0.35, 2),
       i % 2 ? darkLeafMat : leafMat
     );
     const side = i - (crownCount - 1) * 0.5;
-    crown.position.set(side * 0.24 + (Math.random() - 0.5) * 0.25, height + 0.45 + i * 0.18, (Math.random() - 0.5) * 0.32);
-    crown.scale.set(1.05 + Math.random() * 0.25, 0.78 + Math.random() * 0.2, 0.95 + Math.random() * 0.35);
-    crown.rotation.set(Math.random() * 0.35, Math.random() * Math.PI, Math.random() * 0.25);
+    crown.position.set(side * 0.24 + (mapRandom() - 0.5) * 0.25, height + 0.45 + i * 0.18, (mapRandom() - 0.5) * 0.32);
+    crown.scale.set(1.05 + mapRandom() * 0.25, 0.78 + mapRandom() * 0.2, 0.95 + mapRandom() * 0.35);
+    crown.rotation.set(mapRandom() * 0.35, mapRandom() * Math.PI, mapRandom() * 0.25);
     crown.castShadow = true;
     crown.receiveShadow = true;
     g.add(crown);
   }
 
-  if (Math.random() > 0.45) {
+  if (mapRandom() > 0.45) {
     const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.07, 1.05, 6), trunkMat);
     branch.position.set(0.35, height * 0.72, 0);
     branch.rotation.z = Math.PI * 0.42;
-    branch.rotation.y = Math.random() * Math.PI;
+    branch.rotation.y = mapRandom() * Math.PI;
     branch.castShadow = true;
     g.add(branch);
   }
@@ -230,17 +240,17 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, terrain) {
 
 function createBushGroup(bushMat, accentMat) {
   const g = new THREE.Group();
-  const count = 3 + Math.floor(Math.random() * 3);
+  const count = 3 + Math.floor(mapRandom() * 3);
   for (let i = 0; i < count; i++) {
     const bush = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.42 + Math.random() * 0.28, 1),
-      i === count - 1 && Math.random() > 0.5 ? accentMat : bushMat
+      new THREE.IcosahedronGeometry(0.42 + mapRandom() * 0.28, 1),
+      i === count - 1 && mapRandom() > 0.5 ? accentMat : bushMat
     );
-    const ang = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-    const r = Math.random() * 0.42;
-    bush.position.set(Math.cos(ang) * r, 0.28 + Math.random() * 0.18, Math.sin(ang) * r);
-    bush.scale.set(1.1 + Math.random() * 0.45, 0.55 + Math.random() * 0.25, 0.9 + Math.random() * 0.35);
-    bush.rotation.set(Math.random() * 0.25, Math.random() * Math.PI, Math.random() * 0.2);
+    const ang = (i / count) * Math.PI * 2 + mapRandom() * 0.5;
+    const r = mapRandom() * 0.42;
+    bush.position.set(Math.cos(ang) * r, 0.28 + mapRandom() * 0.18, Math.sin(ang) * r);
+    bush.scale.set(1.1 + mapRandom() * 0.45, 0.55 + mapRandom() * 0.25, 0.9 + mapRandom() * 0.35);
+    bush.rotation.set(mapRandom() * 0.25, mapRandom() * Math.PI, mapRandom() * 0.2);
     bush.castShadow = true;
     bush.receiveShadow = true;
     g.add(bush);
@@ -250,12 +260,12 @@ function createBushGroup(bushMat, accentMat) {
 
 function createRockCluster(rockMat, scale = 1) {
   const g = new THREE.Group();
-  const count = 2 + Math.floor(Math.random() * 3);
+  const count = 2 + Math.floor(mapRandom() * 3);
   for (let i = 0; i < count; i++) {
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry((0.35 + Math.random() * 0.55) * scale, 2), rockMat);
-    rock.position.set((Math.random() - 0.5) * 1.2, 0.22 + Math.random() * 0.25, (Math.random() - 0.5) * 1.1);
-    rock.rotation.set(Math.random(), Math.random(), Math.random());
-    rock.scale.set(1.15 + Math.random() * 0.5, 0.58 + Math.random() * 0.42, 0.9 + Math.random() * 0.35);
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry((0.35 + mapRandom() * 0.55) * scale, 2), rockMat);
+    rock.position.set((mapRandom() - 0.5) * 1.2, 0.22 + mapRandom() * 0.25, (mapRandom() - 0.5) * 1.1);
+    rock.rotation.set(mapRandom(), mapRandom(), mapRandom());
+    rock.scale.set(1.15 + mapRandom() * 0.5, 0.58 + mapRandom() * 0.42, 0.9 + mapRandom() * 0.35);
     rock.castShadow = true;
     rock.receiveShadow = true;
     g.add(rock);
@@ -265,14 +275,14 @@ function createRockCluster(rockMat, scale = 1) {
 
 function createHedgeGroup(hedgeMat, bushMat) {
   const g = new THREE.Group();
-  const len = 6 + Math.random() * 5;
-  const lumps = 5 + Math.floor(Math.random() * 4);
+  const len = 6 + mapRandom() * 5;
+  const lumps = 5 + Math.floor(mapRandom() * 4);
   for (let i = 0; i < lumps; i++) {
-    const hedge = new THREE.Mesh(new THREE.IcosahedronGeometry(0.76 + Math.random() * 0.25, 1), i % 3 === 0 ? bushMat : hedgeMat);
+    const hedge = new THREE.Mesh(new THREE.IcosahedronGeometry(0.76 + mapRandom() * 0.25, 1), i % 3 === 0 ? bushMat : hedgeMat);
     const t = lumps <= 1 ? 0 : i / (lumps - 1);
-    hedge.position.set((t - 0.5) * len, 0.65 + Math.random() * 0.18, (Math.random() - 0.5) * 0.42);
-    hedge.scale.set(1.35 + Math.random() * 0.35, 0.75 + Math.random() * 0.22, 0.72 + Math.random() * 0.22);
-    hedge.rotation.set(Math.random() * 0.28, Math.random() * Math.PI, Math.random() * 0.18);
+    hedge.position.set((t - 0.5) * len, 0.65 + mapRandom() * 0.18, (mapRandom() - 0.5) * 0.42);
+    hedge.scale.set(1.35 + mapRandom() * 0.35, 0.75 + mapRandom() * 0.22, 0.72 + mapRandom() * 0.22);
+    hedge.rotation.set(mapRandom() * 0.28, mapRandom() * Math.PI, mapRandom() * 0.18);
     hedge.castShadow = true;
     hedge.receiveShadow = true;
     g.add(hedge);
@@ -288,10 +298,10 @@ function addFarmClusters(mapDef, scene, size, seed, scenery) {
 
   for (let i = 0; i < count && placed < count; i++) {
     const side = i % 2 === 0 ? -1 : 1;
-    const x = side * (size * (0.12 + Math.random() * 0.24));
-    const z = (Math.random() - 0.5) * size * 0.62;
+    const x = side * (size * (0.12 + mapRandom() * 0.24));
+    const z = (mapRandom() - 0.5) * size * 0.62;
     if (isReservedMapSpace(x, z, mapDef, 20 * scale)) continue;
-    addFarmCluster(mapDef, scene, seed, scenery, x, z, Math.random() * Math.PI * 2, mats);
+    addFarmCluster(mapDef, scene, seed, scenery, x, z, mapRandom() * Math.PI * 2, mats);
     placed++;
   }
   Object.values(mats).forEach((mat) => mat.dispose());
@@ -323,7 +333,7 @@ function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, mats) {
     const g = createFarmBuilding(p.kind, mats);
     g.position.set(wx, wy, wz);
     g.rotation.y = rot + p.rot;
-    if (scenery) scenery.register(g, { x: wx, z: wz, kind: p.kind });
+    if (scenery) scenery.register(g, { x: wx, z: wz, kind: p.kind, source: 'map' });
     else scene.add(g);
   }
 
@@ -335,7 +345,7 @@ function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, mats) {
     const wall = createStoneWall(mats.stone);
     wall.position.set(wx, wy, wz);
     wall.rotation.y = rot + Math.PI * 0.5;
-    if (scenery) scenery.register(wall, { x: wx, z: wz, kind: 'stoneWall' });
+    if (scenery) scenery.register(wall, { x: wx, z: wz, kind: 'stoneWall', source: 'map' });
     else scene.add(wall);
   }
 }
@@ -397,9 +407,9 @@ function createStoneWall(mat) {
   const g = new THREE.Group();
   const localMat = mat.clone();
   for (let i = 0; i < 6; i++) {
-    const block = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.55 + Math.random() * 0.18, 0.55), localMat);
-    block.position.set((i - 2.5) * 0.92, 0.28, (Math.random() - 0.5) * 0.14);
-    block.rotation.y = (Math.random() - 0.5) * 0.08;
+    const block = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.55 + mapRandom() * 0.18, 0.55), localMat);
+    block.position.set((i - 2.5) * 0.92, 0.28, (mapRandom() - 0.5) * 0.14);
+    block.rotation.y = (mapRandom() - 0.5) * 0.08;
     block.castShadow = true;
     block.receiveShadow = true;
     g.add(block);
@@ -423,11 +433,11 @@ function addTerrainClutter(mapDef, scene, size, seed, scenery) {
   };
 
   for (let i = 0; i < count; i++) {
-    const x = (Math.random() - 0.5) * size * 0.76;
-    const z = (Math.random() - 0.5) * size * 0.76;
+    const x = (mapRandom() - 0.5) * size * 0.76;
+    const z = (mapRandom() - 0.5) * size * 0.76;
     if (isReservedMapSpace(x, z, mapDef, 13 * scale)) continue;
     const y = heightAt(x, z, mapDef, seed);
-    const roll = Math.random();
+    const roll = mapRandom();
     let g;
     let kind;
 
@@ -446,8 +456,8 @@ function addTerrainClutter(mapDef, scene, size, seed, scenery) {
     }
 
     g.position.set(x, y, z);
-    g.rotation.y = Math.random() * Math.PI * 2;
-    if (scenery) scenery.register(g, { x, z, kind });
+    g.rotation.y = mapRandom() * Math.PI * 2;
+    if (scenery) scenery.register(g, { x, z, kind, source: 'map' });
     else scene.add(g);
   }
 
@@ -476,11 +486,11 @@ function createHaystack(mat) {
 function createFieldFence(mat) {
   const g = new THREE.Group();
   const local = mat.clone();
-  const len = 5.5 + Math.random() * 2.5;
+  const len = 5.5 + mapRandom() * 2.5;
   for (let i = 0; i < 4; i++) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.05, 0.16), local);
-    post.position.set((i / 3 - 0.5) * len, 0.52, (Math.random() - 0.5) * 0.12);
-    post.rotation.z = (Math.random() - 0.5) * 0.12;
+    post.position.set((i / 3 - 0.5) * len, 0.52, (mapRandom() - 0.5) * 0.12);
+    post.rotation.z = (mapRandom() - 0.5) * 0.12;
     post.castShadow = true;
     post.receiveShadow = true;
     g.add(post);
@@ -488,7 +498,7 @@ function createFieldFence(mat) {
   for (const y of [0.42, 0.78]) {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.12), local);
     rail.position.y = y;
-    rail.rotation.z = (Math.random() - 0.5) * 0.04;
+    rail.rotation.z = (mapRandom() - 0.5) * 0.04;
     rail.castShadow = true;
     rail.receiveShadow = true;
     g.add(rail);
@@ -504,7 +514,7 @@ function createAbandonedCart(woodMat, darkWoodMat, metalMat) {
 
   const bed = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.36, 1.05), wood);
   bed.position.y = 0.62;
-  bed.rotation.z = (Math.random() - 0.5) * 0.12;
+  bed.rotation.z = (mapRandom() - 0.5) * 0.12;
   bed.castShadow = true;
   bed.receiveShadow = true;
   g.add(bed);
@@ -531,13 +541,13 @@ function createStumpPatch(woodMat, scrubMat) {
   const scrub = scrubMat.clone();
   const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 0.62, 7), wood);
   stump.position.y = 0.31;
-  stump.rotation.z = (Math.random() - 0.5) * 0.18;
+  stump.rotation.z = (mapRandom() - 0.5) * 0.18;
   stump.castShadow = true;
   stump.receiveShadow = true;
   g.add(stump);
 
   for (let i = 0; i < 3; i++) {
-    const tuft = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28 + Math.random() * 0.14, 1), scrub);
+    const tuft = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28 + mapRandom() * 0.14, 1), scrub);
     const ang = (i / 3) * Math.PI * 2;
     tuft.position.set(Math.cos(ang) * 0.42, 0.22, Math.sin(ang) * 0.36);
     tuft.scale.y = 0.52;

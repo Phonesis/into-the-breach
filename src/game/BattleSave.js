@@ -18,6 +18,7 @@ import {
 import { exportAIState, importAIState } from './AI.js';
 import { restoreTankRiderLinks } from './TankRiders.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { restoreTerrainDamage, serializeTerrainDamage } from '../world/TerrainDamage.js';
 import { createSandbagEmplacementGroup } from '../world/SandbagEmplacement.js';
 import {
   createBaseBuildingMesh,
@@ -42,6 +43,17 @@ import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
 import { updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
 import { FIELD_BUILD_TYPES } from './EngineerSandbags.js';
+import {
+  applyTrenchVisual,
+  peekTrenchNextId,
+  setTrenchNextId,
+} from './InfantryTrench.js';
+import {
+  peekMedicTentNextId,
+  setMedicTentNextId,
+} from './MedicFieldHospital.js';
+import { createTrenchGroup } from '../world/TrenchMesh.js';
+import { createFieldTentMesh } from '../visual/FieldTentMesh.js';
 import * as THREE from 'three';
 
 export const SAVE_VERSION = 1;
@@ -90,6 +102,7 @@ function serializeTargetRef(target) {
   if (target.isScenery && target.entry) {
     return {
       kind: 'scenery',
+      mapKey: target.entry.mapKey ?? null,
       x: target.entry.x,
       z: target.entry.z,
       sceneryKind: target.entry.kind,
@@ -132,6 +145,12 @@ function resolveTargetRef(game, ref, unitById) {
       return null;
     }
     case 'scenery': {
+      if (ref.mapKey) {
+        const keyed = game.scenery?.objects.find(
+          (o) => !o.destroyed && o.mapKey === ref.mapKey
+        );
+        if (keyed?._attackTarget && !keyed._attackTarget.dead) return keyed._attackTarget;
+      }
       const tol = 0.6;
       const obj = game.scenery?.objects.find(
         (o) =>
@@ -228,10 +247,15 @@ export function captureBattleSave(game, { id = null } = {}) {
       retreating: u.retreating,
       surrendered: u.surrendered,
       _garrisonBunkerId: u._garrisonBunkerId ?? null,
+      _garrisonBunkerMapKey:
+        game.scenery?.objects.find((obj) => obj.id === u._garrisonBunkerId)?.mapKey ?? null,
       _mountedOnTankId: u._mountedOnTankId ?? null,
       _pendingMountTankId: u._pendingMountTankId ?? null,
       _tankRiderIds: u._tankRiderIds?.length ? [...u._tankRiderIds] : null,
       _sandbagSite: u._sandbagSite ?? null,
+      _trenchId: u._trenchId ?? null,
+      _trenchDigSite: u._trenchDigSite ?? null,
+      _medicTentSite: u._medicTentSite ?? null,
       attackCooldown: u.attackCooldown ?? 0,
       mgCooldown: u.mgCooldown ?? 0,
       moveTarget: u.moveTarget ? { x: u.moveTarget.x, z: u.moveTarget.z } : null,
@@ -409,6 +433,63 @@ export function captureBattleSave(game, { id = null } = {}) {
         })),
       engineerScenery: [],
     },
+    infantryTrenches: game.infantryTrenches
+      ? {
+          pending: !!game.infantryTrenches.pending,
+          nextId: peekTrenchNextId(),
+          sites: game.infantryTrenches.sites.map((s) => ({
+            id: s.id,
+            x: s.x,
+            z: s.z,
+            y: s.y,
+            team: s.team,
+            diggerId: s.diggerId,
+            progress: s.progress,
+          })),
+          trenches: game.infantryTrenches.trenches
+            .filter((t) => !t.destroyed)
+            .map((t) => ({
+              id: t.id,
+              team: t.team,
+              x: t.x,
+              z: t.z,
+              y: t.y,
+              garrison: [...(t.garrison ?? [])],
+              rotationY: t.mesh?.rotation?.y ?? 0,
+            })),
+        }
+      : null,
+    medicFieldHospitals: game.medicFieldHospitals
+      ? {
+          pending: !!game.medicFieldHospitals.pending,
+          nextId: peekMedicTentNextId(),
+          sites: game.medicFieldHospitals.sites.map((s) => ({
+            id: s.id,
+            x: s.x,
+            z: s.z,
+            y: s.y,
+            team: s.team,
+            medicId: s.medicId,
+            progress: s.progress,
+          })),
+          tents: game.medicFieldHospitals.tents
+            .filter((t) => !t.destroyed)
+            .map((t) => ({
+              id: t.id,
+              team: t.team,
+              x: t.x,
+              z: t.z,
+              y: t.y,
+              hp: t.hp,
+              maxHp: t.maxHp,
+              healRange: t.healRange,
+              healPerSec: t.healPerSec,
+              rotationY: t.mesh?.rotation?.y ?? 0,
+            })),
+        }
+      : null,
+    mapScenery: [],
+    terrainDamage: serializeTerrainDamage(),
     sceneryDestroyed: [],
     selectedHqTeam: game.selectedHq?.team ?? null,
     selectedBaseBuildingId: game.selectedBaseBuilding?.id ?? null,
@@ -426,11 +507,27 @@ export function captureBattleSave(game, { id = null } = {}) {
   }
 
   if (game.scenery) {
-    for (const obj of game.scenery.objects) {
-      if (obj.destroyed) {
-        snapshot.sceneryDestroyed.push({ x: obj.x, z: obj.z, sceneryKind: obj.kind });
-      }
-    }
+    snapshot.mapScenery = game.scenery.objects
+      .filter((obj) => obj.source === 'map')
+      .map((obj) => ({
+        mapKey: obj.mapKey,
+        x: obj.x,
+        z: obj.z,
+        y: obj.group?.position?.y ?? 0,
+        kind: obj.kind,
+        hp: obj.hp,
+        maxHp: obj.maxHp,
+        destroyed: !!obj.destroyed,
+        coverType: obj.coverType,
+        coverRadius: obj.coverRadius,
+        garrison: obj.garrison ? [...obj.garrison] : null,
+        garrisonTeam: obj.garrisonTeam ?? null,
+        rotationY: obj.group?.rotation?.y ?? 0,
+        scale: obj.group?.scale?.x ?? 1,
+      }));
+    snapshot.sceneryDestroyed = snapshot.mapScenery
+      .filter((obj) => obj.destroyed)
+      .map(({ x, z, kind, mapKey }) => ({ x, z, sceneryKind: kind, mapKey }));
   }
 
   for (const pos of game.engineerSandbags?._builtPositions ?? []) {
@@ -487,6 +584,42 @@ function restoreEngineerScenery(game, placements) {
       coverRadius: p.coverRadius,
       hp: p.hp,
     });
+  }
+}
+
+function restoreMapScenery(game, sceneryStates) {
+  if (!sceneryStates?.length || !game.scenery) return;
+  for (const state of sceneryStates) {
+    const obj = game.scenery.objects.find(
+      (entry) =>
+        !entry.destroyed &&
+        ((state.mapKey && entry.mapKey === state.mapKey) ||
+          (!state.mapKey &&
+            entry.kind === state.kind &&
+            Math.abs(entry.x - state.x) < 1.2 &&
+            Math.abs(entry.z - state.z) < 1.2))
+    );
+    if (!obj) continue;
+
+    obj.hp = state.hp ?? obj.maxHp;
+    obj.maxHp = state.maxHp ?? obj.maxHp;
+    obj.x = state.x ?? obj.x;
+    obj.z = state.z ?? obj.z;
+    obj.coverType = state.coverType ?? obj.coverType;
+    obj.coverRadius = state.coverRadius ?? obj.coverRadius;
+    obj.garrison = state.garrison ? [...state.garrison] : obj.garrison;
+    obj.garrisonTeam = state.garrisonTeam ?? null;
+    if (Number.isFinite(state.y)) obj.group.position.y = state.y;
+    if (Number.isFinite(state.x)) obj.group.position.x = state.x;
+    if (Number.isFinite(state.z)) obj.group.position.z = state.z;
+    if (Number.isFinite(state.rotationY)) obj.group.rotation.y = state.rotationY;
+    if (Number.isFinite(state.scale)) obj.group.scale.setScalar(state.scale);
+
+    if (state.destroyed) {
+      game.scenery.destroyObject(obj, { effects: false });
+    } else {
+      game.scenery._updateDamageVisual(obj);
+    }
   }
 }
 
@@ -688,6 +821,94 @@ function restoreFieldBunker(manager, data) {
   return entry;
 }
 
+function restoreTrenchState(game, data) {
+  const manager = game.infantryTrenches;
+  if (!manager || !data) return;
+  manager.pending = !!data.pending;
+  setTrenchNextId(data.nextId ?? 1);
+
+  for (const siteData of data.sites ?? []) {
+    const site = {
+      id: siteData.id,
+      x: siteData.x,
+      z: siteData.z,
+      y: siteData.y,
+      team: siteData.team,
+      diggerId: siteData.diggerId,
+      progress: siteData.progress ?? 0,
+      marker: null,
+    };
+    manager.sites.push(site);
+    manager._attachSiteMarker(site);
+  }
+
+  for (const trenchData of data.trenches ?? []) {
+    const mesh = createTrenchGroup({
+      factionId:
+        trenchData.team === 'player' ? game.playerFaction?.id : game.enemyFaction?.id,
+      seed: trenchData.x * 0.19 + trenchData.z * 0.31,
+    });
+    mesh.position.set(trenchData.x, trenchData.y, trenchData.z);
+    mesh.rotation.y = trenchData.rotationY ?? 0;
+    game.scene.add(mesh);
+    manager.trenches.push({
+      id: trenchData.id,
+      team: trenchData.team,
+      x: trenchData.x,
+      z: trenchData.z,
+      y: trenchData.y,
+      destroyed: false,
+      garrison: [...(trenchData.garrison ?? [])],
+      mesh,
+    });
+    game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
+  }
+}
+
+function restoreMedicFieldHospitalState(game, data) {
+  const manager = game.medicFieldHospitals;
+  if (!manager || !data) return;
+  manager.pending = !!data.pending;
+  setMedicTentNextId(data.nextId ?? 1);
+
+  for (const siteData of data.sites ?? []) {
+    const site = {
+      id: siteData.id,
+      x: siteData.x,
+      z: siteData.z,
+      y: siteData.y,
+      team: siteData.team,
+      medicId: siteData.medicId,
+      progress: siteData.progress ?? 0,
+      marker: null,
+    };
+    manager.sites.push(site);
+    manager._attachSiteMarker(site);
+  }
+
+  for (const tentData of data.tents ?? []) {
+    const mesh = createFieldTentMesh(
+      tentData.team === 'player' ? game.playerFaction?.id : game.enemyFaction?.id
+    );
+    mesh.position.set(tentData.x, tentData.y, tentData.z);
+    mesh.rotation.y = tentData.rotationY ?? 0;
+    game.scene.add(mesh);
+    manager.tents.push({
+      id: tentData.id,
+      team: tentData.team,
+      x: tentData.x,
+      z: tentData.z,
+      y: tentData.y,
+      hp: tentData.hp,
+      maxHp: tentData.maxHp,
+      destroyed: false,
+      mesh,
+      healRange: tentData.healRange,
+      healPerSec: tentData.healPerSec,
+    });
+  }
+}
+
 export function applyBattleSave(game, snapshot) {
   if (!snapshot || snapshot.version !== SAVE_VERSION) return false;
 
@@ -695,6 +916,10 @@ export function applyBattleSave(game, snapshot) {
   if (snapshot.baseBuildings?.nextId) setBaseBuildingNextId(snapshot.baseBuildings.nextId);
   if (snapshot.engineerSandbags?.nextSiteId) {
     setEngineerSiteNextId(snapshot.engineerSandbags.nextSiteId);
+  }
+  if (snapshot.infantryTrenches?.nextId) setTrenchNextId(snapshot.infantryTrenches.nextId);
+  if (snapshot.medicFieldHospitals?.nextId) {
+    setMedicTentNextId(snapshot.medicFieldHospitals.nextId);
   }
 
   game.matchTime = snapshot.matchTime ?? 0;
@@ -773,8 +998,15 @@ export function applyBattleSave(game, snapshot) {
     }
   }
 
-  destroySavedScenery(game, snapshot.sceneryDestroyed);
+  if (snapshot.mapScenery?.length) {
+    restoreMapScenery(game, snapshot.mapScenery);
+  } else {
+    destroySavedScenery(game, snapshot.sceneryDestroyed);
+  }
+  restoreTerrainDamage(game.scene, game.mapDef, game._terrainMesh, snapshot.terrainDamage);
   restoreEngineerScenery(game, snapshot.engineerSandbags?.engineerScenery);
+  restoreTrenchState(game, snapshot.infantryTrenches);
+  restoreMedicFieldHospitalState(game, snapshot.medicFieldHospitals);
 
   if (snapshot.baseBuildings && game.baseBuildings?.active) {
     game.baseBuildings.pendingType = snapshot.baseBuildings.pendingType ?? null;
@@ -885,6 +1117,9 @@ export function applyBattleSave(game, snapshot) {
     unit._pendingMountTankId = null;
     unit._tankRiderIds = uData._tankRiderIds ? [...uData._tankRiderIds] : null;
     unit._sandbagSite = uData._sandbagSite ?? null;
+    unit._trenchId = null;
+    unit._trenchDigSite = uData._trenchDigSite ?? null;
+    unit._medicTentSite = uData._medicTentSite ?? null;
     unit.attackCooldown = uData.attackCooldown ?? 0;
     unit.mgCooldown = uData.mgCooldown ?? 0;
     unit._userMoveOrder = !!uData._userMoveOrder;
@@ -927,11 +1162,26 @@ export function applyBattleSave(game, snapshot) {
     if (!uData._garrisonBunkerId) continue;
     const unit = unitById.get(uData.id);
     if (!unit) continue;
-    unit._garrisonBunkerId = uData._garrisonBunkerId;
+    const sceneryBunker = uData._garrisonBunkerMapKey
+      ? game.scenery?.objects.find((obj) => obj.mapKey === uData._garrisonBunkerMapKey)
+      : null;
+    unit._garrisonBunkerId = sceneryBunker?.id ?? uData._garrisonBunkerId;
     unit.clearAttackOrder();
     unit.moveTarget = null;
     unit._movePath = null;
     if (unit.mesh) unit.mesh.visible = false;
+  }
+
+  for (const uData of snapshot.units ?? []) {
+    if (!uData._trenchId) continue;
+    const unit = unitById.get(uData.id);
+    const trench = game.infantryTrenches?.getTrenchById(uData._trenchId);
+    if (!unit || !trench) continue;
+    unit._trenchId = trench.id;
+    unit._trenchSlot = trench.garrison.indexOf(unit.id);
+    unit.moveTarget = null;
+    unit._movePath = null;
+    applyTrenchVisual(unit, true);
   }
 
   for (const uData of snapshot.units ?? []) {
