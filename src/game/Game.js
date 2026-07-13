@@ -376,6 +376,7 @@ export class Game {
     this.targetIndicators = new TargetIndicators(this.scene);
 
     this.fireSupport = new FireSupportManager(this);
+    this.enemyFireSupport = new FireSupportManager(this, ENEMY_TEAM);
     this.generalOrders = new GeneralOrdersManager(this);
     this.smokeScreens = new SmokeScreenManager(this);
     this.smokeShellTargeting = false;
@@ -775,6 +776,7 @@ export class Game {
     this.battleStats.reset();
     this._battleStatsFinalized = false;
     this.fireSupport.reset();
+    this.enemyFireSupport.reset();
     this.generalOrders.reset();
     this.smokeScreens.reset();
     this.smokeShellTargeting = false;
@@ -2643,9 +2645,11 @@ export class Game {
 
     const targetIsArmored =
       killed && target?.def && isArmoredCombatVehicle(target.def.type);
+    const targetKilledByExplosion = target?._deathCause === 'explosion';
 
     if (
-      killed ||
+      (killed && targetKilledByExplosion) ||
+      targetIsArmored ||
       targetIsScenery ||
       (groundImpact &&
         (def.type === 'artillery' ||
@@ -2980,6 +2984,7 @@ export class Game {
         }
 
         this.fireSupport.update(dt);
+        this.enemyFireSupport.update(dt);
         this.generalOrders.update(dt);
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
@@ -3022,6 +3027,7 @@ export class Game {
               difficulty: this.campaign
                 ? getCampaignDifficulty(this.difficulty)
                 : this.difficulty,
+              enemyFireSupport: this.enemyFireSupport,
             });
           }
 

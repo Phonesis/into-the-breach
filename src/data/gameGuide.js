@@ -172,7 +172,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with spatial fly-by audio and MG bursts along your line.',
       '<strong>Artillery barrage</strong> (~95 s cooldown) — Shell warnings, then clustered impacts.',
       '<strong>Creeping barrage</strong> (~148 s cooldown) — Slower recharge; shells advance in lifts along your attack axis and concentrate maximum fire on the point you click.',
-      '<strong>Airborne drop</strong> (~118 s cooldown) — A transport passes overhead; <strong>five elite paratrooper squads</strong> (four men each) descend by parachute on your target zone. They are <strong>not</strong> built from HQ — only called this way. On landing they fight with <strong>rifles and squad LMG</strong> vs infantry and <strong>anti-tank launchers</strong> (Panzerfaust, bazooka, PIAT, RPG-43, etc. by nation) vs tanks and armored cars. AT shots reload slowly (~4.5 s).',
+      '<strong>Airborne drop</strong> (~180 s cooldown) — A transport passes overhead; <strong>five elite paratrooper squads</strong> (four men each) descend by parachute on your target zone. They are <strong>not</strong> built from HQ — only called this way. On landing they fight with <strong>rifles and squad LMG</strong> vs infantry and <strong>anti-tank launchers</strong> (Panzerfaust, bazooka, PIAT, RPG-43, etc. by nation) vs tanks and armored cars. AT shots reload slowly (~4.5 s).',
       'Click a strike type, then LMB on valid ground. Esc cancels targeting. Not available in Tower Defence (Emplacements) or during Battle Simulation deployment; available in Tower Defence HQ Defense.',
     ],
   },

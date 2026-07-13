@@ -297,14 +297,14 @@ function disposeMeshObject(obj) {
 }
 
 function addBloodPoolAt(parent, x, z, radius, squadIndex = null) {
-  const pool = createBloodPoolMesh(radius, { color: 0x541515, opacity: 0.42, lobes: 5 });
+  const pool = createBloodPoolMesh(radius, { color: 0x541515, opacity: 0.46, lobes: 5 });
   pool.position.set(x, 0.05, z);
   pool.renderOrder = 1;
   pool.name = 'bloodPool';
   if (squadIndex != null) pool.userData.squadIndex = squadIndex;
   parent.add(pool);
 
-  const inner = createBloodPoolMesh(radius * 0.34, { color: 0x7e2020, opacity: 0.3, lobes: 4 });
+  const inner = createBloodPoolMesh(radius * 0.36, { color: 0x7e2020, opacity: 0.33, lobes: 4 });
   inner.position.set(
     x + (Math.random() - 0.5) * radius * 0.22,
     0.06,
@@ -321,12 +321,12 @@ function addGroundStain(mesh, spread = 2.4) {
   group.name = 'corpseStain';
   group.renderOrder = 1;
 
-  addBloodPoolAt(group, 0, 0, spread * 0.27);
+  addBloodPoolAt(group, 0, 0, spread * 0.3);
   addBloodPoolAt(
     group,
     (Math.random() - 0.5) * spread * 0.28,
     (Math.random() - 0.5) * spread * 0.24,
-    spread * 0.12
+    spread * 0.13
   );
 
   mesh.add(group);
@@ -593,8 +593,8 @@ function spawnExplosionGibs(unit, factionId, unitType) {
   const stain = new THREE.Group();
   stain.name = 'bloodPool';
   stain.userData.corpseUnitId = unit.id;
-  addBloodPoolAt(stain, 0, 0, 0.55 + Math.random() * 0.25);
-  addBloodPoolAt(stain, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, 0.28);
+  addBloodPoolAt(stain, 0, 0, 0.6 + Math.random() * 0.27);
+  addBloodPoolAt(stain, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, 0.31);
   stain.position.set(origin.x, sampleTerrainHeight(origin.x, origin.z, unit._mapDef) + 0.03, origin.z);
   scene.add(stain);
   unit._detachedCorpses.push({ anchor: stain, squadIndex: -50 });
@@ -612,8 +612,8 @@ export function updateInfantryGibs(dt) {
       continue;
     }
     if (s.settled) {
-      s.elapsed += dt;
-      if (s.elapsed > s.life + 8) done.push(gib);
+      // Leave settled explosive debris on the battlefield until its owner is disposed.
+      activeGibs.delete(gib);
       continue;
     }
 
@@ -649,7 +649,6 @@ export function updateInfantryGibs(dt) {
       }
     }
 
-    if (s.elapsed > s.life + 12) done.push(gib);
   }
 
   for (const gib of done) {

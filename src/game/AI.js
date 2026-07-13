@@ -4,6 +4,7 @@ import { getLastStandTactic } from '../data/lastStandTactics.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
+let aiSupportTimer = 28;
 
 const AI_TICK_MIN = 3.2;
 const AI_TICK_MAX = 5;
@@ -16,6 +17,7 @@ const CAPTURE_UNIT_TYPES = new Set(['infantry', 'machineGun', 'armoredCar']);
 export function resetAI(openingDelay = 0, firstProdDelay = 5) {
   aiTimer = Math.max(0, openingDelay);
   aiProdTimer = Math.max(0, firstProdDelay);
+  aiSupportTimer = 28;
 }
 
 export function exportAIState() {
@@ -44,6 +46,7 @@ export function updateAI({
   lastStand = false,
   lastStandTactic = null,
   lastStandFlankSide = 1,
+  enemyFireSupport = null,
 }) {
   const d = difficulty ?? { aiTickMult: 1, aiProdMult: 1, captureChanceMult: 1, attackAggressionMult: 1 };
 
@@ -57,6 +60,10 @@ export function updateAI({
     aiProdTimer =
       (AI_PROD_MIN + Math.random() * (AI_PROD_MAX - AI_PROD_MIN)) * prodDelayMult;
     tryProduce(production, enemyResources, spendEnemy, assault, d);
+  }
+
+  if (!clearance && !lastStand && !enemyStagingPhase) {
+    updateAISupport(enemyFireSupport, playerUnits, dt, d);
   }
 
   if (aiTimer > 0) return;
@@ -203,6 +210,52 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+}
+
+function updateAISupport(support, players, dt, difficulty) {
+  if (!support || players.length < 2) return;
+  aiSupportTimer -= dt;
+  if (aiSupportTimer > 0) return;
+  aiSupportTimer = 24 + Math.random() * 18;
+
+  const target = findSupportTarget(players);
+  if (!target) return;
+
+  const barrageChance = Math.min(0.78, 0.48 * (difficulty.attackAggressionMult ?? 1));
+  if (support.isReady('barrage') && target.count >= 3 && Math.random() < barrageChance) {
+    support.tryAiStrike('barrage', target.x, target.z);
+    return;
+  }
+
+  if (support.isReady('creepingBarrage') && target.count >= 4 && Math.random() < barrageChance * 0.55) {
+    support.tryAiStrike('creepingBarrage', target.x, target.z);
+    return;
+  }
+
+  if (support.isReady('airborneDrop') && players.length >= 4 && Math.random() < 0.42) {
+    support.tryAiStrike('airborneDrop', target.x, target.z);
+  }
+}
+
+function findSupportTarget(players) {
+  let best = null;
+  let bestCount = 0;
+  for (const anchor of players) {
+    let count = 0;
+    let sumX = 0;
+    let sumZ = 0;
+    for (const player of players) {
+      if (Math.hypot(player.position.x - anchor.position.x, player.position.z - anchor.position.z) > 16) continue;
+      count++;
+      sumX += player.position.x;
+      sumZ += player.position.z;
+    }
+    if (count > bestCount) {
+      bestCount = count;
+      best = { x: sumX / count, z: sumZ / count, count };
+    }
+  }
+  return best;
 }
 
 function shouldPrioritizeCapture(unit, points, players, assault, campaign) {

@@ -339,7 +339,9 @@ function landParatrooper(drop, scene, mapDef) {
 }
 
 export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
-  const def = opts.def ?? getParatrooperDef(game.playerFaction?.id);
+  const faction = opts.faction ?? game.playerFaction;
+  const team = opts.team ?? 'player';
+  const def = opts.def ?? getParatrooperDef(faction?.id);
   const count = opts.squadCount ?? 5;
   const dropRadius = opts.dropRadius ?? 11;
   const dropHeight = opts.dropHeight ?? 48;
@@ -354,8 +356,8 @@ export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
 
     const unit = new Unit({
       def,
-      faction: game.playerFaction,
-      team: 'player',
+      faction,
+      team,
       position: { x, z },
       scene: game.scene,
     });

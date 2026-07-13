@@ -233,7 +233,7 @@ export function updateCombat(
       attacker.def.type === 'paratrooper' && isParatrooperAtShot(attacker, target);
     attacker.attackCooldown = paratrooperAt
       ? 1 / (attacker.def.atAttackSpeed ?? attacker.def.attackSpeed)
-      : 1 / attacker.def.attackSpeed;
+      : attacker.def.shellReload ?? 1 / attacker.def.attackSpeed;
   }
 }
 
@@ -510,10 +510,11 @@ function fire(
           attacker.def.type === 'antiTankGun' ||
           isTankType(attacker.def.type) ||
           paratrooperAt);
-      target.takeDamage(scalePracticeHqDamage(target, damage, options), {
+      const appliedDamage = scalePracticeHqDamage(target, damage, options);
+      target.takeDamage(appliedDamage, {
         explosive: explosiveKill,
       });
-      if (!target.dead && !target.surrendered) {
+      if (appliedDamage > 0 && !target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
           maybeTriggerRetreat(target, hqs, livingUnits, attacker, {
             generalOrders: options.generalOrders,
@@ -622,8 +623,9 @@ function applySplashDamage(
     splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
     if (!other.surrendered) {
       markUnderFire(other);
-      other.takeDamage(scalePracticeHqDamage(other, splashDmg, options), { explosive: true });
-      if (!other.dead && !other.surrendered) {
+      const appliedDamage = scalePracticeHqDamage(other, splashDmg, options);
+      other.takeDamage(appliedDamage, { explosive: true });
+      if (appliedDamage > 0 && !other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
           maybeTriggerRetreat(other, hqs, units, attacker, {
             generalOrders: options.generalOrders,

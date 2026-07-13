@@ -232,9 +232,7 @@ export class Unit {
       // Per-unit cooldown so one squad doesn't spam every bullet
       if (now - (this._lastUnderFireVoiceAt ?? 0) > 2400) {
         this._lastUnderFireVoiceAt = now;
-        // Panic lines — frequent enough to hear emotion, not a wall of shouts
         if (Math.random() < 0.55) {
-          // Prefer faction.id; fall back to nested fields if a save/restore ever strips id
           const factionId =
             this.faction?.id ?? this.faction?.factionId ?? this.def?.factionId ?? null;
           sounds.playUnderFire(
@@ -242,7 +240,6 @@ export class Unit {
             factionId,
             {
               team: this.team,
-              // Friendly panic over radio; enemy yells are open-field ambient (quieter)
               radio: this.team === 'player',
             }
           );

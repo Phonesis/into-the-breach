@@ -44,7 +44,7 @@ export const FIRE_SUPPORT_TYPES = {
     id: 'airborneDrop',
     label: 'Airborne Drop',
     short: 'Airborne',
-    cooldown: 118,
+    cooldown: 180,
     warnTime: 3.4,
     squadCount: 5,
     dropRadius: 11,

@@ -13,6 +13,7 @@ import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/SoundManager.js';
 
 const PLAYER = 'player';
+const ENEMY = 'enemy';
 
 function makeCooldowns() {
   return Object.fromEntries(
@@ -20,11 +21,12 @@ function makeCooldowns() {
   );
 }
 
-function creepAxisFromPlayer(game, tx, tz) {
+function creepAxisFromPlayer(game, tx, tz, ownerTeam = PLAYER) {
   const mapDef = game.mapDef;
-  const hq = game.hqs.find((h) => h.team === PLAYER);
-  const hx = hq?.position?.x ?? mapDef.playerBase.x;
-  const hz = hq?.position?.z ?? mapDef.playerBase.z;
+  const hq = game.hqs.find((h) => h.team === ownerTeam);
+  const fallback = ownerTeam === PLAYER ? mapDef.playerBase : mapDef.enemyBase;
+  const hx = hq?.position?.x ?? fallback.x;
+  const hz = hq?.position?.z ?? fallback.z;
   let dx = tx - hx;
   let dz = tz - hz;
   const len = Math.hypot(dx, dz) || 1;
@@ -32,14 +34,35 @@ function creepAxisFromPlayer(game, tx, tz) {
 }
 
 export class FireSupportManager {
-  constructor(game) {
+  constructor(game, ownerTeam = PLAYER) {
     this.game = game;
+    this.ownerTeam = ownerTeam;
     this.pending = null;
     this.cooldowns = makeCooldowns();
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
     this._sceneryStrikeCount = 0;
+  }
+
+  get ownerFaction() {
+    return this.ownerTeam === PLAYER ? this.game.playerFaction : this.game.enemyFaction;
+  }
+
+  get targetTeam() {
+    return this.ownerTeam === PLAYER ? ENEMY : PLAYER;
+  }
+
+  get ownerHq() {
+    return this.game.hqs.find((h) => h.team === this.ownerTeam);
+  }
+
+  get ownerBase() {
+    return this.ownerTeam === PLAYER ? this.game.mapDef.playerBase : this.game.mapDef.enemyBase;
+  }
+
+  get targetUnits() {
+    return this.targetTeam === ENEMY ? this.game._enemyAlive : this.game._playerAlive;
   }
 
   reset() {
@@ -140,15 +163,22 @@ export class FireSupportManager {
     return true;
   }
 
+  tryAiStrike(type, x, z) {
+    if (this.ownerTeam === PLAYER || !this.isReady(type)) return false;
+    this.cooldowns[type] = this.getDef(type).cooldown;
+    this.scheduleStrike(type, x, z);
+    return true;
+  }
+
   scheduleStrike(type, tx, tz) {
     const def = this.getDef(type);
     const scene = this.game.scene;
     const mapDef = this.game.mapDef;
 
     if (type === 'strafe') {
-      const hq = this.game.hqs.find((h) => h.team === PLAYER);
-      const hx = hq?.position?.x ?? mapDef.playerBase.x;
-      const hz = hq?.position?.z ?? mapDef.playerBase.z;
+      const hq = this.ownerHq;
+      const hx = hq?.position?.x ?? this.ownerBase.x;
+      const hz = hq?.position?.z ?? this.ownerBase.z;
       let dx = tx - hx;
       let dz = tz - hz;
       const len = Math.sqrt(dx * dx + dz * dz) || 1;
@@ -174,7 +204,7 @@ export class FireSupportManager {
             velZ: perpZ * planeSpeed,
             duration: flyDuration,
           });
-          sounds.playWeapon(mgProfileForFaction(this.game.playerFaction?.id), { x: tx, z: tz }, {
+          sounds.playWeapon(mgProfileForFaction(this.ownerFaction?.id), { x: tx, z: tz }, {
             rate: 0.85,
             volume: 0.9,
           });
@@ -197,8 +227,8 @@ export class FireSupportManager {
     } else if (type === 'barrage') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.radius, true);
       const artyProfile = resolveWeaponProfile(
-        this.game.playerFaction?.units?.artillery ?? { type: 'artillery' },
-        this.game.playerFaction?.id
+        this.ownerFaction?.units?.artillery ?? { type: 'artillery' },
+        this.ownerFaction?.id
       );
       sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.7, volume: 0.8 });
 
@@ -218,7 +248,7 @@ export class FireSupportManager {
         });
       }
     } else if (type === 'creepingBarrage') {
-      const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz);
+      const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz, this.ownerTeam);
       const startX = tx - dx * def.creepLength;
       const startZ = tz - dz * def.creepLength;
 
@@ -226,8 +256,8 @@ export class FireSupportManager {
       spawnStrikeWarning(scene, mapDef, startX, startZ, def.laneWidth * 0.55, true);
 
       const artyProfile = resolveWeaponProfile(
-        this.game.playerFaction?.units?.artillery ?? { type: 'artillery' },
-        this.game.playerFaction?.id
+        this.ownerFaction?.units?.artillery ?? { type: 'artillery' },
+        this.ownerFaction?.id
       );
       sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.62, volume: 0.85 });
 
@@ -258,9 +288,9 @@ export class FireSupportManager {
     } else if (type === 'airborneDrop') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);
 
-      const hq = this.game.hqs.find((h) => h.team === PLAYER);
-      const hx = hq?.position?.x ?? mapDef.playerBase.x;
-      const hz = hq?.position?.z ?? mapDef.playerBase.z;
+      const hq = this.ownerHq;
+      const hx = hq?.position?.x ?? this.ownerBase.x;
+      const hz = hq?.position?.z ?? this.ownerBase.z;
       let dx = tx - hx;
       let dz = tz - hz;
       const len = Math.hypot(dx, dz) || 1;
@@ -301,7 +331,9 @@ export class FireSupportManager {
         at: def.warnTime,
         fn: () => {
           spawnParatrooperSquad(this.game, tx, tz, {
-            def: getParatrooperDef(this.game.playerFaction?.id),
+            def: getParatrooperDef(this.ownerFaction?.id),
+            faction: this.ownerFaction,
+            team: this.ownerTeam,
             squadCount: def.squadCount,
             dropRadius: def.dropRadius,
             dropHeight: def.dropHeight,
@@ -319,7 +351,7 @@ export class FireSupportManager {
     const hqRadius = radius * 1.2;
     const hqRadiusSq = hqRadius * hqRadius;
 
-    for (const u of this.game._enemyAlive ?? []) {
+    for (const u of this.targetUnits ?? []) {
       const dx = u.position.x - x;
       const dz = u.position.z - z;
       const d2 = dx * dx + dz * dz;
@@ -332,7 +364,7 @@ export class FireSupportManager {
     }
 
     for (const h of this.game.hqs) {
-      if (h.dead || h.team === PLAYER) continue;
+      if (h.dead || h.team !== this.targetTeam) continue;
       const dx = h.position.x - x;
       const dz = h.position.z - z;
       const d2 = dx * dx + dz * dz;
