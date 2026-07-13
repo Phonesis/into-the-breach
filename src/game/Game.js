@@ -68,6 +68,7 @@ import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js';
+import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
 import { dismountAllRiders, updateTankRiders } from './TankRiders.js';
@@ -382,6 +383,7 @@ export class Game {
     this.smokeShellTargeting = false;
     this.engineerSandbags = new EngineerSandbagManager(this);
     this.infantryTrenches = new InfantryTrenchManager(this);
+    this.medicFieldHospitals = new MedicFieldHospitalManager(this);
     this.baseBuildings = new BaseBuildingManager(this);
     this.campaignStyle = 'classic';
 
@@ -407,6 +409,7 @@ export class Game {
           : null,
       getPendingSandbagPlacement: () => this.engineerSandbags?.getPending() ?? null,
       getPendingTrenchPlacement: () => this.infantryTrenches?.getPending() ?? null,
+      getPendingMedicTentPlacement: () => this.medicFieldHospitals?.getPending() ?? null,
       getPendingBaseBuildingPlacement: () => this.baseBuildings?.getPending() ?? null,
       getBaseBuildingAttackTargets: () => {
         if (!this.running || this.gameOver || !this.baseBuildings?.active) return [];
@@ -432,7 +435,9 @@ export class Game {
       onLastStandPlacement: (mode, x, z) => this.handleLastStandPlacement(mode, x, z),
       onSandbagPlacement: (mode, x, z) => this.handleSandbagPlacement(mode, x, z),
       onTrenchPlacement: (mode, x, z) => this.handleTrenchPlacement(mode, x, z),
+      onMedicTentPlacement: (mode, x, z) => this.handleMedicTentPlacement(mode, x, z),
       onBaseBuildingPlacement: (mode, x, z) => this.handleBaseBuildingPlacement(mode, x, z),
+      onMoveOrder: (selected) => this.cancelPendingConstructionPlacement(selected),
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
         this.selectedHq = hq;
         this.selectedBaseBuilding = baseBuilding;
@@ -484,6 +489,12 @@ export class Game {
     });
 
     this._placementLayer = document.getElementById('placement-layer');
+    this._onPlacementLayerDown = (e) => {
+      if (e.button !== 2 || this.paused) return;
+      e.preventDefault();
+      this.controller.setPointerFromEvent(e);
+      this.controller.issueMoveOrAttack();
+    };
     this._onPlacementLayerUp = (e) => {
       if (e.button !== 0 || this.paused) return;
       if (this.defenses?.getPending()) {
@@ -498,6 +509,10 @@ export class Game {
         this.placeTrenchAtScreen(e.clientX, e.clientY);
         return;
       }
+      if (this.medicFieldHospitals?.getPending()) {
+        this.placeMedicTentAtScreen(e.clientX, e.clientY);
+        return;
+      }
       if (this.baseBuildings?.getPending()) {
         this.placeBaseBuildingAtScreen(e.clientX, e.clientY);
         return;
@@ -506,7 +521,10 @@ export class Game {
         this.placeLastStandAtScreen(e.clientX, e.clientY);
       }
     };
+    this._onPlacementLayerContextMenu = (e) => e.preventDefault();
+    this._placementLayer?.addEventListener('pointerdown', this._onPlacementLayerDown);
     this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerUp);
+    this._placementLayer?.addEventListener('contextmenu', this._onPlacementLayerContextMenu);
 
     window.addEventListener('resize', () => this.onResize());
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
@@ -564,6 +582,12 @@ export class Game {
       if (e.code === 'Escape' && this.infantryTrenches?.getPending()) {
         this.infantryTrenches.cancel();
         this.ui?.updateInfantryTrench(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+      }
+      if (e.code === 'Escape' && this.medicFieldHospitals?.getPending()) {
+        this.medicFieldHospitals.cancel();
+        this.ui?.updateMedicTent(this);
         this._syncPlacementCapture();
         this._syncBattleCursor();
       }
@@ -782,6 +806,7 @@ export class Game {
     this.smokeShellTargeting = false;
     this.engineerSandbags.reset();
     this.infantryTrenches?.reset();
+    this.medicFieldHospitals?.reset();
     this.baseBuildings.reset();
     if (isBaseBuildingCampaign(this)) {
       this.baseBuildings.enable();
@@ -1268,6 +1293,7 @@ export class Game {
     const deployPending = !!(this.lastStand?.pendingType && isLastStandDeployPhase(this));
     const sandbagPending = !!this.engineerSandbags?.getPending();
     const trenchPending = !!this.infantryTrenches?.getPending();
+    const medicTentPending = !!this.medicFieldHospitals?.getPending();
     const baseBuildPending = !!this.baseBuildings?.getPending();
     this.canvas.style.cursor = resolveBattleCursor({
       fireSupportPending:
@@ -1276,6 +1302,7 @@ export class Game {
         deployPending ||
         sandbagPending ||
         trenchPending ||
+        medicTentPending ||
         baseBuildPending,
       smokeShellPending: !!this.smokeShellTargeting,
       shiftHeld,
@@ -1869,12 +1896,52 @@ export class Game {
       (this.running && !this.gameOver && !!this.defenses?.getPending()) ||
       (this.running && !this.gameOver && !!this.engineerSandbags?.getPending()) ||
       (this.running && !this.gameOver && !!this.infantryTrenches?.getPending()) ||
+      (this.running && !this.gameOver && !!this.medicFieldHospitals?.getPending()) ||
       (this.running && !this.gameOver && !!this.baseBuildings?.getPending()) ||
       (this.running &&
         !this.gameOver &&
         isLastStandDeployPhase(this) &&
         !!this.lastStand?.pendingType);
     this.ui?.setPlacementCapture(active);
+  }
+
+  cancelPendingConstructionPlacement(selected = []) {
+    let cancelled = false;
+    if (this.engineerSandbags?.getPending()) {
+      this.engineerSandbags.cancel();
+      this.ui?.updateEngineerBuild(this);
+      cancelled = true;
+    }
+    if (this.infantryTrenches?.getPending()) {
+      this.infantryTrenches.cancel();
+      this.ui?.updateInfantryTrench(this);
+      cancelled = true;
+    }
+    if (this.medicFieldHospitals?.getPending()) {
+      this.medicFieldHospitals.cancel();
+      this.ui?.updateMedicTent(this);
+      cancelled = true;
+    }
+    if (this.baseBuildings?.getPending()) {
+      this.baseBuildings.cancelPending();
+      this.ui?.updateBaseBuild(this);
+      cancelled = true;
+    }
+    for (const unit of selected) {
+      const sandbagCancelled = this.engineerSandbags?.cancelForUnit?.(unit);
+      const trenchCancelled = this.infantryTrenches?.cancelForUnit?.(unit);
+      const medicTentCancelled = this.medicFieldHospitals?.cancelForUnit?.(unit);
+      if (sandbagCancelled) this.ui?.updateEngineerBuild(this);
+      if (trenchCancelled) this.ui?.updateInfantryTrench(this);
+      if (medicTentCancelled) this.ui?.updateMedicTent(this);
+      cancelled =
+        sandbagCancelled || trenchCancelled || medicTentCancelled || cancelled;
+    }
+    if (cancelled) {
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+    }
+    return cancelled;
   }
 
   armEngineerBuild(buildType) {
@@ -1885,6 +1952,7 @@ export class Game {
     if (buildType === 'bunker' && !mgr.canBuildBunker()) return;
     if (this._isPlayerDeployZoneActive()) return;
     this.infantryTrenches?.cancel?.();
+    this.medicFieldHospitals?.cancel?.();
     const hasEngineer = this._playerAlive.some(
       (u) => u.selected && u.def?.type === 'engineer' && !u.dead && !u._sandbagSite
     );
@@ -1927,6 +1995,7 @@ export class Game {
     if (!hasDigger) return;
     sounds.unlock();
     this.engineerSandbags?.cancel?.();
+    this.medicFieldHospitals?.cancel?.();
     if (!mgr.arm()) {
       this.ui?.updateInfantryTrench(this);
       this._syncPlacementCapture();
@@ -1956,6 +2025,53 @@ export class Game {
     if (!this.running || this.gameOver || !this.infantryTrenches?.getPending()) return;
     const ground = this._screenToGround(clientX, clientY);
     if (ground) this.handleTrenchPlacement('place', ground.x, ground.z);
+  }
+
+  armMedicTent() {
+    if (!this.running || this.gameOver) return;
+    const mgr = this.medicFieldHospitals;
+    if (!mgr?.canUse()) return;
+    if (this._isPlayerDeployZoneActive()) return;
+    const hasMedic = this._playerAlive.some(
+      (u) =>
+        u.selected &&
+        !u.dead &&
+        u.def?.type === 'medic' &&
+        !u._medicTentSite
+    );
+    if (!hasMedic) return;
+    sounds.unlock();
+    this.engineerSandbags?.cancel?.();
+    this.infantryTrenches?.cancel?.();
+    if (!mgr.arm()) {
+      this.ui?.updateMedicTent(this);
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+      return;
+    }
+    this.ui?.updateMedicTent(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  handleMedicTentPlacement(mode, x, z) {
+    if (!this.running || this.gameOver || !this.medicFieldHospitals?.getPending()) return;
+    if (mode === 'preview') return;
+    const placed = this.medicFieldHospitals.tryPlace(x, z, PLAYER_TEAM);
+    if (placed) sounds.play('select');
+    else {
+      const reason = this.medicFieldHospitals.getPlacementRejectReason(x, z, PLAYER_TEAM);
+      if (reason) this.ui?.showMedicTentHint(reason);
+    }
+    this.ui?.updateMedicTent(this);
+    this._syncPlacementCapture();
+    this._syncBattleCursor();
+  }
+
+  placeMedicTentAtScreen(clientX, clientY) {
+    if (!this.running || this.gameOver || !this.medicFieldHospitals?.getPending()) return;
+    const ground = this._screenToGround(clientX, clientY);
+    if (ground) this.handleMedicTentPlacement('place', ground.x, ground.z);
   }
 
   handleSandbagPlacement(mode, x, z) {
@@ -2600,12 +2716,13 @@ export class Game {
     // Keep base rate near 1.0 — sample pools provide variety; big pitch swings sound fake
     let rate = 0.99 + Math.random() * 0.02;
     let volume = 1;
-    if (def.type === 'infantry') {
-      // Squad mix: rifles + SMGs (not dedicated MG-team LMG samples)
+    if (def.type === 'infantry' || def.type === 'engineer') {
+      // Squad mix: rifles + SMGs (engineers carry the same small-arms mix)
       attacker._infVolley = (attacker._infVolley ?? 0) + 1;
       const useSmg = attacker._infVolley % 3 === 0; // ~1/3 SMG bursts
       profile = useSmg ? smgProfileForFaction(factionId) : `rifle_${factionId}`;
       rate = 0.99 + Math.random() * 0.025;
+      if (def.type === 'engineer') volume = 0.92;
     } else if (def.type === 'paratrooper' && !paratrooperAtFire) {
       const useMg = def.usesMG && (attacker._mgVolley ?? 0) % 2 !== 0;
       profile = useMg ? mgProfileForFaction(factionId) : `rifle_${factionId}`;
@@ -2739,6 +2856,10 @@ export class Game {
         this.infantryTrenches?.update(dt);
         if (this.infantryTrenches?.sites?.length) {
           this.ui?.updateInfantryTrench(this);
+        }
+        this.medicFieldHospitals?.update(dt);
+        if (this.medicFieldHospitals?.sites?.length) {
+          this.ui?.updateMedicTent(this);
         }
         this.baseBuildings?.update(dt);
         this._healMarkerAccum += dt;
@@ -3028,6 +3149,7 @@ export class Game {
                 ? getCampaignDifficulty(this.difficulty)
                 : this.difficulty,
               enemyFireSupport: this.enemyFireSupport,
+              game: this,
             });
           }
 

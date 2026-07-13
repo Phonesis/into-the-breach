@@ -583,6 +583,16 @@ export class UIManager {
                 Infantry / MG / sniper dig a fighting trench (~14 s). Move onto it to dig in.
               </p>
             </div>
+            <div class="medic-tent-actions hidden" id="medic-tent-actions">
+              <div class="engineer-build-btns">
+                <button type="button" class="btn btn-primary interactive" id="btn-deploy-field-tent">
+                  Field hospital tent
+                </button>
+              </div>
+              <p class="engineer-build-hint" id="medic-tent-hint">
+                Medic pitches a tent (~16 s). Non-vehicle units heal nearby.
+              </p>
+            </div>
           </div>
           <div class="production-panel interactive hidden" id="production-panel">
             <div class="production-header">
@@ -1251,6 +1261,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-dig-trench')?.addEventListener('click', () => {
       this.callbacks.onArmTrenchDig?.();
+    });
+    this.root.querySelector('#btn-deploy-field-tent')?.addEventListener('click', () => {
+      this.callbacks.onArmMedicTent?.();
     });
 
     this.root.querySelector('#produce-btns')?.addEventListener('pointerdown', (e) => {
@@ -2256,7 +2269,10 @@ export class UIManager {
     const show = canDig && diggers.length > 0;
 
     panel.classList.toggle('hidden', !show);
-    if (!show) return;
+    if (!show) {
+      this.updateMedicTent(game);
+      return;
+    }
 
     const pending = !!mgr?.getPending?.();
     digBtn.classList.toggle('btn-armed', pending);
@@ -2272,6 +2288,62 @@ export class UIManager {
       } else {
         hint.textContent =
           'Infantry / MG / sniper dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
+      }
+    }
+    this.updateMedicTent(game);
+  }
+
+  showMedicTentHint(message) {
+    const hint = this.root.querySelector('#medic-tent-hint');
+    if (!hint || !message) return;
+    hint.textContent = message;
+    hint.classList.add('engineer-build-hint-error');
+    clearTimeout(this._medicTentHintTimer);
+    this._medicTentHintTimer = setTimeout(() => {
+      hint.classList.remove('engineer-build-hint-error');
+      const game = this._lastEngineerBuildGame;
+      if (game) this.updateMedicTent(game);
+    }, 3200);
+  }
+
+  updateMedicTent(game) {
+    const panel = this.root.querySelector('#medic-tent-actions');
+    const btn = this.root.querySelector('#btn-deploy-field-tent');
+    const hint = this.root.querySelector('#medic-tent-hint');
+    if (!panel || !btn) return;
+
+    this._lastEngineerBuildGame = game;
+    const mgr = game?.medicFieldHospitals;
+    const can = mgr?.canUse?.() ?? false;
+    const medics =
+      game?.units?.filter(
+        (u) =>
+          u.selected &&
+          u.team === 'player' &&
+          !u.dead &&
+          !u.surrendered &&
+          u.def?.type === 'medic'
+      ) ?? [];
+    const free = medics.filter((u) => !u._medicTentSite);
+    const show = can && medics.length > 0;
+
+    panel.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    const pending = !!mgr?.getPending?.();
+    btn.classList.toggle('btn-armed', pending);
+    btn.disabled = free.length === 0 && !pending;
+    btn.textContent = pending ? 'Placing tent…' : 'Field hospital tent';
+
+    if (hint && !hint.classList.contains('engineer-build-hint-error')) {
+      if (pending) {
+        hint.textContent =
+          'Click the map within ~18 m of your medic to pitch the tent. Esc to cancel.';
+      } else if (free.length === 0) {
+        hint.textContent = 'Selected medic is already setting up a tent.';
+      } else {
+        hint.textContent =
+          'Medic pitches a field hospital tent (~16 s). Infantry and other non-vehicle units heal within ~12 m.';
       }
     }
   }
@@ -3321,10 +3393,13 @@ export class UIManager {
         const fieldWorks = game?.baseBuildings?.active
           ? 'can erect <strong>garrison bunkers</strong> in the field (Build bunker).'
           : 'can erect <strong>sandbags</strong> or <strong>bunkers</strong> — move infantry onto a bunker to garrison inside.';
-        coverBlock = `<p class="unit-support-status">Support — repairs vehicles within ~16 m; ${fieldWorks}</p>`;
+        coverBlock = `<p class="unit-support-status">Combat engineer squad — rifles/SMGs; repairs vehicles within ~16 m; ${fieldWorks}</p>`;
       } else if (u.def?.type === 'medic') {
-        coverBlock =
-          '<p class="unit-support-status">Support — heals infantry within ~14 m; nearby troops retreat less often.</p>';
+        const tent = game?.medicFieldHospitals?.getMedicDeployStatus?.(u);
+        const tentLine = tent
+          ? `<p class="unit-support-status unit-building-status"><strong>${tent.label}</strong> — ${tent.pct}% complete</p>`
+          : '';
+        coverBlock = `${tentLine}<p class="unit-support-status">Combat medic — heals nearby infantry; can <strong>deploy a field hospital tent</strong> that heals non-vehicle units in range.</p>`;
       } else if (
         u.def?.type === 'infantry' ||
         u.def?.type === 'machineGun' ||

@@ -107,7 +107,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     sniper: 1.5,
     mortar: 2.2,
     medic: 1.4,
-    engineer: 1.4,
+    engineer: 1.65,
     armoredCar: group.userData.hitRadius ?? 2.6,
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,

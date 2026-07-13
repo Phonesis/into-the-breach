@@ -120,7 +120,7 @@ export class EngineerSandbagManager {
     let best = null;
     let bestD = maxDist;
     for (const e of this.fieldBunkers) {
-      if (e.destroyed || e.team !== team) continue;
+      if (e.destroyed || (e.team !== team && (e.garrison?.length ?? 0) > 0)) continue;
       const d = Math.hypot(x - e.x, z - e.z);
       if (d < bestD) {
         bestD = d;
@@ -278,10 +278,10 @@ export class EngineerSandbagManager {
     return n;
   }
 
-  _nearestSelectedEngineer(x, z, team) {
+  _nearestSelectedEngineer(x, z, team, selectedOnly = true) {
     const engineers = this.game.units.filter(
       (u) =>
-        u.selected &&
+        (!selectedOnly || u.selected) &&
         u.team === team &&
         !u.dead &&
         !u.surrendered &&
@@ -341,7 +341,7 @@ export class EngineerSandbagManager {
     return null;
   }
 
-  getPlacementRejectReason(x, z, team, buildType = this.pendingType) {
+  getPlacementRejectReason(x, z, team, buildType = this.pendingType, options = {}) {
     const preset = this._buildPreset(buildType);
     if (!preset) return 'No build type selected.';
     if (buildType === 'sandbags' && !this.canBuildSandbags()) {
@@ -369,7 +369,7 @@ export class EngineerSandbagManager {
     const spacingReason = this._spacingConflict(x, z, preset.minSpacing, buildType);
     if (spacingReason) return spacingReason;
 
-    const engineer = this._nearestSelectedEngineer(x, z, team);
+    const engineer = this._nearestSelectedEngineer(x, z, team, options.selectedOnly !== false);
     if (!engineer) {
       return 'Select a free engineer within ~24 m of the build site.';
     }
@@ -411,6 +411,32 @@ export class EngineerSandbagManager {
     this.game.ui?.updateEngineerBuild?.(this.game);
     this.game._syncPlacementCapture?.();
     this.game._syncBattleCursor?.();
+    return true;
+  }
+
+  tryAiPlace(x, z, team, buildType) {
+    const reason = this.getPlacementRejectReason(x, z, team, buildType, { selectedOnly: false });
+    if (reason) return false;
+
+    const engineer = this._nearestSelectedEngineer(x, z, team, false);
+    if (!engineer) return false;
+
+    const y = this.game.mapDef ? sampleTerrainHeight(x, z, this.game.mapDef) : 0;
+    const site = {
+      id: nextSiteId++,
+      buildType,
+      x,
+      z,
+      y,
+      team,
+      engineerId: engineer.id,
+      progress: 0,
+      marker: null,
+    };
+    this.sites.push(site);
+    engineer._sandbagSite = site.id;
+    engineer.clearAttackOrder?.();
+    this._attachSiteMarker(site);
     return true;
   }
 
@@ -496,6 +522,14 @@ export class EngineerSandbagManager {
     const engineer = this.game.units.find((u) => u.id === site.engineerId);
     if (engineer) engineer._sandbagSite = null;
     this._disposeSiteMarker(site);
+  }
+
+  cancelForUnit(engineer) {
+    const site = this.sites.find((s) => s.engineerId === engineer?.id);
+    if (!site) return false;
+    this._cancelSite(site);
+    this.sites = this.sites.filter((s) => s.id !== site.id);
+    return true;
   }
 
   update(dt) {

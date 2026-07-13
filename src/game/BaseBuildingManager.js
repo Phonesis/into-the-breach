@@ -186,8 +186,18 @@ export class BaseBuildingManager {
   }
 
   pickBunkerAt(x, z, team, maxDist = 6.5) {
-    const e = this.pickAt(x, z, team, maxDist);
-    return e?.typeId === 'bunker' ? e : null;
+    let best = null;
+    let bestD = maxDist;
+    for (const e of this.entries) {
+      if (e.destroyed || e.building || e.typeId !== 'bunker') continue;
+      if (team && e.team !== team && (e.garrison?.length ?? 0) > 0) continue;
+      const d = Math.hypot(x - e.x, z - e.z);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best;
   }
 
   countType(team, typeId) {

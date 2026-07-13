@@ -160,7 +160,7 @@ export function tryEnterBunker(unit, bunker, sources) {
   if (!canGarrisonType(unit.def?.type)) return false;
   if (bunker.neutralGarrison) {
     if (bunker.garrisonTeam && bunker.garrisonTeam !== unit.team) return false;
-  } else if (bunker.team !== unit.team) {
+  } else if (bunker.team !== unit.team && (bunker.garrison?.length ?? 0) > 0) {
     return false;
   }
 

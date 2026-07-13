@@ -130,7 +130,6 @@ export function updateCombat(
     if (attacker._dropping || attacker.retreating || attacker.surrendered || attacker._captureExit) continue;
     if (
       attacker.def.type === 'medic' ||
-      attacker.def.type === 'engineer' ||
       attacker.def.nonCombat ||
       attacker.def.damage <= 0
     )

@@ -11,9 +11,11 @@ import {
 import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/SoundManager.js';
+import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
+const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS + 16;
 
 function makeCooldowns() {
   return Object.fromEntries(
@@ -125,6 +127,10 @@ export class FireSupportManager {
     if (!this.pending || !this.game.mapDef) return;
     const def = this.getDef(this.pending);
     const { scale, color } = this._previewStyle(this.pending, def);
+    const previewColor =
+      this.pending === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)
+        ? 0xe05252
+        : color;
     this._previewScale = scale;
     const y = sampleTerrainHeight(x, z, this.game.mapDef) + 0.25;
 
@@ -132,7 +138,7 @@ export class FireSupportManager {
       const geo = new THREE.RingGeometry(0.88, 1, 40);
       geo.rotateX(-Math.PI / 2);
       const mat = new THREE.MeshBasicMaterial({
-        color,
+        color: previewColor,
         transparent: true,
         opacity: 0.5,
         side: THREE.DoubleSide,
@@ -144,7 +150,36 @@ export class FireSupportManager {
 
     this.preview.position.set(x, y, z);
     this.preview.scale.set(this._previewScale, 1, this._previewScale);
-    this.preview.material.color.setHex(color);
+    this.preview.material.color.setHex(previewColor);
+  }
+
+  _targetHq() {
+    return this.game.hqs.find((h) => h.team === this.targetTeam && !h.dead) ?? null;
+  }
+
+  isAirborneTargetAllowed(x, z) {
+    const hq = this._targetHq();
+    if (!hq) return true;
+    return Math.hypot(x - hq.position.x, z - hq.position.z) >= AIRBORNE_HQ_MIN_DISTANCE;
+  }
+
+  getSafeAirborneTarget(x, z) {
+    const hq = this._targetHq();
+    if (!hq || this.isAirborneTargetAllowed(x, z)) return { x, z };
+
+    let dx = x - hq.position.x;
+    let dz = z - hq.position.z;
+    let distance = Math.hypot(dx, dz);
+    if (distance < 0.001) {
+      dx = this.ownerBase.x - hq.position.x;
+      dz = this.ownerBase.z - hq.position.z;
+      distance = Math.hypot(dx, dz) || 1;
+    }
+
+    return {
+      x: hq.position.x + (dx / distance) * AIRBORNE_HQ_MIN_DISTANCE,
+      z: hq.position.z + (dz / distance) * AIRBORNE_HQ_MIN_DISTANCE,
+    };
   }
 
   tryPlaceTarget(x, z) {
@@ -154,6 +189,7 @@ export class FireSupportManager {
     const half = this.game.mapDef.size / 2 - 8;
     x = THREE.MathUtils.clamp(x, -half, half);
     z = THREE.MathUtils.clamp(z, -half, half);
+    if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)) return false;
 
     this.pending = null;
     this.clearPreview();
@@ -165,6 +201,11 @@ export class FireSupportManager {
 
   tryAiStrike(type, x, z) {
     if (this.ownerTeam === PLAYER || !this.isReady(type)) return false;
+    if (type === 'airborneDrop') {
+      const target = this.getSafeAirborneTarget(x, z);
+      x = target.x;
+      z = target.z;
+    }
     this.cooldowns[type] = this.getDef(type).cooldown;
     this.scheduleStrike(type, x, z);
     return true;

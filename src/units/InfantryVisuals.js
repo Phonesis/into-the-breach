@@ -15,9 +15,9 @@ const INFANTRY_WALK_TYPES = new Set([
   'sniper',
 ]);
 
-const WEAPON_POSE_TYPES = new Set(['infantry', 'paratrooper', 'sniper']);
+const WEAPON_POSE_TYPES = new Set(['infantry', 'paratrooper', 'sniper', 'engineer']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
-const FOOT_MUZZLE_UNIT_TYPES = new Set(['infantry', 'paratrooper', 'sniper']);
+const FOOT_MUZZLE_UNIT_TYPES = new Set(['infantry', 'paratrooper', 'sniper', 'engineer']);
 
 const _muzzleTip = new THREE.Vector3();
 

@@ -5,7 +5,7 @@ export const SQUAD_SIZES = {
   paratrooper: 4,
   machineGun: 2,
   medic: 2,
-  engineer: 2,
+  engineer: 4,
   mortar: 2,
   sniper: 1,
 };

@@ -1,10 +1,14 @@
 import { getStandoffPosition, findNearestEnemy, isInRange } from './Targeting.js';
 import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
+import { canSeekCover, resolveSeekCoverDestination } from './CoverSeek.js';
+import { canGarrisonType, getBunkerEnterRange, getGarrisonBunkerSources, isUnitGarrisoned } from './BunkerGarrison.js';
+import { getCoverStatus } from './CoverSystem.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
 let aiSupportTimer = 28;
+let aiDefenseTimer = 24;
 
 const AI_TICK_MIN = 3.2;
 const AI_TICK_MAX = 5;
@@ -18,15 +22,17 @@ export function resetAI(openingDelay = 0, firstProdDelay = 5) {
   aiTimer = Math.max(0, openingDelay);
   aiProdTimer = Math.max(0, firstProdDelay);
   aiSupportTimer = 28;
+  aiDefenseTimer = 24;
 }
 
 export function exportAIState() {
   return { timer: aiTimer, prodTimer: aiProdTimer };
 }
 
-export function importAIState({ timer = 0, prodTimer = 5 } = {}) {
+export function importAIState({ timer = 0, prodTimer = 5, defenseTimer = 24 } = {}) {
   aiTimer = Math.max(0, timer);
   aiProdTimer = Math.max(0, prodTimer);
+  aiDefenseTimer = Math.max(0, defenseTimer);
 }
 
 export function updateAI({
@@ -47,6 +53,7 @@ export function updateAI({
   lastStandTactic = null,
   lastStandFlankSide = 1,
   enemyFireSupport = null,
+  game = null,
 }) {
   const d = difficulty ?? { aiTickMult: 1, aiProdMult: 1, captureChanceMult: 1, attackAggressionMult: 1 };
 
@@ -62,8 +69,12 @@ export function updateAI({
     tryProduce(production, enemyResources, spendEnemy, assault, d);
   }
 
-  if (!clearance && !lastStand && !enemyStagingPhase) {
+  if (!clearance && !enemyStagingPhase) {
     updateAISupport(enemyFireSupport, playerUnits, dt, d);
+  }
+
+  if (game && !enemyStagingPhase) {
+    updateAIDefenses(game, enemyUnits, dt, assault);
   }
 
   if (aiTimer > 0) return;
@@ -85,7 +96,15 @@ export function updateAI({
   const idleAdvanceChance = 0.45 + 0.25 * (d.attackAggressionMult - 1);
 
   for (const unit of aliveEnemies) {
-    if (unit.retreating || unit.surrendered || unit._captureExit) continue;
+    if (
+      unit.retreating ||
+      unit.surrendered ||
+      unit._captureExit ||
+      unit._sandbagSite ||
+      unit._trenchDigSite ||
+      unit._diggingTrench ||
+      isUnitGarrisoned(unit)
+    ) continue;
 
     if (clearance) {
       updateClearanceDefender(unit, alivePlayers);
@@ -93,6 +112,12 @@ export function updateAI({
     }
 
     if (lastStand) {
+      const coverMove = chooseCoverMove(unit, alivePlayers, game, assault);
+      if (coverMove) {
+        unit.clearAttackOrder();
+        unit.moveTarget = coverMove;
+        continue;
+      }
       if (unit.lastStandRole) {
         updateLastStandPresetUnit(
           unit,
@@ -122,6 +147,13 @@ export function updateAI({
         unit.moveTarget = { x: captureTarget.x, z: captureTarget.z };
         continue;
       }
+    }
+
+    const coverMove = chooseCoverMove(unit, alivePlayers, game, assault);
+    if (coverMove) {
+      unit.clearAttackOrder();
+      unit.moveTarget = coverMove;
+      continue;
     }
 
     const focus = pickAttackTarget(unit, alivePlayers);
@@ -210,6 +242,79 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+}
+
+function updateAIDefenses(game, enemyUnits, dt, assault) {
+  aiDefenseTimer -= dt;
+  if (aiDefenseTimer > 0 || !enemyUnits.length) return;
+  aiDefenseTimer = 34 + Math.random() * 22;
+
+  const engineers = enemyUnits.filter(
+    (unit) => unit.def?.type === 'engineer' && !unit._sandbagSite && !unit.retreating
+  );
+  if (engineers.length && game.engineerSandbags?.canUse?.()) {
+    const engineer = engineers[Math.floor(Math.random() * engineers.length)];
+    const buildType = game.engineerSandbags.canBuildSandbags?.()
+      ? (assault?.defenderTeam === 'enemy' || Math.random() < 0.65 ? 'sandbags' : 'bunker')
+      : 'bunker';
+    if (game.engineerSandbags.tryAiPlace(engineer.position.x, engineer.position.z, 'enemy', buildType)) {
+      return;
+    }
+  }
+
+  const diggers = enemyUnits.filter(
+    (unit) =>
+      canDigAiTrenchType(unit.def?.type) &&
+      !unit._trenchDigSite &&
+      !unit._trenchId &&
+      !unit.retreating
+  );
+  if (diggers.length && game.infantryTrenches?.canUse?.()) {
+    const digger = diggers[Math.floor(Math.random() * diggers.length)];
+    game.infantryTrenches.tryAiPlace(digger.position.x, digger.position.z, 'enemy');
+  }
+}
+
+function canDigAiTrenchType(type) {
+  return type === 'infantry' || type === 'machineGun' || type === 'sniper';
+}
+
+function chooseCoverMove(unit, players, game, assault) {
+  if (!game || !players.length || !canSeekCover(unit) || getCoverStatus(unit).inCover) return null;
+  const ratio = unit.hp / Math.max(1, unit.maxHp);
+  const defending = assault?.defenderTeam === 'enemy';
+  if (ratio > 0.72 && !defending && Math.random() > 0.12) return null;
+
+  if (canGarrisonType(unit.def?.type)) {
+    const bunker = pickFriendlyBunker(unit, getGarrisonBunkerSources(game));
+    if (bunker) return { x: bunker.x, z: bunker.z };
+  }
+
+  const target = averagePosition(players);
+  const destination = resolveSeekCoverDestination(unit, target.x, target.z, game.coverSystem);
+  if (Math.hypot(destination.x - unit.position.x, destination.z - unit.position.z) < 4) return null;
+  if (Math.hypot(destination.x - target.x, destination.z - target.z) < 0.5) return null;
+  return destination;
+}
+
+function pickFriendlyBunker(unit, sources) {
+  let best = null;
+  let bestD = Infinity;
+  for (const source of sources ?? []) {
+    const entries = source.entries ?? source.fieldBunkers ?? source.objects ?? [];
+    for (const entry of entries) {
+      if (entry.destroyed || entry.building) continue;
+      if (!entry.neutralGarrison && entry.team !== unit.team) continue;
+      const capacity = entry.def?.garrisonCapacity ?? 2;
+      if ((entry.garrison?.length ?? 0) >= capacity) continue;
+      const d = Math.hypot(entry.x - unit.position.x, entry.z - unit.position.z);
+      if (d < bestD && d <= 42 + getBunkerEnterRange(entry)) {
+        best = entry;
+        bestD = d;
+      }
+    }
+  }
+  return best;
 }
 
 function updateAISupport(support, players, dt, difficulty) {

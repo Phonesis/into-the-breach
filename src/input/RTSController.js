@@ -35,6 +35,7 @@ export class RTSController {
     getPendingLastStandDeploy,
     getPendingSandbagPlacement,
     getPendingTrenchPlacement,
+    getPendingMedicTentPlacement,
     getPendingBaseBuildingPlacement,
     getBaseBuildingAttackTargets,
     getIsTowerDefense,
@@ -50,10 +51,12 @@ export class RTSController {
     onLastStandPlacement,
     onSandbagPlacement,
     onTrenchPlacement,
+    onMedicTentPlacement,
     onBaseBuildingPlacement,
     onSelectionChange,
     onHoverTarget,
     onOrder,
+    onMoveOrder,
     onBattleCursorChange,
     getCoverSystem,
     getSeekCoverMode,
@@ -74,6 +77,7 @@ export class RTSController {
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
     this.getPendingSandbagPlacement = getPendingSandbagPlacement ?? (() => null);
     this.getPendingTrenchPlacement = getPendingTrenchPlacement ?? (() => null);
+    this.getPendingMedicTentPlacement = getPendingMedicTentPlacement ?? (() => null);
     this.getPendingBaseBuildingPlacement =
       getPendingBaseBuildingPlacement ?? (() => null);
     this.getBaseBuildingAttackTargets = getBaseBuildingAttackTargets ?? (() => []);
@@ -90,10 +94,12 @@ export class RTSController {
     this.onLastStandPlacement = onLastStandPlacement;
     this.onSandbagPlacement = onSandbagPlacement;
     this.onTrenchPlacement = onTrenchPlacement;
+    this.onMedicTentPlacement = onMedicTentPlacement;
     this.onBaseBuildingPlacement = onBaseBuildingPlacement;
     this.onSelectionChange = onSelectionChange;
     this.onHoverTarget = onHoverTarget;
     this.onOrder = onOrder;
+    this.onMoveOrder = onMoveOrder;
     this.onBattleCursorChange = onBattleCursorChange;
     this.getCoverSystem = getCoverSystem ?? (() => null);
     this.getSeekCoverMode = getSeekCoverMode ?? (() => false);
@@ -494,6 +500,7 @@ export class RTSController {
       this.getPendingLastStandDeploy?.() ||
       this.getPendingSandbagPlacement?.() ||
       this.getPendingTrenchPlacement?.() ||
+      this.getPendingMedicTentPlacement?.() ||
       this.getPendingBaseBuildingPlacement?.()
     ) {
       this.setHoveredTarget(null);
@@ -615,6 +622,7 @@ export class RTSController {
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
     const pendingTrench = this.getPendingTrenchPlacement?.();
+    const pendingMedicTent = this.getPendingMedicTentPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
     if (
       pendingFs ||
@@ -622,6 +630,7 @@ export class RTSController {
       pendingDeploy ||
       pendingSandbags ||
       pendingTrench ||
+      pendingMedicTent ||
       pendingBaseBuild
     ) {
       return;
@@ -640,6 +649,7 @@ export class RTSController {
       !this.getPendingLastStandDeploy?.() &&
       !this.getPendingSandbagPlacement?.() &&
       !this.getPendingTrenchPlacement?.() &&
+      !this.getPendingMedicTentPlacement?.() &&
       !this.getPendingBaseBuildingPlacement?.() &&
       !this._tabletFireMode
     ) {
@@ -664,6 +674,7 @@ export class RTSController {
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
     const pendingTrench = this.getPendingTrenchPlacement?.();
+    const pendingMedicTent = this.getPendingMedicTentPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
     if (
       pendingFs ||
@@ -672,6 +683,7 @@ export class RTSController {
       pendingDeploy ||
       pendingSandbags ||
       pendingTrench ||
+      pendingMedicTent ||
       pendingBaseBuild
     ) {
       const ground = this.raycastGround();
@@ -727,6 +739,7 @@ export class RTSController {
     const pendingDeploy = this.getPendingLastStandDeploy?.();
     const pendingSandbags = this.getPendingSandbagPlacement?.();
     const pendingTrench = this.getPendingTrenchPlacement?.();
+    const pendingMedicTent = this.getPendingMedicTentPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
     if (
       pendingFs ||
@@ -735,6 +748,7 @@ export class RTSController {
       pendingDeploy ||
       pendingSandbags ||
       pendingTrench ||
+      pendingMedicTent ||
       pendingBaseBuild
     ) {
       const ground = this.raycastGround();
@@ -756,6 +770,9 @@ export class RTSController {
         }
         if (pendingTrench && this.onTrenchPlacement) {
           this.onTrenchPlacement('place', ground.x, ground.z);
+        }
+        if (pendingMedicTent && this.onMedicTentPlacement) {
+          this.onMedicTentPlacement('place', ground.x, ground.z);
         }
         if (pendingBaseBuild && this.onBaseBuildingPlacement) {
           this.onBaseBuildingPlacement('place', ground.x, ground.z);
@@ -926,6 +943,7 @@ export class RTSController {
         this.getGarrisonSources?.()
       );
       if (mounted > 0) {
+        this.onMoveOrder?.(selected);
         if (this.onOrder) this.onOrder('mount', riders);
         return;
       }
@@ -933,6 +951,8 @@ export class RTSController {
 
     const ground = this.raycastGround();
     if (!ground) return;
+
+    this.onMoveOrder?.(selected);
 
     const clamped = this.clampDeployPoint(ground.x, ground.z);
 

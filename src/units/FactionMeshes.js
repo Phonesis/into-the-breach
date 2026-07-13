@@ -330,28 +330,27 @@ export function buildFactionMedic(group, body, dark, factionId) {
 }
 
 export function buildFactionEngineer(group, body, dark, factionId) {
+  // Kit pile near the squad (shared tools — not a lone engineer model)
   const toolbox = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.15, 0.22), mat(0x6b4a2e, { rough: 0.82 }));
-  toolbox.position.set(0.34, 0.14, -0.16);
+  toolbox.position.set(0.55, 0.14, -0.42);
   tagEquipShadow(toolbox);
   group.add(toolbox);
 
   const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.14, 6), mat(0x3a3028, { rough: 0.9 }));
   handle.rotation.z = Math.PI / 2;
-  handle.position.set(0.34, 0.24, -0.05);
+  handle.position.set(0.55, 0.24, -0.32);
   group.add(handle);
 
-  const wrench = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.045, 0.045), mat(0x8a9098, { metal: 0.72, rough: 0.45 }));
-  wrench.position.set(-0.18, 0.4, 0.12);
-  wrench.rotation.z = 0.55;
-  group.add(wrench);
-
   const oilCan = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.16, 8), mat(0x2a4a62, { metal: 0.55 }));
-  oilCan.position.set(0.08, 0.18, 0.22);
+  oilCan.position.set(0.28, 0.18, -0.48);
   group.add(oilCan);
 
+  // 4-man combat engineer section with rifles
   const positions = [
     { x: 0, z: 0, lead: true },
-    { x: 0.42, z: 0.32, lead: false },
+    { x: 0.48, z: 0.38, lead: false },
+    { x: -0.45, z: 0.32, lead: false },
+    { x: 0.12, z: -0.42, lead: false },
   ];
 
   let squadIndex = 0;
@@ -361,17 +360,30 @@ export function buildFactionEngineer(group, body, dark, factionId) {
       squadIndex: squadIndex++,
       x,
       z,
+      withRifle: true,
       extraMeshes: lead
         ? (soldier) => {
-            const armband = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.12), mat(0xe8c040, { rough: 0.9 }));
+            // NCO gold armband
+            const armband = new THREE.Mesh(
+              new THREE.BoxGeometry(0.05, 0.1, 0.12),
+              mat(0xe8c040, { rough: 0.9 })
+            );
             armband.position.set(0.12, 0.42, 0.02);
             soldier.add(armband);
+            // Wrench on lead soldier
+            const wrench = new THREE.Mesh(
+              new THREE.BoxGeometry(0.2, 0.04, 0.04),
+              mat(0x8a9098, { metal: 0.72, rough: 0.45 })
+            );
+            wrench.position.set(-0.14, 0.38, 0.1);
+            wrench.rotation.z = 0.5;
+            soldier.add(wrench);
           }
         : undefined,
     });
   }
 
-  group.userData.hitRadius = 1.35;
+  group.userData.hitRadius = 1.55;
 }
 
 export function buildFactionMortar(group, body, detail, dark, factionId) {

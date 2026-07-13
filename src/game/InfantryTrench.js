@@ -137,10 +137,10 @@ export class InfantryTrenchManager {
     this.pending = false;
   }
 
-  _diggersSelected(team) {
+  _diggersSelected(team, selectedOnly = true) {
     return this.game.units.filter(
       (u) =>
-        u.selected &&
+        (!selectedOnly || u.selected) &&
         u.team === team &&
         !u.dead &&
         !u.surrendered &&
@@ -154,8 +154,8 @@ export class InfantryTrenchManager {
     );
   }
 
-  _nearestDigger(x, z, team) {
-    const diggers = this._diggersSelected(team);
+  _nearestDigger(x, z, team, selectedOnly = true) {
+    const diggers = this._diggersSelected(team, selectedOnly);
     let best = null;
     let bestD = TRENCH_PLACE_RANGE;
     for (const u of diggers) {
@@ -189,7 +189,7 @@ export class InfantryTrenchManager {
     return null;
   }
 
-  getPlacementRejectReason(x, z, team) {
+  getPlacementRejectReason(x, z, team, options = {}) {
     if (!this.canUse()) return 'Trenches unavailable.';
     if (this.game._isPlayerDeployZoneActive?.()) {
       return 'Wait for battle launch before digging trenches.';
@@ -216,7 +216,7 @@ export class InfantryTrenchManager {
     const spacing = this._spacingConflict(px, pz);
     if (spacing) return spacing;
 
-    if (!this._nearestDigger(px, pz, team)) {
+    if (!this._nearestDigger(px, pz, team, options.selectedOnly !== false)) {
       return 'Select free infantry / MG / sniper within ~18 m of the dig site.';
     }
 
@@ -262,6 +262,31 @@ export class InfantryTrenchManager {
     this.game.ui?.updateInfantryTrench?.(this.game);
     this.game._syncPlacementCapture?.();
     this.game._syncBattleCursor?.();
+    return true;
+  }
+
+  tryAiPlace(x, z, team) {
+    const reason = this.getPlacementRejectReason(x, z, team, { selectedOnly: false });
+    if (reason) return false;
+
+    const digger = this._nearestDigger(x, z, team, false);
+    if (!digger) return false;
+
+    const y = this.game.mapDef ? sampleTerrainHeight(x, z, this.game.mapDef) : 0;
+    const site = {
+      id: nextTrenchId++,
+      x,
+      z,
+      y,
+      team,
+      diggerId: digger.id,
+      progress: 0,
+      marker: null,
+    };
+    this.sites.push(site);
+    digger._trenchDigSite = site.id;
+    digger.clearAttackOrder?.();
+    this._attachSiteMarker(site);
     return true;
   }
 
@@ -324,6 +349,15 @@ export class InfantryTrenchManager {
     this._disposeSiteMarker(site);
   }
 
+  cancelForUnit(digger) {
+    const site = this.sites.find((s) => s.diggerId === digger?.id);
+    if (!site) return false;
+    digger._diggingTrench = false;
+    this._cancelSite(site);
+    this.sites = this.sites.filter((s) => s.id !== site.id);
+    return true;
+  }
+
   _releaseAllFromTrench(trench) {
     if (!trench?.garrison?.length) return;
     const ids = [...trench.garrison];
@@ -341,7 +375,7 @@ export class InfantryTrenchManager {
     let best = null;
     let bestD = maxDist;
     for (const t of this.trenches) {
-      if (t.destroyed || t.team !== team) continue;
+      if (t.destroyed || (t.team !== team && (t.garrison?.length ?? 0) > 0)) continue;
       const d = Math.hypot(x - t.x, z - t.z);
       if (d < bestD) {
         bestD = d;
@@ -418,7 +452,8 @@ export function tryEnterTrench(unit, trench, manager) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
   if (isUnitMounted(unit) || isUnitGarrisoned(unit)) return false;
   if (!OCCUPY_TYPES.has(unit.def?.type)) return false;
-  if (!trench || trench.destroyed || trench.team !== unit.team) return false;
+  if (!trench || trench.destroyed) return false;
+  if (trench.team !== unit.team && (trench.garrison?.length ?? 0) > 0) return false;
   if ((trench.garrison?.length ?? 0) >= TRENCH_CAPACITY) return false;
   if (Math.hypot(unit.position.x - trench.x, unit.position.z - trench.z) > TRENCH_ENTER_RANGE + 0.5) {
     return false;
