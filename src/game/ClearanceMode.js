@@ -30,7 +30,7 @@ export function getArmorDamageMultiplier(attackerType, target) {
     if (attackerType === 'infantry' || attackerType === 'machineGun' || attackerType === 'armoredCar') {
       return 0;
     }
-    if (attackerType === 'sniper') return isSuper ? 0.08 : 0.12;
+    if (attackerType === 'sniper') return 0;
     if (attackerType === 'mortar') return isSuper ? 1.05 : 1.15;
     if (attackerType === 'antiTankGun') return isSuper ? 1.08 : 1.12;
     if (ANTI_ARMOR.has(attackerType)) return isSuper ? 1.25 : 1.4;
@@ -39,7 +39,7 @@ export function getArmorDamageMultiplier(attackerType, target) {
 
   if (t === 'armoredCar') {
     if (attackerType === 'infantry' || attackerType === 'machineGun') return 0.32;
-    if (attackerType === 'sniper') return 0.55;
+    if (attackerType === 'sniper') return 0;
     if (attackerType === 'mortar') return 1.05;
     if (attackerType === 'tank' || attackerType === 'superHeavyTank' || attackerType === 'artillery') {
       return attackerType === 'superHeavyTank' ? 1.35 : 1.25;

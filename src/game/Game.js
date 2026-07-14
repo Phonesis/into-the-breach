@@ -2784,6 +2784,7 @@ export class Game {
       (killed && targetKilledByExplosion) ||
       targetIsArmored ||
       targetIsScenery ||
+      def.type === 'mortar' ||
       (groundImpact &&
         (def.type === 'artillery' ||
           def.type === 'mortar' ||
