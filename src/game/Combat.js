@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
-import { spawnSmokePuff, triggerParatrooperAtRecoil } from '../effects/CombatEffects.js';
-import { sampleTerrainHeight, hasReachedMoveDest, advanceUnitOnTerrain } from '../world/Terrain.js';
+import {
+  spawnHandGrenade,
+  spawnSmokePuff,
+  triggerParatrooperAtRecoil,
+} from '../effects/CombatEffects.js';
+import {
+  sampleTerrainHeight,
+  hasReachedMoveDest,
+  advanceUnitOnTerrain,
+  updateUnitTerrainPose,
+} from '../world/Terrain.js';
 import { advanceMovePath } from './MovePath.js';
 
 import {
@@ -18,6 +27,7 @@ import {
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
   isSmokeShellTarget,
+  SMOKE_SHELL_COOLDOWN_SEC,
   isHqTarget,
 } from './Targeting.js';
 import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
@@ -36,6 +46,8 @@ import { isUnitMounted } from './TankRiders.js';
 import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
 import {
   getInfantryMuzzleWorldPosition,
+  aimDeployedMachineGun,
+  aimDeployedMortar,
   markInfantryFireAim,
   updateInfantryWalkAnimation,
   usesInfantryMuzzleOrigin,
@@ -46,9 +58,78 @@ import {
 } from '../units/VehicleMeshKit.js';
 
 
-const SMALL_ARMS_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'armoredCar', 'paratrooper']);
+const SMALL_ARMS_TYPES = new Set([
+  'infantry',
+  'engineer',
+  'machineGun',
+  'sniper',
+  'armoredCar',
+  'paratrooper',
+]);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
-const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
+const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
+const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
+const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'superHeavyTank']);
+export const HAND_GRENADE_RANGE = 8;
+export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
+const HAND_GRENADE_DAMAGE = 12;
+
+export function canThrowHandGrenadeAt(attacker, target) {
+  if (!attacker || !target || attacker.dead || target.dead) return false;
+  if (!HAND_GRENADE_THROWER_TYPES.has(attacker.def?.type)) return false;
+  if (!HAND_GRENADE_TARGET_TYPES.has(target.def?.type)) return false;
+  if (attacker.team === target.team || attacker.surrendered || attacker._captureExit) return false;
+  if ((attacker.grenadeCooldown ?? 0) > 0 || isUnitMounted(attacker)) return false;
+  return distanceBetween(attacker, target) <= HAND_GRENADE_RANGE;
+}
+
+function findHandGrenadeTarget(attacker, candidates) {
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const target of candidates) {
+    if (!canThrowHandGrenadeAt(attacker, target)) continue;
+    const distance = distanceBetween(attacker, target);
+    if (distance < nearestDistance) {
+      nearest = target;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+function tryThrowHandGrenade(attacker, candidates, scene, mapDef, onFire) {
+  const target = findHandGrenadeTarget(attacker, candidates);
+  if (!target) return false;
+
+  const map = attacker._mapDef || mapDef;
+  const from = new THREE.Vector3(attacker.position.x, attacker.position.y + 0.9, attacker.position.z);
+  if (map) from.y = sampleTerrainHeight(from.x, from.z, map) + 0.9;
+  const to = new THREE.Vector3(target.position.x, target.position.y + 0.85, target.position.z);
+  if (map) to.y = sampleTerrainHeight(to.x, to.z, map) + 0.85;
+
+  attacker.grenadeCooldown = HAND_GRENADE_COOLDOWN_SEC + Math.random() * 1.5;
+  const armorFactor = target.def.type === 'superHeavyTank' ? 0.65 : 1;
+  const damage = HAND_GRENADE_DAMAGE * armorFactor * getRankDamageMultiplier(attacker);
+  target.takeDamage(damage, { explosive: true });
+  if (target.dead) recordEnemyKill(attacker, target);
+
+  const event = {
+    attacker,
+    target,
+    def: { ...attacker.def, type: 'handGrenade' },
+    dist: distanceBetween(attacker, target),
+    killed: target.dead,
+    targetIsHQ: false,
+    targetIsScenery: false,
+    groundImpact: false,
+    handGrenade: true,
+    from: { x: from.x, y: from.y, z: from.z },
+    to: { x: to.x, y: to.y, z: to.z },
+  };
+
+  spawnHandGrenade(scene, from, to, () => onFire?.(event));
+  return true;
+}
 
 function isParatrooperAtShot(attacker, target, fireOpts = {}) {
   if (attacker.def.type !== 'paratrooper') return false;
@@ -73,6 +154,10 @@ export function tickUnitCooldowns(units, dt) {
     if (unit.dead) continue;
     if (unit.attackCooldown > 0) unit.attackCooldown -= dt;
     if (unit.mgCooldown > 0) unit.mgCooldown -= dt;
+    if (unit.grenadeCooldown > 0) unit.grenadeCooldown = Math.max(0, unit.grenadeCooldown - dt);
+    if (unit.smokeShellCooldown > 0) {
+      unit.smokeShellCooldown = Math.max(0, unit.smokeShellCooldown - dt);
+    }
   }
 }
 
@@ -141,6 +226,7 @@ export function updateCombat(
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
     const localAcquire = filterAcquireNearAttacker(attacker, acquire);
+    tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire);
     const target = resolveAttackTarget(attacker, targets, localAcquire);
     if (!target) continue;
 
@@ -162,6 +248,7 @@ export function updateCombat(
     if (
       canFireMain &&
       (attacker.def.type === 'infantry' ||
+        attacker.def.type === 'engineer' ||
         attacker.def.type === 'paratrooper' ||
         attacker.def.type === 'sniper')
     ) {
@@ -187,6 +274,8 @@ export function updateCombat(
     }
 
     faceUnitTowardTarget(attacker, target, dt);
+    aimDeployedMachineGun(attacker, target);
+    aimDeployedMortar(attacker, target);
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
       fire(
@@ -353,6 +442,9 @@ function fire(
     }
   } else if (!coax && attacker.def.type === 'antiTankGun') {
     vfxType = 'tank';
+  } else if (!coax && attacker.def.type === 'engineer') {
+    // Combat engineers use the standard rifle/SMG flash and tracer profile.
+    vfxType = 'infantry';
   }
 
   const map = attacker._mapDef || mapDef;
@@ -452,6 +544,7 @@ function fire(
   }
 
   if (isSmokeShellTarget(target)) {
+    attacker.smokeShellCooldown = SMOKE_SHELL_COOLDOWN_SEC;
     options.smokeScreens?.deploy?.(impact.x, impact.z, attacker.team);
     attacker.clearAttackOrder();
     const showSmokeVfx =
@@ -562,6 +655,7 @@ function fire(
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
     if (
       attacker.def.type === 'infantry' ||
+      attacker.def.type === 'engineer' ||
       attacker.def.type === 'paratrooper' ||
       attacker.def.type === 'sniper'
     ) {
@@ -747,6 +841,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       }
     }
 
+    updateUnitTerrainPose(unit, mapDef, dt);
     updateInfantryWalkAnimation(unit, dt);
   }
 }

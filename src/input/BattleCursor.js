@@ -32,11 +32,13 @@ export function canSmokeShellOrder(unit) {
   return unit?.def?.type === 'artillery' && !unit.dead && !unit.surrendered;
 }
 
+export { isSmokeShellReady };
+
 /** Any combat unit that can receive a Shift+LMB manual fire order. */
 export function canManualFireOrder(unit) {
   if (!unit?.def) return false;
   if (unit.def.nonCombat || unit.def.damage <= 0) return false;
-  if (unit.def.type === 'medic' || unit.def.type === 'engineer') return false;
+  if (unit.def.type === 'medic') return false;
   return true;
 }
 
@@ -62,3 +64,4 @@ export function resolveBattleCursor({
   if (shiftHeld && hasManualFireSelection) return CURSOR_GROUND_FIRE;
   return '';
 }
+import { isSmokeShellReady } from '../game/Targeting.js';

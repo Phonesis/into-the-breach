@@ -22,6 +22,11 @@ import {
 import { renderGameGuideHtml } from '../data/gameGuide.js';
 import { isPlayerStagingPhase } from '../game/OpeningDeployZone.js';
 import {
+  isSmokeShellReady,
+  isSmokeShellTarget,
+  SMOKE_SHELL_COOLDOWN_SEC,
+} from '../game/Targeting.js';
+import {
   DEFENSE_TYPE_LIST,
   DEFENSE_UPGRADES,
   DEFENSE_TYPES,
@@ -549,7 +554,7 @@ export class UIManager {
                 Smoke shell
               </button>
               <p class="smoke-shell-hint" id="smoke-shell-hint">
-                Alt+Shift+LMB on ground — smoke lasts 60s and blocks enemy line of sight
+                Alt+Shift+LMB on ground — 45s cooldown; smoke blocks line of sight for 60s
               </p>
             </div>
             <div class="tank-rider-actions hidden" id="tank-rider-actions">
@@ -3255,15 +3260,32 @@ export class UIManager {
         (u) => u.selected && !u.dead && u.def?.type === 'artillery'
       ) ?? [];
     const hasArtillery = selected.length > 0;
+    const ready = selected.filter(isSmokeShellReady);
+    const pendingMission = selected.some((u) => isSmokeShellTarget(u.attackOrder));
+    const nextReady = selected.length
+      ? Math.min(...selected.map((u) => Math.max(0, u.smokeShellCooldown ?? 0)))
+      : 0;
     wrap.classList.toggle('hidden', !hasArtillery);
 
     const armed = !!game?.smokeShellTargeting;
     btn.classList.toggle('armed', armed);
-    btn.textContent = armed ? 'Cancel smoke shell' : 'Smoke shell';
+    btn.disabled = !armed && ready.length === 0;
+    btn.classList.toggle('on-cooldown', !armed && hasArtillery && ready.length === 0);
+    btn.textContent = armed
+      ? 'Cancel smoke shell'
+      : ready.length > 0
+        ? 'Smoke shell'
+        : pendingMission
+          ? 'Smoke shell (firing)'
+          : `Smoke shell (${Math.ceil(nextReady)}s)`;
     if (hint) {
       hint.textContent = armed
         ? 'Click the map to place smoke (Esc to cancel)'
-        : 'Alt+Shift+LMB on ground, or arm then click — smoke lasts 60s and blocks enemy aim';
+        : ready.length > 0
+          ? `One selected gun fires — ${SMOKE_SHELL_COOLDOWN_SEC}s cooldown; smoke lasts 60s and blocks enemy aim`
+          : pendingMission
+            ? 'Smoke mission assigned — the cooldown begins when the shell is fired'
+            : `Smoke ammunition being prepared — ready in ${Math.ceil(nextReady)}s`;
     }
   }
 

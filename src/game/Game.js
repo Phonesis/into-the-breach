@@ -180,7 +180,7 @@ import { createDeployZoneRings, disposeDeployZoneRings } from '../visual/DeployZ
 import { RTSController } from '../input/RTSController.js';
 import {
   canManualFireOrder,
-  canSmokeShellOrder,
+  isSmokeShellReady,
   resolveBattleCursor,
 } from '../input/BattleCursor.js';
 import { SmokeScreenManager } from './SmokeScreen.js';
@@ -197,6 +197,7 @@ import {
   isInfantryUnitType,
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
+import { setActiveVehicleTheatre } from '../units/UnitTextures.js';
 import { snapUnitYaw } from '../units/VehicleRotation.js';
 import {
   applyUnitDeathVisual,
@@ -761,6 +762,7 @@ export class Game {
     }
     this.campaignStyle = campaignStyle;
     this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
+    setActiveVehicleTheatre(this.mapDef.id);
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
     const assault = isAssaultMode(gameMode);
@@ -1307,7 +1309,7 @@ export class Game {
       smokeShellPending: !!this.smokeShellTargeting,
       shiftHeld,
       hasManualFireSelection: selected.some(canManualFireOrder),
-      hasSmokeShellSelection: selected.some(canSmokeShellOrder),
+      hasSmokeShellSelection: selected.some(isSmokeShellReady),
     });
   }
 
@@ -1811,7 +1813,7 @@ export class Game {
   armSmokeShell() {
     if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
     const artillery = this._playerAlive.filter(
-      (u) => u.selected && canSmokeShellOrder(u)
+      (u) => u.selected && isSmokeShellReady(u)
     );
     if (artillery.length === 0) return;
 
@@ -1840,13 +1842,18 @@ export class Game {
     if (mode !== 'place') return;
 
     const selected = this._playerAlive.filter(
-      (u) => u.selected && canSmokeShellOrder(u)
+      (u) => u.selected && isSmokeShellReady(u)
     );
     if (selected.length === 0) return;
 
-    for (const u of selected) {
-      u.setSmokeShellOrder(x, z);
-    }
+    // One mission uses one gun; multi-select no longer produces a simultaneous smoke salvo.
+    selected.sort(
+      (a, b) =>
+        Math.hypot(a.position.x - x, a.position.z - z) -
+        Math.hypot(b.position.x - x, b.position.z - z)
+    );
+    const firingGun = selected[0];
+    firingGun.setSmokeShellOrder(x, z);
 
     this.smokeShellTargeting = false;
     this.smokeScreens.clearPreview();
@@ -1855,7 +1862,7 @@ export class Game {
     this.ui?.updateFireMissionControls(this._countActiveFireMissions());
     this._syncBattleCursor();
     this.ui?.updateSelection(
-      selected,
+      [firingGun],
       this.controller?.hoveredTarget,
       this.selectedHq,
       this
@@ -2690,10 +2697,19 @@ export class Game {
     to,
     coaxFire,
     paratrooperAtFire,
+    handGrenade,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
     const pos = { x: from.x, z: from.z };
     const factionId = attacker.faction?.id;
+
+    if (handGrenade) {
+      sounds.playImpact('explosion', { x: to.x, z: to.z }, 0);
+      if (killed && target?.def && isArmoredCombatVehicle(target.def.type)) {
+        triggerVehicleKillFx(this, target, to);
+      }
+      return;
+    }
 
     if (coaxFire) {
       sounds.playWeapon(mgProfileForFaction(factionId), pos, {

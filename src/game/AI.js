@@ -1,4 +1,9 @@
-import { getStandoffPosition, findNearestEnemy, isInRange } from './Targeting.js';
+import {
+  getStandoffPosition,
+  findNearestEnemy,
+  isInRange,
+  isSmokeShellReady,
+} from './Targeting.js';
 import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { canSeekCover, resolveSeekCoverDestination } from './CoverSeek.js';
@@ -83,6 +88,8 @@ export function updateAI({
   const aliveEnemies = enemyUnits;
   const alivePlayers = playerUnits;
 
+  tryAiSmokeScreen(aliveEnemies, alivePlayers, game, d);
+
   if (alivePlayers.length === 0 && (!assault || assault.attackerTeam === 'enemy')) return;
 
   const frontline = assault?.frontlineCp;
@@ -105,6 +112,8 @@ export function updateAI({
       unit._diggingTrench ||
       isUnitGarrisoned(unit)
     ) continue;
+
+    if (unit.attackOrder?.isSmokeShell) continue;
 
     if (clearance) {
       updateClearanceDefender(unit, alivePlayers);
@@ -242,6 +251,64 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+}
+
+function tryAiSmokeScreen(enemyUnits, playerUnits, game, difficulty) {
+  if (!game?.smokeScreens || enemyUnits.length < 2 || playerUnits.length === 0) return false;
+  const guns = enemyUnits.filter(isSmokeShellReady);
+  if (guns.length === 0) return false;
+
+  const threats = playerUnits.filter((unit) =>
+    ['antiTankGun', 'tank', 'superHeavyTank'].includes(unit.def?.type)
+  );
+  if (threats.length === 0) return false;
+
+  let best = null;
+  let bestScore = -Infinity;
+  const activeSmoke = game.smokeScreens.getActiveScreens?.() ?? [];
+
+  for (const threat of threats) {
+    const screeningArmor = enemyUnits.filter(
+      (unit) =>
+        !unit.dead &&
+        (isTankType(unit.def?.type) || unit.def?.type === 'armoredCar') &&
+        unit.distanceTo(threat) <= 62
+    );
+    const screeningInfantry = enemyUnits.filter(
+      (unit) =>
+        !unit.dead &&
+        ['infantry', 'engineer', 'paratrooper', 'machineGun'].includes(unit.def?.type) &&
+        unit.distanceTo(threat) <= 46
+    );
+    const protectedUnits = [...screeningArmor, ...screeningInfantry];
+    if (protectedUnits.length < 2 || screeningArmor.length === 0) continue;
+
+    const center = averagePosition(protectedUnits);
+    const dx = center.x - threat.position.x;
+    const dz = center.z - threat.position.z;
+    const distance = Math.hypot(dx, dz) || 1;
+    const offset = Math.min(17, Math.max(8, distance * 0.36));
+    const x = threat.position.x + (dx / distance) * offset;
+    const z = threat.position.z + (dz / distance) * offset;
+    if (activeSmoke.some((screen) => Math.hypot(screen.x - x, screen.z - z) < 32)) continue;
+
+    for (const gun of guns) {
+      const missionDistance = Math.hypot(gun.position.x - x, gun.position.z - z);
+      if (missionDistance > gun.def.range * 0.96) continue;
+      const threatValue = threat.def?.type === 'antiTankGun' ? 120 : threat.def?.type === 'superHeavyTank' ? 85 : 65;
+      const score = threatValue + screeningArmor.length * 28 + screeningInfantry.length * 8 - missionDistance * 0.06;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { gun, x, z };
+      }
+    }
+  }
+
+  if (!best) return false;
+  const useChance = Math.min(0.84, 0.58 * (difficulty.attackAggressionMult ?? 1));
+  if (Math.random() > useChance) return false;
+  best.gun.setSmokeShellOrder(best.x, best.z);
+  return true;
 }
 
 function updateAIDefenses(game, enemyUnits, dt, assault) {
@@ -728,7 +795,13 @@ function pickAttackTarget(unit, players) {
   if (!nearest) return null;
   const d = unit.distanceTo(nearest);
   if (d <= unit.def.range * 1.15) return nearest;
-  if (d < unit.def.range * 1.5 && (unit.def.type === 'infantry' || unit.def.type === 'sniper')) return nearest;
+  if (
+    d < unit.def.range * 1.5 &&
+    (unit.def.type === 'infantry' ||
+      unit.def.type === 'engineer' ||
+      unit.def.type === 'sniper')
+  )
+    return nearest;
   return null;
 }
 

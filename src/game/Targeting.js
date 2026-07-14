@@ -78,6 +78,20 @@ export function isSmokeShellTarget(target) {
   return !!(target?.isSmokeShell && target.position);
 }
 
+/** Reload and ammunition-preparation delay after a howitzer fires smoke. */
+export const SMOKE_SHELL_COOLDOWN_SEC = 45;
+
+export function isSmokeShellReady(unit) {
+  return (
+    unit?.def?.type === 'artillery' &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    (unit.smokeShellCooldown ?? 0) <= 0 &&
+    !isSmokeShellTarget(unit.attackOrder)
+  );
+}
+
 /** True when a player-issued attack order is in weapon range (ground, cover, or unit). */
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;

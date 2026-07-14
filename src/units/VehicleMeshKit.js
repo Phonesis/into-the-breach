@@ -411,6 +411,15 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     coax.userData.tankPart = 'barrel';
     turretPivot.add(coax);
   }
+
+  // Turret child positions are authored in hull-local coordinates. Move the
+  // pivot onto the actual turret ring, then compensate the children so the
+  // untouched model retains its rest pose but rotates around its own center.
+  if (Math.abs(t.z ?? 0) > 1e-6) {
+    turretPivot.position.z = t.z;
+    for (const child of turretPivot.children) child.position.z -= t.z;
+  }
+
   if (d.antenna) {
     const a = d.antenna;
     const mast = new THREE.Mesh(
@@ -620,6 +629,28 @@ function addGunShield(group, body, detail, dark, sh) {
     return;
   }
 
+  if (sh.style === 'pak40') {
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.58, sh.h, sh.d), body, {
+      y: shieldY,
+      z: shieldZ,
+      part: 'hull',
+    });
+    for (const side of [-1, 1]) {
+      addBox(group, new THREE.BoxGeometry(sh.w * 0.28, sh.h * 0.92, sh.d), body, {
+        x: side * sh.w * 0.39,
+        y: shieldY - sh.h * 0.03,
+        z: shieldZ - 0.025,
+        ry: side * -0.18,
+        part: 'hull',
+      });
+    }
+    addBox(group, new THREE.BoxGeometry(sh.w * 0.34, sh.h * 0.18, sh.d * 1.4), dark, {
+      y: shieldY - sh.h * 0.38,
+      z: shieldZ + 0.05,
+    });
+    return;
+  }
+
   if (sh.style === 'at') {
     addBox(group, new THREE.BoxGeometry(sh.w, sh.h, sh.d), body, {
       y: shieldY,
@@ -697,18 +728,89 @@ function addGunTube(group, body, dark, tube, mount, part = null) {
   gun.add(barrel);
 
   if (tube.muzzleBrake) {
-    const mb = new THREE.Mesh(
-      new THREE.CylinderGeometry(r1 * 1.32, r1, 0.26, 8),
-      dark
-    );
-    mb.rotation.x = Math.PI / 2;
-    mb.position.set(0, 0, breechLen / 2 + len + 0.08);
-    mb.userData.tankPart = 'muzzle';
-    gun.add(mb);
+    const count = tube.muzzleBrake === 'double' ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const mb = new THREE.Mesh(
+        new THREE.CylinderGeometry(r1 * 1.42, r1 * 1.24, 0.15, 10),
+        dark
+      );
+      mb.rotation.x = Math.PI / 2;
+      mb.position.set(0, 0, breechLen / 2 + len + 0.04 + i * 0.13);
+      if (i === count - 1) mb.userData.tankPart = 'muzzle';
+      gun.add(mb);
+    }
   }
 
   group.add(gun);
   return gun;
+}
+
+function addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ) {
+  const handwheel = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 6, 14), dark);
+  handwheel.position.set(d.shield.w * 0.35, mountY - 0.12, mountZ - 0.24);
+  handwheel.userData.tankPart = 'hull';
+  group.add(handwheel);
+  addCylinder(group, new THREE.CylinderGeometry(0.025, 0.025, 0.22, 7), dark, {
+    x: d.shield.w * 0.35,
+    y: mountY - 0.12,
+    z: mountZ - 0.24,
+    rz: Math.PI / 2,
+  });
+
+  const addRecuperator = (x, yOffset = 0.14) =>
+    addCylinder(group, new THREE.CylinderGeometry(0.045, 0.05, 0.72, 9), detail, {
+      x,
+      y: mountY + yOffset,
+      z: mountZ + 0.22,
+      rx: Math.PI / 2,
+      part: 'barrel',
+    });
+
+  switch (d.model) {
+    case 'lefh18':
+      addRecuperator(-0.1, 0.16);
+      addRecuperator(0.1, 0.16);
+      break;
+    case 'm101':
+      addRecuperator(0, 0.16);
+      addBox(group, new THREE.BoxGeometry(0.42, 0.18, 0.3), detail, {
+        x: -0.52,
+        y: 0.3,
+        z: -0.46,
+        part: 'hull',
+      });
+      break;
+    case 'qf25pdr': {
+      addRecuperator(0, 0.15);
+      const platform = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.055, 20), dark);
+      platform.position.set(0, 0.045, -0.08);
+      platform.userData.tankPart = 'hull';
+      group.add(platform);
+      break;
+    }
+    case 'm30_122':
+      addRecuperator(-0.09, 0.17);
+      addRecuperator(0.09, 0.17);
+      break;
+    case 'pak40':
+      addRecuperator(0, 0.14);
+      break;
+    case 'm1_57mm':
+    case 'qf6pdr':
+      addRecuperator(0, 0.12);
+      break;
+    case 'zis3':
+      addRecuperator(0, 0.13);
+      addBox(group, new THREE.BoxGeometry(0.36, 0.16, 0.28), detail, {
+        x: -0.48,
+        y: 0.28,
+        z: -0.38,
+        part: 'hull',
+      });
+      break;
+    default:
+      break;
+  }
 }
 
 export function buildArtilleryFromDesign(group, body, detail, dark, d) {
@@ -752,6 +854,7 @@ export function buildArtilleryFromDesign(group, body, detail, dark, d) {
   }
 
   addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
+  addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ);
 
   if (sh.style !== 'box') {
     const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.05), dark);
@@ -785,6 +888,7 @@ export function buildAtGunFromDesign(group, body, detail, dark, d) {
   });
 
   addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
+  addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ);
 
   const trailLock = new THREE.Mesh(
     new THREE.BoxGeometry(0.3, 0.09, 0.24),

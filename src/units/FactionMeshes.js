@@ -78,30 +78,91 @@ export function buildDaimlerAC(group, body, detail, dark) {
 }
 
 /** Germany — leFH 18 */
+function addTowedGunCrew(group, factionId, { artillery = false } = {}) {
+  const positions = artillery
+    ? [
+        { x: -0.62, z: -0.38, gunner: true },
+        { x: 0.7, z: -0.52, gunner: false },
+        { x: 0.18, z: -1.12, gunner: false },
+      ]
+    : [
+        { x: -0.54, z: -0.34, gunner: true },
+        { x: 0.58, z: -0.72, gunner: false },
+      ];
+
+  const crew = new THREE.Group();
+  crew.name = 'towedGunCrew';
+  crew.userData.isTowedGunCrew = true;
+  group.add(crew);
+
+  positions.forEach((position, squadIndex) => {
+    const soldier = buildSquadSoldier(crew, {
+      factionId,
+      squadIndex,
+      x: position.x,
+      z: position.z,
+      gunner: position.gunner,
+      crouching: position.gunner,
+      withRifle: false,
+      withPack: false,
+    });
+    soldier.rotation.y = squadIndex === 0 ? 0.2 : squadIndex === 1 ? -0.28 : Math.PI;
+    soldier.userData.isTowedGunCrew = true;
+  });
+
+  // Ready ammunition makes the crew read as an operating detachment rather than scenery.
+  const ammoCrate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.2, 0.3),
+    mat(factionId === 'russia' ? 0x556044 : 0x67583d, { rough: 0.9, metal: 0.04 })
+  );
+  ammoCrate.position.set(artillery ? 0.72 : 0.58, 0.12, artillery ? -1.3 : -1.05);
+  ammoCrate.userData.tankPart = 'hull';
+  crew.add(ammoCrate);
+
+  if (artillery) {
+    for (let i = 0; i < 3; i++) {
+      const shell = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.045, 0.38, 8),
+        mat(0x9b7a31, { rough: 0.48, metal: 0.62 })
+      );
+      shell.position.set(0.56 + i * 0.11, 0.22, -1.18 - (i % 2) * 0.1);
+      shell.rotation.z = i === 0 ? 0 : 0.08 * i;
+      shell.userData.tankPart = 'hull';
+      crew.add(shell);
+    }
+  }
+}
+
 export function buildLeFH18(group, body, detail, dark) {
   buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('germany', 'artillery'));
+  addTowedGunCrew(group, 'germany', { artillery: true });
 }
 
 /** USA — M101 howitzer */
 export function buildM101(group, body, detail, dark) {
   buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('usa', 'artillery'));
+  addTowedGunCrew(group, 'usa', { artillery: true });
 }
 
 /** UK — QF 25-pounder */
 export function build25Pounder(group, body, detail, dark) {
   buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('uk', 'artillery'));
+  addTowedGunCrew(group, 'uk', { artillery: true });
 }
 
 export function buildPak40(group, body, detail, dark) {
   buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('germany', 'antiTankGun'));
+  addTowedGunCrew(group, 'germany');
 }
 
 export function buildM1AtGun(group, body, detail, dark) {
   buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('usa', 'antiTankGun'));
+  addTowedGunCrew(group, 'usa');
 }
 
 export function build6Pounder(group, body, detail, dark) {
   buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('uk', 'antiTankGun'));
+  addTowedGunCrew(group, 'uk');
 }
 
 function buildT3485(group, body, detail, dark) {
@@ -118,10 +179,12 @@ function buildBA64(group, body, detail, dark) {
 
 function buildM30(group, body, detail, dark) {
   buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'artillery'));
+  addTowedGunCrew(group, 'russia', { artillery: true });
 }
 
 function buildZIS3(group, body, detail, dark) {
   buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'antiTankGun'));
+  addTowedGunCrew(group, 'russia');
 }
 
 function addMgTripod(group, dark, { spread = 0.46, legLen = 0.54, pivotY = 0.34 } = {}) {
@@ -176,114 +239,135 @@ function addRedCross(group, x, y, z, size = 0.09) {
 }
 
 export function buildFactionMG(group, body, detail, dark, factionId) {
+  // The crew turns with the squad; the deployed weapon counter-rotates on this
+  // pivot so its physical barrel can remain locked exactly onto the target.
+  const gun = new THREE.Group();
+  gun.name = 'deployedMachineGun';
+  gun.rotation.y = -Math.PI / 2;
+  gun.userData.baseYaw = -Math.PI / 2;
+  group.add(gun);
+  group.userData.machineGunPivot = gun;
+
+  let muzzleMesh = null;
   if (factionId === 'germany') {
-    addMgTripod(group, dark, { spread: 0.44, legLen: 0.5, pivotY: 0.36 });
+    addMgTripod(gun, dark, { spread: 0.44, legLen: 0.5, pivotY: 0.36 });
 
     const lafette = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.38), dark);
     lafette.position.set(0, 0.42, 0.02);
     tagEquipShadow(lafette);
-    group.add(lafette);
+    gun.add(lafette);
 
     const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.14), dark);
     receiver.position.set(0.04, 0.52, 0.08);
     receiver.rotation.x = -0.08;
-    group.add(receiver);
+    gun.add(receiver);
 
     const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.62, 10), dark);
     jacket.rotation.z = Math.PI / 2;
     jacket.position.set(0.38, 0.54, 0.1);
-    group.add(jacket);
+    gun.add(jacket);
 
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.42, 8), dark);
     barrel.rotation.z = Math.PI / 2;
     barrel.position.set(0.78, 0.54, 0.1);
-    group.add(barrel);
+    gun.add(barrel);
+    muzzleMesh = barrel;
 
     const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.16, 10), dark);
     drum.rotation.x = Math.PI / 2;
     drum.position.set(-0.02, 0.5, -0.12);
-    group.add(drum);
+    gun.add(drum);
 
     const beltBox = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.22), dark);
     beltBox.position.set(-0.22, 0.44, 0.18);
-    group.add(beltBox);
+    gun.add(beltBox);
   } else if (factionId === 'usa') {
-    addMgTripod(group, dark, { spread: 0.42, legLen: 0.48, pivotY: 0.32 });
+    addMgTripod(gun, dark, { spread: 0.42, legLen: 0.48, pivotY: 0.32 });
 
     const traverse = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.28), dark);
     traverse.position.set(0, 0.4, 0);
-    group.add(traverse);
+    gun.add(traverse);
 
     const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.12), dark);
     receiver.position.set(0.08, 0.5, 0.06);
-    group.add(receiver);
+    gun.add(receiver);
 
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.58, 8), dark);
     barrel.rotation.z = Math.PI / 2;
     barrel.position.set(0.46, 0.51, 0.06);
-    group.add(barrel);
+    gun.add(barrel);
+    muzzleMesh = barrel;
 
     const stock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.1), dark);
     stock.position.set(-0.14, 0.49, 0.02);
-    group.add(stock);
+    gun.add(stock);
 
     const ammoCan = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.18), dark);
     ammoCan.position.set(-0.28, 0.38, 0.22);
-    group.add(ammoCan);
+    gun.add(ammoCan);
 
     const lid = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.03, 0.16), mat(0x3d4a32, { rough: 0.8 }));
     lid.position.set(-0.28, 0.47, 0.22);
-    group.add(lid);
+    gun.add(lid);
   } else if (factionId === 'russia') {
-    addMgTripod(group, dark, { spread: 0.4, legLen: 0.48, pivotY: 0.34 });
+    addMgTripod(gun, dark, { spread: 0.4, legLen: 0.48, pivotY: 0.34 });
 
     const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.12), dark);
     receiver.position.set(0.06, 0.48, 0.06);
-    group.add(receiver);
+    gun.add(receiver);
 
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.52, 8), dark);
     barrel.rotation.z = Math.PI / 2;
     barrel.position.set(0.42, 0.5, 0.06);
-    group.add(barrel);
+    gun.add(barrel);
+    muzzleMesh = barrel;
 
     const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.1), dark);
     stock.position.set(-0.16, 0.47, 0.02);
-    group.add(stock);
+    gun.add(stock);
 
     const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 12), dark);
     pan.rotation.x = Math.PI / 2;
     pan.position.set(0, 0.62, 0.02);
-    group.add(pan);
+    gun.add(pan);
 
     const panRim = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 6, 16), mat(0x3a3028, { rough: 0.85 }));
     panRim.rotation.x = Math.PI / 2;
     panRim.position.set(0, 0.65, 0.02);
-    group.add(panRim);
+    gun.add(panRim);
   } else {
-    addMgTripod(group, dark, { spread: 0.4, legLen: 0.5, pivotY: 0.35 });
+    addMgTripod(gun, dark, { spread: 0.4, legLen: 0.5, pivotY: 0.35 });
 
     const cradle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.34), dark);
     cradle.position.set(0, 0.41, 0.04);
-    group.add(cradle);
+    gun.add(cradle);
 
     const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.72, 10), dark);
     jacket.rotation.z = Math.PI / 2;
     jacket.position.set(0.22, 0.52, 0.08);
-    group.add(jacket);
+    gun.add(jacket);
 
     const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.18, 8), dark);
     muzzle.rotation.z = Math.PI / 2;
     muzzle.position.set(0.72, 0.52, 0.08);
-    group.add(muzzle);
+    gun.add(muzzle);
+    muzzleMesh = muzzle;
 
     const condenser = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.2, 8), dark);
     condenser.position.set(-0.3, 0.42, 0.2);
-    group.add(condenser);
+    gun.add(condenser);
 
     const hose = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.04), dark);
     hose.position.set(-0.08, 0.46, 0.14);
     hose.rotation.y = 0.35;
-    group.add(hose);
+    gun.add(hose);
+  }
+
+  if (muzzleMesh) {
+    // Cylinders are rotated +90 degrees around Z, so local -Y is the forward tip.
+    muzzleMesh.name = 'machineGunMuzzle';
+    muzzleMesh.userData.muzzleTipSign = -1;
+    group.userData.machineGunMuzzle = muzzleMesh;
   }
 
   addMgCrewman(group, body, dark, factionId, -0.42, 0.48, { gunner: true });
@@ -387,12 +471,26 @@ export function buildFactionEngineer(group, body, dark, factionId) {
 }
 
 export function buildFactionMortar(group, body, detail, dark, factionId) {
+  const mortar = new THREE.Group();
+  mortar.name = 'deployedMortar';
+  mortar.userData.deployed = true;
+  group.add(mortar);
+  group.userData.mortarPivot = mortar;
+
   const tubeLen = factionId === 'usa' ? 1.2 : 1.45;
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, tubeLen, 10), dark);
   tube.rotation.x = -1.15;
   tube.position.set(0, 0.72, 0.22);
+  tube.name = 'mortarMuzzle';
+  tube.userData.muzzleTipSign = 1;
   tagEquipShadow(tube);
-  group.add(tube);
+  mortar.add(tube);
+  group.userData.mortarMuzzle = tube;
+
+  const muzzleLip = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.012, 6, 12), dark);
+  muzzleLip.rotation.x = Math.PI / 2;
+  muzzleLip.position.y = tubeLen / 2;
+  tube.add(muzzleLip);
 
   const bipodSpread = factionId === 'uk' ? 0.42 : 0.35;
   for (const x of [-bipodSpread, bipodSpread]) {
@@ -400,14 +498,20 @@ export function buildFactionMortar(group, body, detail, dark, factionId) {
     leg.position.set(x, 0.2, 0.38);
     leg.rotation.x = -0.55;
     tagEquipShadow(leg, 'receive');
-    group.add(leg);
+    mortar.add(leg);
   }
 
   if (factionId === 'germany') {
     const plate = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 0.35), dark);
     plate.position.set(0, 0.12, 0);
     tagEquipShadow(plate, 'receive');
-    group.add(plate);
+    mortar.add(plate);
+  } else {
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.045, 10), dark);
+    plate.position.set(0, 0.1, 0.02);
+    plate.scale.z = 0.72;
+    tagEquipShadow(plate, 'receive');
+    mortar.add(plate);
   }
 
   buildSquadSoldier(group, {

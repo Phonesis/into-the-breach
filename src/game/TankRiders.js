@@ -96,7 +96,12 @@ function syncRiderSlot(rider, tank, slotIndex) {
   _riderLocal.set(offset.x, offset.y, offset.z);
   tank.mesh.localToWorld(_riderLocal);
   rider.mesh.position.copy(_riderLocal);
-  rider.mesh.rotation.y = tank.mesh.rotation.y;
+  rider.mesh.rotation.set(
+    tank.mesh.rotation.x,
+    tank.mesh.rotation.y,
+    tank.mesh.rotation.z,
+    tank.mesh.rotation.order
+  );
   rider.mesh.visible = true;
   setMountedRenderOrder(rider.mesh, true);
 }

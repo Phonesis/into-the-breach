@@ -258,6 +258,8 @@ export function captureBattleSave(game, { id = null } = {}) {
       _medicTentSite: u._medicTentSite ?? null,
       attackCooldown: u.attackCooldown ?? 0,
       mgCooldown: u.mgCooldown ?? 0,
+      grenadeCooldown: u.grenadeCooldown ?? 0,
+      smokeShellCooldown: u.smokeShellCooldown ?? 0,
       moveTarget: u.moveTarget ? { x: u.moveTarget.x, z: u.moveTarget.z } : null,
       _movePath: u._movePath?.map((p) => ({ x: p.x, z: p.z })) ?? null,
       _userMoveOrder: !!u._userMoveOrder,
@@ -1122,6 +1124,8 @@ export function applyBattleSave(game, snapshot) {
     unit._medicTentSite = uData._medicTentSite ?? null;
     unit.attackCooldown = uData.attackCooldown ?? 0;
     unit.mgCooldown = uData.mgCooldown ?? 0;
+    unit.grenadeCooldown = uData.grenadeCooldown ?? 0;
+    unit.smokeShellCooldown = uData.smokeShellCooldown ?? 0;
     unit._userMoveOrder = !!uData._userMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;

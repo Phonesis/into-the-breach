@@ -9,7 +9,7 @@ import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
 import { getGarrisonBunkerSources } from '../game/BunkerGarrison.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
-import { canManualFireOrder, canSmokeShellOrder } from './BattleCursor.js';
+import { canManualFireOrder, canSmokeShellOrder, isSmokeShellReady } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 
@@ -565,17 +565,21 @@ export class RTSController {
   issueShiftSmokeShell() {
     if (this._inputBlocked()) return false;
 
-    const selected = this.getSelectedPlayerUnits().filter((u) => canSmokeShellOrder(u));
+    const selected = this.getSelectedPlayerUnits().filter((u) => isSmokeShellReady(u));
     if (selected.length === 0) return false;
 
     const pick = this._pickShiftFireTarget();
     if (!pick || pick.kind !== 'ground') return false;
 
     this._lastOrderAt = Date.now();
-    for (const u of selected) {
-      u.setSmokeShellOrder(pick.point.x, pick.point.z);
-    }
-    if (this.onOrder) this.onOrder('smoke', selected);
+    selected.sort(
+      (a, b) =>
+        Math.hypot(a.position.x - pick.point.x, a.position.z - pick.point.z) -
+        Math.hypot(b.position.x - pick.point.x, b.position.z - pick.point.z)
+    );
+    const firingGun = selected[0];
+    firingGun.setSmokeShellOrder(pick.point.x, pick.point.z);
+    if (this.onOrder) this.onOrder('smoke', [firingGun]);
     return true;
   }
 

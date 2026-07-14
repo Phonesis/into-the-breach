@@ -311,7 +311,18 @@ export function updateCombatEffects(dt) {
 
     fx.life -= dt;
 
-    if (fx.type === 'smoke') {
+    if (fx.type === 'handGrenade') {
+      const t = Math.min(1, 1 - fx.life / fx.maxLife);
+      fx.mesh.position.lerpVectors(fx.from, fx.to, t);
+      fx.mesh.position.y += Math.sin(t * Math.PI) * fx.arcHeight;
+      fx.mesh.rotation.x += dt * 11;
+      fx.mesh.rotation.z += dt * 8;
+      if (t >= 1 && !fx.impacted) {
+        fx.impacted = true;
+        spawnExplosion(fx.scene, fx.to);
+        fx.onImpact?.();
+      }
+    } else if (fx.type === 'smoke') {
       fx.mesh.scale.multiplyScalar(1 + dt * 2.5);
       fx.material.opacity = Math.max(0, fx.material.opacity - dt * 1.8);
       fx.mesh.position.y += dt * 0.8;
@@ -370,6 +381,47 @@ export function updateCombatEffects(dt) {
       active.splice(i, 1);
     }
   }
+}
+
+/** Visible close-range infantry grenade with a short ballistic arc. */
+export function spawnHandGrenade(scene, from, to, onImpact = null) {
+  if (!scene || !canSpawnEffect()) {
+    onImpact?.();
+    return false;
+  }
+
+  const start = toVec3(from).clone();
+  const end = toVec3(to).clone();
+  const distance = start.distanceTo(end);
+  const duration = THREE.MathUtils.clamp(0.42 + distance * 0.035, 0.5, 0.82);
+
+  const geo = new THREE.SphereGeometry(0.105, 7, 6);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x38442b,
+    roughness: 0.82,
+    metalness: 0.18,
+  });
+  const grenade = new THREE.Mesh(geo, mat);
+  grenade.scale.set(0.82, 1.15, 0.82);
+  grenade.position.copy(start);
+  grenade.castShadow = true;
+  scene.add(grenade);
+
+  registerEffect({
+    type: 'handGrenade',
+    scene,
+    mesh: grenade,
+    from: start,
+    to: end,
+    arcHeight: Math.max(1.25, distance * 0.22),
+    onImpact,
+    impacted: false,
+    geometries: [geo],
+    materials: [mat],
+    life: duration,
+    maxLife: duration,
+  });
+  return true;
 }
 
 const CANNON_MUZZLE_TYPES = new Set(['tank', 'superHeavyTank', 'antiTankGun', 'artillery']);

@@ -569,6 +569,85 @@ export function sampleTerrainHeight(x, z, mapDef) {
   return heightAt(x, z, mapDef, seed);
 }
 
+function terrainPoseRadius(type) {
+  switch (type) {
+    case 'superHeavyTank': return 2.15;
+    case 'tank': return 1.7;
+    case 'armoredCar': return 1.35;
+    case 'artillery': return 1.35;
+    case 'antiTankGun': return 1.2;
+    case 'machineGun':
+    case 'mortar': return 0.72;
+    default: return 0.5;
+  }
+}
+
+function terrainClearance(type) {
+  if (type === 'tank' || type === 'superHeavyTank' || type === 'armoredCar') return 0.09;
+  if (type === 'artillery' || type === 'antiTankGun') return 0.065;
+  return 0.025;
+}
+
+/**
+ * Keep a unit's ground contact plane aligned to the local hill rather than
+ * leaving a level model for the terrain to cut through.
+ */
+export function updateUnitTerrainPose(unit, mapDef, dt) {
+  const mesh = unit?.mesh;
+  if (!mesh || !mapDef || unit.dead || unit._dropping || unit._mountedOnTankId) return;
+  if (unit._trenchId || unit._garrisonBunkerId || unit._diggingTrench) return;
+
+  const radius = terrainPoseRadius(unit.def?.type);
+  const yaw = mesh.rotation.y;
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const x = mesh.position.x;
+  const z = mesh.position.z;
+
+  const center = sampleTerrainHeight(x, z, mapDef);
+  const front = sampleTerrainHeight(x + forwardX * radius, z + forwardZ * radius, mapDef);
+  const back = sampleTerrainHeight(x - forwardX * radius, z - forwardZ * radius, mapDef);
+  const right = sampleTerrainHeight(x + rightX * radius, z + rightZ * radius, mapDef);
+  const left = sampleTerrainHeight(x - rightX * radius, z - rightZ * radius, mapDef);
+  const forwardSlope = (front - back) / (radius * 2);
+  const rightSlope = (right - left) / (radius * 2);
+
+  const maxTilt = ['tank', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type)
+    ? 0.46
+    : 0.32;
+  const targetPitch = THREE.MathUtils.clamp(-Math.atan(forwardSlope), -maxTilt, maxTilt);
+  const targetRoll = THREE.MathUtils.clamp(Math.atan(rightSlope), -maxTilt, maxTilt);
+
+  // Sample the footprint corners and lift over sharp convex breaks that a
+  // single center-height sample cannot represent.
+  let convexLift = 0;
+  for (const forwardSign of [-1, 1]) {
+    for (const rightSign of [-1, 1]) {
+      const sx = x + forwardX * radius * forwardSign + rightX * radius * rightSign;
+      const sz = z + forwardZ * radius * forwardSign + rightZ * radius * rightSign;
+      const terrainDelta = sampleTerrainHeight(sx, sz, mapDef) - center;
+      const fittedDelta =
+        forwardSlope * radius * forwardSign + rightSlope * radius * rightSign;
+      convexLift = Math.max(convexLift, terrainDelta - fittedDelta);
+    }
+  }
+
+  const vehicleLike = ['tank', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type);
+  const targetY =
+    center + terrainClearance(unit.def?.type) + Math.min(convexLift, vehicleLike ? 0.24 : 0.1);
+  const alpha = 1 - Math.exp(-Math.max(0, dt) * (unit.moveTarget ? 12 : 7));
+  // Movement stepping snaps to center-ground every substep, so apply the full
+  // footprint correction while moving; stationary settling remains smoothed.
+  mesh.position.y = unit.moveTarget
+    ? targetY
+    : THREE.MathUtils.lerp(mesh.position.y, targetY, alpha);
+  if (mesh.rotation.order !== 'YXZ') mesh.rotation.order = 'YXZ';
+  mesh.rotation.x = THREE.MathUtils.lerp(mesh.rotation.x, targetPitch, alpha);
+  mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z, targetRoll, alpha);
+}
+
 /** Horizontal distance from a unit to a move goal (x/z only). */
 export function horizontalDistToPoint(unit, dest) {
   const dx = dest.x - unit.position.x;

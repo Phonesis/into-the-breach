@@ -15,6 +15,8 @@ import {
   getBodyTexture,
   getGhillieTexture,
   getInfantryUniformTexture,
+  getInfantryMaterials,
+  getVehicleSurfaceBumpMap,
   createCamoMaterial,
 } from './UnitTextures.js';
 import { applyInfantryShadowPolicy } from './InfantryVisuals.js';
@@ -47,6 +49,16 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   const body = mat(teamColor, { rough: 0.72, map: bodyTex ?? undefined });
   const detail = mat(teamColor, { metal: 0.32, rough: 0.65, map: bodyTex ?? undefined });
   const dark = mat(0x1a1a1a, { metal: 0.5 });
+
+  if (bodyTex && !INFANTRY_TYPES.has(type)) {
+    const steelBump = getVehicleSurfaceBumpMap();
+    body.bumpMap = steelBump;
+    body.bumpScale = 0.038;
+    body.roughness = 0.78;
+    detail.bumpMap = steelBump;
+    detail.bumpScale = 0.028;
+    detail.roughness = 0.7;
+  }
 
   let built = false;
 
@@ -740,27 +752,27 @@ function corpseBodyCount(unitType) {
   }
 }
 
-function addFallenHelmet(group, uniformMat, factionId) {
+function addFallenHelmet(group, helmetMat, factionId) {
   let helmet;
   if (factionId === 'germany') {
     helmet = new THREE.Mesh(
       new THREE.SphereGeometry(0.11, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      uniformMat
+      helmetMat
     );
     helmet.rotation.x = Math.PI / 2;
     helmet.position.set(0.05, 0.07, 0.18);
   } else if (factionId === 'usa') {
-    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), uniformMat);
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), helmetMat);
     helmet.scale.set(1.05, 0.55, 1.05);
     helmet.rotation.x = Math.PI / 2;
     helmet.position.set(0.04, 0.07, 0.17);
   } else if (factionId === 'russia') {
-    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), uniformMat);
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), helmetMat);
     helmet.scale.set(1.08, 0.5, 1.08);
     helmet.rotation.x = Math.PI / 2;
     helmet.position.set(0.04, 0.07, 0.16);
   } else {
-    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), uniformMat);
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), helmetMat);
     helmet.scale.set(1.1, 0.48, 1.1);
     helmet.rotation.x = Math.PI / 2;
     helmet.position.set(0.04, 0.07, 0.16);
@@ -780,15 +792,18 @@ function buildFallenSoldierBody(factionId, { ghillie = false } = {}) {
   uniformMat.color.multiplyScalar(0.72);
 
   const skinMat = new THREE.MeshStandardMaterial({ color: 0x8a6e58, roughness: 0.88 });
+  const gearMats = getInfantryMaterials(factionId);
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.16, 0.3), uniformMat);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.12, 0.52, 8), uniformMat);
+  torso.rotation.z = Math.PI / 2;
+  torso.scale.z = 0.72;
   torso.position.set(0, 0.08, 0);
   torso.castShadow = true;
   torso.receiveShadow = true;
   group.add(torso);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), skinMat);
-  head.scale.set(1, 0.85, 1);
+  head.scale.set(1.05, 0.85, 0.9);
   head.position.set(0.34, 0.07, 0.04);
   head.castShadow = true;
   group.add(head);
@@ -798,20 +813,51 @@ function buildFallenSoldierBody(factionId, { ghillie = false } = {}) {
     hood.position.set(0.34, 0.09, 0.04);
     group.add(hood);
   } else {
-    addFallenHelmet(group, uniformMat, factionId);
+    addFallenHelmet(group, gearMats.helmet.clone(), factionId);
   }
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.14), uniformMat);
-  legL.position.set(-0.22, 0.06, 0.08);
-  legL.rotation.z = 0.35;
+  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.3, 7), uniformMat);
+  legL.position.set(-0.32, 0.07, 0.09);
+  legL.rotation.z = Math.PI / 2 + 0.35;
   group.add(legL);
 
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.14), uniformMat);
-  legR.position.set(-0.18, 0.06, -0.1);
-  legR.rotation.z = -0.25;
+  const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.3, 7), uniformMat);
+  legR.position.set(-0.29, 0.07, -0.09);
+  legR.rotation.z = Math.PI / 2 - 0.25;
   group.add(legR);
 
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.1), uniformMat);
+  const bootL = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.08, 0.1),
+    gearMats.leather.clone()
+  );
+  bootL.position.set(-0.51, 0.065, 0.15);
+  bootL.rotation.y = -0.25;
+  group.add(bootL);
+  const bootR = bootL.clone();
+  bootR.position.set(-0.48, 0.065, -0.17);
+  bootR.rotation.y = 0.2;
+  group.add(bootR);
+
+  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.05, 0.31, 7), uniformMat);
+  armL.rotation.z = Math.PI / 2 + 0.25;
+  armL.position.set(0.02, 0.07, 0.19);
+  group.add(armL);
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), skinMat);
+  handL.position.set(-0.14, 0.065, 0.23);
+  group.add(handL);
+
+  const armR = armL.clone();
+  armR.rotation.z = Math.PI / 2 - 0.35;
+  armR.position.set(0.08, 0.07, -0.18);
+  group.add(armR);
+  const handR = handL.clone();
+  handR.position.set(0.24, 0.065, -0.23);
+  group.add(handR);
+
+  const pack = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.14, 0.11),
+    gearMats.webbing.clone()
+  );
   pack.position.set(-0.08, 0.1, -0.02);
   pack.rotation.z = 0.15;
   group.add(pack);
@@ -984,6 +1030,13 @@ export function applyUnitDeathVisual(unit) {
   }
 
   if (type === 'artillery' || type === 'antiTankGun') {
+    // The operating detachment is part of the gun unit: on destruction the live
+    // crew disappears from the carriage and leaves faction-correct casualties.
+    for (const member of getSquadMembers(mesh)) {
+      if (member.userData.isTowedGunCrew && member.visible) {
+        spawnCasualtyAtMember(unit, member, mesh.userData.factionId ?? 'germany', type);
+      }
+    }
     unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
     applyVehicleCorpseLook(mesh, { heavy: type === 'artillery' });
   }

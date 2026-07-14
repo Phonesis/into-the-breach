@@ -50,6 +50,8 @@ export class Unit {
     this._bunkerEntryId = null;
     this.attackCooldown = 0;
     this.mgCooldown = 0;
+    this.grenadeCooldown = 0;
+    this.smokeShellCooldown = 0;
     this.dead = false;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
