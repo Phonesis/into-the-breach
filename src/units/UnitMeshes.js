@@ -3,6 +3,7 @@ import {
   mat,
   buildFactionVehicle,
   buildFactionInfantry,
+  buildFactionVehicleCrew,
   buildFactionParatrooper,
   buildFactionMG,
   buildFactionMortar,
@@ -33,6 +34,7 @@ const INFANTRY_TYPES = new Set([
   'sniper',
   'medic',
   'engineer',
+  'vehicleCrew',
 ]);
 
 const CORPSE_FALL_SEC = 0.45;
@@ -85,6 +87,9 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   } else if (type === 'infantry') {
     buildFactionInfantry(group, body, dark, factionId);
     built = true;
+  } else if (type === 'vehicleCrew') {
+    buildFactionVehicleCrew(group, body, dark, factionId);
+    built = true;
   } else if (type === 'paratrooper') {
     buildFactionParatrooper(group, body, dark, factionId);
     built = true;
@@ -114,12 +119,14 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   }
 
   const hitRadii = {
-    infantry: 1.6,
+    infantry: 2.35,
+    vehicleCrew: 1.55,
+    paratrooper: 2.25,
     machineGun: 2,
     sniper: 1.5,
     mortar: 2.2,
     medic: 1.4,
-    engineer: 1.65,
+    engineer: 2.25,
     armoredCar: group.userData.hitRadius ?? 2.6,
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,
@@ -143,6 +150,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     engineer: 0.52,
     sniper: 0.5,
     infantry: 0.55,
+    vehicleCrew: 0.52,
   };
   hitbox.position.y = hitY[type] ?? 0.55;
   hitbox.name = 'selectionHitbox';
@@ -1004,7 +1012,7 @@ export function applyUnitDeathVisual(unit) {
 
   if (isTankType(type)) {
     unit.wreckTimeLeft = VEHICLE_WRECK_LINGER_SEC;
-    applyTankWreckLook(mesh);
+    applyTankWreckLook(mesh, { preserveTurret: !!unit._recoverableWreck });
     return;
   }
 
@@ -1015,7 +1023,8 @@ export function applyUnitDeathVisual(unit) {
     type === 'sniper' ||
     type === 'mortar' ||
     type === 'medic' ||
-    type === 'engineer'
+    type === 'engineer' ||
+    type === 'vehicleCrew'
   ) {
     unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
     applyInfantryCorpseLook(mesh, type);
@@ -1049,7 +1058,7 @@ export function unitHasCorpseLinger(unit) {
 }
 
 /** Scorched, knocked-out look for destroyed tanks left on the field. */
-export function applyTankWreckLook(mesh) {
+export function applyTankWreckLook(mesh, { preserveTurret = false } = {}) {
   if (!mesh?.userData?.isTank || mesh.userData.wreckApplied) return;
   mesh.userData.wreckApplied = true;
 
@@ -1073,7 +1082,7 @@ export function applyTankWreckLook(mesh) {
     if (!child.isMesh || WRECK_SKIP_MESHES.has(child.name)) return;
 
     const part = child.userData.tankPart;
-    if (WRECK_REMOVED_PARTS.has(part)) {
+    if (!preserveTurret && WRECK_REMOVED_PARTS.has(part)) {
       child.visible = false;
       return;
     }
@@ -1132,6 +1141,8 @@ export function applyTankWreckLook(mesh) {
     chunk.rotation.set(Math.random(), Math.random(), Math.random());
     mesh.add(chunk);
   }
+
+  if (preserveTurret) return;
 
   const factionId = mesh.userData.factionId ?? 'germany';
   const unitType = mesh.userData.type ?? 'tank';

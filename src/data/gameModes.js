@@ -20,7 +20,14 @@ export const GAME_MODES = {
     id: 'clearance',
     name: 'Clear Defenses',
     subtitle:
-      'Fixed attack force vs dug-in defenders — no HQ, no reinforcements. Wipe every defender to win.',
+      'Wipe every dug-in defender — choose Classic fixed forces or Reinforced three-minute arrivals on the Theater screen.',
+  },
+  clearanceReinforced: {
+    id: 'clearanceReinforced',
+    name: 'Clear Defenses — Reinforced',
+    subtitle:
+      'Clear dug-in defenders while both sides receive small automatic reinforcement groups every 3 minutes.',
+    hidden: true,
   },
   towerDefense: {
     id: 'towerDefense',
@@ -39,7 +46,22 @@ export const GAME_MODES = {
 /** Deployment budget per side in Battle Simulation mode. */
 export const LAST_STAND_SUPPLIES = 2000;
 
-export const GAME_MODE_LIST = Object.values(GAME_MODES);
+export const GAME_MODE_LIST = Object.values(GAME_MODES).filter((mode) => !mode.hidden);
+
+export const CLEARANCE_STYLES = {
+  classic: {
+    id: 'classic',
+    name: 'Classic',
+    subtitle: 'Original fixed-force battle — no HQ, production, or reinforcements.',
+  },
+  reinforced: {
+    id: 'reinforced',
+    name: 'Reinforced',
+    subtitle: 'Three-minute reinforcements plus frequent defender probing counterattacks.',
+  },
+};
+
+export const CLEARANCE_STYLE_LIST = Object.values(CLEARANCE_STYLES);
 
 export const ASSAULT_ROLES = {
   attack: {
@@ -98,7 +120,11 @@ export function isAssaultMode(gameMode) {
 }
 
 export function isClearanceMode(gameMode) {
-  return gameMode === 'clearance';
+  return gameMode === 'clearance' || gameMode === 'clearanceReinforced';
+}
+
+export function isReinforcedClearanceMode(gameMode, options = {}) {
+  return gameMode === 'clearanceReinforced' || options.clearanceStyle === 'reinforced';
 }
 
 export function isTowerDefenseMode(gameMode) {

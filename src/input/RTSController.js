@@ -701,6 +701,12 @@ export class RTSController {
         if (pendingDef && this.onDefensePlacement) {
           this.onDefensePlacement('preview', ground.x, ground.z);
         }
+        if (pendingSandbags && this.onSandbagPlacement) {
+          this.onSandbagPlacement('preview', ground.x, ground.z);
+        }
+        if (pendingTrench && this.onTrenchPlacement) {
+          this.onTrenchPlacement('preview', ground.x, ground.z);
+        }
         if (pendingBaseBuild && this.onBaseBuildingPlacement) {
           this.onBaseBuildingPlacement('preview', ground.x, ground.z);
         }

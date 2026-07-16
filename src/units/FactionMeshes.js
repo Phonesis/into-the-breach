@@ -6,7 +6,10 @@ import {
   buildArtilleryFromDesign,
   buildAtGunFromDesign,
 } from './VehicleMeshKit.js';
-import { buildSquadSoldier } from './InfantryVisuals.js';
+import {
+  buildSquadSoldier,
+  configureTacticalSquadFormation,
+} from './InfantryVisuals.js';
 
 /** Historically inspired low-poly silhouettes per nation (not to scale). */
 
@@ -430,12 +433,9 @@ export function buildFactionEngineer(group, body, dark, factionId) {
   group.add(oilCan);
 
   // 4-man combat engineer section with rifles
-  const positions = [
-    { x: 0, z: 0, lead: true },
-    { x: 0.48, z: 0.38, lead: false },
-    { x: -0.45, z: 0.32, lead: false },
-    { x: 0.12, z: -0.42, lead: false },
-  ];
+  const positions = configureTacticalSquadFormation(group, 'engineer', 4).map(
+    ({ x, z }, index) => ({ x, z, lead: index === 0 })
+  );
 
   let squadIndex = 0;
   for (const { x, z, lead } of positions) {
@@ -535,29 +535,39 @@ export function buildFactionMortar(group, body, detail, dark, factionId) {
 }
 
 export function buildFactionInfantry(group, _body, _dark, factionId) {
-  const positions = [
-    [0, 0, 0],
-    [0.55, 0, 0.35],
-    [-0.5, 0, 0.3],
-    [0.35, 0, -0.55],
-    [-0.4, 0, -0.45],
-  ];
+  const positions = configureTacticalSquadFormation(group, 'infantry', 5);
 
   for (let i = 0; i < positions.length; i++) {
-    const [px, , pz] = positions[i];
+    const { x: px, z: pz } = positions[i];
     buildSquadSoldier(group, { factionId, squadIndex: i, x: px, z: pz });
   }
   group.userData.squadSize = positions.length;
   group.userData.hitRadius = 1.2;
 }
 
-export function buildFactionParatrooper(group, _body, dark, factionId) {
+export function buildFactionVehicleCrew(group, _body, _dark, factionId) {
   const positions = [
-    { x: 0, z: 0, lead: true },
-    { x: 0.5, z: 0.32, lead: false },
-    { x: -0.46, z: 0.28, lead: false },
-    { x: 0.32, z: -0.48, lead: false },
+    { x: -0.42, z: 0.08 },
+    { x: 0.46, z: -0.12 },
   ];
+  for (let i = 0; i < positions.length; i++) {
+    buildSquadSoldier(group, {
+      factionId,
+      squadIndex: i,
+      x: positions[i].x,
+      z: positions[i].z,
+      withPack: false,
+      withWebbing: true,
+    });
+  }
+  group.userData.squadSize = positions.length;
+  group.userData.hitRadius = 1.4;
+}
+
+export function buildFactionParatrooper(group, _body, dark, factionId) {
+  const positions = configureTacticalSquadFormation(group, 'paratrooper', 4).map(
+    ({ x, z }, index) => ({ x, z, lead: index === 0 })
+  );
 
   for (let i = 0; i < positions.length; i++) {
     const { x: px, z: pz, lead } = positions[i];

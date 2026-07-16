@@ -892,6 +892,50 @@ body,
   border-top: 1px solid rgba(255, 120, 80, 0.2);
 }
 
+.engagement-stance-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(201, 168, 74, 0.25);
+}
+
+.engagement-stance-actions.hidden {
+  display: none;
+}
+
+.engagement-stance-label {
+  margin: 0 0 0.35rem;
+  color: rgba(235, 220, 176, 0.9);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.engagement-stance-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.engagement-stance-buttons .btn {
+  width: 100%;
+  padding-inline: 0.45rem;
+}
+
+.engagement-stance-buttons .btn.armed {
+  color: #fff4c9;
+  border-color: rgba(241, 203, 91, 0.9);
+  background: linear-gradient(180deg, #76601f 0%, #4d3d12 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 229, 139, 0.14);
+}
+
+.engagement-stance-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: rgba(200, 210, 220, 0.82);
+}
+
 .fire-mission-actions.hidden {
   display: none;
 }

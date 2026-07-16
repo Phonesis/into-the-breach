@@ -82,6 +82,9 @@ const ui = new UIManager(uiRoot, {
   onConfirmTarget() {
     game?.confirmTargetAttack();
   },
+  onSetEngagementStance(stance) {
+    game?.setSelectedEngagementStance(stance);
+  },
   onTabletTargetMode(on) {
     game?.setTabletTargetMode(on);
   },

@@ -18,6 +18,32 @@ export const CLEARANCE_STARTING_RESOURCES = 160;
 /** Enemies hold fire briefly so forward defensive lines do not wipe the staging area. */
 export const CLEARANCE_CEASEFIRE_TIME = 10;
 
+export const CLEARANCE_REINFORCEMENT_INTERVAL = 180;
+
+const PLAYER_REINFORCEMENT_PACKAGES = [
+  ['infantry', 'machineGun'],
+  ['infantry', 'mortar'],
+  ['infantry', 'tank'],
+  ['infantry', 'antiTankGun'],
+];
+
+const DEFENDER_REINFORCEMENT_PACKAGES = [
+  ['infantry', 'machineGun'],
+  ['infantry', 'antiTankGun'],
+  ['infantry', 'armoredCar'],
+  ['infantry', 'mortar'],
+];
+
+const CLEARANCE_PROBE_TYPES = new Set([
+  'infantry',
+  'engineer',
+  'machineGun',
+  'sniper',
+  'armoredCar',
+  'tank',
+  'superHeavyTank',
+]);
+
 const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun', 'paratrooper']);
 
 /** Tanks ignore rifle/MG fire; dedicated anti-armor weapons hurt. */
@@ -27,7 +53,12 @@ export function getArmorDamageMultiplier(attackerType, target) {
 
   if (t === 'tank' || t === 'superHeavyTank') {
     const isSuper = t === 'superHeavyTank';
-    if (attackerType === 'infantry' || attackerType === 'machineGun' || attackerType === 'armoredCar') {
+    if (
+      attackerType === 'infantry' ||
+      attackerType === 'vehicleCrew' ||
+      attackerType === 'machineGun' ||
+      attackerType === 'armoredCar'
+    ) {
       return 0;
     }
     if (attackerType === 'sniper') return 0;
@@ -38,7 +69,12 @@ export function getArmorDamageMultiplier(attackerType, target) {
   }
 
   if (t === 'armoredCar') {
-    if (attackerType === 'infantry' || attackerType === 'machineGun') return 0.32;
+    if (
+      attackerType === 'infantry' ||
+      attackerType === 'vehicleCrew' ||
+      attackerType === 'machineGun'
+    )
+      return 0.32;
     if (attackerType === 'sniper') return 0;
     if (attackerType === 'mortar') return 1.05;
     if (attackerType === 'tank' || attackerType === 'superHeavyTank' || attackerType === 'artillery') {
@@ -87,6 +123,150 @@ export function getClearancePlayerSpawnBase(mapDef) {
   x = Math.max(-half, Math.min(half, x));
   z = Math.max(-half, Math.min(half, z));
   return { x, z };
+}
+
+export function createClearanceReinforcementState(enabled = false) {
+  if (!enabled) return null;
+  return {
+    enabled: true,
+    interval: CLEARANCE_REINFORCEMENT_INTERVAL,
+    nextAt: CLEARANCE_REINFORCEMENT_INTERVAL,
+    wave: 0,
+    nextProbeAt: 52,
+    probe: 0,
+  };
+}
+
+function spawnReinforcementPackage(game, team, types, wave) {
+  const faction = team === 'player' ? game.playerFaction : game.enemyFaction;
+  const base = team === 'player'
+    ? getClearancePlayerSpawnBase(game.mapDef)
+    : game.mapDef.enemyBase;
+  const { ax, az } = axisFromPlayerToEnemy(game.mapDef);
+  const facingX = team === 'player' ? ax : -ax;
+  const facingZ = team === 'player' ? az : -az;
+  const sideX = -az;
+  const sideZ = ax;
+  const spawned = [];
+
+  for (let i = 0; i < types.length; i++) {
+    const def = faction.units[types[i]];
+    if (!def) continue;
+    const lateral = (i - (types.length - 1) / 2) * 4.6;
+    const depth = 3 + i * 1.8;
+    const position = {
+      x: base.x + sideX * lateral - facingX * depth,
+      z: base.z + sideZ * lateral - facingZ * depth,
+    };
+    const unit = new Unit({ def, faction, team, position, scene: game.scene });
+    unit._mapDef = game.mapDef;
+    unit.position.y = sampleTerrainHeight(position.x, position.z, game.mapDef);
+    unit.mesh.rotation.y = Math.atan2(facingX, facingZ);
+    if (team === 'enemy') {
+      unit.defensiveHold = {
+        x: position.x + facingX * (6 + (wave % 2) * 3),
+        z: position.z + facingZ * (6 + (wave % 2) * 3),
+        radius: 15,
+      };
+    }
+    spawned.push(unit);
+  }
+  return spawned;
+}
+
+/** Add one small reinforcement group to each side when the three-minute clock expires. */
+export function updateClearanceReinforcements(game) {
+  const state = game?.clearanceReinforcements;
+  if (!state?.enabled || game.gameOver || game.matchTime < state.nextAt) return null;
+
+  const allSpawned = [];
+  let cycles = 0;
+  while (game.matchTime >= state.nextAt && cycles < 3) {
+    state.wave += 1;
+    const packageIndex = (state.wave - 1) % PLAYER_REINFORCEMENT_PACKAGES.length;
+    allSpawned.push(
+      ...spawnReinforcementPackage(
+        game,
+        'player',
+        PLAYER_REINFORCEMENT_PACKAGES[packageIndex],
+        state.wave
+      ),
+      ...spawnReinforcementPackage(
+        game,
+        'enemy',
+        DEFENDER_REINFORCEMENT_PACKAGES[packageIndex],
+        state.wave
+      )
+    );
+    state.nextAt += state.interval;
+    cycles += 1;
+  }
+  if (!allSpawned.length) return null;
+  game.units.push(...allSpawned);
+  return { wave: state.wave, units: allSpawned };
+}
+
+/** Periodically release a small mobile detachment to test and pursue the attackers. */
+export function updateClearanceCounterattacks(game) {
+  const state = game?.clearanceReinforcements;
+  if (!state?.enabled || game.gameOver || game.matchTime < (state.nextProbeAt ?? 52)) {
+    return null;
+  }
+
+  const attackers = game._playerAlive ?? [];
+  const candidates = (game._enemyAlive ?? []).filter(
+    (unit) =>
+      !unit.dead &&
+      !unit.retreating &&
+      !unit.surrendered &&
+      !unit._clearanceProbe &&
+      !unit._trenchId &&
+      !unit._garrisonBunkerId &&
+      !unit._sandbagSite &&
+      !unit._trenchDigSite &&
+      CLEARANCE_PROBE_TYPES.has(unit.def?.type)
+  );
+  if (!attackers.length || candidates.length < 2) {
+    state.nextProbeAt = game.matchTime + 28;
+    return null;
+  }
+
+  const target = attackers.reduce(
+    (sum, unit) => ({ x: sum.x + unit.position.x, z: sum.z + unit.position.z }),
+    { x: 0, z: 0 }
+  );
+  target.x /= attackers.length;
+  target.z /= attackers.length;
+  candidates.sort((a, b) => {
+    const ad = Math.hypot(a.position.x - target.x, a.position.z - target.z);
+    const bd = Math.hypot(b.position.x - target.x, b.position.z - target.z);
+    return ad - bd;
+  });
+
+  const aggression = game.difficulty?.attackAggressionMult ?? 1;
+  const size = Math.min(
+    4,
+    candidates.length,
+    Math.max(2, Math.round(2 + (aggression - 1) * 2 + candidates.length * 0.08))
+  );
+  const duration = 34 + Math.random() * 14;
+  const probing = candidates.slice(0, size);
+  state.probe = (state.probe ?? 0) + 1;
+  for (const unit of probing) {
+    unit._clearanceProbe = {
+      number: state.probe,
+      until: game.matchTime + duration,
+      targetX: target.x,
+      targetZ: target.z,
+    };
+    unit.clearAttackOrder?.();
+    unit.moveTarget = { x: target.x, z: target.z };
+    unit._userMoveOrder = false;
+  }
+
+  const interval = (52 + Math.random() * 24) / Math.max(0.82, aggression);
+  state.nextProbeAt = game.matchTime + interval;
+  return { number: state.probe, units: probing };
 }
 
 /** Ring positions around a point — defensive dug-in layout. */
@@ -157,6 +337,7 @@ export function spawnClearanceDefenders({
   mapDef,
   capturePoints,
   enemyArmyMult = 1,
+  attackerUnits = [],
 }) {
   let layout = CLEARANCE_DEFENDER_LAYOUT.map((s) => ({
     ...s,
@@ -182,10 +363,38 @@ export function spawnClearanceDefenders({
         z: anchor.z + (Math.random() - 0.5) * jitter,
       };
 
+      // Long-ranged defenders (especially artillery and AT guns) used to begin
+      // with the attacker's assembly already inside their weapon radius. Push
+      // only those unsafe positions deeper into the defensive zone so contact
+      // begins after the player advances, not at the opening whistle.
+      if (attackerUnits.length && def.range > 0) {
+        const { ax, az } = axisFromPlayerToEnemy(mapDef);
+        const half = (mapDef.size ?? 120) * 0.5 - 5;
+        const safeRange = def.range + 5;
+        for (let pass = 0; pass < 18; pass++) {
+          let shortfall = 0;
+          for (const attacker of attackerUnits) {
+            if (attacker.dead) continue;
+            const dist = Math.hypot(
+              position.x - attacker.position.x,
+              position.z - attacker.position.z
+            );
+            shortfall = Math.max(shortfall, safeRange - dist);
+          }
+          if (shortfall <= 0) break;
+          const step = Math.min(10, shortfall + 1);
+          const nextX = Math.max(-half, Math.min(half, position.x + ax * step));
+          const nextZ = Math.max(-half, Math.min(half, position.z + az * step));
+          if (Math.hypot(nextX - position.x, nextZ - position.z) < 0.05) break;
+          position.x = nextX;
+          position.z = nextZ;
+        }
+      }
+
       const unit = new Unit({ def, faction, team, position, scene });
       unit.defensiveHold = {
-        x: anchor.holdX ?? anchor.x,
-        z: anchor.holdZ ?? anchor.z,
+        x: position.x,
+        z: position.z,
         radius: anchor.holdRadius ?? 12,
       };
       unit.position.y = sampleTerrainHeight(position.x, position.z, mapDef);
@@ -194,24 +403,6 @@ export function spawnClearanceDefenders({
   }
 
   return units;
-}
-
-export function setupClearanceCapturePoints(capturePoints, mapDef) {
-  const homeDist = (cp) =>
-    Math.hypot(cp.x - mapDef.playerBase.x, cp.z - mapDef.playerBase.z);
-
-  for (const cp of capturePoints) {
-    if (homeDist(cp) < 22) {
-      cp.owner = 'player';
-      cp.progress = 1;
-    } else if (isEnemyHalfPosition(cp.x, cp.z, mapDef)) {
-      cp.owner = 'enemy';
-      cp.progress = 1;
-    } else {
-      cp.owner = null;
-      cp.progress = 0;
-    }
-  }
 }
 
 export function checkClearanceVictory(game) {

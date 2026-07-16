@@ -22,6 +22,9 @@ import {
 import { buildMovePath } from '../game/MovePath.js';
 import { getMoveReachConfig } from './VehicleTypes.js';
 import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
+import { removeWreckEffect } from '../effects/WreckEffects.js';
+import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
+import { sampleTerrainHeight } from '../world/Terrain.js';
 
 let nextId = 1;
 
@@ -57,6 +60,8 @@ export class Unit {
     this.corpseTimeLeft = 0;
     this.wreckFire = null;
     this._chasingAttack = false;
+    this.engagementStance = 'hold';
+    this._stancePursuitOrder = false;
     this._mgVolley = 0;
     this.retreating = false;
     this.retreatMarker = null;
@@ -111,6 +116,7 @@ export class Unit {
     this.target = target;
     this._manualFireMission = manualFire;
     this._chasingAttack = true;
+    this._stancePursuitOrder = false;
     this._userMoveOrder = false;
     this._movePath = null;
     if (target && !target.dead) {
@@ -122,8 +128,23 @@ export class Unit {
     this.attackOrder = null;
     this.target = null;
     this._chasingAttack = false;
+    this._stancePursuitOrder = false;
     this._manualFireMission = false;
     this._bunkerEntryId = null;
+  }
+
+  setEngagementStance(stance) {
+    const next = stance === 'pursue' ? 'pursue' : 'hold';
+    if (this.engagementStance === next) return false;
+    this.engagementStance = next;
+    if (next === 'hold' && this._stancePursuitOrder) {
+      this.clearAttackOrder();
+      if (!this._userMoveOrder) {
+        this.moveTarget = null;
+        this._movePath = null;
+      }
+    }
+    return true;
   }
 
   cancelManualFireMission() {
@@ -251,6 +272,11 @@ export class Unit {
 
     if (this.hp <= 0) {
       this.hp = 0;
+      const knockout = classifyVehicleKnockout(this, opts);
+      this._rearHitKill = knockout.rearHit;
+      this._catastrophicVehicleKill = knockout.catastrophic;
+      this._recoverableWreck = knockout.recoverable && !this._crewBailedOut;
+      this._preWreckYaw = this.mesh.rotation?.y ?? 0;
       this.dead = true;
       if (opts.explosive || opts.cause === 'explosion') {
         this._deathCause = 'explosion';
@@ -266,6 +292,70 @@ export class Unit {
       if (this.selected) this.setSelected(false);
       applyUnitDeathVisual(this);
     }
+  }
+
+  /** Restore a recoverable knocked-out vehicle with a fresh live mesh. */
+  restoreRecoverableVehicle(coverSystem = null) {
+    if (!this.dead || !this._recoverableWreck || !this.mesh?.parent) return false;
+
+    const oldMesh = this.mesh;
+    const parent = oldMesh.parent;
+    const position = oldMesh.position.clone();
+    if (this._mapDef) {
+      position.y = sampleTerrainHeight(position.x, position.z, this._mapDef);
+    }
+    const yaw = this._preWreckYaw ?? oldMesh.rotation.y ?? 0;
+    if (this.wreckFire) {
+      removeWreckEffect(this.wreckFire);
+      this.wreckFire = null;
+    }
+
+    const replacement = createUnitMesh(
+      this.def.type,
+      this.faction.color,
+      this.faction.accent,
+      this.faction.id
+    );
+    replacement.position.copy(position);
+    replacement.rotation.y = yaw;
+    replacement.userData.unit = this;
+    replacement.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    parent.add(replacement);
+    parent.remove(oldMesh);
+    oldMesh.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
+      else child.material?.dispose?.();
+    });
+
+    this.mesh = replacement;
+    this.dead = false;
+    // The engineer has restarted the hull, but a bailed-out vehicle has no crew.
+    // It remains immobile and unable to fire until an infantry/airborne squad
+    // supplies two replacement crewmen.
+    this._crewless = true;
+    this._replacementCrewUnitId = null;
+    this.hp = Math.max(1, this.maxHp * 0.28);
+    this.target = null;
+    this.attackOrder = null;
+    this.moveTarget = null;
+    this._movePath = null;
+    this._recoverableWreck = false;
+    this._catastrophicVehicleKill = false;
+    this._rearHitKill = false;
+    this._vehicleKillFxDone = false;
+    this._wreckRepairProgress = 0;
+    this._deathCause = null;
+    this.wreckTimeLeft = 0;
+    this.corpseTimeLeft = 0;
+    coverSystem?.removeSourceZone?.(`vehicle-wreck:${this.id}`);
+    this._wreckCoverRegistered = false;
+    return true;
   }
 
   dispose(scene) {

@@ -8,6 +8,7 @@ export const SQUAD_SIZES = {
   engineer: 4,
   mortar: 2,
   sniper: 1,
+  vehicleCrew: 2,
 };
 
 /** Personnel lost when one unit of this type is destroyed or captured. */

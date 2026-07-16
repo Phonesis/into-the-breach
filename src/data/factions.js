@@ -17,6 +17,25 @@ export const SUPER_HEAVY_COAX_MG = {
   attackSpeed: 3.0,
 };
 
+function vehicleCrewDef(factionId) {
+  return {
+    type: 'vehicleCrew',
+    name: 'Bailed-out Vehicle Crew',
+    designation: 'Vehicle crew with personal weapons',
+    description: 'Surviving crew armed with pistols, carbines, and submachine guns.',
+    hp: 36,
+    damage: 6,
+    range: 30,
+    rangeMeters: 300,
+    speed: 4.3,
+    attackSpeed: 1.05,
+    cost: 0,
+    buildTime: 0,
+    weaponSound: `rifle_${factionId}`,
+    hidden: true,
+  };
+}
+
 const atGunGermany = {
   antiTankGun: {
     type: 'antiTankGun',
@@ -535,6 +554,7 @@ export const FACTIONS = {
     accent: 0xc8102e,
     enemyDefault: 'usa',
     units: {
+      vehicleCrew: vehicleCrewDef('germany'),
       infantry: {
         type: 'infantry',
         name: 'Grenadier Squad',
@@ -619,6 +639,7 @@ export const FACTIONS = {
     accent: 0xb22234,
     enemyDefault: 'germany',
     units: {
+      vehicleCrew: vehicleCrewDef('usa'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Squad',
@@ -703,6 +724,7 @@ export const FACTIONS = {
     accent: 0xc8102e,
     enemyDefault: 'germany',
     units: {
+      vehicleCrew: vehicleCrewDef('uk'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Section',
@@ -787,6 +809,7 @@ export const FACTIONS = {
     accent: 0xcc0000,
     enemyDefault: 'germany',
     units: {
+      vehicleCrew: vehicleCrewDef('russia'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Squad',

@@ -17,8 +17,8 @@ export const TRENCH_DIG_RANGE = 3.8;
 export const TRENCH_MIN_SPACING = 6.5;
 export const TRENCH_MAX_PER_TEAM = 14;
 export const TRENCH_COVER_RADIUS = 3.6;
-/** Damage taken while dug into a trench (~58% reduction). */
-export const TRENCH_COVER_MULT = 0.42;
+/** Damage taken while dug into a trench (~70% reduction). */
+export const TRENCH_COVER_MULT = 0.3;
 export const TRENCH_CAPACITY = 4;
 export const TRENCH_ENTER_RANGE = 3.2;
 
@@ -125,6 +125,7 @@ export class InfantryTrenchManager {
       this.game.lastStand.pendingType = null;
       this.game.ui?.updateLastStandDeploy(this.game);
     }
+    this.game._clearDirectionalPlacement?.('trench');
     if (this.pending) {
       this.pending = false;
       return false;
@@ -135,6 +136,7 @@ export class InfantryTrenchManager {
 
   cancel() {
     this.pending = false;
+    this.game._clearDirectionalPlacement?.('trench');
   }
 
   _diggersSelected(team, selectedOnly = true) {
@@ -157,7 +159,7 @@ export class InfantryTrenchManager {
   _nearestDigger(x, z, team, selectedOnly = true) {
     const diggers = this._diggersSelected(team, selectedOnly);
     let best = null;
-    let bestD = TRENCH_PLACE_RANGE;
+    let bestD = Number.POSITIVE_INFINITY;
     for (const u of diggers) {
       const d = Math.hypot(u.position.x - x, u.position.z - z);
       if (d <= bestD) {
@@ -217,13 +219,13 @@ export class InfantryTrenchManager {
     if (spacing) return spacing;
 
     if (!this._nearestDigger(px, pz, team, options.selectedOnly !== false)) {
-      return 'Select free infantry / MG / sniper within ~18 m of the dig site.';
+      return 'Select free infantry, an MG team, or a sniper to assign this dig site.';
     }
 
     return null;
   }
 
-  tryPlace(x, z, team) {
+  tryPlace(x, z, team, rotationY = null) {
     if (!this.pending) return false;
 
     let px = x;
@@ -251,12 +253,15 @@ export class InfantryTrenchManager {
       y,
       team,
       diggerId: digger.id,
+      rotationY: rotationY ?? this._facingYaw(team, px, pz),
       progress: 0,
       marker: null,
     };
     this.sites.push(site);
     digger._trenchDigSite = site.id;
     digger.clearAttackOrder?.();
+    digger.moveTo(site.x, site.z, this.game.mapDef, true);
+    site.moveOrderIssued = true;
     this._attachSiteMarker(site);
     this.pending = false;
     this.game.ui?.updateInfantryTrench?.(this.game);
@@ -280,6 +285,7 @@ export class InfantryTrenchManager {
       y,
       team,
       diggerId: digger.id,
+      rotationY: this._facingYaw(team, x, z),
       progress: 0,
       marker: null,
     };
@@ -298,6 +304,7 @@ export class InfantryTrenchManager {
       verb: 'Digging',
     });
     visual.position.set(site.x, site.y, site.z);
+    visual.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
     this.game.scene.add(visual);
     site.marker = visual;
     updateFieldConstructionVisual(visual, site.progress ?? 0, 0);
@@ -316,11 +323,7 @@ export class InfantryTrenchManager {
       seed: site.x * 0.19 + site.z * 0.31,
     });
     mesh.position.set(site.x, site.y, site.z);
-    // Face toward enemy for berm orientation
-    const foe = site.team === 'player' ? this.game.mapDef?.enemyBase : this.game.mapDef?.playerBase;
-    if (foe) {
-      mesh.rotation.y = Math.atan2(foe.x - site.x, foe.z - site.z);
-    }
+    mesh.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
     this.game.scene.add(mesh);
 
     const trench = {
@@ -332,6 +335,7 @@ export class InfantryTrenchManager {
       destroyed: false,
       garrison: [],
       mesh,
+      rotationY: mesh.rotation.y,
     };
     this.trenches.push(trench);
     this.game.coverSystem?.addZone(site.x, site.z, 'trench', TRENCH_COVER_RADIUS);
@@ -341,6 +345,12 @@ export class InfantryTrenchManager {
       tryEnterTrench(digger, trench, this);
     }
     this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
+  }
+
+  _facingYaw(team, x, z) {
+    const foe = team === 'player' ? this.game.mapDef?.enemyBase : this.game.mapDef?.playerBase;
+    if (!foe) return team === 'player' ? 0 : Math.PI;
+    return Math.atan2(foe.x - x, foe.z - z);
   }
 
   _cancelSite(site) {
@@ -399,9 +409,13 @@ export class InfantryTrenchManager {
 
         const dist = Math.hypot(digger.position.x - site.x, digger.position.z - site.z);
         if (dist > TRENCH_DIG_RANGE) {
-          digger.moveTo(site.x, site.z, this.game.mapDef, true);
+          if (!site.moveOrderIssued || !digger.moveTarget) {
+            digger.moveTo(site.x, site.z, this.game.mapDef, true);
+            site.moveOrderIssued = true;
+          }
           if (site.marker) updateFieldConstructionVisual(site.marker, site.progress ?? 0, dt);
         } else {
+          site.moveOrderIssued = false;
           digger.moveTarget = null;
           digger._movePath = null;
           digger.clearAttackOrder?.();

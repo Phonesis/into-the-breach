@@ -11,6 +11,7 @@ export const UNIT_LOSS_LABELS = {
   infantry: 'Riflemen',
   medic: 'Medics',
   engineer: 'Engineers',
+  vehicleCrew: 'Vehicle crew',
   machineGun: 'MG gunners',
   sniper: 'Snipers',
   mortar: 'Mortar crew',

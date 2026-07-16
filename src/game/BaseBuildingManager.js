@@ -53,7 +53,7 @@ export class BaseBuildingManager {
     this.active = true;
   }
 
-  _addCompletedEntry({ typeId, team, x, z, y, id }) {
+  _addCompletedEntry({ typeId, team, x, z, y, id, rotationY = null }) {
     const def = BASE_BUILDING_TYPES[typeId];
     if (!def) return null;
     const entry = {
@@ -75,7 +75,7 @@ export class BaseBuildingManager {
     };
     const mesh = createBaseBuildingMesh(typeId, this.getFactionId(team));
     mesh.position.set(x, y, z);
-    mesh.rotation.y = this._facingYaw(team, x, z);
+    mesh.rotation.y = rotationY ?? this._facingYaw(team, x, z);
     this.game.scene.add(mesh);
     entry.mesh = mesh;
     this._tagEntryHitbox(entry);
@@ -154,6 +154,7 @@ export class BaseBuildingManager {
     this.game.fireSupport?.cancel();
     this.game.engineerSandbags?.cancel();
     this.game.defenses?.cancelPending?.();
+    this.game._clearDirectionalPlacement?.('base');
     if (this.pendingType === typeId) {
       this.pendingType = null;
       return true;
@@ -164,6 +165,7 @@ export class BaseBuildingManager {
 
   cancelPending() {
     this.pendingType = null;
+    this.game._clearDirectionalPlacement?.('base');
   }
 
   getEntryById(id) {
@@ -289,7 +291,7 @@ export class BaseBuildingManager {
     return null;
   }
 
-  tryPlace(x, z, team, spendResources) {
+  tryPlace(x, z, team, spendResources, rotationY = null) {
     const typeId = this.pendingType;
     if (!typeId) return false;
     const def = BASE_BUILDING_TYPES[typeId];
@@ -310,6 +312,7 @@ export class BaseBuildingManager {
       z,
       y,
       progress: 0,
+      rotationY: rotationY ?? this._facingYaw(team, x, z),
       marker: null,
     };
     this.sites.push(site);
@@ -327,14 +330,14 @@ export class BaseBuildingManager {
       team: site.team,
     });
     visual.position.set(site.x, site.y, site.z);
-    visual.rotation.y = this._facingYaw(site.team, site.x, site.z);
+    visual.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
     this.game.scene.add(visual);
     site.marker = visual;
     updateBaseBuildingConstructionVisual(visual, site.progress ?? 0, 0);
   }
 
   /** Engineer-erected bunker — no supply cost; counts toward bunker cap. */
-  addEngineerBunker({ x, z, y, team, id }) {
+  addEngineerBunker({ x, z, y, team, id, rotationY = null }) {
     if (!this.active) return null;
     const def = BASE_BUILDING_TYPES.bunker;
     const entry = {
@@ -358,7 +361,7 @@ export class BaseBuildingManager {
 
     const mesh = createBaseBuildingMesh('bunker', this.getFactionId(team));
     mesh.position.set(x, y, z);
-    mesh.rotation.y = this._facingYaw(team, x, z);
+    mesh.rotation.y = rotationY ?? this._facingYaw(team, x, z);
     this.game.scene.add(mesh);
     entry.mesh = mesh;
     this._tagEntryHitbox(entry);
@@ -377,6 +380,7 @@ export class BaseBuildingManager {
       z: site.z,
       y: site.y,
       id: site.id,
+      rotationY: site.rotationY,
     });
   }
 

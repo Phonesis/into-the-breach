@@ -16,6 +16,7 @@ import {
   ASSAULT_ENEMY_RESOURCES,
   isAssaultMode,
   isClearanceMode,
+  isReinforcedClearanceMode,
   isTowerDefenseMode,
   isLastStandMode,
   LAST_STAND_SUPPLIES,
@@ -55,17 +56,20 @@ import { DefenseStructureManager } from './DefenseStructures.js';
 import { getFrontlineDef } from './AssaultMode.js';
 import {
   spawnClearanceDefenders,
-  setupClearanceCapturePoints,
   checkClearanceVictory,
   getClearancePlayerSpawnBase,
   getClearanceStagingAnchor,
   CLEARANCE_CEASEFIRE_TIME,
+  createClearanceReinforcementState,
+  updateClearanceReinforcements,
+  updateClearanceCounterattacks,
 } from './ClearanceMode.js';
 import { updateRetreatState, removeRetreatMarker, resolveRetreatHq } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
+import { updateVehicleBailouts } from './VehicleBailout.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js';
 import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
@@ -82,6 +86,16 @@ import {
 
 const TD_ENEMY_CORPSE_LINGER_SEC = 28;
 const TD_ENEMY_WRECK_LINGER_SEC = 42;
+const INFANTRY_DEBRIS_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'sniper',
+  'mortar',
+  'medic',
+  'engineer',
+  'vehicleCrew',
+]);
 
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import {
@@ -116,7 +130,11 @@ import {
 } from './CheatMode.js';
 import { buildCoverSites } from '../world/CoverSites.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
-import { CoverSystem } from './CoverSystem.js';
+import {
+  CoverSystem,
+  addVehicleWreckCover,
+  removeVehicleWreckCover,
+} from './CoverSystem.js';
 import { MAPS, buildMapDef } from '../data/maps.js';
 import { getDeployRadius, getStagingMoveRadius, formatMapHudLabel } from '../data/mapSizes.js';
 import { getDifficulty, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
@@ -136,6 +154,7 @@ import {
 import { DestructibleScenery } from '../world/DestructibleScenery.js';
 import {
   spawnTankWreckFire,
+  spawnRecoverableWreckSmoke,
   updateWreckEffects,
   clearWreckEffects,
   removeWreckEffect,
@@ -273,6 +292,13 @@ export class Game {
     this._tabHidden = false;
     this._rafActive = false;
     this._postMatchRenderAccum = 0;
+    this._debrisPerformance = {
+      frameTimeEma: 1 / 60,
+      lowFpsFor: 0,
+      cullCooldown: 0,
+      samples: 0,
+      baselineFps: 60,
+    };
     this.viewingBattlefield = false;
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
@@ -297,6 +323,8 @@ export class Game {
     this.enemyFaction = null;
     this.gameMode = 'campaign';
     this.tutorial = false;
+    this.clearance = false;
+    this.clearanceReinforcements = null;
     this.assault = null;
     this.assaultRole = null;
     this.towerDefense = null;
@@ -386,6 +414,8 @@ export class Game {
     this.infantryTrenches = new InfantryTrenchManager(this);
     this.medicFieldHospitals = new MedicFieldHospitalManager(this);
     this.baseBuildings = new BaseBuildingManager(this);
+    this._directionalPlacement = null;
+    this._directionalPlacementMarker = null;
     this.campaignStyle = 'classic';
 
     this.controller = new RTSController({
@@ -522,9 +552,19 @@ export class Game {
         this.placeLastStandAtScreen(e.clientX, e.clientY);
       }
     };
+    this._onPlacementLayerMove = (e) => {
+      if (this.paused || !this._directionalPlacement) return;
+      const ground = this._screenToGround(e.clientX, e.clientY);
+      if (!ground) return;
+      const { kind } = this._directionalPlacement;
+      if (kind === 'engineer') this.handleSandbagPlacement('preview', ground.x, ground.z);
+      else if (kind === 'trench') this.handleTrenchPlacement('preview', ground.x, ground.z);
+      else if (kind === 'base') this.handleBaseBuildingPlacement('preview', ground.x, ground.z);
+    };
     this._onPlacementLayerContextMenu = (e) => e.preventDefault();
     this._placementLayer?.addEventListener('pointerdown', this._onPlacementLayerDown);
     this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerUp);
+    this._placementLayer?.addEventListener('pointermove', this._onPlacementLayerMove);
     this._placementLayer?.addEventListener('contextmenu', this._onPlacementLayerContextMenu);
 
     window.addEventListener('resize', () => this.onResize());
@@ -739,6 +779,9 @@ export class Game {
     this.gameMode = gameMode;
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
+    this.clearanceReinforcements = createClearanceReinforcementState(
+      isReinforcedClearanceMode(gameMode, startOptions)
+    );
     this.towerDefense = isTowerDefenseMode(gameMode);
     this.lastStand = isLastStandMode(gameMode)
       ? createLastStandState(startOptions.lastStandDeployMode ?? 'manual')
@@ -806,6 +849,7 @@ export class Game {
     this.generalOrders.reset();
     this.smokeScreens.reset();
     this.smokeShellTargeting = false;
+    this._clearDirectionalPlacement();
     this.engineerSandbags.reset();
     this.infantryTrenches?.reset();
     this.medicFieldHospitals?.reset();
@@ -887,11 +931,10 @@ export class Game {
       }
     }
 
-    this.capturePoints = this.lastStand ? [] : createCapturePoints(this.mapDef, this.scene);
+    this.capturePoints =
+      this.lastStand || this.clearance ? [] : createCapturePoints(this.mapDef, this.scene);
 
-    if (this.clearance) {
-      setupClearanceCapturePoints(this.capturePoints, this.mapDef);
-    } else if (assault) {
+    if (assault) {
       this.assault = createAssaultState({
         playerRole: this.assaultRole,
         mapDef: this.mapDef,
@@ -998,6 +1041,7 @@ export class Game {
           mapDef: this.mapDef,
           capturePoints: this.capturePoints,
           enemyArmyMult: this.difficulty.enemyArmyMult,
+          attackerUnits: this.units,
         })
       );
     } else if (!this.tutorial && !this.towerDefense && !this.lastStand) {
@@ -1100,6 +1144,11 @@ export class Game {
     this._deployUiAccum = 0;
     this._rosterUiAccum = 0;
     this._emptyFieldHandled = false;
+    this._debrisPerformance.frameTimeEma = 1 / 60;
+    this._debrisPerformance.lowFpsFor = 0;
+    this._debrisPerformance.cullCooldown = 0;
+    this._debrisPerformance.samples = 0;
+    this._debrisPerformance.baselineFps = 60;
     if (!restoreSnapshot) {
       this.matchTime = 0;
     }
@@ -1117,6 +1166,7 @@ export class Game {
       lastStand: !!this.lastStand,
       lastStandPreset: isLastStandPresetForce(this),
       campaignStyle: this.campaignStyle,
+      clearanceReinforced: !!this.clearanceReinforcements,
     });
     if (isTabletLikeDevice()) {
       this.setTabletTargetMode(true);
@@ -1213,9 +1263,22 @@ export class Game {
       ? `${hover.id ?? ''}:${hover.team ?? ''}:${hover.dead ? 1 : 0}`
       : '';
     const unitKey = selected
-      .map((u) => `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}`)
+      .map((u) => `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}:${u.engagementStance ?? 'hold'}`)
       .join(',');
     return `${unitKey}|${hoverKey}|${this.selectedHq?.id ?? ''}`;
+  }
+
+  setSelectedEngagementStance(stance) {
+    const next = stance === 'pursue' ? 'pursue' : 'hold';
+    const selected = this._playerAlive.filter(
+      (u) => u.selected && !u.surrendered && !u.def?.nonCombat && (u.def?.damage ?? 0) > 0
+    );
+    if (!selected.length) return false;
+    for (const unit of selected) unit.setEngagementStance(next);
+    sounds.play('order');
+    this._selectionUiKey = '';
+    this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    return true;
   }
 
   _maybeUpdateSelectionPanel(selected, dt) {
@@ -1707,6 +1770,7 @@ export class Game {
     this.ui?.clearMinimap();
     this.ui?.setPlacementCapture(false);
     this.clearance = false;
+    this.clearanceReinforcements = null;
     this.campaign = false;
     this.production.setBuildTimeMult(1);
     for (const u of this.units) {
@@ -1856,6 +1920,7 @@ export class Game {
     firingGun.setSmokeShellOrder(x, z);
 
     this.smokeShellTargeting = false;
+    this._clearDirectionalPlacement();
     this.smokeScreens.clearPreview();
     sounds.play('order');
     this.ui?.updateSmokeShell(this);
@@ -2014,15 +2079,107 @@ export class Game {
     this._syncBattleCursor();
   }
 
+  _clearDirectionalPlacement(kind = null) {
+    if (kind && this._directionalPlacement?.kind !== kind) return;
+    const marker = this._directionalPlacementMarker;
+    if (marker) {
+      if (marker.parent) marker.parent.remove(marker);
+      marker.traverse((child) => {
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) child.material.forEach((mat) => mat.dispose?.());
+        else child.material?.dispose?.();
+      });
+    }
+    this._directionalPlacementMarker = null;
+    this._directionalPlacement = null;
+  }
+
+  _defaultDirectionalYaw(kind, x, z) {
+    if (kind === 'engineer') return this.engineerSandbags?._facingYaw('player', x, z) ?? 0;
+    if (kind === 'trench') return this.infantryTrenches?._facingYaw('player', x, z) ?? 0;
+    return this.baseBuildings?._facingYaw('player', x, z) ?? 0;
+  }
+
+  _beginDirectionalPlacement(kind, type, x, z) {
+    this._clearDirectionalPlacement();
+    const y = this.mapDef ? sampleTerrainHeight(x, z, this.mapDef) : 0;
+    const yaw = this._defaultDirectionalYaw(kind, x, z);
+    const marker = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.5, 2.85, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xfacc15,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    marker.add(ring);
+    const arrow = new THREE.ArrowHelper(
+      new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)),
+      new THREE.Vector3(0, 0.3, 0),
+      7,
+      0xffe36b,
+      1.8,
+      1.05
+    );
+    marker.add(arrow);
+    marker.position.set(x, y + 0.15, z);
+    marker.renderOrder = 12;
+    marker.userData.facingArrow = arrow;
+    this.scene.add(marker);
+    this._directionalPlacementMarker = marker;
+    this._directionalPlacement = { kind, type, x, z, yaw };
+  }
+
+  _updateDirectionalPlacementFacing(x, z) {
+    const placement = this._directionalPlacement;
+    if (!placement) return;
+    const dx = x - placement.x;
+    const dz = z - placement.z;
+    if (Math.hypot(dx, dz) < 0.75) return;
+    placement.yaw = Math.atan2(dx, dz);
+    this._directionalPlacementMarker?.userData?.facingArrow?.setDirection(
+      new THREE.Vector3(Math.sin(placement.yaw), 0, Math.cos(placement.yaw))
+    );
+  }
+
+  _handleDirectionalPlacement(kind, type, mode, x, z, validate, commit) {
+    const current = this._directionalPlacement;
+    if (mode === 'preview') {
+      if (current?.kind === kind && current.type === type) {
+        this._updateDirectionalPlacementFacing(x, z);
+      }
+      return true;
+    }
+    if (!current || current.kind !== kind || current.type !== type) {
+      this._clearDirectionalPlacement();
+      const reason = validate(x, z);
+      if (reason) return reason;
+      this._beginDirectionalPlacement(kind, type, x, z);
+      sounds.play('select');
+      return true;
+    }
+    this._updateDirectionalPlacementFacing(x, z);
+    const placed = commit(current.x, current.z, current.yaw);
+    if (placed) this._clearDirectionalPlacement();
+    return placed;
+  }
+
   handleTrenchPlacement(mode, x, z) {
     if (!this.running || this.gameOver || !this.infantryTrenches?.getPending()) return;
-    if (mode === 'preview') return;
-    const placed = this.infantryTrenches.tryPlace(x, z, PLAYER_TEAM);
-    if (placed) sounds.play('select');
-    else {
-      const reason = this.infantryTrenches.getPlacementRejectReason(x, z, PLAYER_TEAM);
-      if (reason) this.ui?.showInfantryTrenchHint(reason);
-    }
+    const placed = this._handleDirectionalPlacement(
+      'trench',
+      'trench',
+      mode,
+      x,
+      z,
+      (px, pz) => this.infantryTrenches.getPlacementRejectReason(px, pz, PLAYER_TEAM),
+      (px, pz, yaw) => this.infantryTrenches.tryPlace(px, pz, PLAYER_TEAM, yaw)
+    );
+    if (typeof placed === 'string') this.ui?.showInfantryTrenchHint(placed);
+    else if (placed && !this._directionalPlacement && mode !== 'preview') sounds.play('select');
     this.ui?.updateInfantryTrench(this);
     this._syncPlacementCapture();
     this._syncBattleCursor();
@@ -2083,13 +2240,18 @@ export class Game {
 
   handleSandbagPlacement(mode, x, z) {
     if (!this.running || this.gameOver || !this.engineerSandbags?.getPending()) return;
-    if (mode === 'preview') return;
-    const placed = this.engineerSandbags.tryPlace(x, z, PLAYER_TEAM);
-    if (placed) sounds.play('select');
-    else {
-      const reason = this.engineerSandbags.getPlacementRejectReason(x, z, PLAYER_TEAM);
-      if (reason) this.ui?.showEngineerBuildHint(reason);
-    }
+    const type = this.engineerSandbags.getPending();
+    const placed = this._handleDirectionalPlacement(
+      'engineer',
+      type,
+      mode,
+      x,
+      z,
+      (px, pz) => this.engineerSandbags.getPlacementRejectReason(px, pz, PLAYER_TEAM, type),
+      (px, pz, yaw) => this.engineerSandbags.tryPlace(px, pz, PLAYER_TEAM, yaw)
+    );
+    if (typeof placed === 'string') this.ui?.showEngineerBuildHint(placed);
+    else if (placed && !this._directionalPlacement && mode !== 'preview') sounds.play('select');
     this.ui?.updateEngineerBuild(this);
     this._syncPlacementCapture();
     this._syncBattleCursor();
@@ -2113,11 +2275,33 @@ export class Game {
 
   handleBaseBuildingPlacement(mode, x, z) {
     if (!this.running || this.gameOver || !this.baseBuildings?.getPending()) return;
-    if (mode === 'preview') return;
-    const placed = this.baseBuildings.tryPlace(x, z, PLAYER_TEAM, (cost) =>
-      this.spendResources(PLAYER_TEAM, cost)
-    );
-    if (placed) {
+    const type = this.baseBuildings.getPending();
+    let placed;
+    if (type === 'bunker') {
+      placed = this._handleDirectionalPlacement(
+        'base',
+        type,
+        mode,
+        x,
+        z,
+        (px, pz) => this.baseBuildings.getPlacementRejectReason(px, pz, PLAYER_TEAM, type),
+        (px, pz, yaw) =>
+          this.baseBuildings.tryPlace(
+            px,
+            pz,
+            PLAYER_TEAM,
+            (cost) => this.spendResources(PLAYER_TEAM, cost),
+            yaw
+          )
+      );
+      if (typeof placed === 'string') this.ui?.showBaseBuildHint?.(placed);
+    } else {
+      if (mode === 'preview') return;
+      placed = this.baseBuildings.tryPlace(x, z, PLAYER_TEAM, (cost) =>
+        this.spendResources(PLAYER_TEAM, cost)
+      );
+    }
+    if (placed === true && !this._directionalPlacement) {
       sounds.play('select');
       this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
     }
@@ -2395,6 +2579,8 @@ export class Game {
       tutorial: this.tutorial,
       assault: this.assault,
       clearance: this.clearance,
+      clearanceReinforcements: this.clearanceReinforcements,
+      matchTime: this.matchTime,
       towerDefense: this.towerDefense,
       tdHqDefense,
       defenseCount: this.defenses?.entries.filter((e) => !e.destroyed).length ?? 0,
@@ -2645,7 +2831,9 @@ export class Game {
         if (!u._vehicleKillFxDone) {
           triggerVehicleKillFx(this, u, { x: u.position.x, y: u.position.y, z: u.position.z });
         } else if (!u.wreckFire) {
-          u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+          u.wreckFire = u._recoverableWreck
+            ? spawnRecoverableWreckSmoke(this.scene, u.position, u.mesh)
+            : spawnTankWreckFire(this.scene, u.position, u.mesh);
         }
       }
     }
@@ -2823,7 +3011,8 @@ export class Game {
     }
     requestAnimationFrame(this.animate);
 
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const rawFrameDt = Math.min(this.clock.getDelta(), 0.25);
+    const dt = Math.min(rawFrameDt, 0.05);
     const viewActive = this.running && !this.gameOver;
     const simActive = viewActive && !this.paused;
     const fieldHasUnits = this._aliveUnits.length > 0;
@@ -2861,10 +3050,25 @@ export class Game {
         }
 
         this.matchTime += dt;
+        const clearanceArrival = updateClearanceReinforcements(this);
+        if (clearanceArrival) {
+          this._rebuildUnitCaches();
+          this._syncUnitRoster();
+          this.ui?.showSaveToast?.(
+            `Reinforcement cycle ${clearanceArrival.wave}: fresh troops arrived for both sides`
+          );
+        }
+        const clearanceProbe = updateClearanceCounterattacks(this);
+        if (clearanceProbe) {
+          this.ui?.showSaveToast?.(
+            `Enemy probing attack: ${clearanceProbe.units.length} defenders advancing`
+          );
+        }
         updateDetachedCorpseFalls(dt);
         tickUnitCooldowns(this._aliveUnits, dt);
         updateMedicHealing(this._aliveUnits, dt);
-        updateEngineerHealing(this._aliveUnits, dt);
+        updateVehicleBailouts(this, dt);
+        if (updateEngineerHealing(this.units, dt, this.coverSystem) > 0) this._rebuildUnitCaches();
         updateEngineerHqRepair(this.hqs, this._aliveUnits, dt);
         this.engineerSandbags?.update(dt);
         if (this.engineerSandbags?.sites?.length) {
@@ -2889,7 +3093,9 @@ export class Game {
                 motorPools: getActiveMotorPools(this.baseBuildings),
               }
             : null;
-          syncHealMarkers(this._aliveUnits, this.baseBuildings, this.hqs, depotCache);
+          // Include recoverable dead hulls so their repair spanner appears as
+          // soon as an engineer begins restarting them.
+          syncHealMarkers(this.units, this.baseBuildings, this.hqs, depotCache);
           if (depotCache) {
             updateHospitalHealing(
               this.baseBuildings,
@@ -2974,7 +3180,9 @@ export class Game {
             (u) => u._mountedOnTankId || u._pendingMountTankId || u._tankRiderIds?.length
           )
         ) {
-          updateTankRiders(this._aliveUnits, dt, this.mapDef, this);
+          // Include dead hosts so surviving riders/replacement crews can be
+          // detached cleanly from a newly knocked-out vehicle.
+          updateTankRiders(this.units, dt, this.mapDef, this);
         }
         if (isTdHqDefenseStyle(this.towerDefense)) {
           enforcePlayerFrontlineClamp(this);
@@ -3191,6 +3399,7 @@ export class Game {
           if (hasCorpses) updateWreckEffects(dt, this.camera);
           this.cleanupDead(dt);
         }
+        this._updateAdaptiveDebrisCleanup(rawFrameDt);
       }
 
     if (viewActive) {
@@ -3209,6 +3418,82 @@ export class Game {
     }
   }
 
+  _updateAdaptiveDebrisCleanup(frameDt) {
+    const perf = this._debrisPerformance;
+    if (!perf || this.paused || this.matchTime < 20) return;
+
+    // Ignore isolated stalls (asset upload, window movement, debugger pauses).
+    const sample = Math.min(frameDt, 0.1);
+    perf.frameTimeEma = perf.frameTimeEma * 0.94 + sample * 0.06;
+    perf.samples += 1;
+    perf.cullCooldown = Math.max(0, perf.cullCooldown - frameDt);
+    const fps = 1 / Math.max(perf.frameTimeEma, 1 / 120);
+    if (perf.samples < 90) return;
+    if (perf.samples === 90) perf.baselineFps = Math.min(60, Math.max(24, fps));
+
+    // Compare against the device's observed refresh rate so a stable 30 Hz
+    // display is not mistaken for degradation.
+    const lowThreshold = Math.min(42, perf.baselineFps * 0.72);
+    const recoveredThreshold = Math.min(50, perf.baselineFps * 0.86);
+    if (fps < lowThreshold) {
+      perf.lowFpsFor += frameDt;
+    } else if (fps > recoveredThreshold) {
+      perf.lowFpsFor = Math.max(0, perf.lowFpsFor - frameDt * 2);
+    } else {
+      perf.lowFpsFor = Math.max(0, perf.lowFpsFor - frameDt * 0.25);
+    }
+
+    if (perf.lowFpsFor < 2.5 || perf.cullCooldown > 0) return;
+    const batchSize = fps < 28 ? 14 : fps < 35 ? 9 : 5;
+    const removed = this._cullBattlefieldDebris(batchSize, fps);
+    perf.lowFpsFor = removed > 0 ? 0 : Math.min(perf.lowFpsFor, 2.5);
+    perf.cullCooldown = removed > 0 ? 1.25 : 3;
+  }
+
+  _cullBattlefieldDebris(batchSize, fps) {
+    const debris = this.units.filter(
+      (u) =>
+        u.dead &&
+        !u._recoverableWreck &&
+        u._lossRecorded &&
+        u.mesh?.parent &&
+        u.mesh.userData?.deathVisualApplied &&
+        this.matchTime - (u._deathAt ?? this.matchTime) >= 12
+    );
+
+    // Keep a baseline amount of battlefield history, unless performance has
+    // become severe. Repairable wrecks are never part of this budget.
+    const retainedMinimum = fps < 28 ? 18 : 30;
+    const removalCount = Math.min(batchSize, Math.max(0, debris.length - retainedMinimum));
+    if (removalCount <= 0) return 0;
+
+    debris.sort((a, b) => {
+      const aBody = INFANTRY_DEBRIS_TYPES.has(a.def?.type) ? 0 : 1;
+      const bBody = INFANTRY_DEBRIS_TYPES.has(b.def?.type) ? 0 : 1;
+      if (aBody !== bBody) return aBody - bBody;
+      const ageOrder = (a._deathAt ?? 0) - (b._deathAt ?? 0);
+      if (Math.abs(ageOrder) > 3) return ageOrder;
+      const aDist = a.position.distanceToSquared(this.cameraTarget);
+      const bDist = b.position.distanceToSquared(this.cameraTarget);
+      return bDist - aDist;
+    });
+
+    const removedIds = new Set();
+    for (const u of debris.slice(0, removalCount)) {
+      removeVehicleWreckCover(this.coverSystem, u);
+      if (u.wreckFire) {
+        removeWreckEffect(u.wreckFire);
+        u.wreckFire = null;
+      }
+      u.dispose(this.scene);
+      removedIds.add(u.id);
+    }
+    if (!removedIds.size) return 0;
+    this.units = this.units.filter((u) => !removedIds.has(u.id));
+    this._rebuildUnitCaches();
+    return removedIds.size;
+  }
+
   cleanupDead(dt) {
     if (this.gameOver) return;
 
@@ -3218,7 +3503,14 @@ export class Game {
 
     for (const u of this.units) {
       if (!u.dead) continue;
-      if (towerDefenseCleanup && u.team === ENEMY_TEAM && !u._tdLingerCapped) {
+      if (u._deathAt == null) u._deathAt = this.matchTime;
+      if (!u._wreckCoverRegistered) addVehicleWreckCover(this.coverSystem, u);
+      if (
+        towerDefenseCleanup &&
+        !u._recoverableWreck &&
+        u.team === ENEMY_TEAM &&
+        !u._tdLingerCapped
+      ) {
         u.corpseTimeLeft = Math.min(
           u.corpseTimeLeft || TD_ENEMY_CORPSE_LINGER_SEC,
           TD_ENEMY_CORPSE_LINGER_SEC
@@ -3229,7 +3521,7 @@ export class Game {
         );
         u._tdLingerCapped = true;
       }
-      if (towerDefenseCleanup) {
+      if (towerDefenseCleanup && !u._recoverableWreck) {
         if (u.corpseTimeLeft > 0) u.corpseTimeLeft = Math.max(0, u.corpseTimeLeft - dt);
         if (u.wreckTimeLeft > 0) u.wreckTimeLeft = Math.max(0, u.wreckTimeLeft - dt);
       }
@@ -3239,7 +3531,13 @@ export class Game {
       }
       const corpseLingerExpired =
         (u.corpseTimeLeft ?? 0) <= 0 && (u.wreckTimeLeft ?? 0) <= 0;
-      if (towerDefenseCleanup && corpseLingerExpired && u.mesh?.userData?.deathVisualApplied) {
+      if (
+        towerDefenseCleanup &&
+        !u._recoverableWreck &&
+        corpseLingerExpired &&
+        u.mesh?.userData?.deathVisualApplied
+      ) {
+        removeVehicleWreckCover(this.coverSystem, u);
         if (u.wreckFire) {
           removeWreckEffect(u.wreckFire);
           u.wreckFire = null;
@@ -3265,13 +3563,16 @@ export class Game {
             z: u.position.z,
           });
         } else if (!u.wreckFire) {
-          u.wreckFire = spawnTankWreckFire(this.scene, u.position, u.mesh);
+          u.wreckFire = u._recoverableWreck
+            ? spawnRecoverableWreckSmoke(this.scene, u.position, u.mesh)
+            : spawnTankWreckFire(this.scene, u.position, u.mesh);
         }
       }
     }
     this.units = this.units.filter(
       (u) =>
         !u.dead ||
+        u._recoverableWreck ||
         !towerDefenseCleanup ||
         (((u.corpseTimeLeft ?? 0) > 0 || (u.wreckTimeLeft ?? 0) > 0) && u.mesh?.parent)
     );

@@ -7,6 +7,9 @@ export const ENGINEER_AURA_RANGE = 16;
 /** HP restored per second at point-blank (scales down with distance). */
 export const ENGINEER_HEAL_PER_SEC = 2.8;
 
+/** Time for one nearby engineer at point-blank range to restart a recoverable wreck. */
+export const RECOVERABLE_WRECK_REPAIR_SEC = 12;
+
 /** Game meters — engineers within this range of a damaged HQ can repair it. */
 export const ENGINEER_HQ_REPAIR_RANGE = ENGINEER_AURA_RANGE;
 
@@ -47,15 +50,31 @@ export function isHqBeingRepairedByEngineers(hq, units) {
   return false;
 }
 
-export function updateEngineerHealing(units, dt) {
-  if (dt <= 0) return;
+export function updateEngineerHealing(units, dt, coverSystem = null) {
+  if (dt <= 0) return 0;
 
   const engineers = units.filter((u) => !u.dead && u.def?.type === 'engineer');
-  if (!engineers.length) return;
+  if (!engineers.length) return 0;
+  let restoredVehicles = 0;
 
   for (const engineer of engineers) {
     for (const ally of units) {
-      if (ally.dead || ally.team !== engineer.team || ally.id === engineer.id) continue;
+      if (ally.team !== engineer.team || ally.id === engineer.id) continue;
+      if (ally.dead) {
+        if (!ally._recoverableWreck) continue;
+        const dist = distanceBetween(engineer, ally);
+        if (dist > ENGINEER_AURA_RANGE) continue;
+        const proximity = 1 - (dist / ENGINEER_AURA_RANGE) * 0.55;
+        ally._wreckRepairProgress = Math.min(
+          1,
+          (ally._wreckRepairProgress ?? 0) +
+            (proximity * dt) / RECOVERABLE_WRECK_REPAIR_SEC
+        );
+        if (ally._wreckRepairProgress >= 1 && ally.restoreRecoverableVehicle?.(coverSystem)) {
+          restoredVehicles += 1;
+        }
+        continue;
+      }
       if (!isVehicleUnit(ally.def?.type)) continue;
       if (ally.hp >= ally.maxHp) continue;
 
@@ -66,6 +85,7 @@ export function updateEngineerHealing(units, dt) {
       ally.hp = Math.min(ally.maxHp, ally.hp + ENGINEER_HEAL_PER_SEC * proximity * dt);
     }
   }
+  return restoredVehicles;
 }
 
 export function updateEngineerHqRepair(hqs, units, dt) {

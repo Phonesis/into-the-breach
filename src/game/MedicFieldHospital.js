@@ -139,7 +139,7 @@ export class MedicFieldHospitalManager {
   _nearestMedic(x, z, team) {
     const medics = this._medicsSelected(team);
     let best = null;
-    let bestD = TENT_PLACE_RANGE;
+    let bestD = Number.POSITIVE_INFINITY;
     for (const u of medics) {
       const d = Math.hypot(u.position.x - x, u.position.z - z);
       if (d <= bestD) {
@@ -209,7 +209,7 @@ export class MedicFieldHospitalManager {
     if (spacing) return spacing;
 
     if (!this._nearestMedic(px, pz, team)) {
-      return 'Select a free medic within ~18 m of the tent site.';
+      return 'Select a free medic to assign this tent site.';
     }
 
     return null;
@@ -249,6 +249,8 @@ export class MedicFieldHospitalManager {
     this.sites.push(site);
     medic._medicTentSite = site.id;
     medic.clearAttackOrder?.();
+    medic.moveTo(site.x, site.z, this.game.mapDef, true);
+    site.moveOrderIssued = true;
     this._attachSiteMarker(site);
     this.pending = false;
     this.game.ui?.updateMedicTent?.(this.game);
@@ -353,9 +355,13 @@ export class MedicFieldHospitalManager {
 
         const dist = Math.hypot(medic.position.x - site.x, medic.position.z - site.z);
         if (dist > TENT_BUILD_RANGE) {
-          medic.moveTo(site.x, site.z, this.game.mapDef, true);
+          if (!site.moveOrderIssued || !medic.moveTarget) {
+            medic.moveTo(site.x, site.z, this.game.mapDef, true);
+            site.moveOrderIssued = true;
+          }
           if (site.marker) updateFieldConstructionVisual(site.marker, site.progress ?? 0, dt);
         } else {
+          site.moveOrderIssued = false;
           medic.moveTarget = null;
           medic._movePath = null;
           medic.clearAttackOrder?.();

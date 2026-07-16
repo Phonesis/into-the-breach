@@ -187,7 +187,7 @@ export class EngineerSandbagManager {
 
     const mesh = createCampaignBunkerMesh(this._factionId(site.team));
     mesh.position.set(site.x, site.y, site.z);
-    mesh.rotation.y = this._facingYaw(site.team, site.x, site.z);
+    mesh.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
     this.game.scene.add(mesh);
     entry.mesh = mesh;
     this.fieldBunkers.push(entry);
@@ -229,6 +229,7 @@ export class EngineerSandbagManager {
       this.game.ui?.updateLastStandDeploy(this.game);
     }
 
+    this.game._clearDirectionalPlacement?.('engineer');
     if (this.pendingType === buildType) {
       this.pendingType = null;
       return false;
@@ -239,6 +240,7 @@ export class EngineerSandbagManager {
 
   cancel() {
     this.pendingType = null;
+    this.game._clearDirectionalPlacement?.('engineer');
   }
 
   _buildPreset(buildType = this.pendingType) {
@@ -290,7 +292,7 @@ export class EngineerSandbagManager {
         !u._sandbagSite
     );
     let best = null;
-    let bestD = SANDBAG_PLACE_RANGE;
+    let bestD = Number.POSITIVE_INFINITY;
     for (const eng of engineers) {
       const d = Math.hypot(eng.position.x - x, eng.position.z - z);
       if (d <= bestD) {
@@ -371,13 +373,13 @@ export class EngineerSandbagManager {
 
     const engineer = this._nearestSelectedEngineer(x, z, team, options.selectedOnly !== false);
     if (!engineer) {
-      return 'Select a free engineer within ~24 m of the build site.';
+      return 'Select a free engineer to assign this build site.';
     }
 
     return null;
   }
 
-  tryPlace(x, z, team) {
+  tryPlace(x, z, team, rotationY = null) {
     const buildType = this.pendingType;
     if (!buildType) return false;
     const reason = this.getPlacementRejectReason(x, z, team, buildType);
@@ -401,11 +403,15 @@ export class EngineerSandbagManager {
       y,
       team,
       engineerId: engineer.id,
+      rotationY: rotationY ?? this._facingYaw(team, x, z),
       progress: 0,
       marker: null,
     };
     this.sites.push(site);
     engineer._sandbagSite = site.id;
+    engineer.clearAttackOrder?.();
+    engineer.moveTo(site.x, site.z, this.game.mapDef, true);
+    site.moveOrderIssued = true;
     this._attachSiteMarker(site);
     this.pendingType = null;
     this.game.ui?.updateEngineerBuild?.(this.game);
@@ -430,6 +436,7 @@ export class EngineerSandbagManager {
       y,
       team,
       engineerId: engineer.id,
+      rotationY: this._facingYaw(team, x, z),
       progress: 0,
       marker: null,
     };
@@ -449,6 +456,7 @@ export class EngineerSandbagManager {
       verb: 'Building',
     });
     visual.position.set(site.x, site.y, site.z);
+    visual.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
     this.game.scene.add(visual);
     site.marker = visual;
     updateFieldConstructionVisual(visual, site.progress ?? 0, 0);
@@ -471,6 +479,7 @@ export class EngineerSandbagManager {
         z: site.z,
         y: site.y,
         team: site.team,
+        rotationY: site.rotationY,
       });
       this.game.ui?.updateBaseBuild?.(this.game);
       this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
@@ -484,6 +493,7 @@ export class EngineerSandbagManager {
         z: site.z,
         team: site.team,
         buildType: site.buildType,
+        rotationY: site.rotationY,
       });
       this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
       return;
@@ -494,6 +504,7 @@ export class EngineerSandbagManager {
       seed: site.x * 0.17 + site.z * 0.23,
     });
     group.position.set(site.x, site.y, site.z);
+    group.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
 
     if (this.game.scenery) {
       this.game.scenery.register(group, {
@@ -514,6 +525,7 @@ export class EngineerSandbagManager {
       z: site.z,
       team: site.team,
       buildType: site.buildType,
+      rotationY: site.rotationY,
     });
     this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
   }
@@ -548,10 +560,14 @@ export class EngineerSandbagManager {
 
       const dist = Math.hypot(engineer.position.x - site.x, engineer.position.z - site.z);
       if (dist > SANDBAG_BUILD_RANGE) {
-        engineer.moveTo(site.x, site.z, this.game.mapDef, true);
+        if (!site.moveOrderIssued || !engineer.moveTarget) {
+          engineer.moveTo(site.x, site.z, this.game.mapDef, true);
+          site.moveOrderIssued = true;
+        }
         // Still pulse the marker while engineer is en route
         if (site.marker) updateFieldConstructionVisual(site.marker, site.progress ?? 0, dt);
       } else {
+        site.moveOrderIssued = false;
         engineer.moveTarget = null;
         engineer._movePath = null;
         site.progress += dt / buildTime;

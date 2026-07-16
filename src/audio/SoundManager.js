@@ -73,6 +73,7 @@ const INFANTRY_TYPES = new Set([
   'medic',
   'engineer',
   'mortar',
+  'vehicleCrew',
 ]);
 
 const UNIT_SELECT_COUNT = 6;

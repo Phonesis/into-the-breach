@@ -116,7 +116,7 @@ export function updateAI({
     if (unit.attackOrder?.isSmokeShell) continue;
 
     if (clearance) {
-      updateClearanceDefender(unit, alivePlayers);
+      updateClearanceDefender(unit, alivePlayers, game);
       continue;
     }
 
@@ -756,18 +756,50 @@ function updateLastStandUnit(unit, players, mapDef, difficulty) {
   }
 }
 
-function updateClearanceDefender(unit, players) {
+function updateClearanceDefender(unit, players, game = null) {
   const hold = unit.defensiveHold;
-  const focus = pickAttackTarget(unit, players);
-  if (focus) {
-    unit.setAttackOrder(focus);
-    if (!isInRange(unit, focus)) {
-      unit.moveTarget = getStandoffPosition(unit, focus);
+  const probe = unit._clearanceProbe;
+  if (probe) {
+    if (!players.length || (game?.matchTime ?? Infinity) >= probe.until) {
+      unit._clearanceProbe = null;
+      unit.clearAttackOrder();
+      if (hold) {
+        unit.moveTarget = { x: hold.x, z: hold.z };
+        unit._userMoveOrder = false;
+      }
+      return;
+    }
+
+    const probeTarget = findNearestEnemy(unit, players);
+    if (probeTarget) {
+      unit.setAttackOrder(probeTarget);
+      if (!isInRange(unit, probeTarget)) {
+        unit.moveTarget = getStandoffPosition(unit, probeTarget);
+      }
+    } else {
+      unit.clearAttackOrder();
+      unit.moveTarget = { x: probe.targetX, z: probe.targetZ };
     }
     return;
   }
+  // Clear Defenses garrisons hold their prepared positions. The generic target
+  // picker deliberately lets infantry/snipers notice enemies at up to 150% of
+  // range, which made snipers acquire and walk toward the assembly area as soon
+  // as the ceasefire ended. Only engage once a target is actually in range;
+  // pursuit is reserved for the explicit probing-counterattack branch above.
+  const nearest = findNearestEnemy(unit, players);
+  const focus = nearest && isInRange(unit, nearest) ? nearest : null;
+  if (focus) {
+    unit.setAttackOrder(focus);
+    unit.moveTarget = null;
+    unit._chasingAttack = false;
+    return;
+  }
 
-  if (unit.attackOrder && !unit.attackOrder.dead) return;
+  if (unit.attackOrder) {
+    unit.clearAttackOrder();
+    unit.moveTarget = null;
+  }
 
   if (hold) {
     const dx = unit.position.x - hold.x;

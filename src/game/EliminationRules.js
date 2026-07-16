@@ -20,6 +20,7 @@ function getCheapestUnitCost(faction) {
   if (!faction?.units) return Infinity;
   let min = Infinity;
   for (const def of Object.values(faction.units)) {
+    if (def?.hidden) continue;
     if (def?.cost != null && def.cost < min) min = def.cost;
   }
   return min === Infinity ? 0 : min;

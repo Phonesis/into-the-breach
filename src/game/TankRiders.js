@@ -3,6 +3,7 @@ import { sampleTerrainHeight } from '../world/Terrain.js';
 import { distanceBetween } from './Targeting.js';
 import { releaseFromBunker, getGarrisonBunkerSources } from './BunkerGarrison.js';
 import { resetInfantryWalkPose } from '../units/InfantryVisuals.js';
+import { SQUAD_SIZES } from '../data/squadSizes.js';
 
 export const TANK_MOUNT_RANGE = 4.2;
 export const TANK_DISMOUNT_SPREAD = 2.4;
@@ -16,11 +17,13 @@ const RIDER_TYPES = new Set([
   'engineer',
 ]);
 
-const HOST_TYPES = new Set(['tank', 'superHeavyTank']);
+const HOST_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const RIDER_DECK_TYPES = new Set(['tank', 'superHeavyTank']);
 
 const HOST_CAPACITY = {
   tank: 2,
   superHeavyTank: 3,
+  armoredCar: 1,
 };
 
 /** Rider offsets in tank local space (deck height from vehicleDesigns hull top). */
@@ -34,6 +37,7 @@ const RIDER_OFFSETS = {
     { x: 1.05, z: -2.05, y: 1.14 },
     { x: 0, z: -2.45, y: 1.14 },
   ],
+  armoredCar: [{ x: 0, z: -0.72, y: 0.82 }],
 };
 
 const DISMOUNT_OFFSETS = [
@@ -45,6 +49,7 @@ const DISMOUNT_OFFSETS = [
 ];
 
 const MOUNTED_RENDER_ORDER = 12;
+const REPLACEMENT_CREW_COUNT = 2;
 
 const _riderLocal = new THREE.Vector3();
 
@@ -87,6 +92,31 @@ function setMountedRenderOrder(mesh, mounted) {
   });
 }
 
+function squadLivingCount(unit) {
+  const size = SQUAD_SIZES[unit?.def?.type] ?? 1;
+  if (!unit || unit.hp <= 0) return 0;
+  return Math.max(1, Math.ceil((unit.hp / Math.max(unit.maxHp, 1)) * size));
+}
+
+function canSupplyReplacementCrew(unit) {
+  return (
+    (unit?.def?.type === 'infantry' || unit?.def?.type === 'paratrooper') &&
+    squadLivingCount(unit) >= REPLACEMENT_CREW_COUNT
+  );
+}
+
+function syncEmbeddedCrewVisibility(rider, embedded) {
+  if (!rider?.mesh) return;
+  const living = squadLivingCount(rider);
+  rider.mesh.traverse((child) => {
+    if (child.name !== 'squadMember') return;
+    const index = child.userData?.squadIndex;
+    if (index == null) return;
+    if (embedded && index < REPLACEMENT_CREW_COUNT) child.visible = false;
+    else if (!embedded && index < Math.min(REPLACEMENT_CREW_COUNT, living)) child.visible = true;
+  });
+}
+
 function syncRiderSlot(rider, tank, slotIndex) {
   const offsets = RIDER_OFFSETS[tank.def.type] ?? RIDER_OFFSETS.tank;
   const offset = offsets[slotIndex] ?? offsets[offsets.length - 1];
@@ -104,6 +134,7 @@ function syncRiderSlot(rider, tank, slotIndex) {
   );
   rider.mesh.visible = true;
   setMountedRenderOrder(rider.mesh, true);
+  syncEmbeddedCrewVisibility(rider, rider._replacementCrewVehicleId === tank.id);
 }
 
 function dismountPosition(tank, index, mapDef) {
@@ -128,6 +159,13 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
   }
   rider._mountedOnTankId = null;
   rider._pendingMountTankId = null;
+  if (tank?._replacementCrewUnitId === rider.id) {
+    tank._replacementCrewUnitId = null;
+    tank._crewless = !tank.dead;
+    rider._replacementCrewVehicleId = null;
+    rider._embeddedCrewCount = 0;
+    syncEmbeddedCrewVisibility(rider, false);
+  }
   if (rider.mesh) {
     rider.mesh.visible = true;
     setMountedRenderOrder(rider.mesh, false);
@@ -140,21 +178,37 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
   }
 }
 
+export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null) {
+  if (!tank?._crewless || tank.dead || !canHostRiders(tank.def?.type)) return false;
+  if (!canSupplyReplacementCrew(rider) || rider.team !== tank.team) return false;
+  if (!tryMountTank(rider, tank, units, garrisonSources)) return false;
+  tank._crewless = false;
+  tank._replacementCrewUnitId = rider.id;
+  rider._replacementCrewVehicleId = tank.id;
+  rider._embeddedCrewCount = REPLACEMENT_CREW_COUNT;
+  syncEmbeddedCrewVisibility(rider, true);
+  return true;
+}
+
 export function dismountAllRiders(tank, units, mapDef = null) {
   if (!tank?._tankRiderIds?.length) return;
   const ids = [...tank._tankRiderIds];
   for (let i = 0; i < ids.length; i++) {
     const rider = findUnitById(units, ids[i]);
     if (!rider || rider.dead) continue;
+    if (!tank.dead && tank._replacementCrewUnitId === rider.id) continue;
     releaseFromTank(rider, units, mapDef, i);
   }
-  tank._tankRiderIds = [];
+  tank._tankRiderIds = tank.dead
+    ? []
+    : tank._tankRiderIds.filter((id) => id === tank._replacementCrewUnitId);
 }
 
 export function tryMountTank(rider, tank, units, garrisonSources = null) {
   if (!rider || rider.dead || rider.surrendered || rider._captureExit) return false;
   if (!tank || tank.dead || tank.surrendered || tank.team !== rider.team) return false;
   if (!canRideTanks(rider.def?.type) || !canHostRiders(tank.def?.type)) return false;
+  if (!tank._crewless && !RIDER_DECK_TYPES.has(tank.def?.type)) return false;
 
   const riders = ensureRiderList(tank);
   const cap = getTankRiderCapacity(tank);
@@ -167,6 +221,7 @@ export function tryMountTank(rider, tank, units, garrisonSources = null) {
   riders.push(rider.id);
   rider._mountedOnTankId = tank.id;
   rider._pendingMountTankId = null;
+  rider._pendingReplacementCrew = false;
   rider.clearAttackOrder();
   rider.moveTarget = null;
   rider._movePath = null;
@@ -181,6 +236,27 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
   if (!tank || tank.dead || !canHostRiders(tank.def?.type)) return 0;
   const cap = getTankRiderCapacity(tank);
   let issued = 0;
+
+  if (tank._crewless) {
+    const replacement = riders.find(
+      (rider) =>
+        rider &&
+        !rider.dead &&
+        !rider.surrendered &&
+        rider.team === tank.team &&
+        canSupplyReplacementCrew(rider)
+    );
+    if (!replacement) return 0;
+    replacement.clearAttackOrder();
+    replacement._userMoveOrder = true;
+    replacement._chasingAttack = false;
+    if (tryRemanCrewlessTank(replacement, tank, units, garrisonSources)) return 1;
+    replacement._pendingMountTankId = tank.id;
+    replacement._pendingReplacementCrew = true;
+    replacement.moveTarget = { x: tank.position.x, z: tank.position.z };
+    return 1;
+  }
+  if (!RIDER_DECK_TYPES.has(tank.def?.type)) return 0;
 
   for (const rider of riders) {
     if (!rider || rider.dead || rider.surrendered || !canRideTanks(rider.def?.type)) continue;
@@ -205,7 +281,9 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
 
 export function canDismountRiders(tank) {
   if (!tank || tank.dead || !canHostRiders(tank.def?.type)) return false;
-  if (!tank.moveTarget) return getTankRiderIds(tank).length > 0;
+  if (!tank.moveTarget) {
+    return getTankRiderIds(tank).some((id) => id !== tank._replacementCrewUnitId);
+  }
   return false;
 }
 
@@ -221,11 +299,12 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
         releaseFromTank(unit, units, mapDef);
         continue;
       }
-      if (unit.moveTarget || unit.retreating || unit.surrendered) {
+      const isReplacementCrew = unit._replacementCrewVehicleId === tank.id;
+      if (!isReplacementCrew && (unit.moveTarget || unit.retreating || unit.surrendered)) {
         releaseFromTank(unit, units, mapDef);
         continue;
       }
-      if ((tank._underFireTimer ?? 0) > 0) {
+      if (!isReplacementCrew && (tank._underFireTimer ?? 0) > 0) {
         const idx = tank._tankRiderIds?.indexOf(unit.id) ?? 0;
         releaseFromTank(unit, units, mapDef, idx);
         continue;
@@ -239,13 +318,16 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
       const tank = unitById.get(unit._pendingMountTankId);
       if (!tank || tank.dead || tank.team !== unit.team) {
         unit._pendingMountTankId = null;
+        unit._pendingReplacementCrew = false;
         continue;
       }
       if (unit.moveTarget && unit._userMoveOrder && unit.moveTarget.x !== tank.position.x) {
         unit._pendingMountTankId = null;
         continue;
       }
-      if (tryMountTank(unit, tank, units, garrisonSources)) {
+      if (unit._pendingReplacementCrew && tank._crewless) {
+        if (tryRemanCrewlessTank(unit, tank, units, garrisonSources)) continue;
+      } else if (tryMountTank(unit, tank, units, garrisonSources)) {
         continue;
       }
       unit.moveTarget = { x: tank.position.x, z: tank.position.z };
@@ -253,7 +335,15 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
   }
 
   for (const unit of units) {
-    if (!canHostRiders(unit.def?.type) || unit.dead) continue;
+    if (!canHostRiders(unit.def?.type)) continue;
+    if (unit._replacementCrewUnitId) {
+      const crew = unitById.get(unit._replacementCrewUnitId);
+      if (!crew || crew.dead || crew._mountedOnTankId !== unit.id) {
+        unit._replacementCrewUnitId = null;
+        if (!unit.dead) unit._crewless = true;
+      }
+    }
+    if (unit.dead) continue;
     if (!unit._tankRiderIds?.length) continue;
     unit._tankRiderIds = unit._tankRiderIds.filter((id) => {
       const rider = unitById.get(id);

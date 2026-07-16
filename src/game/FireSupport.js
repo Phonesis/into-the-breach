@@ -266,7 +266,7 @@ export class FireSupportManager {
           at: t,
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'strafe', this.game._terrainMesh);
-            this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15);
+            this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15, 'machineGun');
           },
         });
       }
@@ -288,7 +288,7 @@ export class FireSupportManager {
           at: t,
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'barrage', this.game._terrainMesh);
-            this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2);
+            this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2, 'artillery');
             sounds.playImpact('shell', { x: ix, z: iz }, 0.05);
           },
         });
@@ -326,7 +326,7 @@ export class FireSupportManager {
           at: t,
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'creeping', this.game._terrainMesh);
-            this.applyDamage(ix, iz, shellRadius, shellDamage, def.hqDamage * hqMult);
+            this.applyDamage(ix, iz, shellRadius, shellDamage, def.hqDamage * hqMult, 'artillery');
             sounds.playImpact('shell', { x: ix, z: iz }, atTarget ? 0.09 : 0.05);
           },
         });
@@ -391,7 +391,7 @@ export class FireSupportManager {
     }
   }
 
-  applyDamage(x, z, radius, unitDamage, hqDamage) {
+  applyDamage(x, z, radius, unitDamage, hqDamage, attackerType = 'artillery') {
     const cover = this.game.coverSystem;
     const radiusSq = radius * radius;
     const hqRadius = radius * 1.2;
@@ -405,7 +405,10 @@ export class FireSupportManager {
       const d = Math.sqrt(d2);
       const t = 1 - d / radius;
       let dmg = unitDamage * t * t;
-      dmg *= getIncomingDamageMultiplier(u, cover);
+      dmg *= getIncomingDamageMultiplier(u, cover, {
+        def: { type: attackerType },
+        position: { x, z },
+      });
       u.takeDamage(dmg, { explosive: true });
     }
 

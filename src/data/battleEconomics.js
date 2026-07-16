@@ -8,6 +8,7 @@ export const UNIT_MATERIEL_COST_USD_1944 = {
   infantry: 4_200,
   medic: 3_800,
   engineer: 6_500,
+  vehicleCrew: 1_800,
   machineGun: 11_000,
   sniper: 5_200,
   mortar: 22_000,

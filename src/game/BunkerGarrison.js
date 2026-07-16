@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { distanceBetween, distanceToPoint } from './Targeting.js';
 import { isUnitMounted } from './TankRiders.js';
 
-export const BUNKER_GARRISON_COVER_MULT = 0.22;
+export const BUNKER_GARRISON_COVER_MULT = 0.12;
 
 const GARRISON_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer']);
 

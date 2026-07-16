@@ -112,6 +112,51 @@ export function spawnTankWreckFire(scene, position, wreckMesh = null) {
   return fx;
 }
 
+/** Persistent smoke for a repairable knockout: no flames, embers, or cook-off glow. */
+export function spawnRecoverableWreckSmoke(scene, position, wreckMesh = null) {
+  const group = new THREE.Group();
+  group.position.set(position.x, position.y ?? 0, position.z);
+  if (wreckMesh) group.rotation.copy(wreckMesh.rotation);
+
+  const geos = [];
+  const mats = [];
+  const smoke = [];
+  for (let i = 0; i < 4; i++) {
+    const size = 1.7 + i * 0.42;
+    const geo = new THREE.PlaneGeometry(size, size);
+    const material = createSmokeMaterial(i < 2);
+    material.depthTest = false;
+    const plume = new THREE.Mesh(geo, material);
+    plume.userData.isSmoke = true;
+    plume.userData.baseY = 0.9 + i * 0.62;
+    plume.userData.baseOpacity = 0.46 - i * 0.055;
+    plume.userData.wobble = i * 1.71;
+    plume.position.set((Math.random() - 0.5) * 0.7, plume.userData.baseY, (Math.random() - 0.5) * 0.7);
+    plume.material.opacity = plume.userData.baseOpacity;
+    group.add(plume);
+    smoke.push(plume);
+    geos.push(geo);
+    mats.push(material);
+  }
+  scene.add(group);
+  const fx = {
+    group,
+    flames: smoke,
+    embers: null,
+    light: null,
+    geos,
+    mats,
+    life: Number.POSITIVE_INFINITY,
+    maxLife: Number.POSITIVE_INFINITY,
+    phase: 0,
+    wreckMesh,
+    smokeOnly: true,
+  };
+  active.push(fx);
+  while (active.length > MAX_WRECK_FIRES) disposeWreck(active.shift());
+  return fx;
+}
+
 export function updateWreckEffects(dt, camera = null) {
   if (camera?.position) _camPos.copy(camera.position);
 
@@ -132,6 +177,13 @@ export function updateWreckEffects(dt, camera = null) {
         child.scale.multiplyScalar(1 + dt * 0.22);
         child.material.opacity = Math.max(0, child.material.opacity - dt * 0.06);
         child.position.y += dt * 0.65;
+        if (fx.smokeOnly && (child.material.opacity <= 0.04 || child.position.y > 5.2)) {
+          child.position.y = child.userData.baseY;
+          child.position.x = Math.sin(fx.phase + child.userData.wobble) * 0.34;
+          child.position.z = Math.cos(fx.phase * 0.8 + child.userData.wobble) * 0.34;
+          child.scale.setScalar(1);
+          child.material.opacity = child.userData.baseOpacity;
+        }
         if (camera) child.lookAt(_camPos);
       } else {
         child.material.opacity = 0.55 + Math.sin(fx.phase + child.userData.wobble) * 0.3;

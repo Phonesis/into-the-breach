@@ -65,6 +65,7 @@ const SMALL_ARMS_TYPES = new Set([
   'sniper',
   'armoredCar',
   'paratrooper',
+  'vehicleCrew',
 ]);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
 const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
@@ -110,7 +111,7 @@ function tryThrowHandGrenade(attacker, candidates, scene, mapDef, onFire) {
   attacker.grenadeCooldown = HAND_GRENADE_COOLDOWN_SEC + Math.random() * 1.5;
   const armorFactor = target.def.type === 'superHeavyTank' ? 0.65 : 1;
   const damage = HAND_GRENADE_DAMAGE * armorFactor * getRankDamageMultiplier(attacker);
-  target.takeDamage(damage, { explosive: true });
+  target.takeDamage(damage, { explosive: true, impactFrom: attacker.position });
   if (target.dead) recordEnemyKill(attacker, target);
 
   const event = {
@@ -213,7 +214,13 @@ export function updateCombat(
   const lz = listener?.z ?? 0;
 
   for (const attacker of aliveUnits) {
-    if (attacker._dropping || attacker.retreating || attacker.surrendered || attacker._captureExit) continue;
+    if (
+      attacker._dropping ||
+      attacker.retreating ||
+      attacker.surrendered ||
+      attacker._captureExit ||
+      attacker._crewless
+    ) continue;
     if (
       attacker.def.type === 'medic' ||
       attacker.def.nonCombat ||
@@ -227,10 +234,27 @@ export function updateCombat(
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
     const localAcquire = filterAcquireNearAttacker(attacker, acquire);
     tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire);
+    const hadAttackOrder = !!attacker.attackOrder;
     const target = resolveAttackTarget(attacker, targets, localAcquire);
     if (!target) continue;
 
     attacker.target = target;
+    if (
+      !hadAttackOrder &&
+      !attacker.attackOrder &&
+      attacker.engagementStance === 'pursue' &&
+      target.retreating &&
+      !target.surrendered &&
+      !target._captureExit
+    ) {
+      // Pursuit begins only after the fleeing target has entered weapon range.
+      // From then on normal attack movement can follow it if it escapes range.
+      attacker.attackOrder = target;
+      attacker._chasingAttack = true;
+      attacker._stancePursuitOrder = true;
+      attacker._userMoveOrder = false;
+      attacker._movePath = null;
+    }
 
     const structureTarget =
       isHqTarget(target) ||
@@ -249,6 +273,7 @@ export function updateCombat(
       canFireMain &&
       (attacker.def.type === 'infantry' ||
         attacker.def.type === 'engineer' ||
+        attacker.def.type === 'vehicleCrew' ||
         attacker.def.type === 'paratrooper' ||
         attacker.def.type === 'sniper')
     ) {
@@ -340,6 +365,18 @@ function scalePracticeHqDamage(target, damage, options) {
 }
 
 function resolveAttackTarget(attacker, targets, acquireTargets) {
+  if (attacker.attackOrder) {
+    if (
+      attacker._stancePursuitOrder &&
+      (attacker.engagementStance !== 'pursue' || !attacker.attackOrder.retreating)
+    ) {
+      attacker.clearAttackOrder();
+      if (!attacker._userMoveOrder) {
+        attacker.moveTarget = null;
+        attacker._movePath = null;
+      }
+    }
+  }
   if (attacker.attackOrder) {
     if (attacker.attackOrder.isGround || isSmokeShellTarget(attacker.attackOrder)) {
       return attacker.attackOrder;
@@ -442,8 +479,11 @@ function fire(
     }
   } else if (!coax && attacker.def.type === 'antiTankGun') {
     vfxType = 'tank';
-  } else if (!coax && attacker.def.type === 'engineer') {
-    // Combat engineers use the standard rifle/SMG flash and tracer profile.
+  } else if (
+    !coax &&
+    (attacker.def.type === 'engineer' || attacker.def.type === 'vehicleCrew')
+  ) {
+    // Combat engineers and bailed crews use the standard small-arms VFX.
     vfxType = 'infantry';
   }
 
@@ -527,7 +567,7 @@ function fire(
   }
 
   if (!target.isGround && !isSceneryTarget(target)) {
-    damage *= getIncomingDamageMultiplier(target, coverSystem, attacker.def.type);
+    damage *= getIncomingDamageMultiplier(target, coverSystem, attacker);
     damage *= getArmorDamageMultiplier(attackerType, target);
   }
   if (isSceneryTarget(target)) {
@@ -609,6 +649,7 @@ function fire(
       const appliedDamage = scalePracticeHqDamage(target, damage, options);
       target.takeDamage(appliedDamage, {
         explosive: explosiveKill,
+        impactFrom: attacker.position,
       });
       if (appliedDamage > 0 && !target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
@@ -656,6 +697,7 @@ function fire(
     if (
       attacker.def.type === 'infantry' ||
       attacker.def.type === 'engineer' ||
+      attacker.def.type === 'vehicleCrew' ||
       attacker.def.type === 'paratrooper' ||
       attacker.def.type === 'sniper'
     ) {
@@ -716,7 +758,12 @@ function applySplashDamage(
     if (d > splash) continue;
     const t = 1 - d / splash;
     let splashDmg = baseDamage * t * t * 0.65;
-    splashDmg *= getIncomingDamageMultiplier(other, coverSystem);
+    splashDmg *= getIncomingDamageMultiplier(other, coverSystem, {
+      def: attacker.def,
+      // Blast shielding depends on whether the cover lies between the unit and
+      // the detonation, not the distant gun that fired the shell.
+      position: point,
+    });
     splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
     if (!other.surrendered) {
       markUnderFire(other);
@@ -738,7 +785,7 @@ function applySplashDamage(
 
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
-    if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit) continue;
+    if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
     if (isUnitMounted(unit)) continue;
 
     if (unit.retreating) {

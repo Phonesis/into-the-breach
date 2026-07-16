@@ -119,7 +119,16 @@ function engineerIsWorking(unit, units, hqs) {
   if (!unit || unit.dead || unit.def?.type !== 'engineer') return false;
 
   for (const ally of units) {
-    if (ally.dead || ally.team !== unit.team || ally.id === unit.id) continue;
+    if (ally.team !== unit.team || ally.id === unit.id) continue;
+    if (ally.dead) {
+      if (
+        ally._recoverableWreck &&
+        distanceBetween(unit, ally) <= ENGINEER_AURA_RANGE
+      ) {
+        return true;
+      }
+      continue;
+    }
     if (!canReceiveEngineerHeal(ally)) continue;
     if (distanceBetween(unit, ally) <= ENGINEER_AURA_RANGE) return true;
   }
@@ -131,7 +140,20 @@ function engineerIsWorking(unit, units, hqs) {
 }
 
 function getHealKind(unit, units, baseBuildings, hqs = null, depotCache = null) {
-  if (!unit || unit.dead) return null;
+  if (!unit) return null;
+
+  // Recoverable hulls remain dead units until the restart completes, but need
+  // immediate repair feedback just like a damaged living vehicle.
+  if (unit.dead) {
+    if (!unit._recoverableWreck) return null;
+    for (const engineer of units) {
+      if (engineer.dead || engineer.team !== unit.team || engineer.def?.type !== 'engineer') {
+        continue;
+      }
+      if (distanceBetween(unit, engineer) <= ENGINEER_AURA_RANGE) return 'engineer';
+    }
+    return null;
+  }
 
   if (unit.def?.type === 'engineer' && engineerIsWorking(unit, units, hqs)) {
     return 'engineer';
@@ -236,7 +258,7 @@ export function syncHealMarkers(units, baseBuildings = null, hqs = null, depotCa
   const cache = depotCache ?? { hospitals, motorPools };
 
   for (const unit of units) {
-    if (unit.dead || !unit.mesh) {
+    if ((unit.dead && !unit._recoverableWreck) || !unit.mesh) {
       removeHealMarker(unit);
       continue;
     }

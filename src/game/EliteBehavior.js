@@ -25,35 +25,31 @@ function getVeteranTexture() {
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = 'rgba(28, 22, 8, 0.94)';
+  // Veteran: restrained bronze circular field with a single service chevron.
+  ctx.fillStyle = 'rgba(35, 39, 22, 0.96)';
   ctx.beginPath();
   ctx.arc(32, 32, 28, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = '#d4a830';
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#c49645';
+  ctx.lineWidth = 4;
   ctx.stroke();
 
-  ctx.fillStyle = '#ffd966';
+  ctx.strokeStyle = '#f0c66f';
+  ctx.lineWidth = 8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   ctx.beginPath();
-  ctx.moveTo(32, 10);
-  ctx.lineTo(36.5, 24);
-  ctx.lineTo(51, 24);
-  ctx.lineTo(39.5, 33);
-  ctx.lineTo(44, 48);
+  ctx.moveTo(16, 27);
   ctx.lineTo(32, 39);
-  ctx.lineTo(20, 48);
-  ctx.lineTo(24.5, 33);
-  ctx.lineTo(13, 24);
-  ctx.lineTo(27.5, 24);
-  ctx.closePath();
-  ctx.fill();
+  ctx.lineTo(48, 27);
+  ctx.stroke();
 
-  ctx.fillStyle = '#3d2e08';
-  ctx.font = 'bold 9px system-ui, sans-serif';
+  ctx.fillStyle = '#f6dda1';
+  ctx.font = '900 15px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('VET', 32, 54);
+  ctx.fillText('V', 32, 16);
 
   _textures.veteran = new THREE.CanvasTexture(canvas);
   return _textures.veteran;
@@ -66,41 +62,55 @@ function getEliteTexture() {
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = 'rgba(18, 14, 6, 0.96)';
+  // Elite: a pointed crimson shield with a crown. Its silhouette, colour and
+  // icon remain visibly different from the veteran roundel at game scale.
+  ctx.fillStyle = 'rgba(65, 12, 15, 0.97)';
   ctx.beginPath();
-  ctx.arc(32, 32, 28, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = '#f5d060';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  ctx.strokeStyle = 'rgba(255, 220, 120, 0.55)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(32, 32, 22, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = '#ffe566';
-  ctx.beginPath();
-  ctx.moveTo(32, 8);
-  ctx.lineTo(37, 23);
-  ctx.lineTo(53, 23);
-  ctx.lineTo(40.5, 32);
-  ctx.lineTo(45.5, 48);
-  ctx.lineTo(32, 38);
-  ctx.lineTo(18.5, 48);
-  ctx.lineTo(23.5, 32);
-  ctx.lineTo(11, 23);
-  ctx.lineTo(27, 23);
+  ctx.moveTo(8, 10);
+  ctx.lineTo(56, 10);
+  ctx.lineTo(53, 40);
+  ctx.quadraticCurveTo(48, 53, 32, 60);
+  ctx.quadraticCurveTo(16, 53, 11, 40);
   ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = '#2a1e06';
-  ctx.font = 'bold 8px system-ui, sans-serif';
+  ctx.strokeStyle = '#ffd86a';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffe58c';
+  ctx.beginPath();
+  ctx.moveTo(15, 20);
+  ctx.lineTo(19, 9);
+  ctx.lineTo(28, 18);
+  ctx.lineTo(32, 6);
+  ctx.lineTo(36, 18);
+  ctx.lineTo(45, 9);
+  ctx.lineTo(49, 20);
+  ctx.lineTo(46, 27);
+  ctx.lineTo(18, 27);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#ffe58c';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(20, 35);
+  ctx.lineTo(32, 43);
+  ctx.lineTo(44, 35);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(20, 44);
+  ctx.lineTo(32, 52);
+  ctx.lineTo(44, 44);
+  ctx.stroke();
+
+  ctx.fillStyle = '#4a090d';
+  ctx.font = '900 10px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('ELITE', 32, 54);
+  ctx.fillText('E', 32, 22);
 
   _textures.elite = new THREE.CanvasTexture(canvas);
   return _textures.elite;
@@ -115,7 +125,7 @@ function markerHeight(unit) {
 }
 
 function markerScale(unit) {
-  return unit.elite ? 1.85 : 1.75;
+  return unit.elite ? 2.05 : 1.72;
 }
 
 export function isVeteran(unit) {

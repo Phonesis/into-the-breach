@@ -521,7 +521,7 @@ export class DefenseStructureManager {
     const falloff = Math.max(0.65, 1 - (bestD / def.range) * 0.28);
     damage *= falloff * (0.88 + Math.random() * 0.22);
 
-    target.takeDamage(damage);
+    target.takeDamage(damage, { impactFrom: { x: entry.x, z: entry.z } });
     entry.attackCooldown = 1 / def.attackSpeed;
 
     if (entry.maxAmmo) {

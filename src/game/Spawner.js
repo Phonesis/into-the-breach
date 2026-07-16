@@ -82,6 +82,49 @@ function scaleEnemyLayout(layout, armyMult) {
     .filter((slot) => slot.count > 0);
 }
 
+/**
+ * Clear Defenses starts at the rear map edge, so every layer advances inward
+ * from the assembly anchor.  Keep infantry forward, crew-served weapons in
+ * support, armor on the shoulders, and indirect-fire assets protected behind.
+ */
+const CLEARANCE_DEPLOYMENT = {
+  infantry: [
+    { forward: 9, lateral: -14 },
+    { forward: 12, lateral: 0 },
+    { forward: 9, lateral: 14 },
+  ],
+  machineGun: [{ forward: 6, lateral: -8 }],
+  sniper: [{ forward: 8, lateral: 13 }],
+  antiTankGun: [{ forward: 5, lateral: 4 }],
+  armoredCar: [{ forward: 7, lateral: -18 }],
+  tank: [
+    { forward: 3, lateral: -13 },
+    { forward: 3, lateral: 13 },
+  ],
+  engineer: [{ forward: 2, lateral: 4 }],
+  medic: [{ forward: 1, lateral: -3 }],
+  mortar: [{ forward: 1, lateral: -9 }],
+  artillery: [{ forward: 0, lateral: 8 }],
+};
+
+function getClearanceDeploymentOffset(type, index, count) {
+  const rolePositions = CLEARANCE_DEPLOYMENT[type];
+  if (rolePositions?.length) {
+    const position = rolePositions[index % rolePositions.length];
+    const repeat = Math.floor(index / rolePositions.length);
+    return {
+      forward: position.forward + repeat * 2.5,
+      lateral: position.lateral + repeat * (repeat % 2 ? -5 : 5),
+    };
+  }
+
+  // Faction-specific or future unit types still join a broad second line.
+  return {
+    forward: 5 + (index % 2) * 3,
+    lateral: (index - (count - 1) / 2) * 8,
+  };
+}
+
 export function spawnArmy({
   faction,
   team,
@@ -102,14 +145,18 @@ export function spawnArmy({
   }
   const units = [];
   let row = 0;
-  let backAx = 0;
-  let backAz = 0;
+  let forwardX = 0;
+  let forwardZ = 0;
+  let lateralX = 0;
+  let lateralZ = 0;
   if (clearanceSpawn && mapDef?.playerBase && mapDef?.enemyBase) {
     const pb = mapDef.playerBase;
     const eb = mapDef.enemyBase;
     const len = Math.hypot(eb.x - pb.x, eb.z - pb.z) || 1;
-    backAx = (pb.x - eb.x) / len;
-    backAz = (pb.z - eb.z) / len;
+    forwardX = (eb.x - pb.x) / len;
+    forwardZ = (eb.z - pb.z) / len;
+    lateralX = -forwardZ;
+    lateralZ = forwardX;
   }
 
   for (const slot of layout) {
@@ -122,16 +169,9 @@ export function spawnArmy({
       let x;
       let z;
       if (clearanceSpawn) {
-        const alongBack = 5 + row * 3.2;
-        x =
-          base.x +
-          backAx * alongBack +
-          Math.cos(angle) * dist * 0.28;
-        z =
-          base.z +
-          backAz * alongBack +
-          Math.sin(angle) * dist +
-          (i - slot.count / 2) * 2.2;
+        const deployment = getClearanceDeploymentOffset(slot.type, i, slot.count);
+        x = base.x + forwardX * deployment.forward + lateralX * deployment.lateral;
+        z = base.z + forwardZ * deployment.forward + lateralZ * deployment.lateral;
       } else if (campaign || baseBuilding) {
         // Standard campaign: one rifle squad starts well clear of the HQ mesh
         // so it is easy to click (was ~2–4 m under/beside HQ).

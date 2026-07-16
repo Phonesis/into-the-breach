@@ -2,10 +2,16 @@
  * Tank / armored car kill VFX + occasional ammo cook-off secondary blasts.
  */
 
-import { spawnShellExplosion, spawnSmokePuff, spawnExplosion } from './CombatEffects.js';
-import { spawnTankWreckFire } from './WreckEffects.js';
+import {
+  spawnShellExplosion,
+  spawnShellExplosionLite,
+  spawnSmokePuff,
+  spawnExplosion,
+} from './CombatEffects.js';
+import { spawnRecoverableWreckSmoke, spawnTankWreckFire } from './WreckEffects.js';
 import { sounds } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
+import { spawnVehicleCrewBailout } from '../game/VehicleBailout.js';
 
 /** Types that get armored-vehicle destruction (main blast + wreck fire + cook-off chance). */
 export function isArmoredCombatVehicle(type) {
@@ -49,6 +55,32 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   const tier = primaryTier(type);
   const scale = type === 'armoredCar' ? 0.85 : type === 'superHeavyTank' ? 1.25 : 1;
 
+  if (unit._recoverableWreck) {
+    // A survivable knockout gets one contained impact, smoke, and a visible
+    // bailout. It skips flames and ammunition cook-off, but retains persistent
+    // engine-compartment smoke until an engineer restores the hull.
+    const burst = { x: p.x, y: (p.y ?? 0) + 0.45, z: p.z };
+    spawnShellExplosionLite(scene, burst, 'medium');
+    spawnSmokePuff(scene, burst, 1.05 * scale);
+    spawnSmokePuff(
+      scene,
+      { x: p.x + 0.55, y: burst.y + 0.15, z: p.z - 0.35 },
+      0.78 * scale
+    );
+    spawnSmokePuff(
+      scene,
+      { x: p.x - 0.4, y: burst.y + 0.1, z: p.z + 0.45 },
+      0.68 * scale
+    );
+    sounds.play('explosion');
+    sounds.playImpact('explosion', { x: p.x, z: p.z }, 0.02);
+    if (unit.mesh?.parent && !unit.wreckFire) {
+      unit.wreckFire = spawnRecoverableWreckSmoke(scene, unit.position ?? p, unit.mesh);
+    }
+    spawnVehicleCrewBailout(game, unit);
+    return;
+  }
+
   // Primary detonation — bigger than the old smoke-only kill
   spawnShellExplosion(scene, p, tier);
   spawnSmokePuff(scene, p, 1.15 * scale);
@@ -68,7 +100,7 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   game._spawnExplosionCrater?.(p.x, p.z, craterSize);
 
   // Occasional ammo cook-off: shells cooking off after the hull is open
-  if (Math.random() >= cookOffChance(type)) return;
+  if (!unit._catastrophicVehicleKill && Math.random() >= cookOffChance(type)) return;
 
   if (!game._pendingCookOffs) game._pendingCookOffs = [];
 

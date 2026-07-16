@@ -13,10 +13,18 @@ const INFANTRY_WALK_TYPES = new Set([
   'machineGun',
   'mortar',
   'sniper',
+  'vehicleCrew',
 ]);
 
-const WEAPON_POSE_TYPES = new Set(['infantry', 'paratrooper', 'sniper', 'engineer']);
+const WEAPON_POSE_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'sniper',
+  'engineer',
+  'vehicleCrew',
+]);
 const PRONE_FIRE_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
+const TACTICAL_FORMATION_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
 const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'infantry',
@@ -25,11 +33,151 @@ const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'engineer',
   'machineGun',
   'mortar',
+  'vehicleCrew',
 ]);
 
 const _muzzleTip = new THREE.Vector3();
 const _mgTargetLocal = new THREE.Vector3();
 const _mortarTargetLocal = new THREE.Vector3();
+
+const TACTICAL_FORMATIONS = {
+  4: [
+    {
+      name: 'wedge',
+      points: [
+        [0, 1.15],
+        [-0.85, 0.2],
+        [0.9, 0.1],
+        [0.05, -1.05],
+      ],
+    },
+    {
+      name: 'staggered-column',
+      points: [
+        [0, 1.35],
+        [-0.55, 0.45],
+        [0.5, -0.35],
+        [-0.45, -1.25],
+      ],
+    },
+    {
+      name: 'line',
+      points: [
+        [-0.35, 0.08],
+        [-1.3, -0.12],
+        [0.6, 0.12],
+        [1.5, -0.08],
+      ],
+    },
+    {
+      name: 'echelon',
+      points: [
+        [-0.15, 0.95],
+        [-0.8, 0.35],
+        [0.5, -0.25],
+        [1.15, -0.9],
+      ],
+    },
+  ],
+  5: [
+    {
+      name: 'wedge',
+      points: [
+        [0, 1.2],
+        [-0.85, 0.3],
+        [0.9, 0.2],
+        [-1.4, -0.9],
+        [1.35, -1.0],
+      ],
+    },
+    {
+      name: 'staggered-column',
+      points: [
+        [0, 1.45],
+        [-0.55, 0.7],
+        [0.5, 0],
+        [-0.65, -0.75],
+        [0.45, -1.5],
+      ],
+    },
+    {
+      name: 'line',
+      points: [
+        [0, 0.08],
+        [-0.8, -0.1],
+        [0.8, 0.12],
+        [-1.6, 0.06],
+        [1.6, -0.12],
+      ],
+    },
+    {
+      name: 'echelon',
+      points: [
+        [0, 1.05],
+        [-0.65, 0.45],
+        [0.55, -0.05],
+        [-1.25, -0.45],
+        [1.15, -1.0],
+      ],
+    },
+  ],
+};
+
+/**
+ * Give each rifle squad its own set of compact tactical layouts. Layouts stay
+ * within the unit footprint so selection, cover, casualties, and combat still
+ * operate on the squad's shared gameplay position.
+ */
+export function configureTacticalSquadFormation(group, unitType, memberCount) {
+  if (!group || !TACTICAL_FORMATION_TYPES.has(unitType)) return [];
+  const presets = TACTICAL_FORMATIONS[memberCount];
+  if (!presets?.length) return [];
+
+  const spreadScale = 0.92 + Math.random() * 0.18;
+  const mirror = Math.random() < 0.5 ? -1 : 1;
+  const layouts = presets.map((preset) => ({
+    name: preset.name,
+    points: preset.points.map(([x, z], memberIndex) => ({
+      x:
+        x * spreadScale * mirror +
+        (memberIndex === 0 ? 0 : (Math.random() - 0.5) * 0.16),
+      z: z * spreadScale + (Math.random() - 0.5) * 0.14,
+    })),
+  }));
+  const initialIndex = Math.floor(Math.random() * layouts.length);
+  group.userData.tacticalFormation = {
+    layouts,
+    currentIndex: initialIndex,
+    targetIndex: initialIndex,
+    name: layouts[initialIndex].name,
+  };
+  return layouts[initialIndex].points;
+}
+
+function updateTacticalSquadFormation(unit, dt, moving) {
+  const formation = unit.mesh.userData.tacticalFormation;
+  if (!formation?.layouts?.length) return;
+
+  if (moving && !unit._tacticalFormationWasMoving) {
+    const alternatives = formation.layouts.length - 1;
+    const step = 1 + Math.floor(Math.random() * Math.max(1, alternatives));
+    formation.targetIndex = (formation.currentIndex + step) % formation.layouts.length;
+    formation.currentIndex = formation.targetIndex;
+    formation.name = formation.layouts[formation.targetIndex].name;
+  }
+  unit._tacticalFormationWasMoving = moving;
+
+  const targetLayout = formation.layouts[formation.targetIndex];
+  const alpha = 1 - Math.exp(-Math.max(0, dt) * 2.8);
+  unit.mesh.traverse((child) => {
+    if (child.name !== 'squadMember') return;
+    const rest = child.userData.walkRest;
+    const target = targetLayout.points[child.userData.squadIndex ?? 0];
+    if (!rest?.group || !target) return;
+    rest.group.x = THREE.MathUtils.lerp(rest.group.x, target.x, alpha);
+    rest.group.z = THREE.MathUtils.lerp(rest.group.z, target.z, alpha);
+  });
+}
 
 function tagShadow(mesh, mode) {
   mesh.userData.shadowMode = mode;
@@ -827,6 +975,7 @@ export function updateInfantryWalkAnimation(unit, dt) {
   unit._walkLastZ = unit.position.z;
 
   const active = wantsMove && moved > 0.0005;
+  updateTacticalSquadFormation(unit, dt, active);
   const mortarPivot = unit.mesh.userData.mortarPivot;
   if (mortarPivot) {
     mortarPivot.visible = !active;

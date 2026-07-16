@@ -10,6 +10,21 @@ import { getCoverStatus } from './CoverSystem.js';
 const _retreatTex = { tex: null };
 
 /**
+ * Fighting from a prepared position improves cohesion as well as survivability.
+ * These remain multipliers rather than immunity: a badly mauled unit can still
+ * break, and the existing health, rank, leader, and support modifiers continue
+ * to stack normally.
+ */
+export function getCoverRetreatMultiplier(unit) {
+  const cover = getCoverStatus(unit);
+  if (!cover.inCover) return 1;
+  if (cover.garrisoned) return 0.12;
+  if (cover.tier === 'heavy') return 0.22;
+  if (cover.inTrench || cover.tier === 'trench') return 0.3;
+  return 1;
+}
+
+/**
  * Resolve the rally point for a retreating unit.
  * Clear Defenses has no player HQ — fall back to the starting/staging zone.
  * @param {object} unit
@@ -124,7 +139,7 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
   chance *= getRankRetreatMultiplier(unit);
   chance *= getRankMoralePressure(unit, units, attacker);
   chance *= getCommanderRetreatMultiplier(unit, options.generalOrders);
-  if (getCoverStatus(unit).tier === 'heavy') chance *= 0.4;
+  chance *= getCoverRetreatMultiplier(unit);
 
   if (Math.random() < chance) {
     startRetreat(unit, hq);

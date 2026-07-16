@@ -10,6 +10,7 @@ export const FOOT_SOLDIER_TYPES = new Set([
   'sniper',
   'mortar',
   'medic',
+  'vehicleCrew',
 ]);
 
 export function isFootSoldier(type) {

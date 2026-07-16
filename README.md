@@ -85,7 +85,7 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 | Mode | Description |
 |------|-------------|
 | **Standard** | Full skirmish vs AI with difficulty selection. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
-| **Clear Defenses** | Enemy dug in across the map — **no enemy HQ**. Destroy every defender. Opening ceasefire; your force stages behind your HQ. |
+| **Clear Defenses** | Enemy dug in across the map — **no enemy HQ**. On the Theater screen choose **Classic** fixed forces or **Reinforced** three-minute arrivals. |
 | **Training Ground** | No AI — practice orders, production, fire missions, and fire support. Destroy the passive **Practice Target HQ**. |
 | **Assault & Defend** | Scenario on a fixed frontline. Pick **Attack** or **Defend** after choosing the mode. |
 | **Tower Defence** | No player army. Spend **defense points** on emplacements (bunkers, MG nests, AT guns, mines, wire, artillery pits) and hold the frontline through **12 waves**. |
@@ -105,12 +105,14 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 
 ### Clear Defenses
 
-- No enemy HQ or enemy production.
+- No HQ or production queue for either side.
 - Defenders placed at capture points, forward lines, and map center; they hold position and do not retreat. Includes **2× anti-tank guns** (scaled by difficulty).
 - **10 s** opening ceasefire — defenders do not fire so your staged army is not wiped on deploy.
-- Player army spawns ~20 m behind your HQ (includes **1× anti-tank gun**).
-- **160** starting supplies; standard HQ/capture income.
-- **Victory:** All defenders destroyed. **Defeat:** Your HQ falls, or your army is wiped with no way to rebuild.
+- Player army stages in a rear assembly area (includes **1× anti-tank gun**).
+- On the **Select Theater** screen, choose a **Clear Defenses Style** just like the Tower Defence configuration choices.
+- **Classic** (default): original fixed-force battle with no reinforcements.
+- **Reinforced:** every **180 seconds**, both sides receive a two-unit package. Packages rotate through infantry with MG, mortar, armor, or anti-tank support; a HUD countdown shows the next arrival. Roughly every minute, a small mobile defender group also launches a limited probing counterattack against the surviving attackers before falling back to its original defensive holds.
+- **Victory:** All defenders destroyed. **Defeat:** Your attacking force is wiped.
 
 ### Training Ground
 
@@ -316,9 +318,11 @@ Infantry and **machine gun** teams only.
 
 | Tier | Damage taken | Reduction | Examples on maps |
 |------|--------------|-----------|------------------|
-| Heavy | **~22%** | ~78% | Concrete bunkers, sandbag nests |
-| Medium | **~38%** | ~62% | Bocage hedges, stone walls |
-| Light | **~55%** | ~45% | Fighting pits, shell scrapes |
+| Heavy | **as little as ~12%** | up to ~88% | Concrete bunkers, sandbag nests, stationary armor and vehicle wrecks |
+| Medium | **as little as ~28%** | up to ~72% | Bocage hedges, stone walls |
+| Light | **as little as ~45%** | up to ~55% | Fighting pits, shell scrapes |
+
+Cover is directional: the obstacle must lie between the unit and incoming fire, so flanking and rear attacks bypass it. Bunkers and occupied trenches protect broadly. Mortars, tank shells, artillery, and other blast weapons also defeat more cover than rifles and machine guns.
 
 Bonus applies only while the unit stays in the zone. **Shift + LMB** on scenery (with combat units selected) to destroy bunkers, hedges, and brush. Selected infantry/MG show an **IN COVER** banner, a foot ring, and exact damage % on the selection panel. Tanks, super heavies, anti-tank guns, mortars, and artillery ignore cover.
 

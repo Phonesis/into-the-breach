@@ -1,7 +1,12 @@
 import { FACTION_LIST } from '../data/factions.js';
 import { MAP_LIST } from '../data/maps.js';
 import { MAP_SIZE_LIST, formatMapHudLabel } from '../data/mapSizes.js';
-import { GAME_MODE_LIST, ASSAULT_ROLE_LIST, getProducibleUnits } from '../data/gameModes.js';
+import {
+  GAME_MODE_LIST,
+  ASSAULT_ROLE_LIST,
+  CLEARANCE_STYLE_LIST,
+  getProducibleUnits,
+} from '../data/gameModes.js';
 import { DIFFICULTY_LIST, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import { FIRE_SUPPORT_LIST } from '../data/fireSupport.js';
 import { GENERAL_ORDER_LIST } from '../data/generalOrders.js';
@@ -152,6 +157,7 @@ export class UIManager {
     this.selectedAssaultRole = null;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
+    this.selectedClearanceStyle = 'classic';
     this.selectedTdWaveMode = 'standard';
     this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
@@ -294,6 +300,10 @@ export class UIManager {
             <p class="campaign-style-note hidden" id="campaign-style-note">
               Base Building requires a <strong>Large</strong> map.
             </p>
+          </div>
+          <div class="campaign-style-block hidden" id="clearance-style-block">
+            <h2>Clear Defenses Style</h2>
+            <div class="campaign-style-grid" id="clearance-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
             <h2>Wave Mode</h2>
@@ -544,6 +554,20 @@ export class UIManager {
               <button type="button" class="btn btn-target interactive" id="btn-engage-target">Engage target</button>
               <p class="target-offer-hint" id="target-offer-hint">Or left-click the highlighted enemy</p>
             </div>
+            <div class="engagement-stance-actions hidden" id="engagement-stance-actions">
+              <p class="engagement-stance-label">Engagement stance</p>
+              <div class="engagement-stance-buttons">
+                <button type="button" class="btn btn-secondary interactive" id="btn-stance-hold">
+                  Hold Ground
+                </button>
+                <button type="button" class="btn btn-secondary interactive" id="btn-stance-pursue">
+                  Pursue
+                </button>
+              </div>
+              <p class="engagement-stance-hint" id="engagement-stance-hint">
+                Auto-fire at enemies in range without chasing.
+              </p>
+            </div>
             <div class="fire-mission-actions hidden" id="fire-mission-actions">
               <button type="button" class="btn btn-cancel-fire interactive" id="btn-cancel-fire-missions">
                 Cancel fire missions
@@ -575,7 +599,7 @@ export class UIManager {
                 </button>
               </div>
               <p class="engineer-build-hint" id="engineer-build-hint">
-                Heavy cover for infantry — engineer must be within ~24 m. Esc to cancel.
+                Click a valid map location — the engineer will move there and build. Esc to cancel.
               </p>
             </div>
             <div class="infantry-trench-actions hidden" id="infantry-trench-actions">
@@ -823,6 +847,19 @@ export class UIManager {
     }).join('');
   }
 
+  renderClearanceStyles() {
+    const grid = this.root.querySelector('#clearance-style-grid');
+    if (!grid) return;
+    grid.innerHTML = CLEARANCE_STYLE_LIST.map(
+      (style) => `
+      <button type="button" class="card-btn interactive campaign-style-card clearance-style-card${style.id === this.selectedClearanceStyle ? ' selected' : ''}" data-id="${style.id}">
+        <span class="name">${style.name}</span>
+        <span class="meta">${style.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
   updateCampaignStyleMapSizeLock() {
     const lockBaseBuilding =
       this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
@@ -832,6 +869,7 @@ export class UIManager {
       this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
     }
     this.renderCampaignStyles();
+    this.renderClearanceStyles();
     this.renderMapSizes();
   }
 
@@ -887,15 +925,18 @@ export class UIManager {
   updateDifficultyPanel() {
     const block = this.root.querySelector('#difficulty-block');
     const styleBlock = this.root.querySelector('#campaign-style-block');
+    const clearanceStyleBlock = this.root.querySelector('#clearance-style-block');
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
     const tdStyleBlock = this.root.querySelector('#td-style-block');
     const lastStandBlock = this.root.querySelector('#laststand-deploy-block');
     const isTutorial = this.selectedGameMode === 'tutorial';
     const isCampaign = this.selectedGameMode === 'campaign';
+    const isClearance = this.selectedGameMode === 'clearance';
     const isTowerDefense = this.selectedGameMode === 'towerDefense';
     const isLastStand = this.selectedGameMode === 'lastStand';
     if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
+    if (clearanceStyleBlock) clearanceStyleBlock.classList.toggle('hidden', !isClearance);
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
     if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
     if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
@@ -904,6 +945,7 @@ export class UIManager {
       this.renderCampaignStyles();
       this.updateCampaignStyleMapSizeLock();
     }
+    if (isClearance) this.renderClearanceStyles();
     if (isTowerDefense) {
       this.renderTdWaveModes();
       this.renderTdStyles();
@@ -1134,6 +1176,16 @@ export class UIManager {
       this.selectedDifficulty = btn.dataset.id;
     });
 
+    this.root.querySelector('#clearance-style-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.clearance-style-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.clearance-style-card').forEach((b) => {
+        b.classList.remove('selected');
+      });
+      btn.classList.add('selected');
+      this.selectedClearanceStyle = btn.dataset.id;
+    });
+
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
       if (
@@ -1206,6 +1258,8 @@ export class UIManager {
             : this.selectedMapSize ?? 'medium',
           campaignStyle:
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
+          clearanceStyle:
+            this.selectedGameMode === 'clearance' ? this.selectedClearanceStyle : undefined,
           tdWaveMode:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
           tdStyle:
@@ -1257,6 +1311,12 @@ export class UIManager {
     this.root.querySelector('#btn-engage-target').onclick = () => {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
+    this.root.querySelector('#btn-stance-hold')?.addEventListener('click', () => {
+      this.callbacks.onSetEngagementStance?.('hold');
+    });
+    this.root.querySelector('#btn-stance-pursue')?.addEventListener('click', () => {
+      this.callbacks.onSetEngagementStance?.('pursue');
+    });
 
     this.root.querySelector('#btn-build-sandbags')?.addEventListener('click', () => {
       this.callbacks.onArmSandbags?.();
@@ -1517,7 +1577,8 @@ export class UIManager {
 
     const tutorial = gameMode === 'tutorial';
     const assault = gameMode === 'assault';
-    const clearance = gameMode === 'clearance';
+    const clearance = gameMode === 'clearance' || gameMode === 'clearanceReinforced';
+    const clearanceReinforced = clearance && options.clearanceReinforced;
     const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
     const tdHqDefense = towerDefense && (options.tdHqDefense || options.tdStyle === 'hqDefense');
     const lastStand = gameMode === 'lastStand' || options.lastStand;
@@ -1537,7 +1598,12 @@ export class UIManager {
 
     this._hudClearance = clearance;
     const clearanceBanner = this.root.querySelector('#clearance-banner');
-    if (clearanceBanner) clearanceBanner.classList.toggle('hidden', !clearance);
+    if (clearanceBanner) {
+      clearanceBanner.classList.toggle('hidden', !clearance);
+      clearanceBanner.textContent = clearanceReinforced
+        ? 'Clear all defenders — both sides reinforced every 3 minutes'
+        : 'Clear all dug-in defenders — fixed force, no reinforcements';
+    }
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
     this._hudTdEndless = !!(towerDefense && options.tdEndless);
@@ -1591,8 +1657,9 @@ export class UIManager {
         this._defaultHudHint =
           'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
-        this._defaultHudHint =
-          'Clear Defenses: wipe all defenders · fixed force — no HQ, no reinforcements';
+        this._defaultHudHint = clearanceReinforced
+          ? 'Clear Defenses — Reinforced: both sides reinforce every 3 minutes · expect frequent defender probing attacks'
+          : 'Clear Defenses: wipe all defenders · fixed force — no HQ, no reinforcements';
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
@@ -1891,7 +1958,8 @@ export class UIManager {
     const counts = BASE_BUILDING_TYPE_LIST.map((t) =>
       game.baseBuildings.countType('player', t.id)
     ).join(',');
-    return `${supplies}|${pending}|${deployActive}|${game.cheatMode}|${counts}`;
+    const facing = game._directionalPlacement?.kind === 'base' ? 1 : 0;
+    return `${supplies}|${pending}|${facing}|${deployActive}|${game.cheatMode}|${counts}`;
   }
 
   setBaseBuildExpanded(on) {
@@ -1940,7 +2008,9 @@ export class UIManager {
           'Quiet sector — destroy enemy HQ to win · launch battle before expanding the base';
       } else if (pending) {
         const def = BASE_BUILDING_TYPES[pending];
-        hint.textContent = `Placing ${def?.name ?? pending} — click within build range of HQ or a sector you hold. Esc to cancel.`;
+        hint.textContent = game._directionalPlacement?.kind === 'base'
+          ? `Facing ${def?.name ?? pending} — move the arrow toward the threat, then click to confirm. Esc to cancel.`
+          : `Placing ${def?.name ?? pending} — click within build range of HQ or a sector you hold. Esc to cancel.`;
       } else {
         hint.textContent =
           'Build near HQ or a sector you control. LMB place · Esc cancel.';
@@ -2169,7 +2239,7 @@ export class UIManager {
     if (baseBuilding) {
       return 'Garrison bunker — engineer erects on site (~28 s). Move troops onto it to enter. Esc to cancel.';
     }
-    return 'Sandbags (~11 s) or bunkers (~28 s) — engineer must be within ~24 m. Esc to cancel.';
+    return 'Sandbags (~11 s) or bunkers (~28 s) — click a site and the engineer will move there. Esc to cancel.';
   }
 
   showEngineerBuildHint(message) {
@@ -2227,7 +2297,9 @@ export class UIManager {
     if (hint && !hint.classList.contains('engineer-build-hint-error')) {
       if (pending) {
         const label = pending === 'bunker' ? 'bunker' : 'sandbag position';
-        hint.textContent = `Click the map within ~24 m of your engineer to place the ${label}. Esc to cancel.`;
+        hint.textContent = game._directionalPlacement?.kind === 'engineer'
+          ? `Move the facing arrow toward the threat, then click to confirm the ${label}. Esc to cancel.`
+          : `Click a valid map location for the ${label}; then choose which direction it faces. Esc to cancel.`;
       } else if (freeEngineers.length === 0) {
         hint.textContent = 'Selected engineer is already building field works.';
       } else {
@@ -2286,8 +2358,9 @@ export class UIManager {
 
     if (hint && !hint.classList.contains('engineer-build-hint-error')) {
       if (pending) {
-        hint.textContent =
-          'Click the map within ~18 m of your infantry to dig. Esc to cancel.';
+        hint.textContent = game._directionalPlacement?.kind === 'trench'
+          ? 'Move the facing arrow toward the threat, then click to confirm the trench. Esc to cancel.'
+          : 'Click a valid map location, then choose which direction the trench faces. Esc to cancel.';
       } else if (free.length === 0) {
         hint.textContent = 'Selected troops are already digging or dug in.';
       } else {
@@ -2343,7 +2416,7 @@ export class UIManager {
     if (hint && !hint.classList.contains('engineer-build-hint-error')) {
       if (pending) {
         hint.textContent =
-          'Click the map within ~18 m of your medic to pitch the tent. Esc to cancel.';
+          'Click a valid map location; the medic will move there and pitch the tent. Esc to cancel.';
       } else if (free.length === 0) {
         hint.textContent = 'Selected medic is already setting up a tent.';
       } else {
@@ -2761,7 +2834,15 @@ export class UIManager {
     if (tutorial) {
       el.textContent = `Your forces: ${playerAlive} · Practice mode`;
     } else if (clearance) {
-      el.textContent = `Your forces: ${playerAlive} · Defenders left: ${enemyAlive}`;
+      const reinforcement = opts.clearanceReinforcements;
+      if (reinforcement?.enabled) {
+        const seconds = Math.max(0, Math.ceil(reinforcement.nextAt - (opts.matchTime ?? 0)));
+        const mins = Math.floor(seconds / 60);
+        const secs = String(seconds % 60).padStart(2, '0');
+        el.textContent = `Your forces: ${playerAlive} · Defenders: ${enemyAlive} · Reinforcements ${mins}:${secs}`;
+      } else {
+        el.textContent = `Your forces: ${playerAlive} · Defenders left: ${enemyAlive}`;
+      }
     } else if (opts.towerDefense && opts.tdHqDefense) {
       el.textContent = `Your forces: ${playerAlive} · Assault force: ${enemyAlive}`;
     } else if (opts.towerDefense) {
@@ -3294,6 +3375,7 @@ export class UIManager {
     const offer = this.root.querySelector('#target-offer');
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
+    this.updateEngagementStance(hq ? [] : units);
 
     const showProduction = this._hudBaseBuilding
       ? (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
@@ -3402,13 +3484,13 @@ export class UIManager {
       const engBuild = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
       let coverBlock = '';
       if (garrisoned) {
-        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.22) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Look for the green <strong>INSIDE</strong> marker over the roof.</p>`;
+        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.12) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Look for the green <strong>INSIDE</strong> marker over the roof.</p>`;
       } else if (engBuild) {
         coverBlock = `<p class="unit-support-status unit-building-status"><strong>Building ${engBuild.label}</strong> — ${engBuild.pct}% complete — watch the site marker on the map</p>`;
       } else if (dig) {
         coverBlock = `<p class="unit-support-status unit-building-status"><strong>${dig.label}</strong> — ${Math.round(dig.progress * 100)}% complete — watch the dig site marker</p>`;
       } else if (u._trenchId || cover.inTrench) {
-        coverBlock = `<p class="unit-cover-status in-cover"><strong>In trench</strong> — dug in with cover (takes only <strong>${Math.round((cover.mult ?? 0.42) * 100)}%</strong> damage). Order a <strong>move</strong> to leave.</p>`;
+        coverBlock = `<p class="unit-cover-status in-cover"><strong>In trench</strong> — dug in with cover (takes only <strong>${Math.round((cover.mult ?? 0.3) * 100)}%</strong> damage). Order a <strong>move</strong> to leave.</p>`;
       } else if (cover.inCover) {
         coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
       } else if (u.def?.type === 'engineer') {
@@ -3435,9 +3517,13 @@ export class UIManager {
         : '';
       const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
       const riderBlock =
-        riderN > 0
+        u._crewless
+          ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — select an infantry or paratrooper squad and RMB this tank. Two troops will crew it; the rest ride on the hull.</p>'
+          : u._replacementCrewUnitId
+            ? `<p class="unit-support-status"><strong>Replacement crew aboard</strong> — two troops operate the tank; the remaining squad members ride on the hull${riderN > 1 ? ` with ${riderN - 1} additional rider unit${riderN > 2 ? 's' : ''}` : ''}.</p>`
+            : riderN > 0
           ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — RMB friendly infantry onto this tank to mount more; dismount when stationary.</p>`
-          : canHostRiders(u.def?.type)
+          : canHostRiders(u.def?.type) && u.def?.type !== 'armoredCar'
             ? '<p class="unit-support-status">RMB with infantry selected to mount riders on this tank.</p>'
             : '';
       body.innerHTML = `
@@ -3485,6 +3571,36 @@ export class UIManager {
       <p>${summary}</p>
       ${orderNote}
     `;
+  }
+
+  updateEngagementStance(units = []) {
+    const wrap = this.root.querySelector('#engagement-stance-actions');
+    const hold = this.root.querySelector('#btn-stance-hold');
+    const pursue = this.root.querySelector('#btn-stance-pursue');
+    const hint = this.root.querySelector('#engagement-stance-hint');
+    if (!wrap || !hold || !pursue) return;
+
+    const eligible = units.filter(
+      (u) => !u.dead && !u.surrendered && !u.def?.nonCombat && (u.def?.damage ?? 0) > 0
+    );
+    wrap.classList.toggle('hidden', eligible.length === 0);
+    if (!eligible.length) return;
+
+    const holdCount = eligible.filter((u) => u.engagementStance !== 'pursue').length;
+    const pursueCount = eligible.length - holdCount;
+    const allHold = holdCount === eligible.length;
+    const allPursue = pursueCount === eligible.length;
+    hold.classList.toggle('armed', allHold);
+    pursue.classList.toggle('armed', allPursue);
+    hold.setAttribute('aria-pressed', String(allHold));
+    pursue.setAttribute('aria-pressed', String(allPursue));
+    if (hint) {
+      hint.textContent = allPursue
+        ? 'Auto-fire in range and chase enemies that begin fleeing.'
+        : allHold
+          ? 'Auto-fire at enemies in range without chasing.'
+          : `Mixed stance — ${holdCount} holding, ${pursueCount} pursuing.`;
+    }
   }
 
   hideTdBreachAlert() {

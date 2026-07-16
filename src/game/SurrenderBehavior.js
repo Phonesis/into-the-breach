@@ -15,6 +15,7 @@ const SURRENDER_ELIGIBLE = new Set([
   'mortar',
   'medic',
   'engineer',
+  'vehicleCrew',
   'antiTankGun',
 ]);
 

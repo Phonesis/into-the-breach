@@ -41,7 +41,7 @@ import { createSmokeShellTarget } from './Targeting.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
-import { updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
+import { applyUnitDeathVisual, updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
 import { FIELD_BUILD_TYPES } from './EngineerSandbags.js';
 import {
   applyTrenchVisual,
@@ -227,7 +227,10 @@ export function captureBattleSave(game, { id = null } = {}) {
   const unitSnapshots = [];
   let maxUnitId = 0;
   for (const u of game.units) {
-    if (u.dead) continue;
+    // Dead units are still battlefield state: their meshes may be visible as
+    // corpses or wrecks and wrecks can provide cover. Only omit debris that has
+    // already been disposed by the runtime cleanup budget.
+    if (u.dead && !u.mesh?.parent) continue;
     maxUnitId = Math.max(maxUnitId, u.id);
     const faction = u.team === 'player' ? game.playerFaction : game.enemyFaction;
     unitSnapshots.push({
@@ -240,6 +243,20 @@ export function captureBattleSave(game, { id = null } = {}) {
       yaw: u.mesh?.rotation?.y ?? 0,
       hp: u.hp,
       maxHp: u.maxHp,
+      dead: !!u.dead,
+      deathCause: u._deathCause ?? null,
+      deathAt: u._deathAt ?? null,
+      preWreckYaw: u._preWreckYaw ?? null,
+      corpseTimeLeft: u.corpseTimeLeft ?? 0,
+      wreckTimeLeft: u.wreckTimeLeft ?? 0,
+      recoverableWreck: !!u._recoverableWreck,
+      wreckRepairProgress: u._wreckRepairProgress ?? 0,
+      crewBailedOut: !!u._crewBailedOut,
+      crewless: !!u._crewless,
+      replacementCrewUnitId: u._replacementCrewUnitId ?? null,
+      replacementCrewVehicleId: u._replacementCrewVehicleId ?? null,
+      embeddedCrewCount: u._embeddedCrewCount ?? 0,
+      lossRecorded: !!u._lossRecorded,
       selected: u.selected,
       veteran: u.veteran,
       elite: u.elite,
@@ -251,6 +268,7 @@ export function captureBattleSave(game, { id = null } = {}) {
         game.scenery?.objects.find((obj) => obj.id === u._garrisonBunkerId)?.mapKey ?? null,
       _mountedOnTankId: u._mountedOnTankId ?? null,
       _pendingMountTankId: u._pendingMountTankId ?? null,
+      _pendingReplacementCrew: !!u._pendingReplacementCrew,
       _tankRiderIds: u._tankRiderIds?.length ? [...u._tankRiderIds] : null,
       _sandbagSite: u._sandbagSite ?? null,
       _trenchId: u._trenchId ?? null,
@@ -264,6 +282,8 @@ export function captureBattleSave(game, { id = null } = {}) {
       _movePath: u._movePath?.map((p) => ({ x: p.x, z: p.z })) ?? null,
       _userMoveOrder: !!u._userMoveOrder,
       _chasingAttack: !!u._chasingAttack,
+      engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
+      stancePursuitOrder: !!u._stancePursuitOrder,
       manualFireMission: !!u._manualFireMission,
       attackOrderRef: serializeTargetRef(u.attackOrder),
       targetRef: serializeTargetRef(u.target),
@@ -271,6 +291,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       lastStandRole: u.lastStandRole ?? null,
       lastStandEchelon: u.lastStandEchelon ?? null,
       lastStandStance: u.lastStandStance ?? null,
+      clearanceProbe: u._clearanceProbe ? { ...u._clearanceProbe } : null,
     });
   }
 
@@ -289,6 +310,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       options: sessionOptions,
     },
     matchTime: game.matchTime,
+    clearanceReinforcements: game.clearanceReinforcements
+      ? { ...game.clearanceReinforcements }
+      : null,
     paused: game.paused,
     autoBuildMode: !!game.autoBuildMode,
     resources: { ...game.resources },
@@ -391,6 +415,7 @@ export function captureBattleSave(game, { id = null } = {}) {
             z: s.z,
             y: s.y,
             progress: s.progress,
+            rotationY: s.rotationY,
           })),
           entries: game.baseBuildings.entries.map((e) => ({
             id: e.id,
@@ -404,6 +429,7 @@ export function captureBattleSave(game, { id = null } = {}) {
             destroyed: !!e.destroyed,
             garrison: e.destroyed ? [] : [...(e.garrison ?? [])],
             engineerBuilt: !!e.engineerBuilt,
+            rotationY: e.mesh?.rotation?.y ?? 0,
           })),
         }
       : null,
@@ -420,6 +446,7 @@ export function captureBattleSave(game, { id = null } = {}) {
         y: s.y,
         progress: s.progress,
         engineerId: s.engineerId,
+        rotationY: s.rotationY,
       })),
       fieldBunkers: (game.engineerSandbags?.fieldBunkers ?? [])
         .filter((e) => !e.destroyed)
@@ -432,6 +459,7 @@ export function captureBattleSave(game, { id = null } = {}) {
           hp: e.hp,
           maxHp: e.maxHp,
           garrison: [...(e.garrison ?? [])],
+          rotationY: e.mesh?.rotation?.y ?? 0,
         })),
       engineerScenery: [],
     },
@@ -447,6 +475,7 @@ export function captureBattleSave(game, { id = null } = {}) {
             team: s.team,
             diggerId: s.diggerId,
             progress: s.progress,
+            rotationY: s.rotationY,
           })),
           trenches: game.infantryTrenches.trenches
             .filter((t) => !t.destroyed)
@@ -544,6 +573,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       hp: preset.hp,
       buildType: pos.buildType,
       team: pos.team,
+      rotationY: pos.rotationY,
     });
   }
 
@@ -578,6 +608,7 @@ function restoreEngineerScenery(game, placements) {
       seed: p.x * 0.17 + p.z * 0.23,
     });
     group.position.set(p.x, y, p.z);
+    group.rotation.y = p.rotationY ?? 0;
     game.scenery.register(group, {
       x: p.x,
       z: p.z,
@@ -652,11 +683,12 @@ function restoreBaseBuildingSite(manager, siteData) {
     z: siteData.z,
     y: siteData.y,
     progress: siteData.progress ?? 0,
+    rotationY: siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
     marker: null,
   };
   const visual = createBaseBuildingConstructionVisual({ def, team: site.team });
   visual.position.set(site.x, site.y, site.z);
-  visual.rotation.y = manager._facingYaw(site.team, site.x, site.z);
+  visual.rotation.y = site.rotationY;
   manager.game.scene.add(visual);
   site.marker = visual;
   updateBaseBuildingConstructionVisual(visual, site.progress ?? 0, 0);
@@ -697,7 +729,7 @@ function restoreBaseBuildingEntry(manager, data) {
     ? createCampaignBunkerMesh(manager.getFactionId(data.team))
     : createBaseBuildingMesh(data.typeId, manager.getFactionId(data.team));
   mesh.position.set(data.x, data.y, data.z);
-  mesh.rotation.y = manager._facingYaw(data.team, data.x, data.z);
+  mesh.rotation.y = data.rotationY ?? manager._facingYaw(data.team, data.x, data.z);
   manager.game.scene.add(mesh);
   entry.mesh = mesh;
   const ratio = data.maxHp > 0 ? data.hp / data.maxHp : 1;
@@ -770,6 +802,7 @@ function restoreEngineerSite(manager, siteData) {
     team: siteData.team,
     engineerId: siteData.engineerId,
     progress: siteData.progress ?? 0,
+    rotationY: siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
     marker: null,
   };
   const mat = new THREE.MeshBasicMaterial({
@@ -812,7 +845,7 @@ function restoreFieldBunker(manager, data) {
   };
   const mesh = createCampaignBunkerMesh(manager._factionId(data.team));
   mesh.position.set(data.x, data.y, data.z);
-  mesh.rotation.y = manager._facingYaw(data.team, data.x, data.z);
+  mesh.rotation.y = data.rotationY ?? manager._facingYaw(data.team, data.x, data.z);
   manager.game.scene.add(mesh);
   entry.mesh = mesh;
   const ratio = data.maxHp > 0 ? data.hp / data.maxHp : 1;
@@ -838,6 +871,8 @@ function restoreTrenchState(game, data) {
       team: siteData.team,
       diggerId: siteData.diggerId,
       progress: siteData.progress ?? 0,
+      rotationY:
+        siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
       marker: null,
     };
     manager.sites.push(site);
@@ -862,6 +897,7 @@ function restoreTrenchState(game, data) {
       destroyed: false,
       garrison: [...(trenchData.garrison ?? [])],
       mesh,
+      rotationY: mesh.rotation.y,
     });
     game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
   }
@@ -925,6 +961,17 @@ export function applyBattleSave(game, snapshot) {
   }
 
   game.matchTime = snapshot.matchTime ?? 0;
+  if (game.clearanceReinforcements) {
+    const saved = snapshot.clearanceReinforcements;
+    if (saved?.enabled) {
+      Object.assign(game.clearanceReinforcements, saved);
+    } else {
+      const interval = game.clearanceReinforcements.interval ?? 180;
+      game.clearanceReinforcements.wave = Math.floor(game.matchTime / interval);
+      game.clearanceReinforcements.nextAt =
+        (game.clearanceReinforcements.wave + 1) * interval;
+    }
+  }
   game.paused = !!snapshot.paused;
   game.ui?.setGamePaused(game.paused);
   game.autoBuildMode = !!snapshot.autoBuildMode;
@@ -1108,6 +1155,17 @@ export function applyBattleSave(game, snapshot) {
     unit.id = uData.id;
     unit.hp = uData.hp;
     unit.maxHp = uData.maxHp;
+    unit.dead = !!uData.dead;
+    unit._deathCause = uData.deathCause ?? null;
+    unit._deathAt = uData.deathAt ?? null;
+    unit._recoverableWreck = !!uData.recoverableWreck;
+    unit._wreckRepairProgress = uData.wreckRepairProgress ?? 0;
+    unit._crewBailedOut = !!uData.crewBailedOut;
+    unit._crewless = !!uData.crewless;
+    unit._replacementCrewUnitId = uData.replacementCrewUnitId ?? null;
+    unit._replacementCrewVehicleId = uData.replacementCrewVehicleId ?? null;
+    unit._embeddedCrewCount = uData.embeddedCrewCount ?? 0;
+    unit._lossRecorded = !!uData.lossRecorded;
     unit.selected = false;
     unit.veteran = !!uData.veteran;
     unit.elite = !!uData.elite;
@@ -1117,6 +1175,7 @@ export function applyBattleSave(game, snapshot) {
     unit._garrisonBunkerId = null;
     unit._mountedOnTankId = null;
     unit._pendingMountTankId = null;
+    unit._pendingReplacementCrew = !!uData._pendingReplacementCrew;
     unit._tankRiderIds = uData._tankRiderIds ? [...uData._tankRiderIds] : null;
     unit._sandbagSite = uData._sandbagSite ?? null;
     unit._trenchId = null;
@@ -1128,13 +1187,27 @@ export function applyBattleSave(game, snapshot) {
     unit.smokeShellCooldown = uData.smokeShellCooldown ?? 0;
     unit._userMoveOrder = !!uData._userMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
+    unit.engagementStance = uData.engagementStance === 'pursue' ? 'pursue' : 'hold';
+    unit._stancePursuitOrder = !!uData.stancePursuitOrder;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;
     unit.lastStandRole = uData.lastStandRole ?? null;
     unit.lastStandEchelon = uData.lastStandEchelon ?? null;
     unit.lastStandStance = uData.lastStandStance ?? null;
+    unit._clearanceProbe = uData.clearanceProbe ? { ...uData.clearanceProbe } : null;
     unit.position.y = uData.y ?? sampleTerrainHeight(uData.x, uData.z, game.mapDef);
     if (unit.mesh) unit.mesh.rotation.y = uData.yaw ?? 0;
-    updateSquadCasualtyVisual(unit);
+    if (unit.dead) {
+      unit._preWreckYaw = uData.preWreckYaw ?? uData.yaw ?? 0;
+      // Rebuild the static death pose without replaying the kill explosion.
+      unit._vehicleKillFxDone = true;
+      applyUnitDeathVisual(unit);
+      // applyUnitDeathVisual supplies defaults; retain the saved lifetime for
+      // modes which age battlefield debris normally.
+      unit.corpseTimeLeft = uData.corpseTimeLeft ?? unit.corpseTimeLeft;
+      unit.wreckTimeLeft = uData.wreckTimeLeft ?? unit.wreckTimeLeft;
+    } else {
+      updateSquadCasualtyVisual(unit);
+    }
     game.units.push(unit);
     unitById.set(unit.id, unit);
     if (uData.selected) unit.setSelected(true);
@@ -1153,6 +1226,8 @@ export function applyBattleSave(game, snapshot) {
       unit.attackOrder = attackOrder;
       unit.target = target ?? attackOrder;
       unit._manualFireMission = !!uData.manualFireMission;
+    } else {
+      unit._stancePursuitOrder = false;
     }
     if (uData.moveTarget) {
       unit.moveTarget = { x: uData.moveTarget.x, z: uData.moveTarget.z };
