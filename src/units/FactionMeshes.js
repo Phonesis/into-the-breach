@@ -52,13 +52,50 @@ export function buildChurchill(group, body, detail, dark) {
 }
 
 function buildTankDestroyer(group, body, detail, dark, factionId) {
+  const design = getVehicleDesign(factionId, 'tankDestroyer');
   buildTankDestroyerFromDesign(
     group,
     body,
     detail,
     dark,
-    getVehicleDesign(factionId, 'tankDestroyer')
+    design
   );
+  if (design.superstructure?.style === 'openTurret') {
+    addOpenTankDestroyerCrew(group, factionId);
+  }
+}
+
+/** Visible commander and gunner for the open-topped M10 and Achilles turrets. */
+function addOpenTankDestroyerCrew(group, factionId) {
+  const turret = group.userData.turretPivot;
+  if (!turret) return;
+
+  const crew = new THREE.Group();
+  crew.name = 'openTopTankDestroyerCrew';
+  crew.userData.isVehicleCrewVisual = true;
+  turret.add(crew);
+
+  const positions = [
+    { x: -0.29, y: 0.83, z: 0.06, yaw: 0.12 },
+    { x: 0.31, y: 0.89, z: -0.25, yaw: -0.18 },
+  ];
+  positions.forEach((position, squadIndex) => {
+    const soldier = buildSquadSoldier(crew, {
+      factionId,
+      squadIndex,
+      x: position.x,
+      z: position.z,
+      crouching: true,
+      withRifle: false,
+      withPack: false,
+      withWebbing: true,
+    });
+    soldier.name = 'openTopCrewman';
+    soldier.position.y = position.y;
+    soldier.rotation.y = position.yaw;
+    soldier.scale.setScalar(0.92);
+    soldier.userData.isVehicleCrewVisual = true;
+  });
 }
 
 /** Germany — Tiger I */

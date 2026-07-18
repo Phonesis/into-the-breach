@@ -488,11 +488,14 @@ export function buildTankDestroyerFromDesign(group, body, detail, dark, d) {
         rz: side * -0.08,
         part: 'turret',
       });
-      addBox(gunMount, new THREE.BoxGeometry(s.w * 0.43, s.h * 0.86, 0.12), body, {
-        x: side * s.w * 0.27,
-        y: s.y - 0.03,
-        z: s.d * 0.43,
-        ry: side * 0.12,
+      // The M10-family bow of the turret was low and open around the mantlet.
+      // Keep these cheek plates below the crew's eyeline instead of forming
+      // the oversized upright panels visible in the original model.
+      addBox(gunMount, new THREE.BoxGeometry(s.w * 0.34, s.h * 0.58, 0.12), body, {
+        x: side * s.w * 0.29,
+        y: s.y - s.h * 0.16,
+        z: s.d * 0.39,
+        ry: side * 0.24,
         part: 'turret',
       });
     }

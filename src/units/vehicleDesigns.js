@@ -71,7 +71,7 @@ const DESIGNS = {
     tankDestroyer: {
       model: 'jagdpanther',
       hull: { w: 2.52, h: 0.68, d: 4.05, y: 0.58, z: 0.02 },
-      glacis: { w: 2.32, h: 0.12, d: 1.36, y: 0.93, z: 1.42, tilt: -0.5 },
+      glacis: { w: 2.32, h: 0.12, d: 1.36, y: 0.77, z: 1.42, tilt: 0.32 },
       track: { spread: 1.3, height: 0.54, length: 3.92, wheels: 8, skirt: true, fender: true, links: 15 },
       superstructure: { style: 'casemate', w: 2.14, h: 0.78, d: 2.42, y: 1.18, z: 0.18, roofW: 1.62 },
       barrel: { len: 3.48, r0: 0.105, r1: 0.135, y: 1.25, z: 2.18, offsetX: 0.12, mantlet: 'round', muzzleBrake: 'double' },
@@ -161,7 +161,7 @@ const DESIGNS = {
     tankDestroyer: {
       model: 'm10',
       hull: { w: 2.42, h: 0.64, d: 3.62, y: 0.55, z: 0 },
-      glacis: { w: 2.18, h: 0.1, d: 1.28, y: 0.88, z: 1.32, tilt: -0.48 },
+      glacis: { w: 2.18, h: 0.1, d: 1.28, y: 0.76, z: 1.32, tilt: 0.32 },
       track: { spread: 1.23, height: 0.5, length: 3.58, wheels: 6, wheelR: 0.18, rollers: true, fender: true, links: 14 },
       superstructure: { style: 'openTurret', w: 1.68, h: 0.62, d: 1.52, y: 1.2, z: -0.08, rearCounterweight: true },
       barrel: { len: 3.05, r0: 0.095, r1: 0.12, y: 1.23, z: 1.63, mantlet: 'box' },
@@ -250,7 +250,7 @@ const DESIGNS = {
     tankDestroyer: {
       model: 'achilles',
       hull: { w: 2.44, h: 0.66, d: 3.66, y: 0.56, z: 0 },
-      glacis: { w: 2.2, h: 0.1, d: 1.3, y: 0.9, z: 1.34, tilt: -0.48 },
+      glacis: { w: 2.2, h: 0.1, d: 1.3, y: 0.77, z: 1.34, tilt: 0.32 },
       track: { spread: 1.24, height: 0.51, length: 3.62, wheels: 6, wheelR: 0.18, rollers: true, fender: true, links: 14 },
       superstructure: { style: 'openTurret', w: 1.7, h: 0.64, d: 1.54, y: 1.21, z: -0.08, rearCounterweight: true },
       barrel: { len: 3.42, r0: 0.1, r1: 0.125, y: 1.25, z: 1.82, mantlet: 'box', muzzleBrake: 'single' },
@@ -335,7 +335,7 @@ const DESIGNS = {
     tankDestroyer: {
       model: 'su100',
       hull: { w: 2.3, h: 0.64, d: 3.72, y: 0.54, z: 0.02 },
-      glacis: { w: 2.18, h: 0.1, d: 1.46, y: 0.87, z: 1.36, tilt: -0.56 },
+      glacis: { w: 2.18, h: 0.1, d: 1.46, y: 0.76, z: 1.36, tilt: 0.33 },
       track: { spread: 1.22, height: 0.5, length: 3.66, wheels: 5, wheelR: 0.2, fender: true, links: 14 },
       superstructure: { style: 'casemate', w: 2.0, h: 0.72, d: 2.5, y: 1.12, z: 0.12, roofW: 1.58 },
       barrel: { len: 3.36, r0: 0.105, r1: 0.135, y: 1.18, z: 2.1, offsetX: 0.18, mantlet: 'round' },
