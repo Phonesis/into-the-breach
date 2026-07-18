@@ -75,6 +75,7 @@ const PRODUCE_LABELS = {
   antiTankGun: 'AT',
   armoredCar: 'AC',
   tank: 'Tk',
+  tankDestroyer: 'TD',
   superHeavyTank: 'Super Heavy Tank',
   artillery: 'Arty',
 };
@@ -142,6 +143,7 @@ const FACTION_ROSTER_LABELS = {
   antiTankGun: 'AT gun',
   armoredCar: 'Armored car',
   tank: 'Tank',
+  tankDestroyer: 'Tank destroyer',
   superHeavyTank: 'Super Heavy Tank',
   artillery: 'Artillery',
 };
@@ -779,6 +781,32 @@ export class UIManager {
         </div>
       </div>
 
+      <div
+        id="overlay-surrender-confirm"
+        class="surrender-confirm-overlay hidden interactive"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="surrender-confirm-title"
+        aria-describedby="surrender-confirm-message"
+        aria-hidden="true"
+      >
+        <div class="surrender-confirm-box">
+          <p class="surrender-confirm-eyebrow">Command decision</p>
+          <h2 id="surrender-confirm-title">Surrender Battle?</h2>
+          <p id="surrender-confirm-message">
+            This ends the battle as a defeat and opens the battle report.
+          </p>
+          <div class="surrender-confirm-actions">
+            <button type="button" class="btn btn-secondary interactive" id="btn-surrender-cancel">
+              Keep Fighting
+            </button>
+            <button type="button" class="btn btn-danger interactive" id="btn-surrender-confirm">
+              Surrender
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div id="overlay-end" class="overlay-msg hidden interactive">
         <div class="box end-box">
           <h2 id="end-title">Victory</h2>
@@ -1388,12 +1416,39 @@ export class UIManager {
     });
 
     this.root.querySelector('#btn-surrender')?.addEventListener('click', () => {
-      const tutorial = !this.root.querySelector('#tutorial-banner')?.classList.contains('hidden');
-      const msg = tutorial
-        ? 'Leave the training ground and return to the main menu?'
-        : 'Surrender this battle and return to the main menu?';
-      if (!confirm(msg)) return;
+      this.openSurrenderConfirm();
+    });
+    this.root.querySelector('#btn-surrender-cancel')?.addEventListener('click', () => {
+      this.closeSurrenderConfirm();
+    });
+    this.root.querySelector('#btn-surrender-confirm')?.addEventListener('click', () => {
+      this.closeSurrenderConfirm({ restoreFocus: false });
       this.callbacks.onSurrender?.();
+    });
+    const surrenderOverlay = this.root.querySelector('#overlay-surrender-confirm');
+    surrenderOverlay?.addEventListener('pointerdown', (event) => {
+      if (event.target === surrenderOverlay) this.closeSurrenderConfirm();
+    });
+    surrenderOverlay?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeSurrenderConfirm();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const buttons = [
+        this.root.querySelector('#btn-surrender-cancel'),
+        this.root.querySelector('#btn-surrender-confirm'),
+      ].filter(Boolean);
+      if (buttons.length < 2) return;
+      const current = buttons.indexOf(document.activeElement);
+      if (event.shiftKey && current <= 0) {
+        event.preventDefault();
+        buttons[buttons.length - 1].focus();
+      } else if (!event.shiftKey && current === buttons.length - 1) {
+        event.preventDefault();
+        buttons[0].focus();
+      }
     });
 
     if (this.callbacks.onMenuVisible) this.callbacks.onMenuVisible(true);
@@ -1411,6 +1466,41 @@ export class UIManager {
     if (!overlay) return;
     overlay.classList.add('hidden');
     overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  openSurrenderConfirm() {
+    const overlay = this.root.querySelector('#overlay-surrender-confirm');
+    if (!overlay) return;
+    const tutorial = !this.root.querySelector('#tutorial-banner')?.classList.contains('hidden');
+    const title = this.root.querySelector('#surrender-confirm-title');
+    const message = this.root.querySelector('#surrender-confirm-message');
+    const cancel = this.root.querySelector('#btn-surrender-cancel');
+    const confirm = this.root.querySelector('#btn-surrender-confirm');
+
+    if (title) title.textContent = tutorial ? 'Leave Training?' : 'Surrender Battle?';
+    if (message) {
+      message.textContent = tutorial
+        ? 'Leave the training ground? Your current practice battle will end and the battle report will open.'
+        : 'Surrendering ends this battle as a defeat and opens the battle report.';
+    }
+    if (cancel) cancel.textContent = tutorial ? 'Continue Training' : 'Keep Fighting';
+    if (confirm) confirm.textContent = tutorial ? 'Leave Training' : 'Surrender';
+
+    this._surrenderPreviousFocus = document.activeElement;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => cancel?.focus());
+  }
+
+  closeSurrenderConfirm({ restoreFocus = true } = {}) {
+    const overlay = this.root.querySelector('#overlay-surrender-confirm');
+    if (!overlay || overlay.classList.contains('hidden')) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    if (restoreFocus && this._surrenderPreviousFocus?.focus) {
+      this._surrenderPreviousFocus.focus();
+    }
+    this._surrenderPreviousFocus = null;
   }
 
   openGuide(fromMenu = false) {

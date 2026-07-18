@@ -101,6 +101,15 @@ const ICONS = {
     <path d="M6 17l3-4.5h14l3 4.5" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.45"/>
   </svg>`,
 
+  tankDestroyer: `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <rect x="2.5" y="18" width="27" height="7.5" rx="1" fill="currentColor"/>
+    <circle cx="8" cy="27" r="3" fill="currentColor"/>
+    <circle cx="24" cy="27" r="3" fill="currentColor"/>
+    <path d="M6 18l6-7h11l4 7H6z" fill="currentColor" opacity="0.9"/>
+    <path d="M19 12.5h12v2.2H19" fill="currentColor"/>
+    <rect x="27.5" y="12" width="3.5" height="3.2" rx="0.4" fill="currentColor" opacity="0.7"/>
+  </svg>`,
+
   superHeavyTank: `<svg viewBox="0 0 32 32" aria-hidden="true">
     <rect x="2" y="17.5" width="28" height="8.5" rx="1" fill="currentColor"/>
     <rect x="4" y="21" width="4" height="6" rx="0.5" fill="currentColor" opacity="0.85"/>

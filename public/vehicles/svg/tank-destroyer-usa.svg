@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="M10 Wolverine">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><rect x="11" y="46" width="8" height="10"/><rect x="109" y="46" width="8" height="10"/><rect x="15" y="48" width="98" height="6"/></g>
+  <g fill="#4a5c4a"><path d="M23 44 L28 30 L42 23 L99 25 L108 34 L108 44 Z"/></g>
+  <g fill="#3a4538"><rect x="83" y="18" width="39" height="4"/><path d="M48 24 L53 14 L79 14 L89 24 Z"/></g>
+  <g fill="#5a6e58" opacity="0.85"><path d="M55 14h21" stroke="#1a1a18" stroke-width="2" opacity="0.7"/></g>
+</svg>

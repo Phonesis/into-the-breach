@@ -1,6 +1,6 @@
 /** Shared helpers for tracked armor unit types. */
 
-export const TANK_TYPES = new Set(['tank', 'superHeavyTank']);
+export const TANK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
 /** Infantry-scale units that medics can treat (excludes towed guns and vehicles). */
 export const FOOT_SOLDIER_TYPES = new Set([
@@ -20,6 +20,7 @@ export function isFootSoldier(type) {
 /** Mechanical units engineers can repair (tanks, guns, and wheeled armor). */
 export const VEHICLE_UNIT_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
   'artillery',
@@ -35,7 +36,7 @@ export function isTankType(type) {
 }
 
 export function isTrackedVehicle(type) {
-  return type === 'tank' || type === 'superHeavyTank' || type === 'armoredCar' || type === 'artillery';
+  return TANK_TYPES.has(type) || type === 'armoredCar' || type === 'artillery';
 }
 
 /** Movement tuning — super heavies use fewer sim steps and looser ridge snapping. */
@@ -43,7 +44,7 @@ export function getMoveReachConfig(type) {
   if (type === 'superHeavyTank') {
     return { horiz: 3.5, height: 5.2, substeps: 2, pathSegment: 12 };
   }
-  if (type === 'tank') {
+  if (type === 'tank' || type === 'tankDestroyer') {
     return { horiz: 2.6, height: 3.4, substeps: 3, pathSegment: 8 };
   }
   if (type === 'artillery' || type === 'armoredCar' || type === 'antiTankGun') {

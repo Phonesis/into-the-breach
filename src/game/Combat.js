@@ -67,10 +67,10 @@ const SMALL_ARMS_TYPES = new Set([
   'paratrooper',
   'vehicleCrew',
 ]);
-const ARMOR_TARGET_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
 const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
-const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'superHeavyTank']);
+const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 export const HAND_GRENADE_RANGE = 8;
 export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
 const HAND_GRENADE_DAMAGE = 12;

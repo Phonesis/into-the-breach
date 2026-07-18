@@ -5,6 +5,7 @@ import * as THREE from 'three';
 const _cannonMuzzleTip = new THREE.Vector3();
 const CANNON_MUZZLE_UNIT_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'antiTankGun',
   'artillery',
@@ -428,6 +429,196 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     mast.position.set(0, a.y + a.h * 0.5, a.z);
     group.add(mast);
+  }
+
+  group.userData.hitRadius = d.hitRadius;
+  group.userData.isTank = true;
+}
+
+/**
+ * Low-profile self-propelled anti-tank vehicles. Casemate guns remain fixed to
+ * the hull; M10-family open turrets rotate normally and retain their open roof.
+ */
+export function buildTankDestroyerFromDesign(group, body, detail, dark, d) {
+  const h = d.hull;
+  addBox(group, new THREE.BoxGeometry(h.w, h.h, h.d), body, {
+    y: h.y,
+    z: h.z ?? 0,
+    part: 'hull',
+  });
+  if (d.glacis) {
+    const g = d.glacis;
+    addBox(group, new THREE.BoxGeometry(g.w, g.h, g.d), body, {
+      y: g.y,
+      z: g.z,
+      rx: g.tilt ?? 0,
+      part: 'hull',
+    });
+  }
+  trackRun(group, dark, -1, d.track);
+  trackRun(group, dark, 1, d.track);
+
+  const s = d.superstructure;
+  let gunMount = group;
+  let mountZ = 0;
+  if (s.style === 'openTurret') {
+    gunMount = new THREE.Group();
+    gunMount.name = 'turretPivot';
+    gunMount.position.z = s.z ?? 0;
+    group.add(gunMount);
+    group.userData.turretPivot = gunMount;
+    mountZ = s.z ?? 0;
+
+    // Five-sided M10/Achilles fighting compartment: armored walls, dark open interior.
+    addBox(gunMount, new THREE.BoxGeometry(s.w, 0.12, s.d), dark, {
+      y: s.y - s.h * 0.45,
+      z: 0,
+      part: 'turret',
+    });
+    addBox(gunMount, new THREE.BoxGeometry(s.w, s.h, 0.12), body, {
+      y: s.y,
+      z: -s.d * 0.46,
+      part: 'turret',
+    });
+    for (const side of [-1, 1]) {
+      addBox(gunMount, new THREE.BoxGeometry(0.12, s.h, s.d * 0.9), body, {
+        x: side * s.w * 0.46,
+        y: s.y,
+        z: 0,
+        rz: side * -0.08,
+        part: 'turret',
+      });
+      addBox(gunMount, new THREE.BoxGeometry(s.w * 0.43, s.h * 0.86, 0.12), body, {
+        x: side * s.w * 0.27,
+        y: s.y - 0.03,
+        z: s.d * 0.43,
+        ry: side * 0.12,
+        part: 'turret',
+      });
+    }
+    if (s.rearCounterweight) {
+      addBox(gunMount, new THREE.BoxGeometry(s.w * 0.7, s.h * 0.5, s.d * 0.32), detail, {
+        y: s.y + 0.04,
+        z: -s.d * 0.58,
+        part: 'turret',
+      });
+    }
+  } else {
+    // Sloped casemate shoulders and roof create the recognisable Jagdpanther/SU-100 wedge.
+    addBox(group, new THREE.BoxGeometry(s.w, s.h * 0.72, s.d), body, {
+      y: s.y,
+      z: s.z,
+      rx: -0.05,
+      part: 'hull',
+    });
+    addBox(group, new THREE.BoxGeometry(s.roofW ?? s.w * 0.76, 0.11, s.d * 0.82), detail, {
+      y: s.y + s.h * 0.43,
+      z: s.z - s.d * 0.06,
+      part: 'hull',
+    });
+    for (const side of [-1, 1]) {
+      addBox(group, new THREE.BoxGeometry(0.14, s.h * 0.78, s.d * 0.92), body, {
+        x: side * s.w * 0.45,
+        y: s.y - 0.02,
+        z: s.z,
+        rz: side * -0.18,
+        part: 'hull',
+      });
+    }
+  }
+
+  const b = d.barrel;
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(b.r0, b.r1, b.len, 12), body);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(b.offsetX ?? 0, b.y, b.z - mountZ);
+  barrel.userData.tankPart = 'barrel';
+  gunMount.add(barrel);
+
+  if (b.mantlet === 'round') {
+    addCylinder(gunMount, new THREE.SphereGeometry(0.31, 12, 8), body, {
+      x: b.offsetX ?? 0,
+      y: b.y,
+      z: b.z - mountZ - b.len * 0.38,
+      part: 'mantlet',
+    });
+  } else if (b.mantlet) {
+    addBox(gunMount, new THREE.BoxGeometry(0.5, 0.34, 0.28), body, {
+      x: b.offsetX ?? 0,
+      y: b.y,
+      z: b.z - mountZ - b.len * 0.39,
+      part: 'mantlet',
+    });
+  }
+  if (b.muzzleBrake) {
+    const count = b.muzzleBrake === 'double' ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const brake = new THREE.Mesh(
+        new THREE.CylinderGeometry(b.r1 * 1.42, b.r1 * 1.18, 0.16, 10),
+        dark
+      );
+      brake.rotation.x = Math.PI / 2;
+      brake.position.set(b.offsetX ?? 0, b.y, b.z - mountZ + b.len * 0.49 + i * 0.13);
+      if (i === count - 1) brake.userData.tankPart = 'muzzle';
+      gunMount.add(brake);
+    }
+  }
+
+  if (d.machineGun) {
+    const mg = d.machineGun;
+    const mgParent = mg.topMount ? gunMount : group;
+    const mgZ = mg.z - (mg.topMount ? mountZ : 0);
+    addCylinder(mgParent, new THREE.CylinderGeometry(0.028, 0.035, mg.len, 8), dark, {
+      x: mg.x,
+      y: mg.y,
+      z: mgZ,
+      rx: Math.PI / 2,
+      part: 'barrel',
+    });
+    if (mg.topMount) {
+      addBox(mgParent, new THREE.BoxGeometry(0.18, 0.14, 0.24), dark, {
+        x: mg.x,
+        y: mg.y - 0.03,
+        z: mgZ - mg.len * 0.35,
+      });
+    }
+  }
+
+  if (d.cupola) {
+    const c = d.cupola;
+    addCylinder(group, new THREE.CylinderGeometry(c.r, c.r * 0.9, c.h, 12), body, {
+      x: c.x,
+      y: c.y,
+      z: c.z,
+      part: 'hull',
+    });
+  }
+  for (const hatch of d.hatches ?? []) {
+    addBox(group, new THREE.BoxGeometry(0.38, 0.045, 0.3), dark, {
+      x: hatch.x,
+      y: hatch.y,
+      z: hatch.z,
+      ry: hatch.ry ?? 0,
+      part: 'hull',
+    });
+  }
+  addBox(group, new THREE.BoxGeometry(h.w * 0.72, 0.05, h.d * 0.22), dark, {
+    y: h.y + h.h * 0.55,
+    z: (h.z ?? 0) - h.d * 0.34,
+  });
+  for (const ex of d.exhausts ?? []) {
+    addCylinder(group, new THREE.CylinderGeometry(0.07, 0.07, ex.h ?? 0.4, 8), dark, {
+      x: ex.x,
+      y: ex.y,
+      z: ex.z,
+    });
+  }
+  for (const plate of d.spareTrack ?? []) {
+    addBox(group, new THREE.BoxGeometry(plate.w, plate.h, plate.d), dark, {
+      x: plate.x ?? 0,
+      y: plate.y,
+      z: plate.z,
+      part: 'track',
+    });
   }
 
   group.userData.hitRadius = d.hitRadius;

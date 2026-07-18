@@ -501,6 +501,17 @@ body,
   background: rgba(80, 90, 105, 0.95);
 }
 
+.btn-danger {
+  background: #7b2424;
+  color: #fff0eb;
+  border: 1px solid rgba(245, 118, 100, 0.55);
+}
+
+.btn-danger:hover {
+  background: #9a3030;
+  filter: brightness(1.08);
+}
+
 .hud {
   position: absolute;
   inset: 0;
@@ -2576,6 +2587,14 @@ body,
   flex: 1.35 1 4.75rem;
 }
 
+.produce-btn[data-type='tankDestroyer'] {
+  border-color: rgba(210, 164, 76, 0.72);
+}
+
+.produce-btn[data-type='tankDestroyer'] .produce-name {
+  color: #f0cb7a;
+}
+
 .produce-btn[data-type='superHeavyTank'] .produce-name {
   font-size: 0.62rem;
   letter-spacing: 0.01em;
@@ -3227,6 +3246,84 @@ body,
   justify-content: center;
   background: rgba(8, 12, 18, 0.75);
   pointer-events: auto;
+}
+
+.surrender-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 48;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at center, rgba(88, 25, 22, 0.18), transparent 48%),
+    rgba(5, 8, 12, 0.8);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+
+.surrender-confirm-overlay.hidden {
+  display: none !important;
+}
+
+.surrender-confirm-box {
+  width: min(28rem, 92vw);
+  padding: 1.5rem 1.6rem 1.35rem;
+  color: #e8e4dc;
+  background: linear-gradient(165deg, rgba(34, 26, 27, 0.99), rgba(15, 20, 27, 0.99));
+  border: 1px solid rgba(225, 106, 88, 0.55);
+  border-top: 3px solid #a94337;
+  border-radius: 8px;
+  box-shadow:
+    0 22px 60px rgba(0, 0, 0, 0.68),
+    0 0 35px rgba(130, 42, 35, 0.18);
+}
+
+.surrender-confirm-eyebrow {
+  margin: 0 0 0.35rem;
+  color: #cf9d70;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.surrender-confirm-box h2 {
+  margin: 0 0 0.65rem;
+  color: #f0d8c8;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.07em;
+}
+
+.surrender-confirm-box > p:not(.surrender-confirm-eyebrow) {
+  margin: 0;
+  color: #bdc3cb;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.surrender-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1.35rem;
+}
+
+.surrender-confirm-actions .btn {
+  min-width: 9.5rem;
+}
+
+@media (max-width: 520px) {
+  .surrender-confirm-actions {
+    flex-direction: column-reverse;
+  }
+
+  .surrender-confirm-actions .btn {
+    width: 100%;
+  }
 }
 
 .end-stats-loading {
@@ -3995,6 +4092,15 @@ body,
 
 .guide-unit-card[data-type='superHeavyTank'] {
   border-color: rgba(220, 140, 80, 0.35);
+}
+
+.guide-unit-card[data-type='tankDestroyer'] {
+  border-color: rgba(210, 164, 76, 0.58);
+  background: linear-gradient(145deg, rgba(78, 61, 33, 0.3), rgba(18, 18, 16, 0.92));
+}
+
+.guide-unit-card[data-type='tankDestroyer'] .guide-unit-icon {
+  color: #e5bd66;
 }
 
 .guide-unit-card[data-type='superHeavyTank'] .guide-unit-icon {

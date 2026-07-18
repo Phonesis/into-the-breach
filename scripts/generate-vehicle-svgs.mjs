@@ -50,6 +50,34 @@ const SVGS = {
       hull: `<path d="M22 44 L22 28 L30 24 L108 24 L112 44 Z"/><rect x="30" y="24" width="78" height="8"/>`,
       gun: `<rect x="72" y="18" width="28" height="4"/><rect x="68" y="14" width="14" height="10"/>`,
     }),
+  'tank-destroyer-germany': () =>
+    wrap('Jagdpanther', 'germany', {
+      tracks: `<rect x="9" y="45" width="10" height="11"/><rect x="109" y="45" width="10" height="11"/><rect x="13" y="48" width="102" height="7"/>`,
+      hull: `<path d="M20 44 L28 28 L48 15 L96 17 L108 31 L108 44 Z"/>`,
+      gun: `<rect x="90" y="18" width="34" height="5"/><rect x="118" y="16" width="7" height="9"/>`,
+      detail: `<circle cx="48" cy="17" r="4" opacity="0.45"/>`,
+    }),
+  'tank-destroyer-usa': () =>
+    wrap('M10 Wolverine', 'usa', {
+      tracks: `<rect x="11" y="46" width="8" height="10"/><rect x="109" y="46" width="8" height="10"/><rect x="15" y="48" width="98" height="6"/>`,
+      hull: `<path d="M23 44 L28 30 L42 23 L99 25 L108 34 L108 44 Z"/>`,
+      gun: `<rect x="83" y="18" width="39" height="4"/><path d="M48 24 L53 14 L79 14 L89 24 Z"/>`,
+      detail: `<path d="M55 14h21" stroke="#1a1a18" stroke-width="2" opacity="0.7"/>`,
+    }),
+  'tank-destroyer-uk': () =>
+    wrap('Achilles IIC', 'uk', {
+      tracks: `<rect x="11" y="46" width="8" height="10"/><rect x="109" y="46" width="8" height="10"/><rect x="15" y="48" width="98" height="6"/>`,
+      hull: `<path d="M23 44 L28 30 L42 23 L99 25 L108 34 L108 44 Z"/>`,
+      gun: `<rect x="80" y="17" width="43" height="4"/><rect x="119" y="15" width="6" height="8"/><path d="M48 24 L53 14 L79 14 L89 24 Z"/>`,
+      detail: `<path d="M55 14h21" stroke="#1a1a18" stroke-width="2" opacity="0.7"/>`,
+    }),
+  'tank-destroyer-russia': () =>
+    wrap('SU-100', 'russia', {
+      tracks: `<rect x="10" y="46" width="9" height="10"/><rect x="109" y="46" width="9" height="10"/><rect x="14" y="48" width="100" height="6"/>`,
+      hull: `<path d="M20 44 L30 29 L48 17 L98 20 L108 32 L108 44 Z"/>`,
+      gun: `<rect x="87" y="19" width="37" height="5"/><circle cx="87" cy="21" r="5"/>`,
+      detail: `<circle cx="53" cy="17" r="5" opacity="0.45"/>`,
+    }),
   'tank-super-germany': () =>
     wrap('Tiger I', 'germany', {
       tracks: `<rect x="10" y="45" width="9" height="11"/><rect x="109" y="45" width="9" height="11"/><rect x="14" y="48" width="100" height="7"/>`,

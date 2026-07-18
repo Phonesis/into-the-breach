@@ -66,6 +66,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
 
   if (
     type === 'tank' ||
+    type === 'tankDestroyer' ||
     type === 'superHeavyTank' ||
     type === 'armoredCar' ||
     type === 'artillery' ||
@@ -128,6 +129,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     medic: 1.4,
     engineer: 2.25,
     armoredCar: group.userData.hitRadius ?? 2.6,
+    tankDestroyer: group.userData.hitRadius ?? 3.0,
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,
     artillery: group.userData.hitRadius ?? 2.4,
@@ -141,6 +143,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   const hitY = {
     tank: 1.1,
     superHeavyTank: 1.25,
+    tankDestroyer: 1.08,
     armoredCar: 0.85,
     artillery: 0.95,
     antiTankGun: 0.85,

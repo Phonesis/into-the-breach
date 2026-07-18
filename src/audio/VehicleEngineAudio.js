@@ -1,9 +1,10 @@
 /** Looping baked diesel / track engine audio for moving vehicles. */
 
-const ENGINE_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar', 'artillery']);
+const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery']);
 
 const BUFFER_KEYS = {
   tank: 'engine_tank',
+  tankDestroyer: 'engine_tank_destroyer',
   superHeavyTank: 'engine_tank',
   armoredCar: 'engine_armored_car',
   artillery: 'engine_artillery',
@@ -25,6 +26,14 @@ const PROFILES = {
     filterMin: 280,
     filterMax: 1400,
     exhaustGain: 0.35,
+  },
+  tankDestroyer: {
+    rateMin: 0.76,
+    rateMax: 1.08,
+    vol: 0.45,
+    filterMin: 230,
+    filterMax: 1120,
+    exhaustGain: 0.34,
   },
   armoredCar: {
     rateMin: 0.88,
@@ -189,10 +198,13 @@ export class VehicleEngineAudio {
     this.voices = new Map();
   }
 
-  _buffersFor(type) {
-    const key = BUFFER_KEYS[type];
+  _buffersFor(type, factionId = null) {
+    const key = type === 'tankDestroyer'
+      ? `${BUFFER_KEYS.tankDestroyer}_${factionId ?? 'germany'}`
+      : BUFFER_KEYS[type];
     const main = this.sm.buffers[key];
-    const exhaust = this.sm.buffers[`${key}_exhaust`];
+    const exhaust = this.sm.buffers[`${key}_exhaust`] ??
+      (type === 'tankDestroyer' ? this.sm.buffers.engine_tank_exhaust : null);
     if (!main) return null;
     return { main, exhaust: exhaust ?? null };
   }
@@ -226,7 +238,7 @@ export class VehicleEngineAudio {
 
     for (const u of units) {
       if (!ENGINE_TYPES.has(u.def?.type) || u.dead) continue;
-      if (!this._buffersFor(u.def.type)) continue;
+      if (!this._buffersFor(u.def.type, u.faction?.id)) continue;
 
       const speed = this._measureSpeed(u, dt);
       const throttle = Math.min(1, speed / Math.max(u.def.speed * 0.85, 2));
@@ -255,7 +267,7 @@ export class VehicleEngineAudio {
     for (const { unit, throttle } of active.slice(0, MAX_VOICES)) {
       let entry = this.voices.get(unit.id);
       if (!entry) {
-        const buffers = this._buffersFor(unit.def.type);
+        const buffers = this._buffersFor(unit.def.type, unit.faction?.id);
         if (!buffers) continue;
         const voice = new EngineVoice(ctx, dryBus, wetBus, unit.def.type, buffers);
         if (!voice.mainSrc) continue;

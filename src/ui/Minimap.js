@@ -8,6 +8,7 @@ const PLAYER_TEAM = 'player';
 
 const VEHICLE_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
   'artillery',
@@ -18,12 +19,12 @@ const VEHICLE_TYPES = new Set([
 const MAX_FIRE_TRACES = 88;
 const TRACE_LIFE_DEFAULT = 1.05;
 
-const HEAVY_WEAPONS = new Set(['tank', 'superHeavyTank', 'antiTankGun', 'artillery', 'mortar']);
+const HEAVY_WEAPONS = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'antiTankGun', 'artillery', 'mortar']);
 
 function traceLifetime(weaponType) {
   if (weaponType === 'artillery') return 1.75;
   if (weaponType === 'mortar' || weaponType === 'antiTankGun') return 1.45;
-  if (weaponType === 'tank' || weaponType === 'superHeavyTank') return 1.25;
+  if (weaponType === 'tank' || weaponType === 'tankDestroyer' || weaponType === 'superHeavyTank') return 1.25;
   if (weaponType === 'machineGun' || weaponType === 'armoredCar') return 0.95;
   return TRACE_LIFE_DEFAULT;
 }

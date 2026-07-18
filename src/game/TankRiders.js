@@ -17,8 +17,8 @@ const RIDER_TYPES = new Set([
   'engineer',
 ]);
 
-const HOST_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
-const RIDER_DECK_TYPES = new Set(['tank', 'superHeavyTank']);
+const HOST_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
+const RIDER_DECK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
 const HOST_CAPACITY = {
   tank: 2,

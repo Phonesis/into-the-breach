@@ -16,6 +16,7 @@ const AUTO_BUILD_WEIGHTS = {
   antiTankGun: 6,
   armoredCar: 6,
   tank: 11,
+  tankDestroyer: 7,
   artillery: 5,
   superHeavyTank: 3,
 };
@@ -58,7 +59,7 @@ function canAutoEnqueue(game, unitType) {
 function scoreUnitType(type, counts, total, resources, def) {
   let weight = AUTO_BUILD_WEIGHTS[type] ?? 4;
   if (total < 10 && type === 'infantry') weight *= 1.45;
-  if (type === 'superHeavyTank' && (counts.tank ?? 0) < 2) return -1;
+  if (type === 'superHeavyTank' && (counts.tank ?? 0) + (counts.tankDestroyer ?? 0) < 2) return -1;
   if (type === 'artillery' && total < 14) weight *= 0.65;
   if (resources < def.cost * 1.15 && def.cost >= 180) weight *= 0.55;
 

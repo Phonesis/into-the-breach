@@ -155,13 +155,13 @@ export const GAME_GUIDE_SECTIONS = [
     id: 'cover',
     title: 'Cover',
     body: [
-      'Foot troops only, including infantry, paratroopers, machine-gun teams, engineers, snipers, medics, and bailed crews. Tanks, super heavies, anti-tank guns, mortars, and artillery ignore cover bonuses.',
+      'Foot troops only, including infantry, paratroopers, machine-gun teams, engineers, snipers, medics, and bailed crews. Tanks, tank destroyers, super heavies, anti-tank guns, mortars, and artillery ignore cover bonuses.',
       '<strong>Heavy</strong> as little as ~12% damage taken (up to ~88% reduction) — bunkers, sandbags, tanks, and other hard shelter. Protection tapers toward the edge of the cover area.',
       '<strong>Medium</strong> as little as ~28% damage taken (up to ~72% reduction) — hedges and stone walls.',
       '<strong>Light</strong> as little as ~45% damage taken (up to ~55% reduction) — fighting pits and scrub. Trenches provide a consistent ~70% reduction while occupied.',
       '<strong>Direction matters:</strong> nearby cover only protects against fire passing through it. Flanking or rear fire bypasses the position. Bunkers and occupied trenches protect more broadly because troops are inside them.',
       '<strong>Weapon matters:</strong> rifles and machine guns are strongly checked by cover, while mortar bombs, tank shells, artillery, and other blast weapons retain more of their damage through or around it.',
-      'Bonus only while the unit stays in the zone. <strong>Stationary tanks, super-heavies, and armored cars</strong> create neutral cover usable by either side; anti-tank guns do not. Living-vehicle cover disappears as soon as that vehicle begins moving. Destroyed vehicle and field-gun wrecks also provide cover. Use <strong>Shift + LMB</strong> on scenery to destroy other cover objects. Selected foot troops show an <strong>IN COVER</strong> tag, foot ring, and % on the selection panel.',
+      'Bonus only while the unit stays in the zone. <strong>Stationary tanks, tank destroyers, super-heavies, and armored cars</strong> create neutral cover usable by either side; anti-tank guns do not. Living-vehicle cover disappears as soon as that vehicle begins moving. Destroyed vehicle and field-gun wrecks also provide cover. Use <strong>Shift + LMB</strong> on scenery to destroy other cover objects. Selected foot troops show an <strong>IN COVER</strong> tag, foot ring, and % on the selection panel.',
       '<strong>Seek Cover</strong> (General Orders panel) — toggle <strong>On</strong> so infantry, MG, sniper, medic, and engineer <strong>move orders</strong> route to the nearest cover near your click (hedges, pits, sandbags, bunkers) instead of open ground. Tanks and other vehicles still go where you click. Preference is saved in the browser.',
     ],
   },
@@ -180,7 +180,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Strafing run</strong> (~72 s cooldown) — Fighter pass with spatial fly-by audio and MG bursts along your line.',
       '<strong>Artillery barrage</strong> (~95 s cooldown) — Shell warnings, then clustered impacts.',
       '<strong>Creeping barrage</strong> (~148 s cooldown) — Slower recharge; shells advance in lifts along your attack axis and concentrate maximum fire on the point you click.',
-      '<strong>Airborne drop</strong> (~180 s cooldown) — A transport passes overhead; <strong>five elite paratrooper squads</strong> (four men each) descend by parachute on your target zone. Drops cannot target within about <strong>48 m of the opposing HQ</strong>, preventing an immediate HQ assault; Battle Simulation is unaffected when no HQ exists. They are <strong>not</strong> built from HQ — only called this way. On landing they fight with <strong>rifles and squad LMG</strong> vs infantry and <strong>anti-tank launchers</strong> (Panzerfaust, bazooka, PIAT, RPG-43, etc. by nation) vs tanks and armored cars. AT shots reload slowly (~4.5 s).',
+      '<strong>Airborne drop</strong> (~180 s cooldown) — A transport passes overhead; <strong>five elite paratrooper squads</strong> (four men each) descend by parachute on your target zone. Drops cannot target within about <strong>48 m of the opposing HQ</strong>, preventing an immediate HQ assault; Battle Simulation is unaffected when no HQ exists. They are <strong>not</strong> built from HQ — only called this way. On landing they fight with <strong>rifles and squad LMG</strong> vs infantry and <strong>anti-tank launchers</strong> (Panzerfaust, bazooka, PIAT, RPG-43, etc. by nation) vs tanks, tank destroyers, and armored cars. AT shots reload slowly (~4.5 s).',
       'Click a strike type, then LMB on valid ground. Esc cancels targeting. Not available in Tower Defence (Emplacements) or during Battle Simulation deployment; available in Tower Defence HQ Defense.',
     ],
   },
@@ -199,7 +199,7 @@ export const GAME_GUIDE_SECTIONS = [
     id: 'units',
     title: 'Unit roster',
     intro:
-      'Eleven buildable unit types per faction (historical names differ). <strong>Airborne paratroopers</strong> are fire-support only (see Fire support). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
+      'Twelve buildable unit types per faction (historical names differ). <strong>Airborne paratroopers</strong> are fire-support only (see Fire support). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
     units: true,
   },
   {
@@ -222,7 +222,7 @@ export const GUIDE_UNIT_CARDS = [
     cost: 50,
     build: 8,
     range: '400–500 m',
-    desc: 'Rifle squads — cheap, flexible, excel in cover; throw hand grenades at tanks within ~80 m after closing on the target.',
+    desc: 'Rifle squads — cheap, flexible, excel in cover; throw hand grenades at tanks and tank destroyers within ~80 m after closing on the target.',
     tags: ['Cover', 'Retreat', 'AT grenade'],
   },
   {
@@ -298,6 +298,15 @@ export const GUIDE_UNIT_CARDS = [
     tags: ['Fire mission', 'Wreck fire'],
   },
   {
+    type: 'tankDestroyer',
+    name: 'Tank destroyer',
+    cost: '165–190',
+    build: '21–23',
+    range: '~1,800–2,000 m',
+    desc: 'Long-range anti-armor specialist; high penetration but less versatile and less durable than heavy tanks.',
+    tags: ['Anti-armor', 'Ambush', 'Wreck fire'],
+  },
+  {
     type: 'superHeavyTank',
     name: 'Super heavy tank',
     cost: '255–265',
@@ -353,21 +362,23 @@ function renderUnitCard(entry) {
 function renderFactionHeavyTable() {
   const rows = FACTION_LIST.map((f) => {
     const med = f.units.tank;
+    const destroyer = f.units.tankDestroyer;
     const heavy = f.units.superHeavyTank;
-    if (!med || !heavy) return '';
+    if (!med || !destroyer || !heavy) return '';
     return `
       <tr>
         <td><img class="guide-faction-flag" src="${escapeHtml(f.flag)}" alt="" width="28" height="18" loading="lazy" /> ${escapeHtml(f.name)}</td>
         <td>${escapeHtml(med.name)}</td>
+        <td>${escapeHtml(destroyer.name)}</td>
         <td>${escapeHtml(heavy.name)}</td>
       </tr>
     `;
   }).join('');
   return `
     <div class="guide-faction-block">
-      <h4 class="guide-subhead">Faction armor (medium vs super heavy)</h4>
+      <h4 class="guide-subhead">Faction armor</h4>
       <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Medium tank</th><th>Super heavy</th></tr></thead>
+        <thead><tr><th>Nation</th><th>Medium tank</th><th>Tank destroyer</th><th>Super heavy</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>

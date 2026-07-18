@@ -124,6 +124,7 @@ const COVER_UNIT_TYPES = new Set([
 
 const WRECK_COVER_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
   'artillery',
@@ -132,6 +133,7 @@ const WRECK_COVER_TYPES = new Set([
 
 const STATIONARY_VEHICLE_COVER_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
 ]);
@@ -141,6 +143,7 @@ const LIVING_VEHICLE_COVER_PREFIX = 'living-vehicle:';
 function vehicleCoverProfile(type) {
   if (type === 'superHeavyTank') return { tier: 'heavy', radius: 5.8 };
   if (type === 'tank') return { tier: 'heavy', radius: 5.1 };
+  if (type === 'tankDestroyer') return { tier: 'heavy', radius: 5.25 };
   return { tier: 'medium', radius: 4.2 };
 }
 

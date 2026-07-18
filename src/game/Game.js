@@ -2900,7 +2900,7 @@ export class Game {
     }
 
     if (coaxFire) {
-      sounds.playWeapon(mgProfileForFaction(factionId), pos, {
+      sounds.playWeapon(def?.mgWeaponSound ?? mgProfileForFaction(factionId), pos, {
         rate: 0.995 + Math.random() * 0.02,
         volume: 0.82,
       });

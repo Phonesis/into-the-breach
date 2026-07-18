@@ -27,7 +27,7 @@ import { sounds } from '../audio/SoundManager.js';
 import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 
-const ARMOR_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
 
 const MORTAR_SOUND_BY_FACTION = {

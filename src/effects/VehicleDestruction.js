@@ -15,19 +15,19 @@ import { spawnVehicleCrewBailout } from '../game/VehicleBailout.js';
 
 /** Types that get armored-vehicle destruction (main blast + wreck fire + cook-off chance). */
 export function isArmoredCombatVehicle(type) {
-  return type === 'tank' || type === 'superHeavyTank' || type === 'armoredCar';
+  return type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar';
 }
 
 function cookOffChance(type) {
   if (type === 'superHeavyTank') return 0.42;
-  if (type === 'tank') return 0.3;
+  if (type === 'tank' || type === 'tankDestroyer') return 0.3;
   if (type === 'armoredCar') return 0.18;
   return 0;
 }
 
 function primaryTier(type) {
   if (type === 'superHeavyTank') return 'heavy';
-  if (type === 'tank') return 'heavy';
+  if (type === 'tank' || type === 'tankDestroyer') return 'heavy';
   return 'medium';
 }
 
@@ -96,7 +96,7 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   sounds.play('explosion');
   sounds.playImpact('shell', { x: p.x, z: p.z }, 0.04);
 
-  const craterSize = type === 'superHeavyTank' ? 'heavy' : type === 'tank' ? 'medium' : 'light';
+  const craterSize = type === 'superHeavyTank' ? 'heavy' : isTankType(type) ? 'medium' : 'light';
   game._spawnExplosionCrater?.(p.x, p.z, craterSize);
 
   // Occasional ammo cook-off: shells cooking off after the hull is open
@@ -107,7 +107,7 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   const blasts =
     type === 'superHeavyTank'
       ? 3 + Math.floor(Math.random() * 3) // 3–5
-      : type === 'tank'
+      : type === 'tank' || type === 'tankDestroyer'
         ? 2 + Math.floor(Math.random() * 3) // 2–4
         : 2 + Math.floor(Math.random() * 2); // 2–3
 

@@ -21,6 +21,7 @@ const TEXTURE_PATHS = {
 
 const VEHICLE_TYPES = new Set([
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
   'artillery',

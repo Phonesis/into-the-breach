@@ -1,7 +1,7 @@
 export const VEHICLE_BAILOUT_CHANCE = 1 / 3;
 export const REAR_CHAIN_REACTION_CHANCE = 0.62;
 
-const BAILOUT_VEHICLE_TYPES = new Set(['tank', 'superHeavyTank', 'armoredCar']);
+const BAILOUT_VEHICLE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 
 export function isBailoutVehicleType(type) {
   return BAILOUT_VEHICLE_TYPES.has(type);

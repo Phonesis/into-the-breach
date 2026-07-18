@@ -21,6 +21,7 @@
     "bake-elevenlabs-more-sfx": "node scripts/bake-elevenlabs-more-sfx.mjs",
     "bake-elevenlabs-underfire": "node scripts/bake-elevenlabs-underfire.mjs",
     "bake-elevenlabs-engines": "node scripts/bake-elevenlabs-engines.mjs",
+    "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
     "bake-engines": "node scripts/bake-engine-sounds.mjs",
     "bake-infantry-death": "node scripts/bake-infantry-death.mjs",
     "bake-unit-select": "node scripts/bake-unit-select.mjs",

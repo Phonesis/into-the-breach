@@ -118,7 +118,7 @@ function getEliteTexture() {
 
 function markerHeight(unit) {
   const t = unit.def?.type;
-  if (t === 'tank' || t === 'superHeavyTank') return 3.35;
+  if (t === 'tank' || t === 'tankDestroyer' || t === 'superHeavyTank') return 3.35;
   if (t === 'artillery' || t === 'antiTankGun') return 3.1;
   if (t === 'armoredCar') return 3.2;
   return 2.55;

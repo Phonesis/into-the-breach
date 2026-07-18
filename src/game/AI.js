@@ -461,7 +461,7 @@ function enemyNeedsCapture(points, assault) {
 }
 
 function pickPresetAttackTarget(unit, players) {
-  if (unit.def?.type === 'antiTankGun' || unit.def?.type === 'tank' || unit.def?.type === 'superHeavyTank') {
+  if (unit.def?.type === 'antiTankGun' || unit.def?.type === 'tank' || unit.def?.type === 'tankDestroyer' || unit.def?.type === 'superHeavyTank') {
     let best = null;
     let bestScore = Infinity;
     for (const foe of players) {
@@ -860,7 +860,8 @@ function rollEnemyUnitType(assault, difficulty) {
   if (roll < 0.86) return 'mortar';
   if (roll < 0.9 - heavyBias * 0.35) return 'antiTankGun';
   if (roll < 0.93 - heavyBias * 0.45) return 'artillery';
-  if (roll < 0.96 - heavyBias * 0.35) return 'tank';
+  if (roll < 0.95 - heavyBias * 0.35) return 'tank';
+  if (roll < 0.98) return 'tankDestroyer';
   return 'superHeavyTank';
 }
 
@@ -877,6 +878,7 @@ function tryProduce(production, resources, spend, assault, difficulty) {
     'armoredCar',
     'sniper',
     'tank',
+    'tankDestroyer',
     'artillery',
     'superHeavyTank',
   ];

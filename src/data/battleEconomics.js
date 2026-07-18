@@ -15,6 +15,7 @@ export const UNIT_MATERIEL_COST_USD_1944 = {
   antiTankGun: 48_000,
   armoredCar: 95_000,
   tank: 62_000,
+  tankDestroyer: 78_000,
   superHeavyTank: 285_000,
   artillery: 78_000,
 };

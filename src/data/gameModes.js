@@ -107,6 +107,7 @@ export const UNIT_TYPE_ORDER = [
   'antiTankGun',
   'armoredCar',
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'artillery',
 ];

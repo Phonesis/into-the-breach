@@ -93,8 +93,8 @@ export const BASE_BUILDING_TYPES = {
     hp: 400,
     radius: 4.5,
     hitRadius: 5,
-    unlocks: ['engineer', 'sniper', 'armoredCar', 'tank', 'superHeavyTank'],
-    spawns: ['engineer', 'sniper', 'armoredCar', 'tank', 'superHeavyTank'],
+    unlocks: ['engineer', 'sniper', 'armoredCar', 'tank', 'tankDestroyer', 'superHeavyTank'],
+    spawns: ['engineer', 'sniper', 'armoredCar', 'tank', 'tankDestroyer', 'superHeavyTank'],
     maxPerTeam: 1,
     placementMinFromHq: 14,
     placementMaxFromHq: 52,
@@ -142,6 +142,7 @@ const SPAWN_BUILDING_FOR_UNIT = {
   sniper: 'motorPool',
   armoredCar: 'motorPool',
   tank: 'motorPool',
+  tankDestroyer: 'motorPool',
   superHeavyTank: 'motorPool',
 };
 

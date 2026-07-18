@@ -285,14 +285,14 @@ const LAST_STAND_DEFENSIVE_TYPES = new Set([
   'sniper',
   'machineGun',
 ]);
-const LAST_STAND_AGGRESSIVE_TYPES = new Set(['tank', 'armoredCar', 'superHeavyTank']);
+const LAST_STAND_AGGRESSIVE_TYPES = new Set(['tank', 'tankDestroyer', 'armoredCar', 'superHeavyTank']);
 
 function holdRadiusForType(type) {
   if (type === 'artillery' || type === 'mortar') return 12;
   if (type === 'antiTankGun') return 10;
   if (type === 'infantry') return 14;
   if (type === 'machineGun' || type === 'sniper') return 11;
-  if (type === 'tank' || type === 'superHeavyTank') return 16;
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank') return 16;
   if (type === 'armoredCar') return 18;
   return 12;
 }

@@ -89,6 +89,7 @@ export const TD_KILL_REWARD = {
   antiTankGun: 20,
   armoredCar: 18,
   tank: 30,
+  tankDestroyer: 36,
   superHeavyTank: 45,
   artillery: 25,
 };
@@ -98,6 +99,7 @@ export const TD_WAVE_CLEAR_BONUS = 0;
 export const MINE_VEHICLE_TYPES = new Set([
   'armoredCar',
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
   'artillery',
 ]);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getVehicleDesign } from './vehicleDesigns.js';
 import {
   buildTankFromDesign,
+  buildTankDestroyerFromDesign,
   buildArmoredCarFromDesign,
   buildArtilleryFromDesign,
   buildAtGunFromDesign,
@@ -48,6 +49,16 @@ export function buildSherman(group, body, detail, dark) {
 /** UK — Churchill Mk IV */
 export function buildChurchill(group, body, detail, dark) {
   buildTankFromDesign(group, body, detail, dark, getVehicleDesign('uk', 'tank'));
+}
+
+function buildTankDestroyer(group, body, detail, dark, factionId) {
+  buildTankDestroyerFromDesign(
+    group,
+    body,
+    detail,
+    dark,
+    getVehicleDesign(factionId, 'tankDestroyer')
+  );
 }
 
 /** Germany — Tiger I */
@@ -670,6 +681,7 @@ export function buildFactionSniper(group, _body, _detail, dark, factionId, ghill
 const VEHICLE_BUILDERS = {
   germany: {
     tank: buildPanzerIV,
+    tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'germany'),
     superHeavyTank: buildTigerI,
     armoredCar: buildSdkfz222,
     artillery: buildLeFH18,
@@ -677,6 +689,7 @@ const VEHICLE_BUILDERS = {
   },
   usa: {
     tank: buildSherman,
+    tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'usa'),
     superHeavyTank: buildPershing,
     armoredCar: buildM8Greyhound,
     artillery: buildM101,
@@ -684,6 +697,7 @@ const VEHICLE_BUILDERS = {
   },
   uk: {
     tank: buildChurchill,
+    tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'uk'),
     superHeavyTank: buildBlackPrince,
     armoredCar: buildDaimlerAC,
     artillery: build25Pounder,
@@ -691,6 +705,7 @@ const VEHICLE_BUILDERS = {
   },
   russia: {
     tank: buildT3485,
+    tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'russia'),
     superHeavyTank: buildIS2,
     armoredCar: buildBA64,
     artillery: buildM30,

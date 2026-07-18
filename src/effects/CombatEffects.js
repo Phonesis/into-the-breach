@@ -424,7 +424,7 @@ export function spawnHandGrenade(scene, from, to, onImpact = null) {
   return true;
 }
 
-const CANNON_MUZZLE_TYPES = new Set(['tank', 'superHeavyTank', 'antiTankGun', 'artillery']);
+const CANNON_MUZZLE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'antiTankGun', 'artillery']);
 
 function isCannonMuzzle(weaponType) {
   return CANNON_MUZZLE_TYPES.has(weaponType);
@@ -437,7 +437,7 @@ function isCannonMuzzle(weaponType) {
 function spawnTankMuzzleBlast(scene, pos, toV, weaponType) {
   if (!canSpawnEffect(6)) return;
 
-  const heavy = weaponType === 'superHeavyTank' || weaponType === 'artillery';
+  const heavy = weaponType === 'tankDestroyer' || weaponType === 'superHeavyTank' || weaponType === 'artillery';
   const scale = heavy ? 1.45 : weaponType === 'antiTankGun' ? 0.85 : 1.1;
 
   _shotDir.set(toV.x - pos.x, (toV.y ?? pos.y) - pos.y, toV.z - pos.z);
@@ -578,7 +578,7 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {
     pos.y +=
       weaponType === 'artillery'
         ? 1.4
-        : weaponType === 'tank' || weaponType === 'superHeavyTank'
+        : weaponType === 'tank' || weaponType === 'tankDestroyer' || weaponType === 'superHeavyTank'
           ? 1.25
           : weaponType === 'antiTankGun'
             ? 1.05

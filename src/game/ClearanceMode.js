@@ -41,17 +41,18 @@ const CLEARANCE_PROBE_TYPES = new Set([
   'sniper',
   'armoredCar',
   'tank',
+  'tankDestroyer',
   'superHeavyTank',
 ]);
 
-const ANTI_ARMOR = new Set(['tank', 'superHeavyTank', 'artillery', 'antiTankGun', 'paratrooper']);
+const ANTI_ARMOR = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'artillery', 'antiTankGun', 'paratrooper']);
 
 /** Tanks ignore rifle/MG fire; dedicated anti-armor weapons hurt. */
 export function getArmorDamageMultiplier(attackerType, target) {
   if (!target?.def) return 1;
   const t = target.def.type;
 
-  if (t === 'tank' || t === 'superHeavyTank') {
+  if (t === 'tank' || t === 'tankDestroyer' || t === 'superHeavyTank') {
     const isSuper = t === 'superHeavyTank';
     if (
       attackerType === 'infantry' ||
@@ -77,7 +78,7 @@ export function getArmorDamageMultiplier(attackerType, target) {
       return 0.32;
     if (attackerType === 'sniper') return 0;
     if (attackerType === 'mortar') return 1.05;
-    if (attackerType === 'tank' || attackerType === 'superHeavyTank' || attackerType === 'artillery') {
+    if (attackerType === 'tank' || attackerType === 'tankDestroyer' || attackerType === 'superHeavyTank' || attackerType === 'artillery') {
       return attackerType === 'superHeavyTank' ? 1.35 : 1.25;
     }
     return 1;

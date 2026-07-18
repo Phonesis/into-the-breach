@@ -257,6 +257,14 @@ export const WEAPON_SAMPLE_FILES = {
     'tank-122-russia-c.wav',
     'tank-122-russia-d.wav'],
 
+  td_88_germany: ['td-88-germany.wav'],
+  td_76_usa: ['td-76-usa.wav'],
+  td_17pdr_uk: ['td-17pdr-uk.wav'],
+  td_100_russia: ['td-100-russia.wav'],
+  td_mg_germany: ['td-mg-germany.wav'],
+  td_mg_usa: ['td-mg-usa.wav'],
+  td_mg_uk: ['td-mg-uk.wav'],
+
   at_75_germany: [
     'at-75-germany.wav',
     'at-75-germany-c.wav',
@@ -318,6 +326,13 @@ const PROFILE_FALLBACK = {
   mg_russia: 'mg',
   tank_76_russia: 'tank_75',
   tank_122_russia: 'tank_75',
+  td_88_germany: 'tank_88_germany',
+  td_76_usa: 'tank_75_usa',
+  td_17pdr_uk: 'tank_17pdr_uk',
+  td_100_russia: 'tank_122_russia',
+  td_mg_germany: 'mg_germany',
+  td_mg_usa: 'mg_usa',
+  td_mg_uk: 'mg_uk',
   at_76_russia: 'tank_75',
   mortar_russia: 'howitzer_105',
   howitzer_122_russia: 'howitzer_105',
@@ -431,6 +446,16 @@ export function resolveWeaponProfile(def, factionId = null) {
   if (def?.type === 'tank') {
     if (faction === 'russia' || def.weaponSound === 'tank_76_russia') return 'tank_76_russia';
     return `tank_75_${faction}`;
+  }
+  if (def?.type === 'tankDestroyer') {
+    if (def.weaponSound && WEAPON_SAMPLE_FILES[def.weaponSound]) return def.weaponSound;
+    return faction === 'germany'
+      ? 'td_88_germany'
+      : faction === 'usa'
+        ? 'td_76_usa'
+        : faction === 'uk'
+          ? 'td_17pdr_uk'
+          : 'td_100_russia';
   }
   if (def?.type === 'armoredCar') {
     return mgProfileForFaction(faction);

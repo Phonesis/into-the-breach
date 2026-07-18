@@ -41,7 +41,7 @@ export function buildTerrain(mapDef, scene, scenery = null) {
   geo.computeVertexNormals();
 
   const colorTex = createGroundTexture(mapDef);
-  const normalTex = createNormalMap();
+  const normalTex = createNormalMap(mapDef);
   const roughTex = createRoughnessMap(mapDef);
   const aoTex = createAOMap(mapDef);
 
@@ -50,12 +50,12 @@ export function buildTerrain(mapDef, scene, scenery = null) {
     normalMap: normalTex,
     roughnessMap: roughTex,
     aoMap: aoTex,
-    aoMapIntensity: 0.85,
-    normalScale: new THREE.Vector2(0.75, 0.75),
+    aoMapIntensity: 0.92,
+    normalScale: new THREE.Vector2(0.92, 0.92),
     vertexColors: true,
-    roughness: 0.82,
-    metalness: 0.04,
-    envMapIntensity: 0.65,
+    roughness: 0.9,
+    metalness: 0,
+    envMapIntensity: 0.48,
   });
   groundMat.aoMap.channel = 0;
 
@@ -104,39 +104,116 @@ function dune(x, z) {
   return Math.sin(x * 0.08 + z * 0.05) * 0.5 + Math.cos(x * 0.03) * 0.5;
 }
 
+function terrainDecorationPalette(terrain) {
+  if (terrain === 'desert') {
+    return { trunk: 0x58432d, leaf: 0x7d7448, leafDark: 0x5c5836, leafLight: 0x9a8a55, bush: 0x82764a, dry: 0x9a8354, rock: 0x7b6d58, earth: 0x8a704b };
+  }
+  if (terrain === 'steppe') {
+    return { trunk: 0x4b3829, leaf: 0x4d6533, leafDark: 0x344a29, leafLight: 0x71804a, bush: 0x637342, dry: 0x807344, rock: 0x69675a, earth: 0x66563b };
+  }
+  if (terrain === 'hills') {
+    return { trunk: 0x4b362a, leaf: 0x425c32, leafDark: 0x293f27, leafLight: 0x68764a, bush: 0x526c3a, dry: 0x756a40, rock: 0x737066, earth: 0x5c513b };
+  }
+  return { trunk: 0x4a3425, leaf: 0x315b2a, leafDark: 0x1f4120, leafLight: 0x52723a, bush: 0x3f6b32, dry: 0x6d653a, rock: 0x69675d, earth: 0x55462f };
+}
+
+/** Collapse detail pieces sharing a material so richer scenery does not multiply draw calls. */
+function mergeCompatibleGeometries(geometries) {
+  const expanded = geometries.map((geometry) => geometry.index ? geometry.toNonIndexed() : geometry.clone());
+  const merged = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const attrs = expanded.map((geometry) => geometry.getAttribute(name)).filter(Boolean);
+    if (attrs.length !== expanded.length) continue;
+    const itemSize = attrs[0].itemSize;
+    const length = attrs.reduce((sum, attr) => sum + attr.array.length, 0);
+    const array = new Float32Array(length);
+    let offset = 0;
+    for (const attr of attrs) {
+      array.set(attr.array, offset);
+      offset += attr.array.length;
+    }
+    merged.setAttribute(name, new THREE.Float32BufferAttribute(array, itemSize));
+  }
+  expanded.forEach((geometry) => geometry.dispose());
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+function consolidateGroupMeshes(group) {
+  const buckets = new Map();
+  for (const child of [...group.children]) {
+    if (!child.isMesh || Array.isArray(child.material)) continue;
+    child.updateMatrix();
+    const transformed = child.geometry.clone();
+    transformed.applyMatrix4(child.matrix);
+    const bucket = buckets.get(child.material) ?? { geometries: [], castShadow: false, receiveShadow: false };
+    bucket.geometries.push(transformed);
+    bucket.castShadow ||= child.castShadow;
+    bucket.receiveShadow ||= child.receiveShadow;
+    buckets.set(child.material, bucket);
+    group.remove(child);
+    child.geometry.dispose();
+  }
+  for (const [material, bucket] of buckets) {
+    const geometry = bucket.geometries.length === 1
+      ? bucket.geometries[0]
+      : mergeCompatibleGeometries(bucket.geometries);
+    if (bucket.geometries.length > 1) bucket.geometries.forEach((g) => g.dispose());
+    if (!geometry) continue;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = bucket.castShadow;
+    mesh.receiveShadow = bucket.receiveShadow;
+    group.add(mesh);
+  }
+  return group;
+}
+
 function addDecorations(mapDef, scene, size, seed, scenery) {
+  const palette = terrainDecorationPalette(mapDef.terrain);
   const trunkMat = new THREE.MeshStandardMaterial({
-    color: 0x4a3528,
-    roughness: 0.92,
+    color: palette.trunk,
+    roughness: 0.96,
     envMapIntensity: 0.45,
+    flatShading: true,
   });
   const leafMat = new THREE.MeshStandardMaterial({
-    color: 0x2d5a28,
-    roughness: 0.78,
-    emissive: 0x1a3018,
-    emissiveIntensity: 0.12,
-    envMapIntensity: 0.35,
+    color: palette.leaf,
+    roughness: 0.94,
+    envMapIntensity: 0.28,
+  });
+  const lightLeafMat = new THREE.MeshStandardMaterial({
+    color: palette.leafLight,
+    roughness: 0.92,
+    envMapIntensity: 0.3,
   });
   const rockMat = new THREE.MeshStandardMaterial({
-    color: 0x6a6558,
-    roughness: 0.75,
-    metalness: 0.12,
-    envMapIntensity: 0.5,
+    color: palette.rock,
+    roughness: 0.93,
+    metalness: 0,
+    envMapIntensity: 0.32,
+    flatShading: true,
   });
   const bushMat = new THREE.MeshStandardMaterial({
-    color: 0x3d6b32,
-    roughness: 0.88,
-    envMapIntensity: 0.4,
+    color: palette.bush,
+    roughness: 0.94,
+    envMapIntensity: 0.28,
   });
   const darkLeafMat = new THREE.MeshStandardMaterial({
-    color: mapDef.terrain === 'steppe' ? 0x485f2f : 0x23441f,
-    roughness: 0.84,
-    envMapIntensity: 0.34,
+    color: palette.leafDark,
+    roughness: 0.96,
+    envMapIntensity: 0.24,
   });
   const dryBushMat = new THREE.MeshStandardMaterial({
-    color: mapDef.terrain === 'desert' ? 0x8a744f : 0x5b6738,
-    roughness: 0.92,
-    envMapIntensity: 0.32,
+    color: palette.dry,
+    roughness: 0.97,
+    envMapIntensity: 0.2,
+  });
+  const earthMat = new THREE.MeshStandardMaterial({
+    color: palette.earth,
+    roughness: 1,
+    envMapIntensity: 0.18,
+    flatShading: true,
   });
 
   const decorScale = mapDef.sizeScale ?? 1;
@@ -159,7 +236,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       if (scenery) scenery.register(g, { x, z, kind: 'rock', source: 'map' });
       else scene.add(g);
     } else {
-      const g = createTreeGroup(trunkMat, leafMat, darkLeafMat, mapDef.terrain);
+      const g = createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, mapDef.terrain);
       g.position.set(x, y, z);
       g.rotation.y = mapRandom() * Math.PI * 2;
       if (scenery) scenery.register(g, { x, z, kind: 'tree', source: 'map' });
@@ -173,7 +250,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     const z = (mapRandom() - 0.5) * size * 0.78;
     if (Math.abs(x) < 12 && Math.abs(z) < 8) continue;
     const y = heightAt(x, z, mapDef, seed);
-    const g = createBushGroup(mapDef.terrain === 'desert' ? dryBushMat : bushMat, dryBushMat);
+    const g = createBushGroup(mapDef.terrain === 'desert' ? dryBushMat : bushMat, dryBushMat, trunkMat);
     g.position.set(x, y, z);
     g.rotation.y = mapRandom() * Math.PI * 2;
     if (scenery) scenery.register(g, { x, z, kind: 'bush', source: 'map' });
@@ -190,7 +267,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       const hx = (mapRandom() - 0.5) * size * 0.55;
       const hz = (mapRandom() - 0.5) * size * 0.55;
       const hy = heightAt(hx, hz, mapDef, seed);
-      const g = createHedgeGroup(hedgeMat, bushMat);
+      const g = createHedgeGroup(hedgeMat, bushMat, darkLeafMat, trunkMat, earthMat);
       g.position.set(hx, hy, hz);
       g.rotation.y = mapRandom() * Math.PI;
       if (scenery) scenery.register(g, { x: hx, z: hz, kind: 'hedge', source: 'map' });
@@ -198,52 +275,82 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     }
   }
 
+  addGroundCover(mapDef, scene, size, seed, palette);
   addFarmClusters(mapDef, scene, size, seed, scenery);
   addTerrainClutter(mapDef, scene, size, seed, scenery);
 }
 
-function createTreeGroup(trunkMat, leafMat, darkLeafMat, terrain) {
+function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, terrain) {
   const g = new THREE.Group();
-  const height = terrain === 'hills' ? 2.6 + mapRandom() * 1.3 : 2.1 + mapRandom() * 1.1;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.24, height, 9), trunkMat);
+  const isOlive = terrain === 'hills';
+  const height = isOlive ? 2.3 + mapRandom() * 1.05 : 2.8 + mapRandom() * 1.45;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.27, height, 10, 3), trunkMat);
   trunk.position.y = height * 0.5;
-  trunk.rotation.z = (mapRandom() - 0.5) * 0.12;
+  trunk.rotation.z = (mapRandom() - 0.5) * (isOlive ? 0.22 : 0.12);
   trunk.castShadow = true;
   trunk.receiveShadow = true;
   g.add(trunk);
 
-  const crownCount = terrain === 'steppe' ? 3 : 4;
+  for (let i = 0; i < 4; i++) {
+    const root = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.11, 0.62, 6), trunkMat);
+    const ang = (i / 4) * Math.PI * 2 + mapRandom() * 0.35;
+    root.position.set(Math.cos(ang) * 0.19, 0.16, Math.sin(ang) * 0.19);
+    root.rotation.order = 'YXZ';
+    root.rotation.set(Math.PI * 0.39, -ang, 0);
+    root.castShadow = true;
+    g.add(root);
+  }
+
+  const branchCount = isOlive ? 4 : 3;
+  for (let i = 0; i < branchCount; i++) {
+    const branchLength = height * (0.28 + mapRandom() * 0.12);
+    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.085, branchLength, 7), trunkMat);
+    const ang = (i / branchCount) * Math.PI * 2 + mapRandom() * 0.7;
+    branch.position.set(Math.cos(ang) * 0.18, height * (0.62 + i * 0.07), Math.sin(ang) * 0.18);
+    branch.rotation.order = 'YXZ';
+    branch.rotation.set(Math.PI * (0.28 + mapRandom() * 0.12), -ang, 0);
+    branch.castShadow = true;
+    g.add(branch);
+  }
+
+  const crownCount = terrain === 'steppe' ? 6 : isOlive ? 8 : 9;
   for (let i = 0; i < crownCount; i++) {
-    const crown = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.68 + mapRandom() * 0.35, 2),
-      i % 2 ? darkLeafMat : leafMat
+    const material = i % 5 === 0 ? lightLeafMat : i % 2 ? darkLeafMat : leafMat;
+    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.46 + mapRandom() * 0.34, 1), material);
+    const ang = (i / crownCount) * Math.PI * 2 + mapRandom() * 0.75;
+    const ring = (isOlive ? 0.78 : 0.58) * (0.45 + mapRandom() * 0.8);
+    crown.position.set(
+      Math.cos(ang) * ring,
+      height + (isOlive ? 0.08 : 0.28) + (mapRandom() - 0.35) * 0.72,
+      Math.sin(ang) * ring
     );
-    const side = i - (crownCount - 1) * 0.5;
-    crown.position.set(side * 0.24 + (mapRandom() - 0.5) * 0.25, height + 0.45 + i * 0.18, (mapRandom() - 0.5) * 0.32);
-    crown.scale.set(1.05 + mapRandom() * 0.25, 0.78 + mapRandom() * 0.2, 0.95 + mapRandom() * 0.35);
+    crown.scale.set(
+      (isOlive ? 1.35 : 1.05) + mapRandom() * 0.38,
+      0.68 + mapRandom() * 0.3,
+      (isOlive ? 1.25 : 1) + mapRandom() * 0.38
+    );
     crown.rotation.set(mapRandom() * 0.35, mapRandom() * Math.PI, mapRandom() * 0.25);
     crown.castShadow = true;
     crown.receiveShadow = true;
     g.add(crown);
   }
-
-  if (mapRandom() > 0.45) {
-    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.07, 1.05, 6), trunkMat);
-    branch.position.set(0.35, height * 0.72, 0);
-    branch.rotation.z = Math.PI * 0.42;
-    branch.rotation.y = mapRandom() * Math.PI;
-    branch.castShadow = true;
-    g.add(branch);
-  }
-  return g;
+  return consolidateGroupMeshes(g);
 }
 
-function createBushGroup(bushMat, accentMat) {
+function createBushGroup(bushMat, accentMat, twigMat) {
   const g = new THREE.Group();
-  const count = 3 + Math.floor(mapRandom() * 3);
+  const count = 5 + Math.floor(mapRandom() * 3);
+  for (let i = 0; i < 4; i++) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.03, 0.65 + mapRandom() * 0.25, 5), twigMat);
+    const ang = (i / 4) * Math.PI * 2 + mapRandom() * 0.4;
+    stem.position.set(Math.cos(ang) * 0.12, 0.3, Math.sin(ang) * 0.12);
+    stem.rotation.set((mapRandom() - 0.5) * 0.55, ang, (mapRandom() - 0.5) * 0.55);
+    stem.castShadow = true;
+    g.add(stem);
+  }
   for (let i = 0; i < count; i++) {
     const bush = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.42 + mapRandom() * 0.28, 1),
+      new THREE.IcosahedronGeometry(0.3 + mapRandom() * 0.25, 1),
       i === count - 1 && mapRandom() > 0.5 ? accentMat : bushMat
     );
     const ang = (i / count) * Math.PI * 2 + mapRandom() * 0.5;
@@ -255,7 +362,7 @@ function createBushGroup(bushMat, accentMat) {
     bush.receiveShadow = true;
     g.add(bush);
   }
-  return g;
+  return consolidateGroupMeshes(g);
 }
 
 function createRockCluster(rockMat, scale = 1) {
@@ -270,24 +377,172 @@ function createRockCluster(rockMat, scale = 1) {
     rock.receiveShadow = true;
     g.add(rock);
   }
-  return g;
+  return consolidateGroupMeshes(g);
 }
 
-function createHedgeGroup(hedgeMat, bushMat) {
+function createHedgeBankGeometry(length) {
+  const geo = new THREE.BoxGeometry(length * 0.96, 0.52, 1.05, 8, 2, 3);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const edgeFade = Math.max(0.2, 1 - Math.abs(x) / Math.max(0.1, length * 0.5));
+    const top = y > 0.2;
+    pos.setXYZ(
+      i,
+      x + (mapRandom() - 0.5) * 0.16,
+      y + (top ? mapRandom() * 0.16 * edgeFade : (mapRandom() - 0.5) * 0.035),
+      z + (mapRandom() - 0.5) * 0.18 * edgeFade
+    );
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createHedgeGroup(hedgeMat, bushMat, darkLeafMat, twigMat, earthMat) {
   const g = new THREE.Group();
   const len = 6 + mapRandom() * 5;
-  const lumps = 5 + Math.floor(mapRandom() * 4);
+  const bank = new THREE.Mesh(createHedgeBankGeometry(len), earthMat);
+  bank.position.y = 0.24;
+  bank.rotation.y = (mapRandom() - 0.5) * 0.025;
+  bank.rotation.z = (mapRandom() - 0.5) * 0.035;
+  bank.castShadow = true;
+  bank.receiveShadow = true;
+  g.add(bank);
+
+  const lumps = 9 + Math.floor(mapRandom() * 4);
   for (let i = 0; i < lumps; i++) {
-    const hedge = new THREE.Mesh(new THREE.IcosahedronGeometry(0.76 + mapRandom() * 0.25, 1), i % 3 === 0 ? bushMat : hedgeMat);
+    const hedge = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.5 + mapRandom() * 0.24, 1),
+      i % 5 === 0 ? darkLeafMat : i % 3 === 0 ? bushMat : hedgeMat
+    );
     const t = lumps <= 1 ? 0 : i / (lumps - 1);
-    hedge.position.set((t - 0.5) * len, 0.65 + mapRandom() * 0.18, (mapRandom() - 0.5) * 0.42);
-    hedge.scale.set(1.35 + mapRandom() * 0.35, 0.75 + mapRandom() * 0.22, 0.72 + mapRandom() * 0.22);
+    hedge.position.set((t - 0.5) * len, 0.72 + mapRandom() * 0.22, (mapRandom() - 0.5) * 0.58);
+    hedge.scale.set(1.15 + mapRandom() * 0.45, 0.72 + mapRandom() * 0.3, 0.75 + mapRandom() * 0.28);
     hedge.rotation.set(mapRandom() * 0.28, mapRandom() * Math.PI, mapRandom() * 0.18);
     hedge.castShadow = true;
     hedge.receiveShadow = true;
     g.add(hedge);
   }
-  return g;
+
+  for (let i = 0; i < Math.max(5, Math.floor(len * 0.8)); i++) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.035, 1.05 + mapRandom() * 0.4, 5), twigMat);
+    stem.position.set((mapRandom() - 0.5) * len * 0.92, 0.68, (mapRandom() - 0.5) * 0.5);
+    stem.rotation.z = (mapRandom() - 0.5) * 0.45;
+    stem.rotation.y = mapRandom() * Math.PI;
+    stem.castShadow = true;
+    g.add(stem);
+  }
+  return consolidateGroupMeshes(g);
+}
+
+function createGrassClumpGeometry() {
+  const vertices = [];
+  const bladeCount = 7;
+  for (let i = 0; i < bladeCount; i++) {
+    const ang = (i / bladeCount) * Math.PI * 2;
+    const radius = i === 0 ? 0 : 0.08 + (i % 3) * 0.025;
+    const cx = Math.cos(ang) * radius;
+    const cz = Math.sin(ang) * radius;
+    const width = 0.045 + (i % 2) * 0.018;
+    const height = 0.34 + (i % 4) * 0.09;
+    const dx = Math.cos(ang) * width;
+    const dz = Math.sin(ang) * width;
+    const bendX = Math.sin(ang) * 0.07;
+    const bendZ = Math.cos(ang) * 0.07;
+    vertices.push(
+      cx - dx, 0, cz - dz,
+      cx + dx, 0, cz + dz,
+      cx + bendX, height, cz + bendZ
+    );
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function addGroundCover(mapDef, scene, size, seed, palette) {
+  const terrain = mapDef.terrain;
+  const scale = mapDef.sizeScale ?? 1;
+  const grassBase = terrain === 'desert' ? 120 : terrain === 'bocage' ? 620 : terrain === 'steppe' ? 520 : 470;
+  const grassCount = Math.round(grassBase * scale * (scale > 1 ? 1.08 : 1));
+  const grassGeo = createGrassClumpGeometry();
+  const grassMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 1,
+    metalness: 0,
+    side: THREE.DoubleSide,
+    envMapIntensity: 0.15,
+    vertexColors: false,
+  });
+  const grass = new THREE.InstancedMesh(grassGeo, grassMat, grassCount);
+  grass.name = 'groundCoverGrass';
+  grass.castShadow = false;
+  grass.receiveShadow = true;
+  grass.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+
+  const greenA = new THREE.Color(terrain === 'desert' ? 0x8d7a48 : palette.bush);
+  const greenB = new THREE.Color(terrain === 'steppe' ? 0x9a874c : terrain === 'desert' ? 0xb0975e : palette.leafLight);
+  const dry = new THREE.Color(palette.dry);
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const rotation = new THREE.Euler();
+  const instanceScale = new THREE.Vector3();
+  const color = new THREE.Color();
+  let placed = 0;
+  for (let i = 0; i < grassCount * 1.3 && placed < grassCount; i++) {
+    const x = (mapRandom() - 0.5) * size * 0.94;
+    const z = (mapRandom() - 0.5) * size * 0.94;
+    if (isReservedMapSpace(x, z, mapDef, 4.5)) continue;
+    const y = heightAt(x, z, mapDef, seed) + 0.015;
+    rotation.set(0, mapRandom() * Math.PI * 2, (mapRandom() - 0.5) * 0.08);
+    quaternion.setFromEuler(rotation);
+    const clumpScale = terrain === 'desert' ? 0.65 + mapRandom() * 0.65 : 0.8 + mapRandom() * 1.05;
+    instanceScale.set(clumpScale * (0.7 + mapRandom() * 0.55), clumpScale, clumpScale * (0.7 + mapRandom() * 0.55));
+    position.set(x, y, z);
+    matrix.compose(position, quaternion, instanceScale);
+    grass.setMatrixAt(placed, matrix);
+    color.copy(mapRandom() > (terrain === 'desert' ? 0.28 : 0.78) ? dry : greenA).lerp(greenB, mapRandom() * 0.45);
+    grass.setColorAt(placed, color);
+    placed++;
+  }
+  grass.count = placed;
+  grass.instanceMatrix.needsUpdate = true;
+  if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+  grass.computeBoundingSphere();
+  scene.add(grass);
+
+  const stoneCount = Math.round((terrain === 'desert' ? 190 : 90) * scale);
+  const stoneGeo = new THREE.DodecahedronGeometry(0.13, 0);
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: palette.rock,
+    roughness: 0.96,
+    flatShading: true,
+    envMapIntensity: 0.2,
+  });
+  const stones = new THREE.InstancedMesh(stoneGeo, stoneMat, stoneCount);
+  stones.name = 'groundCoverStones';
+  stones.castShadow = false;
+  stones.receiveShadow = true;
+  stones.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  for (let i = 0; i < stoneCount; i++) {
+    const x = (mapRandom() - 0.5) * size * 0.94;
+    const z = (mapRandom() - 0.5) * size * 0.94;
+    const y = heightAt(x, z, mapDef, seed) + 0.07;
+    rotation.set(mapRandom() * Math.PI, mapRandom() * Math.PI, mapRandom() * Math.PI);
+    quaternion.setFromEuler(rotation);
+    const s = 0.65 + mapRandom() * (terrain === 'desert' ? 1.8 : 1.15);
+    instanceScale.set(s * (0.8 + mapRandom() * 0.8), s * (0.35 + mapRandom() * 0.5), s);
+    position.set(x, y, z);
+    matrix.compose(position, quaternion, instanceScale);
+    stones.setMatrixAt(i, matrix);
+  }
+  stones.instanceMatrix.needsUpdate = true;
+  stones.computeBoundingSphere();
+  scene.add(stones);
 }
 
 function addFarmClusters(mapDef, scene, size, seed, scenery) {
@@ -583,7 +838,7 @@ function terrainPoseRadius(type) {
 }
 
 function terrainClearance(type) {
-  if (type === 'tank' || type === 'superHeavyTank' || type === 'armoredCar') return 0.09;
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') return 0.09;
   if (type === 'artillery' || type === 'antiTankGun') return 0.065;
   return 0.025;
 }
@@ -614,7 +869,7 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
   const forwardSlope = (front - back) / (radius * 2);
   const rightSlope = (right - left) / (radius * 2);
 
-  const maxTilt = ['tank', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type)
+  const maxTilt = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type)
     ? 0.46
     : 0.32;
   const targetPitch = THREE.MathUtils.clamp(-Math.atan(forwardSlope), -maxTilt, maxTilt);
@@ -634,7 +889,7 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
     }
   }
 
-  const vehicleLike = ['tank', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type);
+  const vehicleLike = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type);
   const targetY =
     center + terrainClearance(unit.def?.type) + Math.min(convexLift, vehicleLike ? 0.24 : 0.1);
   const alpha = 1 - Math.exp(-Math.max(0, dt) * (unit.moveTarget ? 12 : 7));

@@ -62,7 +62,7 @@ function getSurrenderTexture() {
 
 function markerHeight(unit) {
   const t = unit.def?.type;
-  if (t === 'tank' || t === 'superHeavyTank') return 4.2;
+  if (t === 'tank' || t === 'tankDestroyer' || t === 'superHeavyTank') return 4.2;
   if (t === 'artillery' || t === 'antiTankGun') return 3.5;
   return 2.85;
 }
