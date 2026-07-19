@@ -52,7 +52,7 @@ import {
   peekMedicTentNextId,
   setMedicTentNextId,
 } from './MedicFieldHospital.js';
-import { createTrenchGroup } from '../world/TrenchMesh.js';
+import { alignTrenchGroupToTerrain, createTrenchGroup } from '../world/TrenchMesh.js';
 import { createFieldTentMesh } from '../visual/FieldTentMesh.js';
 import * as THREE from 'three';
 
@@ -251,6 +251,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       wreckTimeLeft: u.wreckTimeLeft ?? 0,
       recoverableWreck: !!u._recoverableWreck,
       wreckRepairProgress: u._wreckRepairProgress ?? 0,
+      mobilityDamaged: !!u._mobilityDamaged,
+      mobilityDamageKind: u._mobilityDamageKind ?? null,
+      mobilityRepairProgress: u._mobilityRepairProgress ?? 0,
       crewBailedOut: !!u._crewBailedOut,
       crewless: !!u._crewless,
       replacementCrewUnitId: u._replacementCrewUnitId ?? null,
@@ -885,19 +888,19 @@ function restoreTrenchState(game, data) {
         trenchData.team === 'player' ? game.playerFaction?.id : game.enemyFaction?.id,
       seed: trenchData.x * 0.19 + trenchData.z * 0.31,
     });
-    mesh.position.set(trenchData.x, trenchData.y, trenchData.z);
-    mesh.rotation.y = trenchData.rotationY ?? 0;
+    const rotationY = trenchData.rotationY ?? 0;
+    alignTrenchGroupToTerrain(mesh, trenchData.x, trenchData.z, rotationY, game.mapDef);
     game.scene.add(mesh);
     manager.trenches.push({
       id: trenchData.id,
       team: trenchData.team,
       x: trenchData.x,
       z: trenchData.z,
-      y: trenchData.y,
+      y: mesh.position.y,
       destroyed: false,
       garrison: [...(trenchData.garrison ?? [])],
       mesh,
-      rotationY: mesh.rotation.y,
+      rotationY,
     });
     game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
   }
@@ -1160,6 +1163,9 @@ export function applyBattleSave(game, snapshot) {
     unit._deathAt = uData.deathAt ?? null;
     unit._recoverableWreck = !!uData.recoverableWreck;
     unit._wreckRepairProgress = uData.wreckRepairProgress ?? 0;
+    unit._mobilityDamaged = !!uData.mobilityDamaged;
+    unit._mobilityDamageKind = uData.mobilityDamageKind ?? null;
+    unit._mobilityRepairProgress = uData.mobilityRepairProgress ?? 0;
     unit._crewBailedOut = !!uData.crewBailedOut;
     unit._crewless = !!uData.crewless;
     unit._replacementCrewUnitId = uData.replacementCrewUnitId ?? null;

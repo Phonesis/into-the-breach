@@ -1,5 +1,6 @@
 import { distanceBetween } from './Targeting.js';
 import { isVehicleUnit } from '../units/VehicleTypes.js';
+import { clearMobilityDamage } from './ArmorPenetration.js';
 
 /** Game meters — aura in which engineers repair vehicles and steady crews. */
 export const ENGINEER_AURA_RANGE = 16;
@@ -9,6 +10,9 @@ export const ENGINEER_HEAL_PER_SEC = 2.8;
 
 /** Time for one nearby engineer at point-blank range to restart a recoverable wreck. */
 export const RECOVERABLE_WRECK_REPAIR_SEC = 12;
+
+/** Time for one nearby engineer at point-blank range to repair running gear. */
+export const MOBILITY_REPAIR_SEC = 8.5;
 
 /** Game meters — engineers within this range of a damaged HQ can repair it. */
 export const ENGINEER_HQ_REPAIR_RANGE = ENGINEER_AURA_RANGE;
@@ -76,13 +80,24 @@ export function updateEngineerHealing(units, dt, coverSystem = null) {
         continue;
       }
       if (!isVehicleUnit(ally.def?.type)) continue;
-      if (ally.hp >= ally.maxHp) continue;
+      if (ally.hp >= ally.maxHp && !ally._mobilityDamaged) continue;
 
       const dist = distanceBetween(engineer, ally);
       if (dist > ENGINEER_AURA_RANGE) continue;
 
       const proximity = 1 - (dist / ENGINEER_AURA_RANGE) * 0.55;
-      ally.hp = Math.min(ally.maxHp, ally.hp + ENGINEER_HEAL_PER_SEC * proximity * dt);
+      if (ally._mobilityDamaged) {
+        ally._mobilityRepairProgress = Math.min(
+          1,
+          (ally._mobilityRepairProgress ?? 0) + (proximity * dt) / MOBILITY_REPAIR_SEC
+        );
+        if (ally._mobilityRepairProgress >= 1 && clearMobilityDamage(ally)) {
+          restoredVehicles += 1;
+        }
+      }
+      if (ally.hp < ally.maxHp) {
+        ally.hp = Math.min(ally.maxHp, ally.hp + ENGINEER_HEAL_PER_SEC * proximity * dt);
+      }
     }
   }
   return restoredVehicles;

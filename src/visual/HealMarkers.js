@@ -10,7 +10,7 @@ import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior
 import { getActiveMotorPools, isUnitNearMotorPool } from '../game/MotorPoolBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
 
-const _tex = { cross: null, spanner: null };
+const _tex = { cross: null, spanner: null, mobility: null };
 
 const MARKER_HEIGHT = {
   infantry: 2.55,
@@ -22,6 +22,7 @@ const MARKER_HEIGHT = {
   antiTankGun: 2.9,
   armoredCar: 3.3,
   tank: 4.1,
+  tankDestroyer: 4.1,
   superHeavyTank: 4.6,
   artillery: 3.7,
 };
@@ -103,6 +104,41 @@ function getSpannerTexture() {
   return _tex.spanner;
 }
 
+function getMobilityTexture() {
+  if (_tex.mobility) return _tex.mobility;
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(55, 25, 8, 0.94)';
+  ctx.beginPath();
+  ctx.arc(32, 32, 28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffad32';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ffe0a3';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(20, 36, 8, 0, Math.PI * 2);
+  ctx.arc(44, 36, 8, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(13, 25);
+  ctx.lineTo(26, 25);
+  ctx.moveTo(38, 25);
+  ctx.lineTo(51, 25);
+  ctx.moveTo(26, 19);
+  ctx.lineTo(38, 31);
+  ctx.moveTo(38, 19);
+  ctx.lineTo(26, 31);
+  ctx.stroke();
+  _tex.mobility = new THREE.CanvasTexture(canvas);
+  return _tex.mobility;
+}
+
 function canReceiveMedicHeal(ally) {
   if (!ally || ally.dead || ally.hp >= ally.maxHp) return false;
   if (!isFootSoldier(ally.def?.type)) return false;
@@ -111,8 +147,8 @@ function canReceiveMedicHeal(ally) {
 }
 
 function canReceiveEngineerHeal(ally) {
-  if (!ally || ally.dead || ally.hp >= ally.maxHp) return false;
-  return isVehicleUnit(ally.def?.type);
+  if (!ally || ally.dead || !isVehicleUnit(ally.def?.type)) return false;
+  return ally.hp < ally.maxHp || ally._mobilityDamaged;
 }
 
 function engineerIsWorking(unit, units, hqs) {
@@ -159,6 +195,8 @@ function getHealKind(unit, units, baseBuildings, hqs = null, depotCache = null) 
     return 'engineer';
   }
 
+  if (unit._mobilityDamaged) return 'mobility';
+
   for (const medic of units) {
     if (medic.dead || medic.team !== unit.team || medic.def?.type !== 'medic') continue;
     if (!canReceiveMedicHeal(unit)) continue;
@@ -182,8 +220,12 @@ function getHealKind(unit, units, baseBuildings, hqs = null, depotCache = null) 
 
 function attachHealMarker(unit, kind) {
   if (!unit.mesh) return;
-  const map = kind === 'medic' ? getCrossTexture() : getSpannerTexture();
-  const baseScale = kind === 'medic' ? 1.85 : 1.9;
+  const map = kind === 'medic'
+    ? getCrossTexture()
+    : kind === 'mobility'
+      ? getMobilityTexture()
+      : getSpannerTexture();
+  const baseScale = kind === 'medic' ? 1.85 : kind === 'mobility' ? 2.05 : 1.9;
 
   if (!unit.healMarker) {
     const mat = new THREE.SpriteMaterial({

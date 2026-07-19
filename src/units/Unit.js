@@ -79,6 +79,9 @@ export class Unit {
     this.healMarkerKind = null;
     this.damageSmoke = null;
     this.defensiveHold = null;
+    this._mobilityDamaged = false;
+    this._mobilityDamageKind = null;
+    this._mobilityRepairProgress = 0;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
     this.mesh.position.set(position.x, 0, position.z);
@@ -199,6 +202,12 @@ export class Unit {
    */
   moveTo(x, z, mapDef = null, playerOrder = false) {
     if (this.surrendered || this._captureExit) return;
+    if (this._mobilityDamaged) {
+      this.moveTarget = null;
+      this._movePath = null;
+      this._userMoveOrder = false;
+      return;
+    }
     clearRetreat(this);
     this.clearAttackOrder();
     this._userMoveOrder = playerOrder;
@@ -350,6 +359,9 @@ export class Unit {
     this._rearHitKill = false;
     this._vehicleKillFxDone = false;
     this._wreckRepairProgress = 0;
+    this._mobilityDamaged = false;
+    this._mobilityDamageKind = null;
+    this._mobilityRepairProgress = 0;
     this._deathCause = null;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;

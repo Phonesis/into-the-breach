@@ -138,11 +138,10 @@ export function updateVehicleCookOffs(game, dt) {
     c.done = true;
 
     if (scene) {
-      if (c.tier === 'heavy') {
-        spawnShellExplosion(scene, c, 'heavy');
-      } else {
-        spawnShellExplosion(scene, c, 'medium');
-      }
+      // The primary knockout already used the full heavy effect. Secondary
+      // ammunition bursts retain the flash/smoke silhouette without allocating
+      // another 15–20 meshes and materials for every cooked-off shell.
+      spawnShellExplosionLite(scene, c, c.tier);
       spawnSmokePuff(scene, c, 0.7 + Math.random() * 0.35);
       // Occasional flash debris for variety
       if (Math.random() < 0.4) spawnExplosion(scene, c);

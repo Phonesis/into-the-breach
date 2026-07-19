@@ -45,10 +45,22 @@ export function faceUnitTowardTarget(unit, target, dt) {
     return;
   }
 
+  // A fixed-casemate vehicle cannot pivot its hull after losing a track.
+  if (unit._mobilityDamaged) return;
+
   // Towed guns / foot teams: hull faces travel direction while repositioning.
   if (unit.moveTarget) return;
 
   slewHullYaw(unit.mesh, worldYaw, dt, TURRET_SLEW_RATE);
+}
+
+export function canWeaponBearOnTarget(unit, target, maxFixedArc = 0.3) {
+  if (!unit?._mobilityDamaged || hasTurretPivot(unit.mesh)) return true;
+  const tx = target.position?.x ?? target.mesh?.position?.x;
+  const tz = target.position?.z ?? target.mesh?.position?.z;
+  if (!Number.isFinite(tx) || !Number.isFinite(tz)) return false;
+  const worldYaw = Math.atan2(tx - unit.position.x, tz - unit.position.z);
+  return Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <= maxFixedArc;
 }
 
 export function faceUnitTowardMovement(unit, nx, nz, dt) {

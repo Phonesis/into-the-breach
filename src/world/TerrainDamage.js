@@ -429,7 +429,8 @@ function disposeCrater(entry) {
   for (const mesh of entry.meshes ?? []) {
     entry.scene?.remove(mesh);
     mesh.geometry?.dispose();
-    mesh.material?.map?.dispose();
+    // Crater textures are shared by cached terrain/style variants. They are
+    // disposed once in clearTerrainDamage, not when an individual decal ages out.
     mesh.material?.dispose();
   }
 }

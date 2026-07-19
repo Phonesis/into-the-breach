@@ -3616,6 +3616,9 @@ export class UIManager {
           : canHostRiders(u.def?.type) && u.def?.type !== 'armoredCar'
             ? '<p class="unit-support-status">RMB with infantry selected to mount riders on this tank.</p>'
             : '';
+      const mobilityBlock = u._mobilityDamaged
+        ? `<p class="unit-support-status unit-mobility-status"><strong>${u._mobilityDamageKind === 'wheel' ? 'WHEEL DAMAGE' : 'BROKEN TRACK'} — IMMOBILE</strong> — keep a combat engineer within ~16 m to repair the running gear (${Math.round((u._mobilityRepairProgress ?? 0) * 100)}%). The weapon remains operational.</p>`
+        : '';
       body.innerHTML = `
         <h3>${u.name}${
           garrisoned
@@ -3623,10 +3626,11 @@ export class UIManager {
             : cover.inCover
               ? ' <span class="cover-tag">COVER</span>'
               : ''
-        }${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}</h3>
+        }${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
         ${surrenderBlock}
+        ${mobilityBlock}
         ${riderBlock}
         ${coverBlock}
       `;

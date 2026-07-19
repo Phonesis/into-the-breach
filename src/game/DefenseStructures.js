@@ -20,12 +20,13 @@ import {
   getResupplyCost,
   pickBarrageAmmoPit,
 } from '../data/towerDefense.js';
-import { spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
+import { spawnArmorRicochet, spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
 import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
+import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 
 const ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
@@ -521,7 +522,25 @@ export class DefenseStructureManager {
     const falloff = Math.max(0.65, 1 - (bestD / def.range) * 0.28);
     damage *= falloff * (0.88 + Math.random() * 0.22);
 
-    target.takeDamage(damage, { impactFrom: { x: entry.x, z: entry.z } });
+    const armorHit = isArmor && def.antiArmor
+      ? resolveArmorHit(
+          {
+            def: {
+              type: def.weaponType === 'superHeavyTank' ? 'superHeavyTank' : 'antiTankGun',
+              name: def.name,
+            },
+            position: { x: entry.x, z: entry.z },
+          },
+          target,
+          { distance: bestD, weaponRange: def.range }
+        )
+      : null;
+    if (armorHit) {
+      damage *= armorHit.damageMultiplier;
+      if (armorHit.mobilityDamaged) applyMobilityDamage(target, armorHit.mobilityDamageKind);
+    }
+
+    target.takeDamage(damage, { impactFrom: { x: entry.x, z: entry.z }, armorHit });
     entry.attackCooldown = 1 / def.attackSpeed;
 
     if (entry.maxAmmo) {
@@ -551,6 +570,7 @@ export class DefenseStructureManager {
         spawnShellExplosion(scene, to, 'medium');
       } else {
         spawnMuzzleFlash(scene, from, to, wType);
+        if (armorHit?.deflected) spawnArmorRicochet(scene, to, from);
       }
     }
 
@@ -576,6 +596,9 @@ export class DefenseStructureManager {
           minGapMs: shotGapMs,
         }
       );
+      if (armorHit) {
+        sounds.playImpact(armorHit.deflected ? 'bullet' : 'tank_round', target.position, 0.08 + bestD / 180);
+      }
     }
   }
 

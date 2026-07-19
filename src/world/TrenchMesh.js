@@ -1,5 +1,49 @@
 import * as THREE from 'three';
 import { createCamoMaterial, getInfantryUniformTexture, getVehicleCamoTexture } from '../units/UnitTextures.js';
+import { sampleTerrainHeight } from './Terrain.js';
+
+const MAX_TRENCH_TILT = 0.52;
+
+/** Seat a rigid trench into the best-fit local terrain plane. */
+export function alignTrenchGroupToTerrain(group, x, z, yaw, mapDef) {
+  if (!group) return;
+  const length = group.userData.trenchLength ?? 4.2;
+  const width = group.userData.trenchWidth ?? 2.4;
+  const center = mapDef ? sampleTerrainHeight(x, z, mapDef) : 0;
+  const forwardRadius = Math.max(0.65, width * 0.42);
+  const rightRadius = Math.max(1.1, length * 0.43);
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const front = mapDef
+    ? sampleTerrainHeight(x + forwardX * forwardRadius, z + forwardZ * forwardRadius, mapDef)
+    : center;
+  const back = mapDef
+    ? sampleTerrainHeight(x - forwardX * forwardRadius, z - forwardZ * forwardRadius, mapDef)
+    : center;
+  const right = mapDef
+    ? sampleTerrainHeight(x + rightX * rightRadius, z + rightZ * rightRadius, mapDef)
+    : center;
+  const left = mapDef
+    ? sampleTerrainHeight(x - rightX * rightRadius, z - rightZ * rightRadius, mapDef)
+    : center;
+  const pitch = THREE.MathUtils.clamp(
+    -Math.atan((front - back) / (forwardRadius * 2)),
+    -MAX_TRENCH_TILT,
+    MAX_TRENCH_TILT
+  );
+  const roll = THREE.MathUtils.clamp(
+    Math.atan((right - left) / (rightRadius * 2)),
+    -MAX_TRENCH_TILT,
+    MAX_TRENCH_TILT
+  );
+
+  group.position.set(x, center, z);
+  group.rotation.set(pitch, yaw, roll);
+  group.userData.terrainPitch = pitch;
+  group.userData.terrainRoll = roll;
+}
 
 /**
  * Simple dug fighting trench — berms + pit floor for infantry cover.
@@ -7,6 +51,8 @@ import { createCamoMaterial, getInfantryUniformTexture, getVehicleCamoTexture } 
 export function createTrenchGroup({ factionId = null, seed = 0, length = 4.2, width = 2.4 } = {}) {
   const g = new THREE.Group();
   g.name = 'infantryTrench';
+  g.userData.trenchLength = length;
+  g.userData.trenchWidth = width;
 
   const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
   const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;

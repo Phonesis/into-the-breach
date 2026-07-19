@@ -43,7 +43,8 @@ import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { isUnitMounted } from './TankRiders.js';
-import { faceUnitTowardTarget } from '../units/VehicleRotation.js';
+import { canWeaponBearOnTarget, faceUnitTowardTarget } from '../units/VehicleRotation.js';
+import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 import {
   getInfantryMuzzleWorldPosition,
   aimDeployedMachineGun,
@@ -268,7 +269,8 @@ export function updateCombat(
         : isInRange(attacker, target);
     const canFireMain =
       inMainGunRange &&
-      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget);
+      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget) &&
+      canWeaponBearOnTarget(attacker, target);
     if (
       canFireMain &&
       (attacker.def.type === 'infantry' ||
@@ -583,6 +585,22 @@ function fire(
     damage *= getStructureDamageMultiplier(attackerType);
   }
 
+  const armorHit =
+    !isGroundShot && !isSceneryTarget(target) && !isDefenseTarget(target) && !isBaseBuildingTarget(target)
+      ? resolveArmorHit(attacker, target, {
+          distance: dist,
+          weaponRange,
+          coax,
+          paratrooperAt,
+        })
+      : null;
+  if (armorHit) {
+    damage *= armorHit.damageMultiplier;
+    if (armorHit.mobilityDamaged) {
+      applyMobilityDamage(target, armorHit.mobilityDamageKind);
+    }
+  }
+
   if (isSmokeShellTarget(target)) {
     attacker.smokeShellCooldown = SMOKE_SHELL_COOLDOWN_SEC;
     options.smokeScreens?.deploy?.(impact.x, impact.z, attacker.team);
@@ -650,6 +668,7 @@ function fire(
       target.takeDamage(appliedDamage, {
         explosive: explosiveKill,
         impactFrom: attacker.position,
+        armorHit,
       });
       if (appliedDamage > 0 && !target.dead && !target.surrendered) {
         if (!maybeTriggerSurrender(target, livingUnits, options, attacker) && hqs) {
@@ -718,6 +737,7 @@ function fire(
       targetIsScenery:
         isSceneryTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target),
       groundImpact: target.isGround,
+      armorHit,
       from: attacker.position,
       to: impact,
     });
@@ -787,6 +807,14 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
     if (isUnitMounted(unit)) continue;
+    if (unit._mobilityDamaged) {
+      unit.moveTarget = null;
+      unit._movePath = null;
+      unit._userMoveOrder = false;
+      unit._chasingAttack = false;
+      updateUnitTerrainPose(unit, mapDef, dt);
+      continue;
+    }
 
     if (unit.retreating) {
       // Clear Defenses: no player HQ — rally to starting/staging zone instead

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { createTrenchGroup } from '../world/TrenchMesh.js';
+import { alignTrenchGroupToTerrain, createTrenchGroup } from '../world/TrenchMesh.js';
 import { isUnitMounted } from './TankRiders.js';
 import { isUnitGarrisoned } from './BunkerGarrison.js';
 import { isTdHqDefenseStyle } from '../data/towerDefense.js';
@@ -322,8 +322,8 @@ export class InfantryTrenchManager {
       factionId,
       seed: site.x * 0.19 + site.z * 0.31,
     });
-    mesh.position.set(site.x, site.y, site.z);
-    mesh.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
+    const rotationY = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
+    alignTrenchGroupToTerrain(mesh, site.x, site.z, rotationY, this.game.mapDef);
     this.game.scene.add(mesh);
 
     const trench = {
@@ -331,11 +331,11 @@ export class InfantryTrenchManager {
       team: site.team,
       x: site.x,
       z: site.z,
-      y: site.y,
+      y: mesh.position.y,
       destroyed: false,
       garrison: [],
       mesh,
-      rotationY: mesh.rotation.y,
+      rotationY,
     };
     this.trenches.push(trench);
     this.game.coverSystem?.addZone(site.x, site.z, 'trench', TRENCH_COVER_RADIUS);
@@ -460,6 +460,24 @@ export function releaseFromTrench(unit, manager) {
   unit._trenchSlot = null;
   unit._diggingTrench = false;
   applyTrenchVisual(unit, false);
+  if (trench) positionTrenchOccupants(trench, manager);
+}
+
+function positionTrenchOccupants(trench, manager) {
+  if (!trench?.garrison?.length || !manager?.game?.units) return;
+  const count = trench.garrison.length;
+  const yaw = trench.rotationY ?? trench.mesh?.rotation?.y ?? 0;
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  for (let slot = 0; slot < count; slot++) {
+    const unit = manager.game.units.find((candidate) => candidate.id === trench.garrison[slot]);
+    if (!unit || unit.dead) continue;
+    const spread = (slot - (count - 1) * 0.5) * 0.85;
+    unit._trenchSlot = slot;
+    unit.position.x = trench.x + rightX * spread;
+    unit.position.z = trench.z + rightZ * spread;
+    applyTrenchVisual(unit, true);
+  }
 }
 
 export function tryEnterTrench(unit, trench, manager) {
@@ -485,14 +503,7 @@ export function tryEnterTrench(unit, trench, manager) {
   unit._movePath = null;
   unit._userMoveOrder = false;
   unit.retreating = false;
-
-  // Slot along the trench
-  const slot = unit._trenchSlot ?? 0;
-  const spread = (slot - (trench.garrison.length - 1) * 0.5) * 0.85;
-  unit.position.x = trench.x + Math.cos(trench.mesh?.rotation?.y ?? 0) * spread * 0.15;
-  unit.position.z = trench.z + spread * 0.35;
-
-  applyTrenchVisual(unit, true);
+  positionTrenchOccupants(trench, manager);
   return true;
 }
 
@@ -556,11 +567,13 @@ export function applyTrenchVisual(unit, inTrench) {
   unit.mesh.userData.trenchSink = targetY;
   unit._inTrenchVisual = !!inTrench;
 
-  // Immediate sink so it reads instantly
-  if (unit.mesh.userData._baseMeshY == null) {
-    unit.mesh.userData._baseMeshY = 0;
-  }
-  unit.mesh.position.y = unit.mesh.userData._baseMeshY + targetY;
+  // Ground contact must be based on this slot, not world zero or only the
+  // trench centre. This also fixes occupants restored from older saves.
+  const pose = getTrenchOccupantTerrainPose(unit);
+  unit.mesh.userData._baseMeshY = pose.y;
+  unit.mesh.position.y = pose.y + targetY;
+  unit.mesh.rotation.x = pose.pitch;
+  unit.mesh.rotation.z = pose.roll;
 
   unit.mesh.traverse((child) => {
     if (child.name !== 'squadMember') return;
@@ -579,6 +592,30 @@ export function applyTrenchVisual(unit, inTrench) {
   });
 }
 
+function getTrenchOccupantTerrainPose(unit) {
+  const mapDef = unit?._mapDef;
+  const x = unit?.position?.x ?? 0;
+  const z = unit?.position?.z ?? 0;
+  const yaw = unit?.mesh?.rotation?.y ?? 0;
+  const y = mapDef ? sampleTerrainHeight(x, z, mapDef) : unit?.position?.y ?? 0;
+  if (!mapDef) return { y, pitch: 0, roll: 0 };
+
+  const radius = 0.82;
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const front = sampleTerrainHeight(x + forwardX * radius, z + forwardZ * radius, mapDef);
+  const back = sampleTerrainHeight(x - forwardX * radius, z - forwardZ * radius, mapDef);
+  const right = sampleTerrainHeight(x + rightX * radius, z + rightZ * radius, mapDef);
+  const left = sampleTerrainHeight(x - rightX * radius, z - rightZ * radius, mapDef);
+  return {
+    y,
+    pitch: THREE.MathUtils.clamp(-Math.atan((front - back) / (radius * 2)), -0.46, 0.46),
+    roll: THREE.MathUtils.clamp(Math.atan((right - left) / (radius * 2)), -0.46, 0.46),
+  };
+}
+
 /** Soft blend trench sink each frame (call from combat/visual update). */
 export function updateTrenchVisuals(unit, dt) {
   if (!unit?.mesh) return;
@@ -591,7 +628,21 @@ export function updateTrenchVisuals(unit, dt) {
     });
   }
   const sink = unit.mesh.userData.trenchSink ?? 0;
-  const base = unit.mesh.userData._baseMeshY ?? 0;
+  const pose = getTrenchOccupantTerrainPose(unit);
+  const base = pose.y;
+  unit.mesh.userData._baseMeshY = base;
+  if (unit._trenchId || unit._diggingTrench) {
+    unit.mesh.rotation.x = THREE.MathUtils.lerp(
+      unit.mesh.rotation.x,
+      pose.pitch,
+      Math.min(1, dt * 8)
+    );
+    unit.mesh.rotation.z = THREE.MathUtils.lerp(
+      unit.mesh.rotation.z,
+      pose.roll,
+      Math.min(1, dt * 8)
+    );
+  }
   const cur = unit.mesh.position.y - base;
   if (Math.abs(cur - sink) > 0.01) {
     unit.mesh.position.y = base + THREE.MathUtils.lerp(cur, sink, Math.min(1, dt * 8));

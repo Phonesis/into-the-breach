@@ -177,6 +177,7 @@ import { applySceneEnvironment } from '../world/EnvironmentMap.js';
 
 import {
   spawnExplosion,
+  spawnArmorRicochet,
   spawnShellExplosion,
   spawnSmokePuff,
   updateCombatEffects,
@@ -2886,6 +2887,7 @@ export class Game {
     coaxFire,
     paratrooperAtFire,
     handGrenade,
+    armorHit,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
     const pos = { x: from.x, z: from.z };
@@ -2951,7 +2953,7 @@ export class Game {
       const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
       sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
     } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
-      sounds.playImpact('tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
+      sounds.playImpact(armorHit?.deflected ? 'bullet' : 'tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
         sounds.playInfantryDeath(
@@ -2967,6 +2969,27 @@ export class Game {
     const targetIsArmored =
       killed && target?.def && isArmoredCombatVehicle(target.def.type);
     const targetKilledByExplosion = target?._deathCause === 'explosion';
+
+    if (armorHit?.deflected && !killed) {
+      const ricochetY = this.mapDef
+        ? sampleTerrainHeight(to.x, to.z, this.mapDef) + 1.1
+        : (to.y ?? 0) + 1.1;
+      spawnArmorRicochet(this.scene, { x: to.x, y: ricochetY, z: to.z }, from);
+    }
+    if (armorHit && (attacker?.team === 'player' || target?.team === 'player')) {
+      const now = performance.now();
+      const important = armorHit.weakSpot || (!killed && (armorHit.mobilityDamaged || armorHit.deflected));
+      if (important && now - (this._lastArmorHitToastAt ?? 0) > 700) {
+        this._lastArmorHitToastAt = now;
+        const vehicleName = target?.name ?? 'Vehicle';
+        const message = armorHit.weakSpot
+          ? `${vehicleName}: weak spot hit — ${armorHit.weakSpot}`
+          : armorHit.mobilityDamaged
+            ? `${vehicleName}: ${armorHit.mobilityDamageKind === 'wheel' ? 'wheel damaged' : 'track broken'} — engineer required`
+            : `${vehicleName}: shell deflected by ${armorHit.aspect} armor`;
+        this.ui?.showSaveToast?.(message);
+      }
+    }
 
     if (
       (killed && targetKilledByExplosion) ||
