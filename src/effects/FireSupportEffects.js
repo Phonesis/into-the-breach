@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
-import { spawnShellExplosionLite } from './CombatEffects.js';
+import { spawnArtilleryExplosion, spawnShellExplosionLite } from './CombatEffects.js';
 
 const active = [];
 const MAX_ACTIVE_WARNINGS = 2;
@@ -111,7 +111,7 @@ export function spawnStrikeImpact(scene, mapDef, x, z, kind = 'barrage', terrain
     return;
   }
 
-  spawnShellExplosionLite(scene, pos, 'heavy');
+  spawnArtilleryExplosion(scene, pos, kind);
   addExplosionCrater(scene, mapDef, x, z, 'medium', terrainMesh, {
     deformTerrain: false,
     heavy: false,

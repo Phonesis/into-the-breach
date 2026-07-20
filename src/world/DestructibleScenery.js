@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { spawnExplosion } from '../effects/CombatEffects.js';
+import {
+  spawnCollapseDust,
+  spawnExplosion,
+  spawnSmokePuff,
+} from '../effects/CombatEffects.js';
 import { addExplosionCrater } from './TerrainDamage.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 
@@ -58,6 +62,9 @@ const KIND_COVER = {
 const BUILDING_KINDS = new Set(['farmHouse', 'barn', 'outbuilding']);
 const GARRISON_BUILDING_KINDS = new Set(['farmHouse', 'barn', 'outbuilding']);
 const CRUSHABLE_KINDS = new Set([
+  'tree',
+  'hedge',
+  'bush',
   'farmHouse',
   'barn',
   'outbuilding',
@@ -65,6 +72,19 @@ const CRUSHABLE_KINDS = new Set([
   'haystack',
   'fieldFence',
   'cart',
+  'stump',
+]);
+
+/** Wheeled scout cars flatten light scenery, but only tracked armor levels full buildings. */
+const LIGHT_VEHICLE_CRUSHABLE_KINDS = new Set([
+  'tree',
+  'hedge',
+  'bush',
+  'outbuilding',
+  'haystack',
+  'fieldFence',
+  'cart',
+  'stump',
 ]);
 
 const GARRISON_CAPACITY = {
@@ -91,6 +111,8 @@ export class DestructibleScenery {
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.objects = [];
     this.rubble = [];
+    this.crushAnimations = [];
+    this.buildingCollapseAnimations = [];
     this.coverSystem = null;
     this._mapObjectIndex = 0;
   }
@@ -219,13 +241,23 @@ export class DestructibleScenery {
     if (obj.hp <= 0) this.destroyObject(obj);
   }
 
-  crushAt(x, z, crushRadius = 1.8) {
+  crushAt(x, z, crushRadius = 1.8, options = {}) {
+    const lightVehicle = options.vehicleClass === 'light';
+    let crushedCount = 0;
     for (const obj of this.objects) {
       if (obj.destroyed || !CRUSHABLE_KINDS.has(obj.kind)) continue;
+      if (lightVehicle && !LIGHT_VEHICLE_CRUSHABLE_KINDS.has(obj.kind)) continue;
       const threshold = Math.max(crushRadius + obj.radius * 0.45, obj.radius * 0.72);
       if (Math.hypot(obj.x - x, obj.z - z) > threshold) continue;
-      this.destroyObject(obj);
+      this.destroyObject(obj, {
+        effects: false,
+        crushed: true,
+        directionX: options.directionX,
+        directionZ: options.directionZ,
+      });
+      crushedCount++;
     }
+    return crushedCount;
   }
 
   _updateDamageVisual(obj) {
@@ -253,7 +285,10 @@ export class DestructibleScenery {
     obj.group.scale.set(s, s * (0.88 + ratio * 0.12), s);
   }
 
-  destroyObject(obj, { effects = true } = {}) {
+  destroyObject(
+    obj,
+    { effects = true, crushed = false, directionX = 0, directionZ = 0 } = {}
+  ) {
     if (obj.destroyed) return;
     obj.destroyed = true;
     const y = obj.group.position.y + 0.5;
@@ -271,7 +306,16 @@ export class DestructibleScenery {
     if (obj._attackTarget) obj._attackTarget.dead = true;
 
     if (BUILDING_KINDS.has(obj.kind)) {
+      if (crushed) {
+        this._beginBuildingCollapse(obj, directionX, directionZ);
+        return;
+      }
       this._spawnBuildingRubble(obj);
+    }
+
+    if (crushed && !BUILDING_KINDS.has(obj.kind)) {
+      this._leaveCrushedProp(obj, directionX, directionZ);
+      return;
     }
 
     this.scene.remove(obj.group);
@@ -284,24 +328,299 @@ export class DestructibleScenery {
     });
   }
 
-  _spawnBuildingRubble(obj) {
+  /** Leave flattened vegetation / props behind so a vehicle impact reads as weight, not deletion. */
+  _leaveCrushedProp(obj, directionX = 0, directionZ = 0) {
+    const group = obj.group;
+    let dx = Number.isFinite(directionX) ? directionX : 0;
+    let dz = Number.isFinite(directionZ) ? directionZ : 0;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.001) {
+      dx /= len;
+      dz /= len;
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      dx = Math.cos(angle);
+      dz = Math.sin(angle);
+    }
+
+    if (obj.kind === 'tree') {
+      const fallAxis = new THREE.Vector3(dz, 0, -dx).normalize();
+      this.crushAnimations.push({
+        group,
+        fallAxis,
+        startQuaternion: group.quaternion.clone(),
+        rotation: new THREE.Quaternion(),
+        targetAngle: Math.PI * (0.475 + Math.random() * 0.015),
+        duration: 1.05 + Math.random() * 0.28,
+        elapsed: 0,
+        startY: group.position.y,
+        impactDust: false,
+      });
+    } else {
+      const flatten = obj.kind === 'hedge' || obj.kind === 'fieldFence' ? 0.2 : 0.3;
+      group.scale.y *= flatten;
+      group.rotation.x += dz * 0.24;
+      group.rotation.z -= dx * 0.24;
+      group.position.y += 0.03;
+    }
+
+    group.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = obj.kind === 'tree';
+      child.receiveShadow = true;
+    });
+    this.rubble.push(group);
+  }
+
+  /** Animate crushed trees from the base with a gravity-led fall and a small impact settle. */
+  update(dt) {
+    if (
+      (!this.crushAnimations.length && !this.buildingCollapseAnimations.length) ||
+      !Number.isFinite(dt) ||
+      dt <= 0
+    ) return;
+    const step = Math.min(dt, 0.05);
+
+    for (let i = this.crushAnimations.length - 1; i >= 0; i--) {
+      const anim = this.crushAnimations[i];
+      if (!anim.group?.parent) {
+        this.crushAnimations.splice(i, 1);
+        continue;
+      }
+
+      anim.elapsed += step;
+      const t = THREE.MathUtils.clamp(anim.elapsed / anim.duration, 0, 1);
+      let angle;
+      if (t < 0.82) {
+        const falling = t / 0.82;
+        angle = anim.targetAngle * falling * falling;
+      } else {
+        const settling = (t - 0.82) / 0.18;
+        angle =
+          anim.targetAngle +
+          Math.sin(settling * Math.PI) * (1 - settling) * 0.065;
+        if (!anim.impactDust) {
+          anim.impactDust = true;
+          const { x, z } = anim.group.position;
+          spawnSmokePuff(this.scene, { x, y: anim.startY + 0.2, z }, 0.95);
+          spawnSmokePuff(
+            this.scene,
+            {
+              x: x + anim.fallAxis.z * 0.7,
+              y: anim.startY + 0.15,
+              z: z - anim.fallAxis.x * 0.7,
+            },
+            0.62
+          );
+        }
+      }
+
+      anim.rotation.setFromAxisAngle(anim.fallAxis, angle);
+      anim.group.quaternion.copy(anim.rotation).multiply(anim.startQuaternion);
+      anim.group.position.y =
+        anim.startY + (t >= 0.82 ? Math.sin(((t - 0.82) / 0.18) * Math.PI) * 0.035 : 0);
+
+      if (t >= 1) {
+        anim.group.position.y = anim.startY;
+        this.crushAnimations.splice(i, 1);
+      }
+    }
+
+    for (let i = this.buildingCollapseAnimations.length - 1; i >= 0; i--) {
+      const anim = this.buildingCollapseAnimations[i];
+      anim.elapsed += step;
+      const t = THREE.MathUtils.clamp(anim.elapsed / anim.duration, 0, 1);
+      const buckleT = THREE.MathUtils.clamp(t / 0.68, 0, 1);
+      const buckle = buckleT * buckleT * (3 - 2 * buckleT);
+
+      if (anim.group?.parent) {
+        anim.group.scale.set(
+          anim.startScale.x * (1 + buckle * 0.035),
+          anim.startScale.y * (1 - buckle * 0.87),
+          anim.startScale.z * (1 + buckle * 0.025)
+        );
+        anim.group.rotation.x = anim.startRotation.x + anim.localDz * buckle * 0.16;
+        anim.group.rotation.z = anim.startRotation.z - anim.localDx * buckle * 0.16;
+        anim.group.position.x = anim.startPosition.x + anim.dx * buckle * 0.34;
+        anim.group.position.z = anim.startPosition.z + anim.dz * buckle * 0.34;
+
+        for (const piece of anim.breakawayPieces) {
+          const peel = Math.max(0, (buckleT - piece.delay) / (1 - piece.delay));
+          const eased = peel * peel;
+          piece.mesh.position.copy(piece.startPosition);
+          piece.mesh.position.x += anim.localDx * eased * piece.travel;
+          piece.mesh.position.z += anim.localDz * eased * piece.travel;
+          piece.mesh.position.y -= eased * piece.drop;
+          piece.mesh.rotation.x = piece.startRotation.x + anim.localDz * eased * piece.spin;
+          piece.mesh.rotation.z = piece.startRotation.z - anim.localDx * eased * piece.spin;
+        }
+      }
+
+      if (t >= 0.5 && !anim.rubbleRevealed) {
+        anim.rubbleRevealed = true;
+        anim.rubble.visible = true;
+        this._spawnCollapseDust(anim, 1.2);
+      }
+
+      if (anim.rubbleRevealed) {
+        const debrisT = THREE.MathUtils.clamp((t - 0.5) / 0.5, 0, 1);
+        const settle = 1 - Math.pow(1 - debrisT, 3);
+        for (const debris of anim.debris) {
+          debris.mesh.position.lerpVectors(debris.startPosition, debris.finalPosition, settle);
+          debris.mesh.position.y += Math.sin(debrisT * Math.PI) * debris.arc;
+          debris.mesh.quaternion.slerpQuaternions(
+            debris.startQuaternion,
+            debris.finalQuaternion,
+            settle
+          );
+        }
+      }
+
+      if (t >= 0.7 && !anim.shellRemoved) {
+        anim.shellRemoved = true;
+        this._removeAndDisposeGroup(anim.group);
+      }
+
+      if (t >= 1) {
+        for (const debris of anim.debris) {
+          debris.mesh.position.copy(debris.finalPosition);
+          debris.mesh.quaternion.copy(debris.finalQuaternion);
+        }
+        this.buildingCollapseAnimations.splice(i, 1);
+      }
+    }
+  }
+
+  _beginBuildingCollapse(obj, directionX = 0, directionZ = 0) {
+    let dx = Number.isFinite(directionX) ? directionX : 0;
+    let dz = Number.isFinite(directionZ) ? directionZ : 0;
+    const directionLength = Math.hypot(dx, dz);
+    if (directionLength > 0.001) {
+      dx /= directionLength;
+      dz /= directionLength;
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      dx = Math.cos(angle);
+      dz = Math.sin(angle);
+    }
+
+    const group = obj.group;
+    const yaw = group.rotation.y;
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const localDx = cos * dx + sin * dz;
+    const localDz = -sin * dx + cos * dz;
+    const rubble = this._spawnBuildingRubble(obj, { visible: false, crushed: true });
+    const debris = [];
+    const radius = obj.radius ?? 3;
+
+    for (const mesh of rubble.children) {
+      if (!mesh.isMesh || mesh.userData.rubbleBase) continue;
+      const finalPosition = mesh.position.clone();
+      const finalQuaternion = mesh.quaternion.clone();
+      const startPosition = new THREE.Vector3(
+        (Math.random() - 0.5) * radius * 0.45 - localDx * 0.3,
+        1.1 + Math.random() * (obj.kind === 'barn' ? 2.4 : 1.8),
+        (Math.random() - 0.5) * radius * 0.45 - localDz * 0.3
+      );
+      const startQuaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(
+          Math.random() * Math.PI,
+          Math.random() * Math.PI,
+          Math.random() * Math.PI
+        )
+      );
+      mesh.position.copy(startPosition);
+      mesh.quaternion.copy(startQuaternion);
+      debris.push({
+        mesh,
+        startPosition,
+        finalPosition,
+        startQuaternion,
+        finalQuaternion,
+        arc: 0.35 + Math.random() * 0.75,
+      });
+    }
+
+    const breakawayPieces = [];
+    for (const mesh of group.children) {
+      if (!mesh.isMesh) continue;
+      const highPiece =
+        mesh.name === 'buildingRoof' ||
+        mesh.name === 'buildingChimney' ||
+        mesh.position.y > (obj.kind === 'outbuilding' ? 1.65 : 2.2);
+      if (!highPiece) continue;
+      breakawayPieces.push({
+        mesh,
+        startPosition: mesh.position.clone(),
+        startRotation: mesh.rotation.clone(),
+        delay: 0.05 + Math.random() * 0.16,
+        travel: 0.55 + Math.random() * 0.75,
+        drop: 0.55 + Math.random() * 0.65,
+        spin: 0.35 + Math.random() * 0.42,
+      });
+    }
+
+    const anim = {
+      obj,
+      group,
+      rubble,
+      debris,
+      breakawayPieces,
+      dx,
+      dz,
+      localDx,
+      localDz,
+      startPosition: group.position.clone(),
+      startRotation: group.rotation.clone(),
+      startScale: group.scale.clone(),
+      duration: obj.kind === 'barn' ? 1.18 : 0.98,
+      elapsed: 0,
+      rubbleRevealed: false,
+      shellRemoved: false,
+    };
+    this.buildingCollapseAnimations.push(anim);
+    this._spawnCollapseDust(anim, 0.72);
+  }
+
+  _spawnCollapseDust(anim, scale = 1) {
+    const { x, y, z } = anim.startPosition;
+    spawnCollapseDust(
+      this.scene,
+      { x, y: y + 0.04, z },
+      (anim.obj.radius ?? 3) * 0.72 * scale,
+      { x: anim.dx, z: anim.dz }
+    );
+  }
+
+  _removeAndDisposeGroup(group) {
+    if (!group) return;
+    if (group.parent) this.scene.remove(group);
+    group.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose());
+      else child.material?.dispose?.();
+    });
+  }
+
+  _spawnBuildingRubble(obj, { visible = true, crushed = false } = {}) {
     const rubble = new THREE.Group();
     rubble.position.copy(obj.group.position);
     rubble.rotation.y = obj.group.rotation.y;
 
     const stoneMat = new THREE.MeshStandardMaterial({
-      color: 0x4a453d,
+      color: crushed ? 0x716858 : 0x4a453d,
       roughness: 0.94,
       metalness: 0.04,
       envMapIntensity: 0.28,
     });
     const timberMat = new THREE.MeshStandardMaterial({
-      color: 0x2f241c,
+      color: crushed ? 0x493428 : 0x2f241c,
       roughness: 0.9,
       envMapIntensity: 0.22,
     });
     const scorchMat = new THREE.MeshStandardMaterial({
-      color: 0x17120f,
+      color: crushed ? 0x564e40 : 0x17120f,
       roughness: 0.98,
       envMapIntensity: 0.12,
     });
@@ -312,6 +631,7 @@ export class DestructibleScenery {
     base.scale.z = 0.72;
     base.castShadow = false;
     base.receiveShadow = true;
+    base.userData.rubbleBase = true;
     rubble.add(base);
 
     const chunks = obj.kind === 'barn' ? 12 : 9;
@@ -331,7 +651,9 @@ export class DestructibleScenery {
     }
 
     this.scene.add(rubble);
+    rubble.visible = visible;
     this.rubble.push(rubble);
+    return rubble;
   }
 
   clear() {
@@ -354,7 +676,12 @@ export class DestructibleScenery {
         }
       });
     }
+    for (const anim of this.buildingCollapseAnimations) {
+      if (!anim.shellRemoved) this._removeAndDisposeGroup(anim.group);
+    }
     this.objects = [];
     this.rubble = [];
+    this.crushAnimations = [];
+    this.buildingCollapseAnimations = [];
   }
 }

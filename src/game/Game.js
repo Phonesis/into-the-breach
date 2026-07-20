@@ -96,6 +96,13 @@ const INFANTRY_DEBRIS_TYPES = new Set([
   'engineer',
   'vehicleCrew',
 ]);
+const DESTROYED_GUN_BLAST_TYPES = new Set(['artillery', 'antiTankGun']);
+
+function shellCraterTier(def) {
+  if (def?.type === 'artillery' || (def?.caliber ?? 0) >= 105) return 'heavy';
+  if ((def?.caliber ?? 999) <= 64) return 'light';
+  return 'medium';
+}
 
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import {
@@ -160,6 +167,7 @@ import {
   removeWreckEffect,
 } from '../effects/WreckEffects.js';
 import {
+  scheduleGunAmmoCookOff,
   triggerVehicleKillFx,
   updateVehicleCookOffs,
   clearVehicleCookOffs,
@@ -177,9 +185,9 @@ import { applySceneEnvironment } from '../world/EnvironmentMap.js';
 
 import {
   spawnExplosion,
+  spawnArtilleryExplosion,
   spawnArmorRicochet,
   spawnShellExplosion,
-  spawnSmokePuff,
   updateCombatEffects,
   clearCombatEffects,
 } from '../effects/CombatEffects.js';
@@ -1728,7 +1736,12 @@ export class Game {
 
   _spawnExplosionCrater(x, z, tier = 'medium') {
     if (!this.scene || !this.mapDef) return;
-    addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh);
+    // Keep combat craters as decals. Recomputing the entire terrain mesh's
+    // normals immediately after a blast caused an intermittent frame-length
+    // stall and also reintroduced the raised/deformed crater appearance.
+    addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh, {
+      deformTerrain: false,
+    });
   }
 
   stopGame() {
@@ -2882,6 +2895,7 @@ export class Game {
     targetIsHQ,
     targetIsScenery,
     groundImpact,
+    smokeDeployed,
     from,
     to,
     coaxFire,
@@ -2968,7 +2982,19 @@ export class Game {
 
     const targetIsArmored =
       killed && target?.def && isArmoredCombatVehicle(target.def.type);
+    const targetIsDestroyedGun =
+      killed && target?.def && DESTROYED_GUN_BLAST_TYPES.has(target.def.type);
     const targetKilledByExplosion = target?._deathCause === 'explosion';
+    const destroyedGunByShell = targetIsDestroyedGun && targetKilledByExplosion;
+    const directShellHitOnInfantry =
+      !groundImpact &&
+      target?.def &&
+      isInfantryUnitType(target.def.type) &&
+      (def.type === 'artillery' ||
+        def.type === 'mortar' ||
+        def.type === 'antiTankGun' ||
+        isTankType(def.type) ||
+        (def.type === 'paratrooper' && paratrooperAtFire));
 
     if (armorHit?.deflected && !killed) {
       const ricochetY = this.mapDef
@@ -2992,24 +3018,32 @@ export class Game {
     }
 
     if (
-      (killed && targetKilledByExplosion) ||
-      targetIsArmored ||
-      targetIsScenery ||
-      def.type === 'mortar' ||
-      (groundImpact &&
-        (def.type === 'artillery' ||
-          def.type === 'mortar' ||
-          def.type === 'antiTankGun' ||
-          isTankType(def.type)))
+      !smokeDeployed &&
+      ((killed && targetKilledByExplosion) ||
+        directShellHitOnInfantry ||
+        targetIsArmored ||
+        destroyedGunByShell ||
+        targetIsScenery ||
+        def.type === 'mortar' ||
+        (groundImpact &&
+          (def.type === 'artillery' ||
+            def.type === 'mortar' ||
+            def.type === 'antiTankGun' ||
+            isTankType(def.type))))
     ) {
       if (targetIsArmored) {
         triggerVehicleKillFx(this, target, to);
+      } else if (destroyedGunByShell) {
+        const destroyedGunTier = target.def.type === 'artillery' ? 'heavy' : 'medium';
+        spawnShellExplosion(this.scene, to, destroyedGunTier);
+        this._spawnExplosionCrater(to.x, to.z, destroyedGunTier);
+        scheduleGunAmmoCookOff(this, target, to);
       } else if (def.type === 'artillery') {
-        spawnShellExplosion(this.scene, to, 'heavy');
+        spawnArtilleryExplosion(this.scene, to, 'artillery', def.caliber);
         this._spawnExplosionCrater(to.x, to.z, 'heavy');
       } else if (def.type === 'mortar' || def.type === 'antiTankGun' || isTankType(def.type)) {
-        spawnShellExplosion(this.scene, to, 'medium');
-        this._spawnExplosionCrater(to.x, to.z, def.type === 'mortar' ? 'medium' : 'medium');
+        spawnShellExplosion(this.scene, to, 'medium', def.caliber);
+        this._spawnExplosionCrater(to.x, to.z, shellCraterTier(def));
       } else {
         spawnExplosion(this.scene, to);
         this._spawnExplosionCrater(to.x, to.z, groundImpact ? 'medium' : 'light');
@@ -3055,6 +3089,14 @@ export class Game {
         this._renderFrame();
         return;
       }
+      // Let the final kill finish visually behind the results panel. Delayed
+      // tank magazines and field-gun ammunition would otherwise freeze as soon
+      // as the last unit triggered game over.
+      updateWreckEffects(dt, this.camera);
+      updateVehicleCookOffs(this, dt);
+      updateHqBurnEffects(dt, this.camera, this.hqs);
+      updateCombatEffects(dt);
+      updateDetachedCorpseFalls(dt);
       this._postMatchRenderAccum += dt;
       if (this._postMatchRenderAccum < 0.05) return;
       this._postMatchRenderAccum = 0;
@@ -3187,6 +3229,7 @@ export class Game {
           scenery: this.scenery,
           clearance: this.clearance,
         });
+        this.scenery?.update(dt);
         if (
           getGarrisonBunkerSources(this).length > 0 ||
           this._aliveUnits.some((u) => u._garrisonBunkerId || u._bunkerEntryId)
@@ -3289,6 +3332,7 @@ export class Game {
                 !this.tutorial &&
                 !this.towerDefense &&
                 !this.lastStand &&
+                !this.clearance &&
                 this.matchTime < BATTLE_OPENING_TIME,
               enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,

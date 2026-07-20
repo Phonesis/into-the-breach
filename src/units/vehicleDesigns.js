@@ -47,6 +47,7 @@ export function getVehicleDesign(factionId, unitType) {
 const DESIGNS = {
   germany: {
     tank: {
+      model: 'panzer4',
       hull: { w: 2.38, h: 0.72, d: 3.58, y: 0.58, z: 0.04 },
       glacis: { w: 2.12, h: 0.58, d: 1.15, y: 0.74, z: 1.58, tilt: -0.44 },
       track: { spread: 1.24, height: 0.52, length: 3.35, wheels: 8, skirt: true, fender: true, links: 14 },
@@ -83,6 +84,7 @@ const DESIGNS = {
       hitRadius: 2.55,
     },
     superHeavyTank: {
+      model: 'tiger1',
       hull: { w: 2.92, h: 0.86, d: 4.55, y: 0.7, z: 0.08 },
       glacis: { w: 2.48, h: 0.65, d: 1.42, y: 0.92, z: 1.98, tilt: -0.36 },
       track: { spread: 1.28, height: 0.56, length: 4.15, wheels: 9, skirt: true, fender: true, links: 15 },
@@ -104,6 +106,7 @@ const DESIGNS = {
       hitRadius: 2.78,
     },
     armoredCar: {
+      model: 'sdkfz222',
       hull: { w: 1.88, h: 0.52, d: 3.45, y: 0.54 },
       nose: { w: 1.6, h: 0.42, d: 0.85, y: 0.55, z: 1.45, tilt: -0.25 },
       rear: { w: 1.5, h: 0.55, d: 0.9, y: 0.58, z: -1.35 },
@@ -141,6 +144,7 @@ const DESIGNS = {
   },
   usa: {
     tank: {
+      model: 'sherman',
       hull: { w: 2.32, h: 0.68, d: 3.28, y: 0.56, z: 0 },
       glacis: { w: 2.08, h: 0.52, d: 1.38, y: 0.7, z: 1.38, tilt: -0.5 },
       track: { spread: 1.2, height: 0.5, length: 3.32, wheels: 6, wheelR: 0.18, skirt: false, rollers: true, fender: true, links: 13 },
@@ -172,6 +176,7 @@ const DESIGNS = {
       hitRadius: 2.36,
     },
     superHeavyTank: {
+      model: 'pershing',
       hull: { w: 2.78, h: 0.75, d: 4.15, y: 0.64, z: 0.05 },
       glacis: { w: 2.38, h: 0.58, d: 1.48, y: 0.8, z: 1.78, tilt: -0.44 },
       track: { spread: 1.26, height: 0.54, length: 4.08, wheels: 8, skirt: false, fender: true, links: 15 },
@@ -190,6 +195,7 @@ const DESIGNS = {
       hitRadius: 2.72,
     },
     armoredCar: {
+      model: 'm8',
       hull: { w: 2.08, h: 0.5, d: 3.52, y: 0.52 },
       nose: { w: 1.7, h: 0.38, d: 1.0, y: 0.58, z: 1.25, tilt: -0.38 },
       wheels: [
@@ -201,7 +207,7 @@ const DESIGNS = {
         [1.02, 0.34, 1.15],
       ],
       wheelR: 0.34,
-      turret: { style: 'cylinder', w: 0.66, h: 0.34, d: 0.66, y: 0.94, z: -0.12 },
+      turret: { style: 'openRound', w: 0.66, h: 0.34, d: 0.66, y: 0.94, z: -0.12 },
       barrel: { len: 0.95, r0: 0.06, r1: 0.07, y: 1.04, z: 0.48, offsetX: 0.3 },
       secondaryGun: { len: 0.75, y: 1.02, z: 0.45, style: 'box' },
       hitRadius: 2.32,
@@ -228,6 +234,7 @@ const DESIGNS = {
   },
   uk: {
     tank: {
+      model: 'churchill4',
       hull: { w: 2.55, h: 0.88, d: 4.28, y: 0.64, z: 0.22 },
       glacis: { w: 2.22, h: 0.58, d: 0.95, y: 0.58, z: 2.38, tilt: -0.12 },
       track: { spread: 1.34, height: 0.78, length: 4.38, wheels: 10, skirt: false, fender: true, links: 16 },
@@ -261,6 +268,7 @@ const DESIGNS = {
       hitRadius: 2.4,
     },
     superHeavyTank: {
+      model: 'blackPrince',
       hull: { w: 2.88, h: 0.98, d: 4.72, y: 0.74, z: 0.28 },
       track: { spread: 1.46, height: 0.84, length: 4.78, wheels: 10, skirt: false, fender: true, links: 17 },
       turret: { style: 'forward', w: 1.58, h: 0.6, d: 1.48, y: 1.4, z: 0.88 },
@@ -280,6 +288,7 @@ const DESIGNS = {
       hitRadius: 2.82,
     },
     armoredCar: {
+      model: 'daimler',
       hull: { w: 1.98, h: 0.54, d: 3.28, y: 0.56 },
       nose: { w: 1.5, h: 0.45, d: 0.75, y: 0.58, z: 1.2, tilt: -0.2 },
       wheels: [
@@ -316,6 +325,7 @@ const DESIGNS = {
   },
   russia: {
     tank: {
+      model: 't3485',
       hull: { w: 2.28, h: 0.66, d: 3.42, y: 0.54, z: 0.02 },
       glacis: { w: 2.18, h: 0.62, d: 1.62, y: 0.68, z: 1.42, tilt: -0.58 },
       track: { spread: 1.22, height: 0.5, length: 3.38, wheels: 5, wheelR: 0.2, skirt: false, fender: true, links: 13 },
@@ -346,10 +356,11 @@ const DESIGNS = {
       hitRadius: 2.38,
     },
     superHeavyTank: {
+      model: 'is2',
       hull: { w: 2.72, h: 0.78, d: 4.35, y: 0.66, z: 0.06 },
       glacis: { w: 2.32, h: 0.58, d: 1.52, y: 0.82, z: 1.88, tilt: -0.48 },
       track: { spread: 1.28, height: 0.56, length: 4.22, wheels: 6, wheelR: 0.22, skirt: false, fender: true, links: 15 },
-      turret: { style: 'box', w: 1.72, h: 0.62, d: 1.58, y: 1.32, z: -0.1, bustle: false },
+      turret: { style: 'cylinder', w: 1.72, h: 0.62, d: 1.58, y: 1.32, z: -0.1, bustle: false, radiusTopScale: 0.5, radiusBottomScale: 0.58, segments: 12 },
       barrel: { len: 3.28, r0: 0.12, r1: 0.14, y: 1.32, z: 2.12, mantlet: true },
       coax: { len: 0.46, y: 1.28, z: 0.38 },
       cupola: { x: -0.2, r: 0.16, h: 0.18, z: -0.42 },
@@ -367,6 +378,7 @@ const DESIGNS = {
       hitRadius: 2.75,
     },
     armoredCar: {
+      model: 'ba64',
       hull: { w: 1.72, h: 0.46, d: 2.85, y: 0.5 },
       nose: { w: 1.42, h: 0.36, d: 0.72, y: 0.52, z: 1.05, tilt: -0.28 },
       wheels: [
@@ -376,7 +388,7 @@ const DESIGNS = {
         [0.82, 0.32, -0.85],
       ],
       wheelR: 0.32,
-      turret: { style: 'cylinder', w: 0.58, h: 0.32, d: 0.58, y: 0.88, z: -0.05 },
+      turret: { style: 'openFaceted', w: 0.58, h: 0.32, d: 0.58, y: 0.88, z: -0.05 },
       barrel: { len: 0.82, r0: 0.05, r1: 0.06, y: 0.92, z: 0.42 },
       hitRadius: 1.95,
     },

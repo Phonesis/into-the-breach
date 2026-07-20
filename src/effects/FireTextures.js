@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 let flameTexture = null;
 let smokeTexture = null;
+let earthSprayTexture = null;
 let emberTexture = null;
 
 function makeCanvas(w, h, draw) {
@@ -91,6 +92,39 @@ export function getSmokeTexture() {
     ctx.fillRect(0, 0, w, h);
   });
   return smokeTexture;
+}
+
+/** Irregular vertical mask for soil thrown up by a buried HE shell. */
+export function getEarthSprayTexture() {
+  if (earthSprayTexture) return earthSprayTexture;
+  earthSprayTexture = makeCanvas(128, 192, (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.save();
+    ctx.filter = 'blur(6px)';
+    const lobes = [
+      { base: 0.45, tip: 0.32, top: 0.08, width: 0.3 },
+      { base: 0.52, tip: 0.54, top: 0.02, width: 0.34 },
+      { base: 0.58, tip: 0.73, top: 0.18, width: 0.29 },
+    ];
+    for (let lobeIndex = 0; lobeIndex < lobes.length; lobeIndex++) {
+      const lobe = lobes[lobeIndex];
+      for (let i = 0; i < 9; i++) {
+        const t = i / 8;
+        const x = THREE.MathUtils.lerp(lobe.base, lobe.tip, t) * w +
+          Math.sin(i * 2.1 + lobeIndex) * w * 0.025;
+        const y = THREE.MathUtils.lerp(0.9, lobe.top, t) * h;
+        const spread = Math.sin(t * Math.PI);
+        const radiusX = w * (0.045 + lobe.width * spread * 0.58);
+        const radiusY = h * (0.027 + spread * 0.064);
+        ctx.fillStyle = `rgba(245, 236, 220, ${0.16 + (1 - t) * 0.16})`;
+        ctx.beginPath();
+        ctx.ellipse(x, y, radiusX, radiusY, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  });
+  return earthSprayTexture;
 }
 
 let damageSmokeTexture = null;

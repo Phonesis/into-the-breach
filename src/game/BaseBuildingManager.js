@@ -17,7 +17,7 @@ import {
 } from '../visual/BaseBuildingConstruction.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
-import { spawnExplosion, spawnShellExplosion, spawnSmokePuff } from '../effects/CombatEffects.js';
+import { spawnShellExplosion } from '../effects/CombatEffects.js';
 import { isTeamStagingPhase } from './OpeningDeployZone.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 
@@ -401,9 +401,6 @@ export class BaseBuildingManager {
 
     // Heavier collapse FX than a small infantry puff
     spawnShellExplosion(this.game.scene, pos, entry.typeId === 'bunker' ? 'medium' : 'heavy');
-    spawnSmokePuff(this.game.scene, pos, 1.1);
-    spawnSmokePuff(this.game.scene, { x: pos.x + 0.8, y: pos.y, z: pos.z - 0.4 }, 0.75);
-    spawnExplosion(this.game.scene, pos);
 
     if (this.game.mapDef) {
       addExplosionCrater(

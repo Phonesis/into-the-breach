@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
 import {
   spawnHandGrenade,
-  spawnSmokePuff,
+  spawnSmokeShellImpact,
   triggerParatrooperAtRecoil,
 } from '../effects/CombatEffects.js';
 import {
@@ -43,7 +43,13 @@ import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { isUnitMounted } from './TankRiders.js';
-import { canWeaponBearOnTarget, faceUnitTowardTarget } from '../units/VehicleRotation.js';
+import {
+  canIndependentMgBearOnTarget,
+  canWeaponBearOnTarget,
+  faceIndependentMgTowardTarget,
+  faceUnitTowardTarget,
+  hasIndependentMgPivot,
+} from '../units/VehicleRotation.js';
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 import {
   getInfantryMuzzleWorldPosition,
@@ -54,7 +60,9 @@ import {
   usesInfantryMuzzleOrigin,
 } from '../units/InfantryVisuals.js';
 import {
+  getIndependentVehicleMgMuzzleWorldPosition,
   getVehicleCannonMuzzleWorldPosition,
+  usesIndependentVehicleMgMuzzleOrigin,
   usesVehicleCannonMuzzleOrigin,
 } from '../units/VehicleMeshKit.js';
 
@@ -67,6 +75,12 @@ const SMALL_ARMS_TYPES = new Set([
   'armoredCar',
   'paratrooper',
   'vehicleCrew',
+]);
+const CRUSHING_VEHICLE_TYPES = new Set([
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
+  'armoredCar',
 ]);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
@@ -267,28 +281,27 @@ export function updateCombat(
       : structureTarget
         ? isInRange(attacker, target, 1.05)
         : isInRange(attacker, target);
-    const canFireMain =
+    const mainGunCanAim =
       inMainGunRange &&
-      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget) &&
-      canWeaponBearOnTarget(attacker, target);
-    if (
-      canFireMain &&
-      (attacker.def.type === 'infantry' ||
-        attacker.def.type === 'engineer' ||
-        attacker.def.type === 'vehicleCrew' ||
-        attacker.def.type === 'paratrooper' ||
-        attacker.def.type === 'sniper')
-    ) {
-      markInfantryFireAim(attacker, 0.28);
-    }
-    const canFireCoax =
+      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget);
+    const coaxInRange =
       !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
-    const coaxHandlesSoft =
-      canFireCoax && isCoaxSoftTarget(target) && attacker.def.coaxMG;
+    const independentMg = coaxInRange && hasIndependentMgPivot(attacker.mesh);
+    const independentMgSoftTarget =
+      independentMg && isCoaxSoftTarget(target) && !!attacker.def.coaxMG;
 
-    if (!canFireMain && !canFireCoax) continue;
+    if ((mainGunCanAim && !independentMgSoftTarget) || (coaxInRange && !independentMg)) {
+      faceUnitTowardTarget(attacker, target, dt);
+      aimDeployedMachineGun(attacker, target);
+      aimDeployedMortar(attacker, target);
+    }
+    if (independentMg) {
+      faceIndependentMgTowardTarget(attacker, target, dt);
+    }
 
-    if (!attacker._userMoveOrder) {
+    // Reaching weapon range stops an attack advance even while the turret is
+    // still traversing; otherwise a slow turret can make the hull overshoot.
+    if (!attacker._userMoveOrder && (mainGunCanAim || coaxInRange)) {
       if (attacker.moveTarget && attacker.attackOrder && !target.isGround) {
         const standoff = getStandoffPosition(attacker, target);
         const reach = getMoveReachConfig(attacker.def.type);
@@ -300,9 +313,26 @@ export function updateCombat(
       }
     }
 
-    faceUnitTowardTarget(attacker, target, dt);
-    aimDeployedMachineGun(attacker, target);
-    aimDeployedMortar(attacker, target);
+    const weaponOnBearing = canWeaponBearOnTarget(attacker, target);
+    const canFireMain = mainGunCanAim && weaponOnBearing;
+    if (
+      canFireMain &&
+      (attacker.def.type === 'infantry' ||
+        attacker.def.type === 'engineer' ||
+        attacker.def.type === 'vehicleCrew' ||
+        attacker.def.type === 'paratrooper' ||
+        attacker.def.type === 'sniper')
+    ) {
+      markInfantryFireAim(attacker, 0.28);
+    }
+    const mgOnBearing = independentMg
+      ? canIndependentMgBearOnTarget(attacker, target)
+      : weaponOnBearing;
+    const canFireCoax = coaxInRange && mgOnBearing;
+    const coaxHandlesSoft =
+      coaxInRange && isCoaxSoftTarget(target) && attacker.def.coaxMG;
+
+    if (!canFireMain && !canFireCoax) continue;
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
       fire(
@@ -425,6 +455,10 @@ const _muzzleFrom = new THREE.Vector3();
 function resolveMuzzleFrom(attacker, map, vfxType, coax) {
   if (usesInfantryMuzzleOrigin(attacker)) {
     getInfantryMuzzleWorldPosition(attacker, vfxType, _muzzleFrom);
+    return { from: _muzzleFrom, exactOrigin: true };
+  }
+  if (usesIndependentVehicleMgMuzzleOrigin(attacker, coax)) {
+    getIndependentVehicleMgMuzzleWorldPosition(attacker, _muzzleFrom);
     return { from: _muzzleFrom, exactOrigin: true };
   }
   // Main gun flash from the cannon tip (follows turret/barrel aim)
@@ -612,17 +646,7 @@ function fire(
       const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
       const to = { x: impact.x, y: toY, z: impact.z };
       spawnMuzzleFlash(scene, from, to, 'artillery', { exactOrigin });
-      for (let i = 0; i < 8; i++) {
-        spawnSmokePuff(
-          scene,
-          {
-            x: impact.x + (Math.random() - 0.5) * 14,
-            y: toY + 0.8 + Math.random() * 2,
-            z: impact.z + (Math.random() - 0.5) * 14,
-          },
-          3.5 + Math.random() * 2.5
-        );
-      }
+      spawnSmokeShellImpact(scene, { x: impact.x, y: toY - 0.88, z: impact.z }, 1.15);
     }
     if (onFire) {
       onFire({
@@ -902,12 +926,29 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         if (options.getWireSlowMult && unit.team === 'enemy') {
           moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
         }
+        const beforeX = unit.position.x;
+        const beforeZ = unit.position.z;
         advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
-        if (options.scenery && isTankType(unit.def?.type)) {
+        const directionX = unit.position.x - beforeX;
+        const directionZ = unit.position.z - beforeZ;
+        if (
+          options.scenery &&
+          CRUSHING_VEHICLE_TYPES.has(unit.def?.type) &&
+          Math.hypot(directionX, directionZ) > 0.01
+        ) {
           options.scenery.crushAt?.(
             unit.position.x,
             unit.position.z,
-            unit.def.type === 'superHeavyTank' ? 2.8 : 2.1
+            unit.def.type === 'superHeavyTank'
+              ? 2.8
+              : unit.def.type === 'armoredCar'
+                ? 1.45
+                : 2.1,
+            {
+              vehicleClass: unit.def.type === 'armoredCar' ? 'light' : 'tracked',
+              directionX,
+              directionZ,
+            }
           );
         }
         advanceMovePath(unit, mapDef);

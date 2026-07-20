@@ -79,10 +79,9 @@ function craterStyle(mapDef) {
   };
 }
 
-function lerpColor(a, b, t) {
-  const ca = new THREE.Color(a);
-  const cb = new THREE.Color(b);
-  return `#${ca.lerp(cb, t).getHexString()}`;
+function colorBytes(value) {
+  const color = new THREE.Color(value);
+  return [color.r * 255, color.g * 255, color.b * 255];
 }
 
 function paintCraterTexture(mapDef, seed, heavy) {
@@ -94,9 +93,21 @@ function paintCraterTexture(mapDef, seed, heavy) {
   const cx = size * 0.5;
   const cy = size * 0.5;
   const style = craterStyle(mapDef);
+  const palette = {
+    pit: colorBytes(style.pit),
+    wall: colorBytes(style.wall),
+    rim: colorBytes(style.rim),
+    outer: colorBytes(style.outer),
+    grass: colorBytes(style.grass ?? style.outer),
+    streak: colorBytes(style.streak),
+  };
+  const image = ctx.createImageData(size, size);
+  const pixels = image.data;
 
-  ctx.clearRect(0, 0, size, size);
-
+  // Write the crater into one ImageData buffer. The previous implementation
+  // issued tens of thousands of fillRect calls and constructed THREE.Color
+  // objects inside this loop, causing a visible hitch the first time a new
+  // crater texture variant was needed during an explosion.
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const dx = (x - cx) / cx;
@@ -109,42 +120,57 @@ function paintCraterTexture(mapDef, seed, heavy) {
       const angle = Math.atan2(dy, dx);
       const streak = 0.5 + 0.5 * Math.sin(angle * (style.kind === 'desert' ? 7 : 5) + n * 4);
 
-      let color;
+      let colorA = palette.pit;
+      let colorB = palette.pit;
+      let colorMix = 0;
       let alpha = 0;
 
       if (dist < 0.22) {
-        color = style.pit;
         alpha = 0.94 + n * 0.04;
       } else if (dist < 0.38) {
-        const t = (dist - 0.22) / 0.16;
-        color = lerpColor(style.pit, style.wall, t);
+        colorA = palette.pit;
+        colorB = palette.wall;
+        colorMix = (dist - 0.22) / 0.16;
         alpha = 0.9 + n2 * 0.05;
       } else if (dist < 0.56) {
-        const t = (dist - 0.38) / 0.18;
-        color = lerpColor(style.wall, style.rim, t);
+        colorA = palette.wall;
+        colorB = palette.rim;
+        colorMix = (dist - 0.38) / 0.18;
         alpha = 0.88 + n * 0.06;
       } else if (dist < 0.78) {
         const t = (dist - 0.56) / 0.22;
+        colorA = palette.rim;
         if (style.kind === 'desert') {
-          color = lerpColor(style.rim, style.outer, t * 0.65);
+          colorB = palette.outer;
+          colorMix = t * 0.65;
           alpha = (0.72 - t * 0.35) * (0.55 + streak * 0.45);
         } else {
-          color = lerpColor(style.rim, style.grass ?? style.outer, t);
+          colorB = palette.grass;
+          colorMix = t;
           alpha = 0.65 - t * 0.28;
         }
       } else {
         const t = (dist - 0.78) / 0.24;
+        colorA = palette.outer;
         if (style.kind === 'desert') {
-          color = lerpColor(style.outer, style.streak, streak * 0.5);
+          colorB = palette.streak;
+          colorMix = streak * 0.5;
           alpha = (0.38 - t * 0.34) * (0.4 + streak * 0.35);
         } else {
-          color = lerpColor(style.outer, style.grass ?? style.outer, 0.35 + t * 0.4);
+          colorB = palette.grass;
+          colorMix = 0.35 + t * 0.4;
           alpha = (0.42 - t * 0.38) * (0.55 + n * 0.25);
         }
       }
 
+      let red = colorA[0] + (colorB[0] - colorA[0]) * colorMix;
+      let green = colorA[1] + (colorB[1] - colorA[1]) * colorMix;
+      let blue = colorA[2] + (colorB[2] - colorA[2]) * colorMix;
+
       if (style.kind !== 'desert' && dist > 0.48 && dist < 0.9 && n2 > 0.62) {
-        color = lerpColor(color, style.grass ?? style.outer, 0.35);
+        red += (palette.grass[0] - red) * 0.35;
+        green += (palette.grass[1] - green) * 0.35;
+        blue += (palette.grass[2] - blue) * 0.35;
       }
 
       if (heavy && dist > 0.34 && dist < 0.72 && n > 0.7) {
@@ -155,11 +181,14 @@ function paintCraterTexture(mapDef, seed, heavy) {
       alpha *= edgeFade;
       if (alpha < 0.03) continue;
 
-      const rgb = new THREE.Color(color);
-      ctx.fillStyle = `rgba(${Math.round(rgb.r * 255)},${Math.round(rgb.g * 255)},${Math.round(rgb.b * 255)},${alpha})`;
-      ctx.fillRect(x, y, 1, 1);
+      const offset = (y * size + x) * 4;
+      pixels[offset] = Math.round(red);
+      pixels[offset + 1] = Math.round(green);
+      pixels[offset + 2] = Math.round(blue);
+      pixels[offset + 3] = Math.round(Math.min(1, alpha) * 255);
     }
   }
+  ctx.putImageData(image, 0, 0);
 
   if (style.kind === 'desert') {
     ctx.globalCompositeOperation = 'source-over';

@@ -44,8 +44,10 @@ let loader = null;
 let preloadPromise = null;
 let fabricNormalMap = null;
 let vehicleSurfaceBumpMap = null;
+let vehicleSurfaceRoughnessMap = null;
 let sharedInfantryGlobals = null;
 let activeVehicleTheatre = 'normandy';
+let proceduralVehicleTexturesReady = false;
 
 const THEATRE_CAMO = {
   normandy: {
@@ -94,7 +96,9 @@ function stringSeed(value) {
 function createTheatreCamoTexture(theatreId, factionId) {
   if (typeof document === 'undefined') return null;
   const spec = THEATRE_CAMO[theatreId]?.[factionId] ?? THEATRE_CAMO.normandy.germany;
-  const size = 512;
+  // Only the active theatre is generated (four faction sheets), so the paint
+  // can stay sharp without pre-allocating sixteen 1K textures at startup.
+  const size = 1024;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -106,11 +110,11 @@ function createTheatreCamoTexture(theatreId, factionId) {
 
   if (spec.pattern === 'bands') {
     ctx.lineCap = 'round';
-    ctx.filter = 'blur(3px)';
-    for (let i = 0; i < 18; i++) {
+    ctx.filter = 'blur(2px)';
+    for (let i = 0; i < 24; i++) {
       ctx.strokeStyle = spec.accents[i % spec.accents.length];
       ctx.globalAlpha = 0.58 + random() * 0.12;
-      ctx.lineWidth = 16 + random() * 24;
+      ctx.lineWidth = 30 + random() * 42;
       ctx.beginPath();
       ctx.moveTo(-60, random() * size);
       const midY = random() * size;
@@ -119,12 +123,12 @@ function createTheatreCamoTexture(theatreId, factionId) {
     }
     ctx.filter = 'none';
   } else {
-    ctx.filter = 'blur(4px)';
-    for (let i = 0; i < 48; i++) {
+    ctx.filter = 'blur(2px)';
+    for (let i = 0; i < 76; i++) {
       const x = random() * size;
       const y = random() * size;
-      const rx = 16 + random() * 52;
-      const ry = 10 + random() * 34;
+      const rx = 28 + random() * 82;
+      const ry = 18 + random() * 54;
       ctx.fillStyle = spec.accents[i % spec.accents.length];
       ctx.globalAlpha = 0.52 + random() * 0.18;
       ctx.beginPath();
@@ -134,16 +138,40 @@ function createTheatreCamoTexture(theatreId, factionId) {
     ctx.filter = 'none';
   }
 
-  // Dust, faded paint, chips, and vertical grime keep the finish matte and field-used.
-  ctx.globalAlpha = theatreId === 'northAfrica' ? 0.2 : 0.12;
+  // Fine paint modulation breaks up the uniform digital fill without making
+  // the finish noisy at normal RTS camera distances.
+  ctx.globalAlpha = 0.055;
+  for (let i = 0; i < 9200; i++) {
+    const shade = 96 + Math.floor(random() * 100);
+    ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+    const s = 0.5 + random() * 1.35;
+    ctx.fillRect(random() * size, random() * size, s, s);
+  }
+
+  // Dust, faded paint, chips, scratches, and rain streaks give the surfaces a
+  // field-used finish. These marks remain crisp enough to read on close zoom.
+  ctx.globalAlpha = theatreId === 'northAfrica' ? 0.18 : 0.1;
   ctx.fillStyle = theatreId === 'northAfrica' ? '#e0c48f' : '#b5a47a';
-  for (let i = 0; i < 420; i++) {
-    const s = 1 + random() * 4;
+  for (let i = 0; i < 1150; i++) {
+    const s = 0.7 + random() * 3.2;
     ctx.fillRect(random() * size, random() * size, s, s * (0.45 + random()));
   }
-  ctx.globalAlpha = 0.1;
+  ctx.globalAlpha = 0.14;
+  ctx.strokeStyle = '#d0c5a8';
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 72; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const len = 9 + random() * 42;
+    ctx.lineWidth = 0.7 + random() * 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (random() - 0.5) * len * 0.35, y + len);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.09;
   ctx.strokeStyle = '#1f241d';
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 58; i++) {
     const x = random() * size;
     ctx.lineWidth = 1 + random() * 2;
     ctx.beginPath();
@@ -158,21 +186,27 @@ function createTheatreCamoTexture(theatreId, factionId) {
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 1.5);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
   texture.needsUpdate = true;
   return texture;
 }
 
-function createAllTheatreCamoTextures() {
-  for (const theatreId of Object.keys(THEATRE_CAMO)) {
-    for (const factionId of FACTIONS) {
-      const texture = createTheatreCamoTexture(theatreId, factionId);
-      if (texture) cache.set(`vehicle:${theatreId}:${factionId}`, texture);
-    }
+function ensureTheatreCamoTextures(theatreId) {
+  if (!proceduralVehicleTexturesReady) return;
+  for (const factionId of FACTIONS) {
+    const key = `vehicle:${theatreId}:${factionId}`;
+    if (cache.has(key)) continue;
+    const texture = createTheatreCamoTexture(theatreId, factionId);
+    if (texture) cache.set(key, texture);
   }
 }
 
 export function setActiveVehicleTheatre(theatreId) {
   activeVehicleTheatre = THEATRE_CAMO[theatreId] ? theatreId : 'normandy';
+  ensureTheatreCamoTextures(activeVehicleTheatre);
 }
 
 const FACTION_WEBBING = {
@@ -194,6 +228,9 @@ function configureTexture(tex, repeat) {
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeat[0], repeat[1]);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   return tex;
 }
 
@@ -222,7 +259,10 @@ export function preloadUnitTextures() {
   }
   tasks.push(loadTexture(TEXTURE_PATHS.ghillie, [2, 2]).then((tex) => cache.set('ghillie', tex)));
 
-  preloadPromise = Promise.all(tasks).then(() => createAllTheatreCamoTextures());
+  preloadPromise = Promise.all(tasks).then(() => {
+    proceduralVehicleTexturesReady = true;
+    ensureTheatreCamoTextures(activeVehicleTheatre);
+  });
   return preloadPromise;
 }
 
@@ -251,7 +291,7 @@ export function getVehicleCamoTexture(factionId) {
 /** Fine rolled-steel grain, weld scarring, chips, and accumulated grit. */
 export function getVehicleSurfaceBumpMap() {
   if (vehicleSurfaceBumpMap || typeof document === 'undefined') return vehicleSurfaceBumpMap;
-  const size = 192;
+  const size = 512;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -259,28 +299,74 @@ export function getVehicleSurfaceBumpMap() {
   const image = ctx.createImageData(size, size);
   const random = seededRandom(0x19441945);
   for (let i = 0; i < image.data.length; i += 4) {
-    const grain = Math.round(116 + random() * 28 + (random() > 0.985 ? 55 : 0));
+    const grain = Math.round(116 + random() * 28 + (random() > 0.992 ? 55 : 0));
     image.data[i] = grain;
     image.data[i + 1] = grain;
     image.data[i + 2] = grain;
     image.data[i + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
-  ctx.globalAlpha = 0.38;
+  ctx.globalAlpha = 0.3;
   ctx.strokeStyle = '#e0e0e0';
-  ctx.lineWidth = 2;
-  for (let y = 24; y < size; y += 48) {
+  ctx.lineWidth = 2.5;
+  for (let y = 48; y < size; y += 96) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    for (let x = 0; x <= size; x += 8) ctx.lineTo(x, y + Math.sin(x * 0.42) * 1.2);
+    for (let x = 0; x <= size; x += 12) ctx.lineTo(x, y + Math.sin(x * 0.31) * 1.5);
     ctx.stroke();
+  }
+  ctx.globalAlpha = 0.46;
+  ctx.fillStyle = '#585858';
+  for (let i = 0; i < 280; i++) {
+    const w = 1 + random() * 3;
+    ctx.fillRect(random() * size, random() * size, w, 0.6 + random() * 1.4);
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3.5, 3.5);
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
   vehicleSurfaceBumpMap = texture;
   return vehicleSurfaceBumpMap;
+}
+
+/** Uneven matt paint, polished wear, and oily patches for non-uniform highlights. */
+export function getVehicleSurfaceRoughnessMap() {
+  if (vehicleSurfaceRoughnessMap || typeof document === 'undefined') return vehicleSurfaceRoughnessMap;
+  const size = 384;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  const random = seededRandom(0x524f5547);
+  for (let i = 0; i < image.data.length; i += 4) {
+    let value = 188 + Math.round((random() - 0.5) * 34);
+    if (random() > 0.994) value -= 62;
+    image.data[i] = value;
+    image.data[i + 1] = value;
+    image.data[i + 2] = value;
+    image.data[i + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#5a5a5a';
+  for (let i = 0; i < 46; i++) {
+    ctx.beginPath();
+    ctx.ellipse(random() * size, random() * size, 3 + random() * 16, 1 + random() * 6, random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.8, 2.8);
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  vehicleSurfaceRoughnessMap = texture;
+  return vehicleSurfaceRoughnessMap;
 }
 
 export function getInfantryUniformTexture(factionId) {

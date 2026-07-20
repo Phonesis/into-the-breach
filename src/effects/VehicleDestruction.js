@@ -1,12 +1,10 @@
 /**
- * Tank / armored car kill VFX + occasional ammo cook-off secondary blasts.
+ * Armored vehicle and field-gun kill VFX + occasional ammunition cook-offs.
  */
 
 import {
   spawnShellExplosion,
   spawnShellExplosionLite,
-  spawnSmokePuff,
-  spawnExplosion,
 } from './CombatEffects.js';
 import { spawnRecoverableWreckSmoke, spawnTankWreckFire } from './WreckEffects.js';
 import { sounds } from '../audio/SoundManager.js';
@@ -17,6 +15,11 @@ import { spawnVehicleCrewBailout } from '../game/VehicleBailout.js';
 export function isArmoredCombatVehicle(type) {
   return type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar';
 }
+
+const GUN_AMMO_COOK_OFF_CHANCE = {
+  artillery: 0.36,
+  antiTankGun: 0.24,
+};
 
 function cookOffChance(type) {
   if (type === 'superHeavyTank') return 0.42;
@@ -42,7 +45,6 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   const type = unit.def?.type;
   if (!isArmoredCombatVehicle(type)) return;
 
-  unit._vehicleKillFxDone = true;
   const p = pos ?? {
     x: unit.position?.x ?? 0,
     y: unit.position?.y ?? 0,
@@ -53,25 +55,14 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   if (!scene) return;
 
   const tier = primaryTier(type);
-  const scale = type === 'armoredCar' ? 0.85 : type === 'superHeavyTank' ? 1.25 : 1;
 
   if (unit._recoverableWreck) {
     // A survivable knockout gets one contained impact, smoke, and a visible
     // bailout. It skips flames and ammunition cook-off, but retains persistent
     // engine-compartment smoke until an engineer restores the hull.
     const burst = { x: p.x, y: (p.y ?? 0) + 0.45, z: p.z };
-    spawnShellExplosionLite(scene, burst, 'medium');
-    spawnSmokePuff(scene, burst, 1.05 * scale);
-    spawnSmokePuff(
-      scene,
-      { x: p.x + 0.55, y: burst.y + 0.15, z: p.z - 0.35 },
-      0.78 * scale
-    );
-    spawnSmokePuff(
-      scene,
-      { x: p.x - 0.4, y: burst.y + 0.1, z: p.z + 0.45 },
-      0.68 * scale
-    );
+    if (!spawnShellExplosionLite(scene, burst, 'medium')) return;
+    unit._vehicleKillFxDone = true;
     sounds.play('explosion');
     sounds.playImpact('explosion', { x: p.x, z: p.z }, 0.02);
     if (unit.mesh?.parent && !unit.wreckFire) {
@@ -82,12 +73,8 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
   }
 
   // Primary detonation — bigger than the old smoke-only kill
-  spawnShellExplosion(scene, p, tier);
-  spawnSmokePuff(scene, p, 1.15 * scale);
-  spawnSmokePuff(scene, { x: p.x + 0.6, y: p.y, z: p.z - 0.4 }, 0.85 * scale);
-  if (type !== 'armoredCar') {
-    spawnSmokePuff(scene, { x: p.x - 0.5, y: p.y, z: p.z + 0.5 }, 0.7 * scale);
-  }
+  if (!spawnShellExplosion(scene, p, tier)) return;
+  unit._vehicleKillFxDone = true;
 
   if (unit.mesh?.parent && !unit.wreckFire) {
     unit.wreckFire = spawnTankWreckFire(scene, unit.position ?? p, unit.mesh);
@@ -110,6 +97,7 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
       : type === 'tank' || type === 'tankDestroyer'
         ? 2 + Math.floor(Math.random() * 3) // 2–4
         : 2 + Math.floor(Math.random() * 2); // 2–3
+  const majorBlastIndex = Math.floor(Math.random() * blasts);
 
   let delay = 0.28 + Math.random() * 0.22;
   for (let i = 0; i < blasts; i++) {
@@ -119,11 +107,47 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
       y: (p.y ?? 0) + 0.3 + Math.random() * 0.6,
       z: p.z + (Math.random() - 0.5) * spread,
       t: delay,
-      tier: Math.random() < 0.3 ? 'heavy' : 'medium',
+      tier: i === majorBlastIndex || Math.random() < 0.3 ? 'heavy' : 'medium',
+      major: i === majorBlastIndex,
+      sourceType: type,
       unit,
     });
     delay += 0.22 + Math.random() * 0.48;
   }
+}
+
+/**
+ * Destroyed field guns sometimes ignite ready ammunition after the initial hit.
+ * The probability is resolved once per gun, then the delayed blast uses the
+ * same full-size chain-reaction effect as an armored-vehicle magazine cook-off.
+ */
+export function scheduleGunAmmoCookOff(game, unit, pos = null) {
+  const type = unit?.def?.type;
+  const chance = GUN_AMMO_COOK_OFF_CHANCE[type];
+  if (!game || !unit || !chance || unit._ammoCookOffResolved) return false;
+  unit._ammoCookOffResolved = true;
+  if (Math.random() >= chance) return false;
+
+  const p = pos ?? unit.position ?? { x: 0, y: 0, z: 0 };
+  if (!game._pendingCookOffs) game._pendingCookOffs = [];
+  const blasts = type === 'artillery' ? 1 + (Math.random() < 0.48 ? 1 : 0) : 1;
+  let delay = 0.42 + Math.random() * 0.72;
+
+  for (let i = 0; i < blasts; i++) {
+    const spread = type === 'artillery' ? 2.3 : 1.65;
+    game._pendingCookOffs.push({
+      x: p.x + (Math.random() - 0.5) * spread,
+      y: (p.y ?? 0) + 0.32 + Math.random() * 0.48,
+      z: p.z + (Math.random() - 0.5) * spread,
+      t: delay,
+      tier: i === 0 ? 'heavy' : 'medium',
+      major: i === 0,
+      sourceType: type,
+      unit,
+    });
+    delay += 0.3 + Math.random() * 0.4;
+  }
+  return true;
 }
 
 /** Advance scheduled secondary ammo explosions. Call each sim frame. */
@@ -138,23 +162,20 @@ export function updateVehicleCookOffs(game, dt) {
     c.done = true;
 
     if (scene) {
-      // The primary knockout already used the full heavy effect. Secondary
-      // ammunition bursts retain the flash/smoke silhouette without allocating
-      // another 15–20 meshes and materials for every cooked-off shell.
-      spawnShellExplosionLite(scene, c, c.tier);
-      spawnSmokePuff(scene, c, 0.7 + Math.random() * 0.35);
-      // Occasional flash debris for variety
-      if (Math.random() < 0.4) spawnExplosion(scene, c);
+      // Every cook-off sequence contains one unmistakable magazine detonation;
+      // subsequent cartridges use the lower-intensity capped effect.
+      if (c.major) spawnShellExplosion(scene, c, 'heavy');
+      else spawnShellExplosionLite(scene, c, c.tier);
     }
 
     sounds.playImpact('explosion', { x: c.x, z: c.z }, 0);
-    if (Math.random() < 0.55) {
+    if (c.major || Math.random() < 0.55) {
       sounds.play('explosion');
     }
 
     // Smaller secondary craters only sometimes
-    if (Math.random() < 0.35) {
-      game._spawnExplosionCrater?.(c.x, c.z, 'light');
+    if (Math.random() < (c.major ? 0.58 : 0.35)) {
+      game._spawnExplosionCrater?.(c.x, c.z, c.major ? 'medium' : 'light');
     }
 
     // Keep wreck fire alive / re-assert if mesh still present

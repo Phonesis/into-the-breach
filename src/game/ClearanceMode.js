@@ -15,8 +15,8 @@ export const CLEARANCE_DEFENDER_LAYOUT = [
 
 export const CLEARANCE_STARTING_RESOURCES = 160;
 
-/** Enemies hold fire briefly so forward defensive lines do not wipe the staging area. */
-export const CLEARANCE_CEASEFIRE_TIME = 10;
+/** Clear Defenses begins live; safe deployment spacing replaces an opening ceasefire. */
+export const CLEARANCE_CEASEFIRE_TIME = 0;
 
 export const CLEARANCE_REINFORCEMENT_INTERVAL = 180;
 

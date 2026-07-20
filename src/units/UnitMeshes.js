@@ -18,6 +18,7 @@ import {
   getInfantryUniformTexture,
   getInfantryMaterials,
   getVehicleSurfaceBumpMap,
+  getVehicleSurfaceRoughnessMap,
   createCamoMaterial,
 } from './UnitTextures.js';
 import { applyInfantryShadowPolicy } from './InfantryVisuals.js';
@@ -54,12 +55,15 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
 
   if (bodyTex && !INFANTRY_TYPES.has(type)) {
     const steelBump = getVehicleSurfaceBumpMap();
+    const steelRoughness = getVehicleSurfaceRoughnessMap();
     body.bumpMap = steelBump;
-    body.bumpScale = 0.038;
-    body.roughness = 0.78;
+    body.bumpScale = 0.026;
+    body.roughnessMap = steelRoughness;
+    body.roughness = 0.76;
     detail.bumpMap = steelBump;
-    detail.bumpScale = 0.028;
-    detail.roughness = 0.7;
+    detail.bumpScale = 0.019;
+    detail.roughnessMap = steelRoughness;
+    detail.roughness = 0.68;
   }
 
   let built = false;
@@ -1042,14 +1046,20 @@ export function applyUnitDeathVisual(unit) {
   }
 
   if (type === 'artillery' || type === 'antiTankGun') {
-    // The operating detachment is part of the gun unit: on destruction the live
-    // crew disappears from the carriage and leaves faction-correct casualties.
+    // The operating detachment is part of the gun unit: when it is knocked out,
+    // the live crew disappears from the carriage and leaves faction-correct
+    // casualties. Small arms kill the exposed crew, not the weapon itself, so
+    // retain the complete, normally painted field piece as battlefield cover.
     for (const member of getSquadMembers(mesh)) {
       if (member.userData.isTowedGunCrew && member.visible) {
         spawnCasualtyAtMember(unit, member, mesh.userData.factionId ?? 'germany', type);
       }
     }
     unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    if (unit._deathCause !== 'explosion') {
+      mesh.userData.crewKilled = true;
+      return;
+    }
     applyVehicleCorpseLook(mesh, { heavy: type === 'artillery' });
   }
 }
@@ -1126,7 +1136,7 @@ export function applyTankWreckLook(mesh, { preserveTurret = false } = {}) {
     mesh.add(mark);
   }
 
-  const holeMat = new THREE.MeshBasicMaterial({ color: 0x050403, roughness: 1 });
+  const holeMat = new THREE.MeshBasicMaterial({ color: 0x050403 });
   for (let i = 0; i < 4; i++) {
     const hole = new THREE.Mesh(new THREE.CircleGeometry(0.18 + Math.random() * 0.22, 8), holeMat);
     hole.rotation.x = -Math.PI / 2;

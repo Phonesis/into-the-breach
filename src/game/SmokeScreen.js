@@ -74,7 +74,7 @@ function buildSmokeVisual(scene, mapDef, x, z) {
       map: smokeTex,
       color: 0xe8ecef,
       transparent: true,
-      opacity: spot.op,
+      opacity: 0,
       depthWrite: false,
       depthTest: false,
     });
@@ -161,6 +161,7 @@ export class SmokeScreenManager {
       radius: SMOKE_RADIUS,
       team,
       remaining: SMOKE_DURATION,
+      age: 0,
       phase: Math.random() * Math.PI * 2,
       ...visual,
     };
@@ -184,7 +185,9 @@ export class SmokeScreenManager {
     for (let i = this.screens.length - 1; i >= 0; i--) {
       const s = this.screens[i];
       s.remaining -= dt;
+      s.age = Math.min(2.4, (s.age ?? 2.4) + dt);
       const life = Math.max(0, s.remaining / SMOKE_DURATION);
+      const formation = THREE.MathUtils.smootherstep(s.age / 2.4, 0, 1);
       s.phase += dt * 0.55;
 
       let idx = 0;
@@ -193,10 +196,12 @@ export class SmokeScreenManager {
         if (!mat) continue;
         const pulse = 0.92 + Math.sin(s.phase * 0.9 + sprite.userData.wobble) * 0.08;
         const baseOp = sprite.userData.baseOp ?? 0.7;
-        mat.opacity = (0.32 + life * (baseOp - 0.32)) * pulse;
+        mat.opacity = (0.32 + life * (baseOp - 0.32)) * pulse * formation;
         sprite.position.y =
-          sprite.userData.baseY + Math.sin(s.phase * 0.7 + idx) * 0.45 + (1 - life) * 1.1;
-        const sizeMult = 0.92 + life * 0.14;
+          sprite.userData.baseY * (0.38 + formation * 0.62) +
+          Math.sin(s.phase * 0.7 + idx) * 0.45 * formation +
+          (1 - life) * 1.1;
+        const sizeMult = (0.34 + formation * 0.66) * (0.92 + life * 0.14);
         sprite.scale.set(
           sprite.userData.baseSx * sizeMult * pulse,
           sprite.userData.baseSy * sizeMult * pulse,
@@ -234,6 +239,7 @@ export class SmokeScreenManager {
         radius: SMOKE_RADIUS,
         team: e.team ?? 'player',
         remaining: e.remaining,
+        age: 2.4,
         phase: Math.random() * Math.PI * 2,
         ...visual,
       };

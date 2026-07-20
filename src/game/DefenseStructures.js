@@ -20,7 +20,12 @@ import {
   getResupplyCost,
   pickBarrageAmmoPit,
 } from '../data/towerDefense.js';
-import { spawnArmorRicochet, spawnShellExplosion, spawnMuzzleFlash } from '../effects/CombatEffects.js';
+import {
+  spawnArmorRicochet,
+  spawnArtilleryExplosion,
+  spawnShellExplosion,
+  spawnMuzzleFlash,
+} from '../effects/CombatEffects.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
@@ -391,7 +396,7 @@ export class DefenseStructureManager {
       }
     }
     const y = sampleTerrainHeight(x, z, this.mapDef);
-    spawnShellExplosion(this.scene, { x, y: y + 1, z }, 'heavy');
+    spawnArtilleryExplosion(this.scene, { x, y: y + 1, z }, 'barrage');
     addExplosionCrater(this.scene, this.mapDef, x, z, 'heavy', this.getTerrainMesh());
     sounds.playWeapon('howitzer_105', { x, z }, { rate: 0.8, volume: 0.9 });
     sounds.playImpact('shell', { x, z }, 0.35);
@@ -567,7 +572,17 @@ export class DefenseStructureManager {
       const from = { x: entry.x, y: fromY, z: entry.z };
       const to = { x: target.position.x, y: toY, z: target.position.z };
       if (wType === 'mortar') {
-        spawnShellExplosion(scene, to, 'medium');
+        const craterTier = (def.caliber ?? 0) >= 105 ? 'heavy' : 'medium';
+        spawnShellExplosion(scene, to, 'medium', def.caliber);
+        addExplosionCrater(
+          scene,
+          mapDef,
+          target.position.x,
+          target.position.z,
+          craterTier,
+          this.getTerrainMesh(),
+          { deformTerrain: false }
+        );
       } else {
         spawnMuzzleFlash(scene, from, to, wType);
         if (armorHit?.deflected) spawnArmorRicochet(scene, to, from);

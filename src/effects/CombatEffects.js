@@ -1,6 +1,27 @@
 import * as THREE from 'three';
+import {
+  getEarthSprayTexture,
+  getEmberTexture,
+  getFlameTexture,
+  getSmokeTexture,
+} from './FireTextures.js';
 
 const MAX_EFFECTS = 64;
+// Leave room for impacts even during dense MG/tracer exchanges. Destruction
+// effects are gameplay feedback and must not disappear because routine muzzle
+// smoke happened to fill the shared transient pool first.
+const EXPLOSION_RESERVED_SLOTS = 8;
+const MAX_LAYERED_EXPLOSIONS = 8;
+const ROUTINE_EFFECT_LIMIT = MAX_EFFECTS - EXPLOSION_RESERVED_SLOTS;
+const EXPLOSION_EVICTABLE_TYPES = new Set([
+  'tracerBullet',
+  'smoke',
+  'flash',
+  'armorRicochet',
+  'tankMuzzle',
+  'collapseDust',
+  'smokeShellImpact',
+]);
 const active = [];
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
@@ -130,7 +151,54 @@ function toVec3(v) {
 }
 
 function canSpawnEffect(slots = 1) {
-  return active.length + slots <= MAX_EFFECTS;
+  return active.length + slots <= ROUTINE_EFFECT_LIMIT;
+}
+
+function disposeActiveAt(index) {
+  if (index < 0 || index >= active.length) return;
+  disposeEffect(active[index]);
+  active.splice(index, 1);
+}
+
+/**
+ * Guarantee that a visible impact can spawn under combat load. At most eight
+ * layered blasts remain alive simultaneously; a newer detonation replaces the
+ * oldest fading one instead of stacking enough transparent sprites to hitch.
+ */
+function reserveLayeredExplosionSlot() {
+  let layeredCount = 0;
+  let oldestLayeredIndex = -1;
+  let oldestElapsed = -1;
+  for (let i = 0; i < active.length; i++) {
+    const fx = active[i];
+    if (fx.type !== 'layeredExplosion') continue;
+    layeredCount++;
+    if ((fx.elapsed ?? 0) > oldestElapsed) {
+      oldestElapsed = fx.elapsed ?? 0;
+      oldestLayeredIndex = i;
+    }
+  }
+
+  if (layeredCount >= MAX_LAYERED_EXPLOSIONS) {
+    disposeActiveAt(oldestLayeredIndex);
+  }
+
+  while (active.length >= MAX_EFFECTS) {
+    const routineIndex = active.findIndex((fx) =>
+      EXPLOSION_EVICTABLE_TYPES.has(fx.type)
+    );
+    if (routineIndex >= 0) {
+      disposeActiveAt(routineIndex);
+      continue;
+    }
+
+    const fadingExplosionIndex = active.findIndex(
+      (fx) => fx.type === 'layeredExplosion'
+    );
+    if (fadingExplosionIndex < 0) return false;
+    disposeActiveAt(fadingExplosionIndex);
+  }
+  return true;
 }
 
 function registerEffect(effect) {
@@ -294,6 +362,105 @@ function updateTracerBullet(fx, dt) {
   fx.glowMat.opacity = fade * fx.glowOpacity;
 }
 
+function updateExplosionPoints(points, velocities, gravity, dt) {
+  if (!points || !velocities?.length) return;
+  const position = points.geometry.attributes.position;
+  const values = position.array;
+  for (let i = 0; i < position.count; i++) {
+    const velocity = velocities[i];
+    const offset = i * 3;
+    velocity.y -= gravity * dt;
+    values[offset] += velocity.x * dt;
+    values[offset + 1] = Math.max(0.04, values[offset + 1] + velocity.y * dt);
+    values[offset + 2] += velocity.z * dt;
+    if (values[offset + 1] <= 0.041) {
+      velocity.x *= Math.max(0, 1 - dt * 7);
+      velocity.z *= Math.max(0, 1 - dt * 7);
+      velocity.y = Math.max(0, velocity.y * -0.16);
+    }
+  }
+  position.needsUpdate = true;
+}
+
+function updateLayeredExplosion(fx, dt) {
+  fx.elapsed += dt;
+  const elapsed = fx.elapsed;
+
+  const flashT = THREE.MathUtils.clamp(elapsed / fx.flashDuration, 0, 1);
+  const flashFade = (1 - flashT) * (1 - flashT);
+  fx.flashMaterial.opacity = flashFade;
+  fx.flash.scale.setScalar(fx.flashScale * (1 + flashT * 1.8));
+  fx.flash.visible = flashFade > 0.01;
+  fx.light.intensity = fx.lightIntensity * flashFade;
+
+  const fireT = THREE.MathUtils.clamp(elapsed / fx.fireDuration, 0, 1);
+  const fireFade = Math.pow(1 - fireT, 1.25);
+  fx.hotMaterial.opacity = fireFade * fx.fireOpacity;
+  fx.fireMaterial.opacity = fireFade * 0.86 * fx.fireOpacity;
+  for (const fire of fx.fireSprites) {
+    fire.sprite.position.addScaledVector(fire.velocity, dt);
+    const scale = fire.baseScale * (1 + fireT * fire.growth);
+    fire.sprite.scale.set(scale, scale * (1.02 + fire.stretch), 1);
+    fire.sprite.visible = fireFade > 0.015;
+  }
+
+  const smokeT = THREE.MathUtils.clamp(
+    (elapsed - fx.smokeDelay) / fx.smokeDuration,
+    0,
+    1
+  );
+  const smokeIn = THREE.MathUtils.smoothstep(smokeT, 0, 0.12);
+  const smokeOut = 1 - THREE.MathUtils.smoothstep(smokeT, 0.56, 1);
+  for (const smokeLayer of fx.smokeMaterials) {
+    smokeLayer.material.opacity = smokeLayer.opacity * smokeIn * smokeOut;
+  }
+  for (const smoke of fx.smokeSprites) {
+    smoke.velocity.multiplyScalar(Math.max(0, 1 - dt * 0.72));
+    smoke.sprite.position.addScaledVector(smoke.velocity, dt);
+    smoke.sprite.position.y += dt * smoke.rise;
+    const scale = smoke.baseScale * (1 + smokeT * smoke.growth);
+    smoke.sprite.scale.set(scale * smoke.widen, scale, 1);
+  }
+
+  const dustT = THREE.MathUtils.clamp(elapsed / fx.dustDuration, 0, 1);
+  const dustFade = (1 - dustT) * (1 - dustT);
+  fx.dustMaterial.opacity = fx.dustOpacity * dustFade;
+  for (const dust of fx.dustSprites) {
+    dust.velocity.multiplyScalar(Math.max(0, 1 - dt * 1.8));
+    dust.sprite.position.addScaledVector(dust.velocity, dt);
+    const scale = dust.baseScale * (1 + dustT * dust.growth);
+    dust.sprite.scale.set(scale * dust.widen, scale * 0.48, 1);
+  }
+
+  const earthT = THREE.MathUtils.clamp(elapsed / fx.earthDuration, 0, 1);
+  const earthIn = THREE.MathUtils.smoothstep(earthT, 0, 0.06);
+  const earthOut = 1 - THREE.MathUtils.smoothstep(earthT, 0.48, 1);
+  for (const earthLayer of fx.earthMaterials) {
+    earthLayer.material.opacity = earthLayer.opacity * earthIn * earthOut;
+  }
+  for (const earth of fx.earthSprites) {
+    earth.velocity.y -= dt * fx.scale * earth.gravity;
+    earth.sprite.position.addScaledVector(earth.velocity, dt);
+    if (earth.sprite.position.y < fx.scale * 0.025) {
+      earth.sprite.position.y = fx.scale * 0.025;
+      earth.velocity.y = Math.max(0, earth.velocity.y * -0.08);
+      earth.velocity.x *= Math.max(0, 1 - dt * 6);
+      earth.velocity.z *= Math.max(0, 1 - dt * 6);
+    }
+    const scale = earth.baseScale * (1 + earthT * earth.growth);
+    earth.sprite.scale.set(scale * earth.width, scale * earth.height, 1);
+  }
+
+  updateExplosionPoints(fx.sparks, fx.sparkVelocities, 9.5, dt);
+  updateExplosionPoints(fx.debris, fx.debrisVelocities, 13.5, dt);
+  fx.sparkMaterial.opacity = Math.pow(
+    1 - THREE.MathUtils.clamp(elapsed / fx.sparkDuration, 0, 1),
+    1.4
+  );
+  fx.debrisMaterial.opacity =
+    0.8 * (1 - THREE.MathUtils.smoothstep(elapsed, fx.lifeDuration * 0.62, fx.lifeDuration));
+}
+
 /** Call once per frame from the game loop. */
 export function updateCombatEffects(dt) {
   updateParatrooperAtRecoil(dt);
@@ -326,6 +493,37 @@ export function updateCombatEffects(dt) {
       fx.mesh.scale.multiplyScalar(1 + dt * 2.5);
       fx.material.opacity = Math.max(0, fx.material.opacity - dt * 1.8);
       fx.mesh.position.y += dt * 0.8;
+    } else if (fx.type === 'collapseDust') {
+      const fade = Math.max(0, fx.life / fx.maxLife);
+      for (const puff of fx.puffs) {
+        puff.velocity.multiplyScalar(Math.max(0, 1 - dt * 1.4));
+        puff.mesh.position.addScaledVector(puff.velocity, dt);
+        puff.mesh.position.y += dt * puff.rise;
+        puff.mesh.scale.multiplyScalar(1 + dt * puff.growth);
+        puff.material.opacity = puff.opacity * fade * fade;
+      }
+      fx.ring.scale.multiplyScalar(1 + dt * 2.2);
+      fx.ringMaterial.opacity = 0.28 * fade * fade;
+    } else if (fx.type === 'smokeShellImpact') {
+      fx.elapsed += dt;
+      const t = THREE.MathUtils.clamp(fx.elapsed / fx.maxLife, 0, 1);
+      const appear = THREE.MathUtils.smoothstep(t, 0, 0.08);
+      const fade = 1 - THREE.MathUtils.smoothstep(t, 0.46, 1);
+      for (const puff of fx.puffs) {
+        puff.velocity.multiplyScalar(Math.max(0, 1 - dt * 1.15));
+        puff.sprite.position.addScaledVector(puff.velocity, dt);
+        puff.sprite.position.y += dt * puff.rise;
+        const grow = 1 + t * puff.growth;
+        puff.sprite.scale.set(
+          puff.baseScale * puff.width * grow,
+          puff.baseScale * grow,
+          1
+        );
+        puff.material.opacity = puff.opacity * appear * fade;
+        puff.material.rotation += dt * puff.rotationSpeed;
+      }
+      updateExplosionPoints(fx.debris, fx.debrisVelocities, 14.5, dt);
+      fx.debrisMaterial.opacity = 0.72 * (1 - THREE.MathUtils.smoothstep(t, 0.52, 1));
     } else if (fx.type === 'tankMuzzle') {
       const t = 1 - fx.life / fx.maxLife;
       // Fire core expands then fades fast
@@ -356,6 +554,8 @@ export function updateCombatEffects(dt) {
         puff.vx *= 1 - dt * 0.6;
         puff.vz *= 1 - dt * 0.6;
       }
+    } else if (fx.type === 'layeredExplosion') {
+      updateLayeredExplosion(fx, dt);
     } else if (fx.type === 'explosion' || fx.type === 'shellExplosion') {
       const grow = fx.type === 'shellExplosion' ? 2.4 : 1.2;
       fx.group.scale.multiplyScalar(1 + dt * grow);
@@ -812,229 +1012,700 @@ export function spawnSmokePuff(scene, pos, scale) {
   });
 }
 
-export function spawnExplosion(scene, pos) {
-  if (!canSpawnEffect()) return;
-
-  const p = toVec3(pos);
+/** One capped effect for a heavy, ground-hugging building-collapse dust sheet. */
+export function spawnCollapseDust(scene, pos, radius = 2.5, direction = null) {
+  if (!scene || !canSpawnEffect()) return false;
   const group = new THREE.Group();
-  group.position.copy(p);
+  group.position.copy(toVec3(pos));
+  const geometry = new THREE.SphereGeometry(1, 7, 5);
+  const materials = [];
+  const puffs = [];
+  const dir = new THREE.Vector3(direction?.x ?? 0, 0, direction?.z ?? 0);
+  if (dir.lengthSq() > 0.001) dir.normalize();
 
-  const geos = [];
-  const mats = [];
-
-  for (let i = 0; i < 5; i++) {
-    const geo = new THREE.SphereGeometry(0.35 + Math.random() * 0.5, 5, 5);
-    const mat = new THREE.MeshBasicMaterial({
-      color: i % 2 ? 0xff4400 : 0x444444,
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+    const outward = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+    const material = new THREE.MeshBasicMaterial({
+      color: i % 3 === 0 ? 0x9b8b70 : i % 3 === 1 ? 0x776d5c : 0x887c65,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.36 + Math.random() * 0.14,
+      depthWrite: false,
     });
-    const part = new THREE.Mesh(geo, mat);
-    part.position.set((Math.random() - 0.5) * 1.6, Math.random(), (Math.random() - 0.5) * 1.6);
-    group.add(part);
-    geos.push(geo);
-    mats.push(mat);
+    const mesh = new THREE.Mesh(geometry, material);
+    const distance = radius * (0.12 + Math.random() * 0.38);
+    mesh.position.set(outward.x * distance, 0.2 + Math.random() * 0.26, outward.z * distance);
+    mesh.scale.set(
+      radius * (0.24 + Math.random() * 0.18),
+      radius * (0.12 + Math.random() * 0.09),
+      radius * (0.22 + Math.random() * 0.18)
+    );
+    group.add(mesh);
+    materials.push(material);
+    puffs.push({
+      mesh,
+      material,
+      opacity: material.opacity,
+      velocity: outward
+        .multiplyScalar(0.65 + Math.random() * 0.65)
+        .addScaledVector(dir, 0.35 + Math.random() * 0.55),
+      rise: 0.18 + Math.random() * 0.34,
+      growth: 0.65 + Math.random() * 0.55,
+    });
   }
 
+  const ringGeometry = new THREE.RingGeometry(radius * 0.22, radius * 0.78, 24);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x8e8169,
+    transparent: true,
+    opacity: 0.28,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.08;
+  group.add(ring);
+  materials.push(ringMaterial);
   scene.add(group);
 
+  const life = 1.05;
   registerEffect({
-    type: 'explosion',
+    type: 'collapseDust',
     group,
-    geometries: geos,
-    materials: mats,
-    life: 0.55,
-    maxLife: 0.55,
+    puffs,
+    ring,
+    ringMaterial,
+    geometries: [geometry, ringGeometry],
+    materials,
+    life,
+    maxLife: life,
   });
+  return true;
+}
+
+const EXPLOSION_PROFILES = {
+  small: {
+    scale: 0.82,
+    fireScale: 1,
+    fireCount: 3,
+    smokeCount: 4,
+    dustCount: 4,
+    earthCount: 3,
+    sparkCount: 8,
+    debrisCount: 12,
+    flashDuration: 0.12,
+    fireDuration: 0.42,
+    smokeDelay: 0.07,
+    smokeDuration: 1.35,
+    dustDuration: 0.72,
+    sparkDuration: 0.62,
+    lightIntensity: 5.5,
+  },
+  liteMedium: {
+    scale: 1.02,
+    fireScale: 1.08,
+    fireCount: 3,
+    smokeCount: 5,
+    dustCount: 5,
+    earthCount: 4,
+    sparkCount: 10,
+    debrisCount: 18,
+    flashDuration: 0.13,
+    fireDuration: 0.52,
+    smokeDelay: 0.07,
+    smokeDuration: 1.55,
+    dustDuration: 0.82,
+    sparkDuration: 0.68,
+    lightIntensity: 7,
+  },
+  medium: {
+    scale: 1.34,
+    fireScale: 1.18,
+    fireCount: 4,
+    smokeCount: 6,
+    dustCount: 6,
+    earthCount: 5,
+    sparkCount: 13,
+    debrisCount: 28,
+    flashDuration: 0.14,
+    fireDuration: 0.64,
+    smokeDelay: 0.08,
+    smokeDuration: 1.9,
+    dustDuration: 0.94,
+    sparkDuration: 0.76,
+    lightIntensity: 9.5,
+  },
+  large: {
+    scale: 1.72,
+    fireScale: 1.22,
+    fireCount: 5,
+    smokeCount: 7,
+    dustCount: 7,
+    earthCount: 6,
+    sparkCount: 16,
+    debrisCount: 38,
+    flashDuration: 0.15,
+    fireDuration: 0.72,
+    smokeDelay: 0.08,
+    smokeDuration: 2.15,
+    dustDuration: 1.02,
+    sparkDuration: 0.84,
+    lightIntensity: 12,
+  },
+  heavy: {
+    scale: 2.14,
+    fireScale: 1.28,
+    fireCount: 5,
+    smokeCount: 8,
+    dustCount: 8,
+    earthCount: 8,
+    sparkCount: 19,
+    debrisCount: 48,
+    flashDuration: 0.16,
+    fireDuration: 0.78,
+    smokeDelay: 0.08,
+    smokeDuration: 2.35,
+    dustDuration: 1.08,
+    sparkDuration: 0.9,
+    lightIntensity: 14,
+  },
+  artillery: {
+    scale: 2.82,
+    fireScale: 0.72,
+    fireCount: 1,
+    fireOpacity: 0.3,
+    smokeCount: 4,
+    dustCount: 8,
+    earthCount: 19,
+    sparkCount: 7,
+    debrisCount: 96,
+    flashDuration: 0.08,
+    fireDuration: 0.26,
+    smokeDelay: 0.035,
+    smokeDuration: 1.9,
+    dustDuration: 1.38,
+    earthDuration: 1.82,
+    sparkDuration: 0.58,
+    lightIntensity: 5.5,
+    soilDominant: true,
+  },
+  barrage: {
+    scale: 3.16,
+    fireScale: 0.76,
+    fireCount: 1,
+    fireOpacity: 0.34,
+    smokeCount: 5,
+    dustCount: 9,
+    earthCount: 22,
+    sparkCount: 8,
+    debrisCount: 112,
+    flashDuration: 0.085,
+    fireDuration: 0.28,
+    smokeDelay: 0.035,
+    smokeDuration: 2.05,
+    dustDuration: 1.48,
+    earthDuration: 1.96,
+    sparkDuration: 0.62,
+    lightIntensity: 6.5,
+    soilDominant: true,
+  },
+  creeping: {
+    scale: 3.02,
+    fireScale: 0.74,
+    fireCount: 1,
+    fireOpacity: 0.32,
+    smokeCount: 4,
+    dustCount: 9,
+    earthCount: 21,
+    sparkCount: 7,
+    debrisCount: 104,
+    flashDuration: 0.08,
+    fireDuration: 0.27,
+    smokeDelay: 0.035,
+    smokeDuration: 1.98,
+    dustDuration: 1.44,
+    earthDuration: 1.9,
+    sparkDuration: 0.6,
+    lightIntensity: 6,
+    soilDominant: true,
+  },
+};
+
+function createExplosionPointBurst(count, scale, sparks) {
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radial = Math.random() * scale * (sparks ? 0.24 : 0.34);
+    positions[i * 3] = Math.cos(angle) * radial;
+    positions[i * 3 + 1] = scale * (sparks
+      ? 0.12 + Math.random() * 0.34
+      : 0.035 + Math.random() * 0.12);
+    positions[i * 3 + 2] = Math.sin(angle) * radial;
+    const speed = scale * (sparks ? 3.6 + Math.random() * 4.4 : 2.8 + Math.random() * 4.6);
+    velocities.push(
+      new THREE.Vector3(
+        Math.cos(angle) * speed * (0.55 + Math.random() * 0.55),
+        scale * (sparks ? 3.6 + Math.random() * 5.2 : 3.6 + Math.random() * 5.6),
+        Math.sin(angle) * speed * (0.55 + Math.random() * 0.55)
+      )
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    map: getEmberTexture(),
+    alphaMap: getEmberTexture(),
+    color: sparks ? 0xffb14a : 0x493422,
+    size: scale * (sparks ? 0.22 : 0.23),
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: sparks ? 1 : 0.8,
+    blending: sparks ? THREE.AdditiveBlending : THREE.NormalBlending,
+    depthWrite: false,
+    alphaTest: 0.025,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  return { points, geometry, material, velocities };
+}
+
+function spawnLayeredExplosion(scene, pos, profileName = 'medium', scaleMultiplier = 1) {
+  if (!scene || !reserveLayeredExplosionSlot()) return false;
+  const profile = EXPLOSION_PROFILES[profileName] ?? EXPLOSION_PROFILES.medium;
+  const heavyOrdnance = ['large', 'heavy', 'artillery', 'barrage', 'creeping'].includes(profileName);
+  const soilDominant = profile.soilDominant === true;
+  const scale = profile.scale * THREE.MathUtils.clamp(scaleMultiplier, 0.82, 1.22);
+  const group = new THREE.Group();
+  group.name = 'layeredExplosion';
+  group.userData.explosionProfile = profileName;
+  group.position.copy(toVec3(pos));
+  const geometries = [];
+  const materials = [];
+
+  const flameTexture = getFlameTexture();
+  const smokeTexture = getSmokeTexture();
+  const hotMaterial = new THREE.SpriteMaterial({
+    map: flameTexture,
+    color: 0xffe7a3,
+    transparent: true,
+    opacity: profile.fireOpacity ?? 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const fireMaterial = new THREE.SpriteMaterial({
+    map: flameTexture,
+    color: 0xff5a16,
+    transparent: true,
+    opacity: 0.86 * (profile.fireOpacity ?? 1),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+  });
+  materials.push(hotMaterial, fireMaterial);
+  const fireSprites = [];
+  for (let i = 0; i < profile.fireCount; i++) {
+    const sprite = new THREE.Sprite(i % 3 === 0 ? hotMaterial : fireMaterial);
+    const angle = (i / profile.fireCount) * Math.PI * 2 + Math.random() * 0.6;
+    const radial = scale * Math.random() * 0.42;
+    sprite.position.set(
+      Math.cos(angle) * radial,
+      scale * (0.32 + Math.random() * 0.48),
+      Math.sin(angle) * radial
+    );
+    const baseScale = scale * profile.fireScale * (0.9 + Math.random() * 0.75);
+    sprite.scale.set(baseScale, baseScale, 1);
+    sprite.name = 'explosionFire';
+    sprite.renderOrder = 12;
+    group.add(sprite);
+    fireSprites.push({
+      sprite,
+      baseScale,
+      growth: 1.1 + Math.random() * 0.9,
+      stretch: Math.random() * 0.25,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * scale * (0.25 + Math.random() * 0.35),
+        scale * (0.85 + Math.random() * 0.7),
+        Math.sin(angle) * scale * (0.25 + Math.random() * 0.35)
+      ),
+    });
+  }
+
+  const smokeDarkMaterial = new THREE.SpriteMaterial({
+    map: smokeTexture,
+    color: soilDominant ? 0x32281f : heavyOrdnance ? 0x262724 : 0x3d3b36,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const smokeLightMaterial = new THREE.SpriteMaterial({
+    map: smokeTexture,
+    color: soilDominant ? 0x67513a : heavyOrdnance ? 0x55544d : 0x69645a,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const smokeMaterials = [
+    {
+      material: smokeDarkMaterial,
+      opacity: soilDominant ? 0.58 : heavyOrdnance ? 0.72 : 0.62,
+    },
+    {
+      material: smokeLightMaterial,
+      opacity: soilDominant ? 0.36 : heavyOrdnance ? 0.5 : 0.44,
+    },
+  ];
+  materials.push(smokeDarkMaterial, smokeLightMaterial);
+  const smokeSprites = [];
+  for (let i = 0; i < profile.smokeCount; i++) {
+    const sprite = new THREE.Sprite(i % 3 === 0 ? smokeLightMaterial : smokeDarkMaterial);
+    const angle = (i / profile.smokeCount) * Math.PI * 2 + Math.random() * 0.75;
+    const corePuff = i < 2;
+    const radial = scale * (corePuff ? 0.06 + Math.random() * 0.2 : 0.28 + Math.random() * 0.82);
+    sprite.position.set(
+      Math.cos(angle) * radial,
+      scale * (corePuff ? 0.38 + i * 0.34 + Math.random() * 0.16 : 0.28 + Math.random() * 0.82),
+      Math.sin(angle) * radial
+    );
+    const baseScale = scale * (corePuff ? 0.54 + Math.random() * 0.3 : 0.42 + Math.random() * 0.38);
+    sprite.scale.set(baseScale, baseScale, 1);
+    sprite.name = 'explosionSmoke';
+    sprite.renderOrder = 8;
+    group.add(sprite);
+    smokeSprites.push({
+      sprite,
+      baseScale,
+      growth: 1.4 + Math.random() * 0.85,
+      widen: 1 + Math.random() * 0.28,
+      rise: scale * (0.38 + Math.random() * 0.42),
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * scale * (0.18 + Math.random() * 0.25),
+        scale * (0.12 + Math.random() * 0.2),
+        Math.sin(angle) * scale * (0.18 + Math.random() * 0.25)
+      ),
+    });
+  }
+
+  const dustMaterial = new THREE.SpriteMaterial({
+    map: smokeTexture,
+    color: 0x81725b,
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+    depthTest: true,
+  });
+  materials.push(dustMaterial);
+  const dustSprites = [];
+  for (let i = 0; i < profile.dustCount; i++) {
+    const sprite = new THREE.Sprite(dustMaterial);
+    const angle = (i / profile.dustCount) * Math.PI * 2 + Math.random() * 0.55;
+    const baseScale = scale * (0.75 + Math.random() * 0.55);
+    sprite.position.set(Math.cos(angle) * scale * 0.35, scale * 0.16, Math.sin(angle) * scale * 0.35);
+    sprite.scale.set(baseScale, baseScale * 0.5, 1);
+    sprite.name = 'explosionDust';
+    sprite.renderOrder = 7;
+    group.add(sprite);
+    dustSprites.push({
+      sprite,
+      baseScale,
+      growth: 1.4 + Math.random() * 0.8,
+      widen: 1.4 + Math.random() * 0.5,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * scale * (1.3 + Math.random() * 0.9),
+        scale * (0.08 + Math.random() * 0.12),
+        Math.sin(angle) * scale * (1.3 + Math.random() * 0.9)
+      ),
+    });
+  }
+
+  // A shell throws an irregular curtain of earth, not a clean pressure-ring.
+  // These narrow, fast-rising plumes sit behind the fireball and make heavier
+  // calibres read through displaced soil even after the flash is gone.
+  const earthDarkMaterial = new THREE.SpriteMaterial({
+    map: getEarthSprayTexture(),
+    color: soilDominant ? 0x70492d : 0x4a3828,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const earthMidMaterial = new THREE.SpriteMaterial({
+    map: getEarthSprayTexture(),
+    color: soilDominant ? 0x9b683a : 0x654c35,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const earthLightMaterial = new THREE.SpriteMaterial({
+    map: getEarthSprayTexture(),
+    color: soilDominant ? 0xc1884b : 0x796044,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const earthMaterials = [
+    { material: earthDarkMaterial, opacity: soilDominant ? 0.72 : heavyOrdnance ? 0.76 : 0.64 },
+    { material: earthMidMaterial, opacity: soilDominant ? 0.68 : heavyOrdnance ? 0.68 : 0.56 },
+    { material: earthLightMaterial, opacity: soilDominant ? 0.64 : heavyOrdnance ? 0.58 : 0.48 },
+  ];
+  materials.push(earthDarkMaterial, earthMidMaterial, earthLightMaterial);
+  const earthSprites = [];
+  const soilLobeRotation = Math.random() * Math.PI * 2;
+  const soilLobes = soilDominant
+    ? Array.from(
+        { length: 7 },
+        (_, index) => soilLobeRotation + (index / 7) * Math.PI * 2 + (Math.random() - 0.5) * 0.26
+      )
+    : null;
+  for (let i = 0; i < profile.earthCount; i++) {
+    const soilMaterial = i % 4 === 0
+      ? earthLightMaterial
+      : i % 4 === 2
+        ? earthDarkMaterial
+        : earthMidMaterial;
+    const sprite = new THREE.Sprite(soilDominant ? soilMaterial : i % 3 === 0 ? earthLightMaterial : earthDarkMaterial);
+    if (soilDominant) sprite.center.set(0.5, 0.05);
+    const angle = soilDominant
+      ? soilLobes[i % soilLobes.length] + (Math.random() - 0.5) * 0.62
+      : (i / profile.earthCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.72;
+    const radial = scale * (soilDominant
+      ? 0.02 + Math.random() * 0.11
+      : 0.08 + Math.random() * 0.34);
+    sprite.position.set(
+      Math.cos(angle) * radial,
+      scale * (0.05 + Math.random() * 0.1),
+      Math.sin(angle) * radial
+    );
+    const baseScale = scale * (soilDominant
+      ? 0.7 + Math.random() * 0.56
+      : 0.58 + Math.random() * 0.42);
+    const soilSpike = soilDominant && i % 3 === 0;
+    sprite.scale.set(
+      baseScale * (soilDominant ? 0.26 : 0.48),
+      baseScale * (soilDominant ? 1.72 : 1.2),
+      1
+    );
+    sprite.name = 'explosionEarthSpray';
+    sprite.renderOrder = 9;
+    group.add(sprite);
+    earthSprites.push({
+      sprite,
+      baseScale,
+      width: soilDominant
+        ? soilSpike ? 0.3 + Math.random() * 0.24 : 0.5 + Math.random() * 0.42
+        : 0.42 + Math.random() * 0.24,
+      height: soilDominant
+        ? soilSpike ? 1.75 + Math.random() * 0.8 : 1.28 + Math.random() * 0.68
+        : 1.05 + Math.random() * 0.48,
+      growth: soilDominant ? 0.92 + Math.random() * 0.8 : 1.05 + Math.random() * 0.82,
+      gravity: soilDominant ? 2.65 + Math.random() * 0.85 : 2.4,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * scale * (soilDominant
+          ? soilSpike ? 0.75 + Math.random() * 0.75 : 1.45 + Math.random() * 1.2
+          : 0.72 + Math.random() * 0.9),
+        scale * (soilDominant
+          ? soilSpike ? 3.35 + Math.random() * 1.65 : 2.7 + Math.random() * 1.35
+          : 1.6 + Math.random() * 1.45),
+        Math.sin(angle) * scale * (soilDominant
+          ? soilSpike ? 0.75 + Math.random() * 0.75 : 1.45 + Math.random() * 1.2
+          : 0.72 + Math.random() * 0.9)
+      ),
+    });
+  }
+
+  const flashMaterial = new THREE.SpriteMaterial({
+    map: getFlashTexture(heavyOrdnance ? 0xffb250 : 0xffc06a),
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+  });
+  const flash = new THREE.Sprite(flashMaterial);
+  flash.name = 'explosionFlash';
+  const flashScale = scale * (soilDominant ? 2.8 : 4.8);
+  flash.scale.setScalar(flashScale);
+  flash.position.y = scale * 0.62;
+  flash.renderOrder = 15;
+  group.add(flash);
+  materials.push(flashMaterial);
+
+  const sparkBurst = createExplosionPointBurst(profile.sparkCount, scale, true);
+  const debrisBurst = createExplosionPointBurst(profile.debrisCount, scale, false);
+  sparkBurst.points.name = 'explosionSparks';
+  debrisBurst.points.name = 'explosionDebris';
+  group.add(sparkBurst.points, debrisBurst.points);
+  geometries.push(sparkBurst.geometry, debrisBurst.geometry);
+  materials.push(sparkBurst.material, debrisBurst.material);
+
+  const light = new THREE.PointLight(0xff8a3a, profile.lightIntensity, scale * 17, 2);
+  light.position.y = scale * 0.82;
+  light.castShadow = false;
+  group.add(light);
+  scene.add(group);
+
+  const lifeDuration = profile.smokeDelay + profile.smokeDuration;
+  registerEffect({
+    type: 'layeredExplosion',
+    profileName,
+    group,
+    fireSprites,
+    hotMaterial,
+    fireMaterial,
+    fireOpacity: profile.fireOpacity ?? 1,
+    smokeSprites,
+    smokeMaterials,
+    dustSprites,
+    dustMaterial,
+    dustOpacity: heavyOrdnance ? 0.48 : 0.4,
+    earthSprites,
+    earthMaterials,
+    flash,
+    flashMaterial,
+    flashScale,
+    light,
+    lightIntensity: profile.lightIntensity,
+    sparks: sparkBurst.points,
+    sparkMaterial: sparkBurst.material,
+    sparkVelocities: sparkBurst.velocities,
+    debris: debrisBurst.points,
+    debrisMaterial: debrisBurst.material,
+    debrisVelocities: debrisBurst.velocities,
+    elapsed: 0,
+    flashDuration: profile.flashDuration,
+    fireDuration: profile.fireDuration,
+    smokeDelay: profile.smokeDelay,
+    smokeDuration: profile.smokeDuration,
+    dustDuration: profile.dustDuration,
+    earthDuration: profile.earthDuration ?? profile.dustDuration * 1.24,
+    scale,
+    sparkDuration: profile.sparkDuration,
+    lifeDuration,
+    geometries,
+    materials,
+    life: lifeDuration,
+    maxLife: lifeDuration,
+  });
+  return true;
+}
+
+export function spawnExplosion(scene, pos) {
+  return spawnLayeredExplosion(scene, pos, 'small');
 }
 
 /**
  * Large shell burst for artillery / mortars (and barrage strikes).
- * @param {'heavy'|'medium'} tier
+ * @param {'heavy'|'large'|'medium'} tier
+ * @param {number|null} caliber — millimetres; used to distinguish shell weight
  */
-export function spawnShellExplosion(scene, pos, tier = 'heavy') {
-  if (!canSpawnEffect(4)) return;
-
-  const p = toVec3(pos);
-  const group = new THREE.Group();
-  group.position.copy(p);
-
-  const geos = [];
-  const mats = [];
-  const heavy = tier === 'heavy';
-  const partCount = heavy ? 14 : 9;
-  const spread = heavy ? 3.8 : 2.6;
-  const baseSize = heavy ? 0.85 : 0.55;
-
-  for (let i = 0; i < partCount; i++) {
-    const geo = new THREE.SphereGeometry(baseSize + Math.random() * (heavy ? 1.4 : 0.9), 6, 6);
-    const mat = new THREE.MeshBasicMaterial({
-      color: i % 3 === 0 ? 0x1a1a1a : i % 3 === 1 ? 0xff5500 : 0xffaa33,
-      transparent: true,
-      opacity: heavy ? 0.92 : 0.82,
-    });
-    const part = new THREE.Mesh(geo, mat);
-    part.position.set(
-      (Math.random() - 0.5) * spread,
-      Math.random() * (heavy ? 1.8 : 1.2),
-      (Math.random() - 0.5) * spread
-    );
-    group.add(part);
-    geos.push(geo);
-    mats.push(mat);
+export function spawnShellExplosion(scene, pos, tier = 'heavy', caliber = null) {
+  let profile = tier === 'heavy' ? 'heavy' : tier === 'large' ? 'large' : 'medium';
+  if (tier !== 'heavy' && Number.isFinite(caliber)) {
+    if (caliber <= 64) profile = 'liteMedium';
+    else if (caliber >= 105) profile = 'heavy';
+    else if (caliber >= 85) profile = 'large';
   }
-
-  const ringGeo = new THREE.RingGeometry(0.4, heavy ? 4.2 : 3, 24);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0xff6622,
-    transparent: true,
-    opacity: heavy ? 0.55 : 0.42,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.08;
-  group.add(ring);
-  geos.push(ringGeo);
-  mats.push(ringMat);
-
-  const flashMat = new THREE.SpriteMaterial({
-    map: getFlashTexture(heavy ? 0xff7722 : 0xff9944),
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    depthTest: false,
-    opacity: 1,
-  });
-  const flashSprite = new THREE.Sprite(flashMat);
-  const flashScale = heavy ? 9 : 6.5;
-  flashSprite.scale.set(flashScale, flashScale, 1);
-  flashSprite.position.y = heavy ? 1.2 : 0.85;
-  flashSprite.renderOrder = 14;
-  group.add(flashSprite);
-  mats.push(flashMat);
-
-  const light = new THREE.PointLight(heavy ? 0xffaa55 : 0xff8844, heavy ? 14 : 9, heavy ? 28 : 20);
-  light.position.y = 1.5;
-  group.add(light);
-
-  const smokePuffs = [];
-  const puffCount = heavy ? 5 : 3;
-  for (let i = 0; i < puffCount; i++) {
-    const sGeo = new THREE.SphereGeometry((heavy ? 0.9 : 0.65) + Math.random() * 0.5, 6, 6);
-    const sMat = new THREE.MeshBasicMaterial({
-      color: i % 2 ? 0x555555 : 0x333322,
-      transparent: true,
-      opacity: heavy ? 0.5 : 0.4,
-      depthWrite: false,
-    });
-    const puff = new THREE.Mesh(sGeo, sMat);
-    puff.position.set((Math.random() - 0.5) * 2, 0.2 + Math.random() * 0.6, (Math.random() - 0.5) * 2);
-    group.add(puff);
-    geos.push(sGeo);
-    mats.push(sMat);
-    smokePuffs.push({ mesh: puff, mat: sMat });
-  }
-
-  scene.add(group);
-
-  const life = heavy ? 1.05 : 0.85;
-  registerEffect({
-    type: 'shellExplosion',
-    tier,
-    group,
-    light,
-    flashSprite,
-    flashMat,
-    smokePuffs,
-    geometries: geos,
-    materials: mats,
-    life,
-    maxLife: life,
-  });
+  return spawnLayeredExplosion(scene, pos, profile);
 }
 
-/** Cheaper burst for rapid fire-support hits — no dynamic light, fewer particles. */
+/** Lower-intensity capped burst for rapid fire-support hits and cook-offs. */
 export function spawnShellExplosionLite(scene, pos, tier = 'medium') {
-  if (!canSpawnEffect()) return;
+  return spawnLayeredExplosion(scene, pos, tier === 'heavy' ? 'medium' : 'liteMedium');
+}
 
-  const p = toVec3(pos);
+/** Full-size impact used only for guns and scheduled fire support. */
+export function spawnArtilleryExplosion(scene, pos, kind = 'artillery', caliber = 105) {
+  const profile = ['barrage', 'creeping'].includes(kind) ? kind : 'artillery';
+  const caliberScale = Number.isFinite(caliber)
+    ? THREE.MathUtils.clamp(Math.pow(caliber / 105, 0.72), 0.88, 1.18)
+    : 1;
+  return spawnLayeredExplosion(scene, pos, profile, caliberScale);
+}
+
+/** Compact canister discharge for a smoke round: dirty-white smoke, dust and
+ * a few soil fragments. The persistent screen grows separately around it. */
+export function spawnSmokeShellImpact(scene, pos, scale = 1) {
+  if (!scene || !canSpawnEffect()) return false;
+
   const group = new THREE.Group();
-  group.position.copy(p);
-
-  const geos = [];
-  const mats = [];
-  const heavy = tier === 'heavy';
-  const partCount = heavy ? 6 : 4;
-  const spread = heavy ? 2.4 : 1.8;
-  const baseSize = heavy ? 0.55 : 0.42;
-
-  for (let i = 0; i < partCount; i++) {
-    const geo = new THREE.SphereGeometry(baseSize + Math.random() * 0.45, 5, 5);
-    const mat = new THREE.MeshBasicMaterial({
-      color: i % 2 ? 0xff5500 : 0x333333,
+  group.name = 'smokeShellImpact';
+  group.position.copy(toVec3(pos));
+  const puffs = [];
+  const materials = [];
+  const smokeTexture = getSmokeTexture();
+  const count = 8;
+  for (let i = 0; i < count; i++) {
+    const dirtPuff = i < 2;
+    const material = new THREE.SpriteMaterial({
+      map: smokeTexture,
+      color: dirtPuff
+        ? (i === 0 ? 0x74614a : 0x8a765a)
+        : (i % 2 === 0 ? 0xc5c8c5 : 0xaeb3b2),
       transparent: true,
-      opacity: heavy ? 0.82 : 0.72,
-    });
-    const part = new THREE.Mesh(geo, mat);
-    part.position.set(
-      (Math.random() - 0.5) * spread,
-      Math.random() * (heavy ? 1.1 : 0.8),
-      (Math.random() - 0.5) * spread
-    );
-    group.add(part);
-    geos.push(geo);
-    mats.push(mat);
-  }
-
-  const flashMat = new THREE.SpriteMaterial({
-    map: getFlashTexture(heavy ? 0xff7722 : 0xff9944),
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    depthTest: false,
-    opacity: 1,
-  });
-  const flashSprite = new THREE.Sprite(flashMat);
-  const flashScale = heavy ? 5.5 : 4.2;
-  flashSprite.scale.set(flashScale, flashScale, 1);
-  flashSprite.position.y = heavy ? 0.9 : 0.65;
-  flashSprite.renderOrder = 14;
-  group.add(flashSprite);
-  mats.push(flashMat);
-
-  const smokePuffs = [];
-  const puffCount = heavy ? 2 : 1;
-  for (let i = 0; i < puffCount; i++) {
-    const sGeo = new THREE.SphereGeometry(0.55 + Math.random() * 0.25, 5, 5);
-    const sMat = new THREE.MeshBasicMaterial({
-      color: 0x444444,
-      transparent: true,
-      opacity: 0.38,
+      opacity: 0,
       depthWrite: false,
+      depthTest: true,
+      rotation: Math.random() * Math.PI * 2,
     });
-    const puff = new THREE.Mesh(sGeo, sMat);
-    puff.position.set((Math.random() - 0.5) * 1.2, 0.15 + Math.random() * 0.35, (Math.random() - 0.5) * 1.2);
-    group.add(puff);
-    geos.push(sGeo);
-    mats.push(sMat);
-    smokePuffs.push({ mesh: puff, mat: sMat });
+    const sprite = new THREE.Sprite(material);
+    const angle = Math.random() * Math.PI * 2;
+    const radial = scale * (0.08 + Math.random() * (dirtPuff ? 0.3 : 0.65));
+    sprite.position.set(
+      Math.cos(angle) * radial,
+      scale * (dirtPuff ? 0.08 + Math.random() * 0.18 : 0.18 + Math.random() * 0.5),
+      Math.sin(angle) * radial
+    );
+    const baseScale = scale * (dirtPuff ? 0.52 + Math.random() * 0.32 : 0.72 + Math.random() * 0.5);
+    const width = dirtPuff ? 1.35 + Math.random() * 0.35 : 0.82 + Math.random() * 0.42;
+    sprite.scale.set(baseScale * width, baseScale, 1);
+    sprite.name = dirtPuff ? 'smokeShellDust' : 'smokeShellDischarge';
+    sprite.renderOrder = 13;
+    group.add(sprite);
+    materials.push(material);
+    puffs.push({
+      sprite,
+      material,
+      baseScale,
+      width,
+      growth: dirtPuff ? 1.8 + Math.random() * 0.8 : 1.15 + Math.random() * 0.9,
+      opacity: dirtPuff ? 0.42 : 0.5 + Math.random() * 0.12,
+      rise: scale * (dirtPuff ? 0.16 + Math.random() * 0.22 : 0.52 + Math.random() * 0.55),
+      rotationSpeed: (Math.random() - 0.5) * 0.7,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * scale * (dirtPuff ? 1.5 : 0.55 + Math.random() * 0.7),
+        scale * (dirtPuff ? 0.1 : 0.18 + Math.random() * 0.22),
+        Math.sin(angle) * scale * (dirtPuff ? 1.5 : 0.55 + Math.random() * 0.7)
+      ),
+    });
   }
+
+  const debrisBurst = createExplosionPointBurst(14, scale * 0.48, false);
+  debrisBurst.points.name = 'smokeShellSoilFragments';
+  debrisBurst.points.renderOrder = 14;
+  group.add(debrisBurst.points);
+  materials.push(debrisBurst.material);
 
   scene.add(group);
-
-  const life = heavy ? 0.72 : 0.58;
+  const life = 1.2;
   registerEffect({
-    type: 'shellExplosion',
-    tier: heavy ? 'heavy' : 'medium',
+    type: 'smokeShellImpact',
     group,
-    flashSprite,
-    flashMat,
-    smokePuffs,
-    geometries: geos,
-    materials: mats,
+    puffs,
+    debris: debrisBurst.points,
+    debrisMaterial: debrisBurst.material,
+    debrisVelocities: debrisBurst.velocities,
+    elapsed: 0,
+    geometries: [debrisBurst.geometry],
+    materials,
     life,
     maxLife: life,
   });
+  return true;
 }
