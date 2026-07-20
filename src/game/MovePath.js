@@ -65,6 +65,7 @@ export function advanceMovePath(unit, mapDef) {
     unit.moveTarget = null;
     unit._movePath = null;
     unit._userMoveOrder = false;
+    unit._reverseMoveOrder = false;
     if (unit.retreating) clearRetreat(unit);
   }
 }

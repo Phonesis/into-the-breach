@@ -41,7 +41,11 @@ import { isDefenseTarget } from './DefenseTarget.js';
 import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
-import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
+import {
+  getMoveReachConfig,
+  isTankType,
+  shouldUseTacticalReverse,
+} from '../units/VehicleTypes.js';
 import { isUnitMounted } from './TankRiders.js';
 import {
   canIndependentMgBearOnTarget,
@@ -922,6 +926,22 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         unit.moveTarget = null;
         unit._chasingAttack = false;
       } else {
+        // AI orders normally assign moveTarget directly rather than calling
+        // Unit.moveTo(). Classify each new destination with the same short
+        // rear-arc rule used by player orders, excluding panic retreats.
+        if (!unit._userMoveOrder && !unit.retreating && isTankType(unit.def?.type)) {
+          const newAutoOrder =
+            unit._autoMoveOrderX == null ||
+            Math.hypot(
+              dest.x - unit._autoMoveOrderX,
+              dest.z - unit._autoMoveOrderZ
+            ) > 0.5;
+          if (newAutoOrder) {
+            unit._autoMoveOrderX = dest.x;
+            unit._autoMoveOrderZ = dest.z;
+            unit._reverseMoveOrder = shouldUseTacticalReverse(unit, dest.x, dest.z);
+          }
+        }
         let moveDt = dt;
         if (options.getWireSlowMult && unit.team === 'enemy') {
           moveDt *= options.getWireSlowMult(unit.position.x, unit.position.z, unit);
@@ -955,6 +975,12 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         if (!unit.moveTarget) unit._chasingAttack = false;
         unit._mapDef = mapDef;
       }
+    }
+
+    if (!unit.moveTarget) {
+      unit._autoMoveOrderX = null;
+      unit._autoMoveOrderZ = null;
+      if (!unit._userMoveOrder) unit._reverseMoveOrder = false;
     }
 
     updateUnitTerrainPose(unit, mapDef, dt);

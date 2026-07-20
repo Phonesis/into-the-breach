@@ -2,6 +2,24 @@
 
 export const TANK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
+export const TACTICAL_REVERSE_MAX_DISTANCE = 20;
+// About 11 degrees either side of straight back. Rear-quarter clicks should
+// produce a turn, not a diagonal reverse that exposes the tank's flank.
+const TACTICAL_REVERSE_REAR_DOT = -0.98;
+
+/** Whether a tank should back into a nearby destination instead of turning around. */
+export function shouldUseTacticalReverse(unit, x, z) {
+  if (!unit?.mesh || !TANK_TYPES.has(unit.def?.type)) return false;
+  const dx = x - unit.position.x;
+  const dz = z - unit.position.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= 0.001 || distance > TACTICAL_REVERSE_MAX_DISTANCE) return false;
+  const hullYaw = unit.mesh.rotation.y ?? 0;
+  const forwardDot =
+    (dx * Math.sin(hullYaw) + dz * Math.cos(hullYaw)) / distance;
+  return forwardDot <= TACTICAL_REVERSE_REAR_DOT;
+}
+
 /** Infantry-scale units that medics can treat (excludes towed guns and vehicles). */
 export const FOOT_SOLDIER_TYPES = new Set([
   'infantry',

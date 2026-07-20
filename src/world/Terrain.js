@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getMoveReachConfig } from '../units/VehicleTypes.js';
+import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
 import { faceUnitTowardMovement } from '../units/VehicleRotation.js';
 import {
   createAOMap,
@@ -1190,6 +1190,11 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
   const destY = sampleTerrainHeight(dest.x, dest.z, mapDef);
   const substeps = cfg.substeps;
   const subDt = dt / substeps;
+  const reversing =
+    unit._reverseMoveOrder &&
+    !unit.retreating &&
+    isTankType(unit.def?.type);
+  const reverseSpeedMultiplier = reversing ? 0.55 : 1;
 
   for (let s = 0; s < substeps; s++) {
     if (hasReachedMoveDest(unit, dest, mapDef, cfg.horiz, cfg.height)) return false;
@@ -1204,16 +1209,19 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
       unit.position.y = groundY + (destY - groundY) * Math.min(1, subDt * 5);
       if (Math.abs(unit.position.y - destY) < 0.4 && horiz < cfg.horiz) return false;
       if (horiz > 0.08) {
-        const creep = Math.min(horiz, unit.def.speed * subDt * 0.45);
+        const creep = Math.min(
+          horiz,
+          unit.def.speed * reverseSpeedMultiplier * subDt * 0.45
+        );
         unit.position.x += (dx / horiz) * creep;
         unit.position.z += (dz / horiz) * creep;
         unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
-        faceUnitTowardMovement(unit, dx / horiz, dz / horiz, subDt);
+        if (!reversing) faceUnitTowardMovement(unit, dx / horiz, dz / horiz, subDt);
       }
       continue;
     }
 
-    let speed = unit.def.speed * subDt;
+    let speed = unit.def.speed * reverseSpeedMultiplier * subDt;
     if (uphill > 2) speed *= 1.5;
     else if (uphill > 0.6) speed *= 1.25;
     else if (uphill < -1.5) speed *= 0.92;
@@ -1225,7 +1233,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     unit.position.x += nx * step;
     unit.position.z += nz * step;
     unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
-    faceUnitTowardMovement(unit, nx, nz, subDt);
+    if (!reversing) faceUnitTowardMovement(unit, nx, nz, subDt);
   }
 
   return true;

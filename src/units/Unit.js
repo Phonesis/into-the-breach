@@ -20,7 +20,7 @@ import {
   getStandoffPosition,
 } from '../game/Targeting.js';
 import { buildMovePath } from '../game/MovePath.js';
-import { getMoveReachConfig } from './VehicleTypes.js';
+import { getMoveReachConfig, shouldUseTacticalReverse } from './VehicleTypes.js';
 import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
 import { removeWreckEffect } from '../effects/WreckEffects.js';
 import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
@@ -50,6 +50,9 @@ export class Unit {
     this.moveTarget = null;
     this._movePath = null;
     this._userMoveOrder = false;
+    this._reverseMoveOrder = false;
+    this._autoMoveOrderX = null;
+    this._autoMoveOrderZ = null;
     this._bunkerEntryId = null;
     this.attackCooldown = 0;
     this.mgCooldown = 0;
@@ -209,7 +212,15 @@ export class Unit {
     this.clearAttackOrder();
     this._userMoveOrder = playerOrder;
     this._chasingAttack = false;
+    this._autoMoveOrderX = null;
+    this._autoMoveOrderZ = null;
     if (playerOrder) this._pendingMountTankId = null;
+
+    // A short click into a tank's rear arc is a tactical withdrawal: retain
+    // the hull's current facing so frontal armour and the turret stay toward
+    // the threat. Longer moves still turn around and use normal pathing.
+    this._reverseMoveOrder =
+      playerOrder && shouldUseTacticalReverse(this, x, z);
 
     if (mapDef && playerOrder) {
       const { pathSegment } = getMoveReachConfig(this.def.type);

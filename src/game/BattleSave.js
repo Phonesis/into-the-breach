@@ -284,6 +284,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       moveTarget: u.moveTarget ? { x: u.moveTarget.x, z: u.moveTarget.z } : null,
       _movePath: u._movePath?.map((p) => ({ x: p.x, z: p.z })) ?? null,
       _userMoveOrder: !!u._userMoveOrder,
+      _reverseMoveOrder: !!u._reverseMoveOrder,
       _chasingAttack: !!u._chasingAttack,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
       stancePursuitOrder: !!u._stancePursuitOrder,
@@ -1192,6 +1193,7 @@ export function applyBattleSave(game, snapshot) {
     unit.grenadeCooldown = uData.grenadeCooldown ?? 0;
     unit.smokeShellCooldown = uData.smokeShellCooldown ?? 0;
     unit._userMoveOrder = !!uData._userMoveOrder;
+    unit._reverseMoveOrder = !!uData._reverseMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
     unit.engagementStance = uData.engagementStance === 'pursue' ? 'pursue' : 'hold';
     unit._stancePursuitOrder = !!uData.stancePursuitOrder;
