@@ -87,12 +87,9 @@ export class Unit {
     this.mesh.position.set(position.x, 0, position.z);
     this.mesh.userData.unit = this;
     scene.add(this.mesh);
-    this.mesh.traverse((c) => {
-      if (c.isMesh) {
-        c.castShadow = true;
-        c.receiveShadow = true;
-      }
-    });
+    // createUnitMesh owns shadow policy. In particular, infantry intentionally
+    // cast only a few silhouette shadows; forcing every limb, weapon and hidden
+    // helper into the 4096px sun-shadow pass becomes prohibitive in large fights.
   }
 
   get position() {
@@ -328,12 +325,6 @@ export class Unit {
     replacement.position.copy(position);
     replacement.rotation.y = yaw;
     replacement.userData.unit = this;
-    replacement.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
     parent.add(replacement);
     parent.remove(oldMesh);
     oldMesh.traverse((child) => {

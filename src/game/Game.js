@@ -267,7 +267,9 @@ export class Game {
       powerPreference: 'high-performance',
       alpha: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this._nativePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    this._renderPixelRatio = this._nativePixelRatio;
+    this.renderer.setPixelRatio(this._renderPixelRatio);
     setupRenderer(this.renderer);
 
     this.scene = new THREE.Scene();
@@ -307,11 +309,15 @@ export class Game {
       cullCooldown: 0,
       samples: 0,
       baselineFps: 60,
+      highFpsFor: 0,
+      qualityCooldown: 0,
+      budgetCheckAccum: 0,
     };
     this.viewingBattlefield = false;
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
+    this._unitVisualSyncAccum = 0;
     this.showUnitFieldIcons = true;
     this.seekCoverMode = false;
     this.autoBuildMode = false;
@@ -710,6 +716,16 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  _setRenderPixelRatio(value) {
+    const minRatio = Math.min(1, this._nativePixelRatio);
+    const next = THREE.MathUtils.clamp(value, minRatio, this._nativePixelRatio);
+    if (Math.abs(next - this._renderPixelRatio) < 0.04) return false;
+    this._renderPixelRatio = next;
+    this.renderer.setPixelRatio(next);
+    this.onResize();
+    return true;
   }
 
   _bindPinchZoom(canvas) {
@@ -1147,6 +1163,7 @@ export class Game {
     this._coverUiAccum = 0;
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
+    this._unitVisualSyncAccum = 0;
     this._selectionUiKey = '';
     this._hoverUiId = '';
     this._combatAccum = 0;
@@ -1158,6 +1175,10 @@ export class Game {
     this._debrisPerformance.cullCooldown = 0;
     this._debrisPerformance.samples = 0;
     this._debrisPerformance.baselineFps = 60;
+    this._debrisPerformance.highFpsFor = 0;
+    this._debrisPerformance.qualityCooldown = 0;
+    this._debrisPerformance.budgetCheckAccum = 0;
+    this._setRenderPixelRatio(this._nativePixelRatio);
     if (!restoreSnapshot) {
       this.matchTime = 0;
     }
@@ -3108,7 +3129,10 @@ export class Game {
     if (simActive) {
         this.ui?.tickMinimapFireTraces(dt);
         this._minimapUiAccum += dt;
-        const minimapInterval = this.ui?.minimapHasFireTraces?.() ? 0.033 : 0.1;
+        const largeBattle = this._aliveUnits.length > 55;
+        const minimapInterval = this.ui?.minimapHasFireTraces?.()
+          ? largeBattle ? 0.06 : 0.033
+          : largeBattle ? 0.16 : 0.1;
         if (this._minimapUiAccum >= minimapInterval) {
           this._minimapUiAccum = 0;
           this._updateMinimap();
@@ -3176,12 +3200,16 @@ export class Game {
             );
           }
         }
-        syncDamageSmoke(this._aliveUnits);
+        this._unitVisualSyncAccum += dt;
+        if (this._unitVisualSyncAccum >= (largeBattle ? 0.2 : 0.1)) {
+          this._unitVisualSyncAccum = 0;
+          syncDamageSmoke(this._aliveUnits);
+          syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
+          syncSurrenderMarkers(this._aliveUnits);
+          syncRankMarkers(this._aliveUnits);
+        }
         updateDamageSmoke(this._aliveUnits, dt);
-        syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
         updateSurrenderState(this, this.units, dt);
-        syncSurrenderMarkers(this._aliveUnits);
-        syncRankMarkers(this._aliveUnits);
         updateRankMarkers(this._aliveUnits);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
@@ -3494,7 +3522,40 @@ export class Game {
     perf.frameTimeEma = perf.frameTimeEma * 0.94 + sample * 0.06;
     perf.samples += 1;
     perf.cullCooldown = Math.max(0, perf.cullCooldown - frameDt);
+    perf.qualityCooldown = Math.max(0, perf.qualityCooldown - frameDt);
+    perf.budgetCheckAccum += frameDt;
     const fps = 1 / Math.max(perf.frameTimeEma, 1 / 120);
+
+    // Retina fill-rate and the sun-shadow pass dominate once a battle grows.
+    // Reduce only the drawing-buffer resolution; simulation and model detail
+    // remain unchanged. Restore sharpness gradually after the field thins out.
+    const liveCount = this._aliveUnits.length;
+    const loadPixelRatioCap =
+      liveCount >= 68 ? 1.15 : liveCount >= 50 ? 1.35 : liveCount >= 38 ? 1.6 : this._nativePixelRatio;
+    let desiredPixelRatio = Math.min(this._nativePixelRatio, loadPixelRatioCap);
+    if (desiredPixelRatio < this._renderPixelRatio && perf.qualityCooldown <= 0) {
+      if (this._setRenderPixelRatio(desiredPixelRatio)) perf.qualityCooldown = 2;
+    }
+
+    // Long Standard games otherwise retain an unlimited history of rendered
+    // corpses. Keep battlefield evidence, but tighten the allowance while a
+    // large living army is still consuming the render budget.
+    if (perf.budgetCheckAccum >= 2) {
+      perf.budgetCheckAccum = 0;
+      const retainedDebris = liveCount >= 55 ? 18 : liveCount >= 40 ? 24 : 30;
+      let renderedDebris = 0;
+      for (const unit of this.units) {
+        if (unit.dead && !unit._recoverableWreck && unit.mesh?.parent) renderedDebris += 1;
+      }
+      if (renderedDebris > retainedDebris) {
+        this._cullBattlefieldDebris(
+          Math.min(12, renderedDebris - retainedDebris),
+          fps,
+          retainedDebris
+        );
+      }
+    }
+
     if (perf.samples < 90) return;
     if (perf.samples === 90) perf.baselineFps = Math.min(60, Math.max(24, fps));
 
@@ -3510,6 +3571,23 @@ export class Game {
       perf.lowFpsFor = Math.max(0, perf.lowFpsFor - frameDt * 0.25);
     }
 
+    if (perf.lowFpsFor >= 1.2) {
+      desiredPixelRatio = Math.min(desiredPixelRatio, fps < 26 ? 1 : 1.2);
+      if (desiredPixelRatio < this._renderPixelRatio && perf.qualityCooldown <= 0) {
+        if (this._setRenderPixelRatio(desiredPixelRatio)) perf.qualityCooldown = 2;
+      }
+      perf.highFpsFor = 0;
+    } else if (fps > recoveredThreshold && liveCount < 50) {
+      perf.highFpsFor += frameDt;
+      if (perf.highFpsFor >= 6 && perf.qualityCooldown <= 0) {
+        const restored = Math.min(desiredPixelRatio, this._renderPixelRatio + 0.25);
+        if (this._setRenderPixelRatio(restored)) perf.qualityCooldown = 2;
+        perf.highFpsFor = 0;
+      }
+    } else {
+      perf.highFpsFor = 0;
+    }
+
     if (perf.lowFpsFor < 2.5 || perf.cullCooldown > 0) return;
     const batchSize = fps < 28 ? 14 : fps < 35 ? 9 : 5;
     const removed = this._cullBattlefieldDebris(batchSize, fps);
@@ -3517,7 +3595,7 @@ export class Game {
     perf.cullCooldown = removed > 0 ? 1.25 : 3;
   }
 
-  _cullBattlefieldDebris(batchSize, fps) {
+  _cullBattlefieldDebris(batchSize, fps, retainedMinimumOverride = null) {
     const debris = this.units.filter(
       (u) =>
         u.dead &&
@@ -3530,7 +3608,7 @@ export class Game {
 
     // Keep a baseline amount of battlefield history, unless performance has
     // become severe. Repairable wrecks are never part of this budget.
-    const retainedMinimum = fps < 28 ? 18 : 30;
+    const retainedMinimum = retainedMinimumOverride ?? (fps < 28 ? 18 : 30);
     const removalCount = Math.min(batchSize, Math.max(0, debris.length - retainedMinimum));
     if (removalCount <= 0) return 0;
 
