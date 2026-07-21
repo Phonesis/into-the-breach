@@ -225,6 +225,18 @@ export function clearCombatEffects() {
   activeAtRecoil.length = 0;
 }
 
+/** Generate the shared canvas textures before the first scheduled heavy impact. */
+export function prewarmArtilleryExplosionAssets(renderer = null) {
+  const textures = [
+    getFlameTexture(),
+    getSmokeTexture(),
+    getEarthSprayTexture(),
+    getEmberTexture(),
+    getFlashTexture(0xffb250),
+  ];
+  for (const texture of textures) renderer?.initTexture?.(texture);
+}
+
 export function triggerParatrooperAtRecoil(unitMesh) {
   if (!unitMesh) return;
   const lead = unitMesh.children.find((c) => c.userData?.squadIndex === 0);

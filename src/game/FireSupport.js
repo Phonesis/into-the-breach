@@ -7,6 +7,7 @@ import {
   spawnStrikeWarning,
   spawnStrafePlane,
   spawnStrikeImpact,
+  prewarmStrikeImpacts,
 } from '../effects/FireSupportEffects.js';
 import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
@@ -278,12 +279,14 @@ export class FireSupportManager {
       );
       sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.7, volume: 0.8 });
 
+      const impacts = [];
       for (let i = 0; i < def.shellCount; i++) {
         const t = def.warnTime + i * def.shellInterval;
         const angle = Math.random() * Math.PI * 2;
         const r = Math.sqrt(Math.random()) * def.radius;
         const ix = tx + Math.cos(angle) * r;
         const iz = tz + Math.sin(angle) * r;
+        impacts.push({ x: ix, z: iz });
         this.events.push({
           at: t,
           fn: () => {
@@ -293,6 +296,7 @@ export class FireSupportManager {
           },
         });
       }
+      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false);
     } else if (type === 'creepingBarrage') {
       const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz, this.ownerTeam);
       const startX = tx - dx * def.creepLength;
@@ -307,6 +311,7 @@ export class FireSupportManager {
       );
       sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.62, volume: 0.85 });
 
+      const impacts = [];
       for (let i = 0; i < def.shellCount; i++) {
         const t = def.warnTime + i * def.shellInterval;
         const ratio = def.shellCount <= 1 ? 1 : i / (def.shellCount - 1);
@@ -317,6 +322,7 @@ export class FireSupportManager {
         const lateral = (Math.random() - 0.5) * def.laneWidth * laneTight;
         const ix = cx + perpX * lateral;
         const iz = cz + perpZ * lateral;
+        impacts.push({ x: ix, z: iz });
         const atTarget = ratio >= 0.82;
         const shellDamage = atTarget ? def.targetDamage : def.damage * (0.78 + ratio * 0.28);
         const shellRadius = atTarget ? def.targetRadius : def.hitRadius;
@@ -331,6 +337,7 @@ export class FireSupportManager {
           },
         });
       }
+      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false);
     } else if (type === 'airborneDrop') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);
 

@@ -3,6 +3,10 @@ import { sampleTerrainHeight } from './Terrain.js';
 
 const craters = [];
 const texCache = new Map();
+const pendingTextureKeys = new Set();
+const craterTextureWarmQueue = [];
+let craterTextureWarmScheduled = false;
+let craterTextureGeneration = 0;
 const _pit = new THREE.Color();
 const _rim = new THREE.Color();
 const _outer = new THREE.Color();
@@ -230,13 +234,61 @@ function paintCraterTexture(mapDef, seed, heavy) {
   return tex;
 }
 
+function craterTextureKey(mapDef, x, z, heavy) {
+  const bucket = Math.floor(x * 0.7) ^ Math.floor(z * 0.7);
+  return `${mapDef?.id ?? 'map'}:${terrainKind(mapDef)}:${heavy ? 'h' : 'm'}:${bucket % 5}`;
+}
+
 function getCraterTexture(mapDef, x, z, heavy) {
   const bucket = Math.floor(x * 0.7) ^ Math.floor(z * 0.7);
-  const key = `${mapDef?.id ?? 'map'}:${terrainKind(mapDef)}:${heavy ? 'h' : 'm'}:${bucket % 5}`;
+  const key = craterTextureKey(mapDef, x, z, heavy);
   if (!texCache.has(key)) {
     texCache.set(key, paintCraterTexture(mapDef, key.length * 17 + bucket, heavy));
   }
   return texCache.get(key);
+}
+
+function scheduleCraterTextureWarm() {
+  if (craterTextureWarmScheduled || craterTextureWarmQueue.length === 0) return;
+  craterTextureWarmScheduled = true;
+  const run = () => {
+    craterTextureWarmScheduled = false;
+    const job = craterTextureWarmQueue.shift();
+    if (!job) return;
+    pendingTextureKeys.delete(job.pendingKey);
+    if (job.generation === craterTextureGeneration) {
+      const texture = getCraterTexture(job.mapDef, job.x, job.z, job.heavy);
+      job.renderer?.initTexture?.(texture);
+    }
+    scheduleCraterTextureWarm();
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 180 });
+  } else {
+    requestAnimationFrame(run);
+  }
+}
+
+/** Build exact crater texture variants during a strike's warning period. */
+export function prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy = false) {
+  if (!Array.isArray(impacts)) return;
+  for (const impact of impacts) {
+    if (!Number.isFinite(impact?.x) || !Number.isFinite(impact?.z)) continue;
+    const key = craterTextureKey(mapDef, impact.x, impact.z, heavy);
+    const pendingKey = `${craterTextureGeneration}:${key}`;
+    if (texCache.has(key) || pendingTextureKeys.has(pendingKey)) continue;
+    pendingTextureKeys.add(pendingKey);
+    craterTextureWarmQueue.push({
+      mapDef,
+      renderer,
+      x: impact.x,
+      z: impact.z,
+      heavy,
+      pendingKey,
+      generation: craterTextureGeneration,
+    });
+  }
+  scheduleCraterTextureWarm();
 }
 
 function deformVertexAt(pos, colors, i, x, z, r, r2, depth, style) {
@@ -456,6 +508,9 @@ function disposeCrater(entry) {
 }
 
 export function clearTerrainDamage() {
+  craterTextureGeneration += 1;
+  craterTextureWarmQueue.length = 0;
+  pendingTextureKeys.clear();
   while (craters.length) {
     disposeCrater(craters.shift());
   }

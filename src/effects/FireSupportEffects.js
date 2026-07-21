@@ -1,10 +1,37 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { addExplosionCrater } from '../world/TerrainDamage.js';
-import { spawnArtilleryExplosion, spawnShellExplosionLite } from './CombatEffects.js';
+import { addExplosionCrater, prewarmExplosionCraterTextures } from '../world/TerrainDamage.js';
+import {
+  prewarmArtilleryExplosionAssets,
+  spawnArtilleryExplosion,
+  spawnShellExplosionLite,
+} from './CombatEffects.js';
 
 const active = [];
 const MAX_ACTIVE_WARNINGS = 2;
+let artilleryAssetsWarmScheduled = false;
+let artilleryAssetsWarmed = false;
+
+function scheduleArtilleryAssetWarm(renderer) {
+  if (artilleryAssetsWarmed || artilleryAssetsWarmScheduled) return;
+  artilleryAssetsWarmScheduled = true;
+  const run = () => {
+    prewarmArtilleryExplosionAssets(renderer);
+    artilleryAssetsWarmed = true;
+    artilleryAssetsWarmScheduled = false;
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 140 });
+  } else {
+    requestAnimationFrame(run);
+  }
+}
+
+/** Prepare lazy procedural assets across the warning window, before shells land. */
+export function prewarmStrikeImpacts(renderer, mapDef, impacts, heavy = false) {
+  scheduleArtilleryAssetWarm(renderer);
+  prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy);
+}
 
 export function clearFireSupportEffects() {
   while (active.length) {
