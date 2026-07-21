@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from './Terrain.js';
 
 const craters = [];
-const MAX_CRATERS = 32;
 const texCache = new Map();
 const _pit = new THREE.Color();
 const _rim = new THREE.Color();
@@ -367,10 +366,6 @@ export function addTerrainCrater(scene, mapDef, x, z, opts = {}) {
   };
   craters.push(entry);
 
-  while (craters.length > MAX_CRATERS) {
-    disposeCrater(craters.shift());
-  }
-
   return entry;
 }
 
@@ -404,10 +399,6 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
     deformTerrain,
   };
   craters.push(entry);
-
-  while (craters.length > MAX_CRATERS) {
-    disposeCrater(craters.shift());
-  }
 
   return entry;
 }

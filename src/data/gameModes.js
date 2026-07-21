@@ -46,6 +46,9 @@ export const GAME_MODES = {
 /** Deployment budget per side in Battle Simulation mode. */
 export const LAST_STAND_SUPPLIES = 2000;
 
+/** Maximum living units deployed per side in Standard mode. */
+export const STANDARD_UNIT_LIMIT = 30;
+
 export const GAME_MODE_LIST = Object.values(GAME_MODES).filter((mode) => !mode.hidden);
 
 export const CLEARANCE_STYLES = {

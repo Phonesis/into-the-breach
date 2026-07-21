@@ -16,6 +16,8 @@ export class ProductionManager {
     getUnlockedUnits = null,
     getPlayerProductionUnits = null,
     isProductionBlocked = null,
+    getUnitLimit = null,
+    getDeployedUnitCount = null,
   }) {
     this.getFaction = getFaction;
     this.getTeam = getTeam;
@@ -23,6 +25,8 @@ export class ProductionManager {
     this.getUnlockedUnits = getUnlockedUnits;
     this.getPlayerProductionUnits = getPlayerProductionUnits;
     this.isProductionBlocked = isProductionBlocked;
+    this.getUnitLimit = getUnitLimit;
+    this.getDeployedUnitCount = getDeployedUnitCount;
     this.getScene = getScene;
     this.getMapDef = getMapDef;
     this.onSpawn = onSpawn;
@@ -51,6 +55,20 @@ export class ProductionManager {
     this.buildTimeMult = mult ?? 1;
   }
 
+  getUnitCapacity(team) {
+    const limit = this.getUnitLimit?.(team);
+    if (!Number.isFinite(limit)) return null;
+    const deployed = Math.max(0, this.getDeployedUnitCount?.(team) ?? 0);
+    const queued = this.queues[team]?.length ?? 0;
+    return { limit, deployed, queued, available: Math.max(0, limit - deployed - queued) };
+  }
+
+  isAtUnitLimit(team, { includeQueue = true } = {}) {
+    const capacity = this.getUnitCapacity(team);
+    if (!capacity) return false;
+    return capacity.deployed + (includeQueue ? capacity.queued : 0) >= capacity.limit;
+  }
+
   canEnqueue(team, unitType, resources, options = {}) {
     if (this.isProductionBlocked?.(team)) return false;
     const faction = this.getFaction(team);
@@ -69,6 +87,7 @@ export class ProductionManager {
     }
     const q = this.queues[team];
     if (q.length >= MAX_QUEUE) return false;
+    if (this.isAtUnitLimit(team)) return false;
     if (this.cheatMode && team === 'player') return true;
     const supply = typeof resources === 'number' ? resources : 0;
     return supply >= def.cost;
@@ -76,7 +95,7 @@ export class ProductionManager {
 
   canAffordAny(team, resources, options = {}) {
     if (this.cheatMode && team === 'player') {
-      return this.queues.player.length < MAX_QUEUE;
+      return this.queues.player.length < MAX_QUEUE && !this.isAtUnitLimit(team);
     }
     const faction = this.getFaction(team);
     if (!faction?.units) return false;
@@ -108,7 +127,7 @@ export class ProductionManager {
     }
     const faction = this.getFaction(team);
     const def = faction?.units[unitType];
-    if (!def || this.queues[team].length >= MAX_QUEUE) return false;
+    if (!def || this.queues[team].length >= MAX_QUEUE || this.isAtUnitLimit(team)) return false;
     const playerCheat = this.cheatMode && team === 'player';
     if (!playerCheat && !spendResources(def.cost)) return false;
 
@@ -127,6 +146,7 @@ export class ProductionManager {
 
     for (const team of ['player', 'enemy']) {
       if (this.isProductionBlocked?.(team)) continue;
+      if (this.isAtUnitLimit(team, { includeQueue: false })) continue;
       const q = this.queues[team];
       if (q.length === 0) continue;
 

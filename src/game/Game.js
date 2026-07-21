@@ -20,6 +20,7 @@ import {
   isTowerDefenseMode,
   isLastStandMode,
   LAST_STAND_SUPPLIES,
+  STANDARD_UNIT_LIMIT,
   TD_STARTING_POINTS,
 
   getProducibleUnits,
@@ -84,18 +85,6 @@ import {
   baseBuildingRequiresLargeMap,
 } from '../data/baseBuildings.js';
 
-const TD_ENEMY_CORPSE_LINGER_SEC = 28;
-const TD_ENEMY_WRECK_LINGER_SEC = 42;
-const INFANTRY_DEBRIS_TYPES = new Set([
-  'infantry',
-  'paratrooper',
-  'machineGun',
-  'sniper',
-  'mortar',
-  'medic',
-  'engineer',
-  'vehicleCrew',
-]);
 const DESTROYED_GUN_BLAST_TYPES = new Set(['artillery', 'antiTankGun']);
 
 function shellCraterTier(def) {
@@ -303,15 +292,13 @@ export class Game {
     this._tabHidden = false;
     this._rafActive = false;
     this._postMatchRenderAccum = 0;
-    this._debrisPerformance = {
+    this._renderPerformance = {
       frameTimeEma: 1 / 60,
       lowFpsFor: 0,
-      cullCooldown: 0,
       samples: 0,
       baselineFps: 60,
       highFpsFor: 0,
       qualityCooldown: 0,
-      budgetCheckAccum: 0,
     };
     this.viewingBattlefield = false;
     this._fireSupportUiAccum = 0;
@@ -376,6 +363,9 @@ export class Game {
           : team === PLAYER_TEAM
             ? isPlayerStagingPhase(this)
             : isEnemyStagingPhase(this),
+      getUnitLimit: () => (this.gameMode === 'campaign' ? STANDARD_UNIT_LIMIT : null),
+      getDeployedUnitCount: (team) =>
+        this.units.reduce((count, unit) => count + (!unit.dead && unit.team === team ? 1 : 0), 0),
       getSpawnPos: (team, unitType) => {
         if (isBaseBuildingCampaign(this)) {
           const need = getSpawnBuildingForUnit(unitType);
@@ -1170,14 +1160,12 @@ export class Game {
     this._deployUiAccum = 0;
     this._rosterUiAccum = 0;
     this._emptyFieldHandled = false;
-    this._debrisPerformance.frameTimeEma = 1 / 60;
-    this._debrisPerformance.lowFpsFor = 0;
-    this._debrisPerformance.cullCooldown = 0;
-    this._debrisPerformance.samples = 0;
-    this._debrisPerformance.baselineFps = 60;
-    this._debrisPerformance.highFpsFor = 0;
-    this._debrisPerformance.qualityCooldown = 0;
-    this._debrisPerformance.budgetCheckAccum = 0;
+    this._renderPerformance.frameTimeEma = 1 / 60;
+    this._renderPerformance.lowFpsFor = 0;
+    this._renderPerformance.samples = 0;
+    this._renderPerformance.baselineFps = 60;
+    this._renderPerformance.highFpsFor = 0;
+    this._renderPerformance.qualityCooldown = 0;
     this._setRenderPixelRatio(this._nativePixelRatio);
     if (!restoreSnapshot) {
       this.matchTime = 0;
@@ -3494,7 +3482,7 @@ export class Game {
           if (hasCorpses) updateWreckEffects(dt, this.camera);
           this.cleanupDead(dt);
         }
-        this._updateAdaptiveDebrisCleanup(rawFrameDt);
+        this._updateAdaptiveRenderQuality(rawFrameDt);
       }
 
     if (viewActive) {
@@ -3513,17 +3501,15 @@ export class Game {
     }
   }
 
-  _updateAdaptiveDebrisCleanup(frameDt) {
-    const perf = this._debrisPerformance;
+  _updateAdaptiveRenderQuality(frameDt) {
+    const perf = this._renderPerformance;
     if (!perf || this.paused || this.matchTime < 20) return;
 
     // Ignore isolated stalls (asset upload, window movement, debugger pauses).
     const sample = Math.min(frameDt, 0.1);
     perf.frameTimeEma = perf.frameTimeEma * 0.94 + sample * 0.06;
     perf.samples += 1;
-    perf.cullCooldown = Math.max(0, perf.cullCooldown - frameDt);
     perf.qualityCooldown = Math.max(0, perf.qualityCooldown - frameDt);
-    perf.budgetCheckAccum += frameDt;
     const fps = 1 / Math.max(perf.frameTimeEma, 1 / 120);
 
     // Retina fill-rate and the sun-shadow pass dominate once a battle grows.
@@ -3535,25 +3521,6 @@ export class Game {
     let desiredPixelRatio = Math.min(this._nativePixelRatio, loadPixelRatioCap);
     if (desiredPixelRatio < this._renderPixelRatio && perf.qualityCooldown <= 0) {
       if (this._setRenderPixelRatio(desiredPixelRatio)) perf.qualityCooldown = 2;
-    }
-
-    // Long Standard games otherwise retain an unlimited history of rendered
-    // corpses. Keep battlefield evidence, but tighten the allowance while a
-    // large living army is still consuming the render budget.
-    if (perf.budgetCheckAccum >= 2) {
-      perf.budgetCheckAccum = 0;
-      const retainedDebris = liveCount >= 55 ? 18 : liveCount >= 40 ? 24 : 30;
-      let renderedDebris = 0;
-      for (const unit of this.units) {
-        if (unit.dead && !unit._recoverableWreck && unit.mesh?.parent) renderedDebris += 1;
-      }
-      if (renderedDebris > retainedDebris) {
-        this._cullBattlefieldDebris(
-          Math.min(12, renderedDebris - retainedDebris),
-          fps,
-          retainedDebris
-        );
-      }
     }
 
     if (perf.samples < 90) return;
@@ -3588,110 +3555,20 @@ export class Game {
       perf.highFpsFor = 0;
     }
 
-    if (perf.lowFpsFor < 2.5 || perf.cullCooldown > 0) return;
-    const batchSize = fps < 28 ? 14 : fps < 35 ? 9 : 5;
-    const removed = this._cullBattlefieldDebris(batchSize, fps);
-    perf.lowFpsFor = removed > 0 ? 0 : Math.min(perf.lowFpsFor, 2.5);
-    perf.cullCooldown = removed > 0 ? 1.25 : 3;
   }
 
-  _cullBattlefieldDebris(batchSize, fps, retainedMinimumOverride = null) {
-    const debris = this.units.filter(
-      (u) =>
-        u.dead &&
-        !u._recoverableWreck &&
-        u._lossRecorded &&
-        u.mesh?.parent &&
-        u.mesh.userData?.deathVisualApplied &&
-        this.matchTime - (u._deathAt ?? this.matchTime) >= 12
-    );
-
-    // Keep a baseline amount of battlefield history, unless performance has
-    // become severe. Repairable wrecks are never part of this budget.
-    const retainedMinimum = retainedMinimumOverride ?? (fps < 28 ? 18 : 30);
-    const removalCount = Math.min(batchSize, Math.max(0, debris.length - retainedMinimum));
-    if (removalCount <= 0) return 0;
-
-    debris.sort((a, b) => {
-      const aBody = INFANTRY_DEBRIS_TYPES.has(a.def?.type) ? 0 : 1;
-      const bBody = INFANTRY_DEBRIS_TYPES.has(b.def?.type) ? 0 : 1;
-      if (aBody !== bBody) return aBody - bBody;
-      const ageOrder = (a._deathAt ?? 0) - (b._deathAt ?? 0);
-      if (Math.abs(ageOrder) > 3) return ageOrder;
-      const aDist = a.position.distanceToSquared(this.cameraTarget);
-      const bDist = b.position.distanceToSquared(this.cameraTarget);
-      return bDist - aDist;
-    });
-
-    const removedIds = new Set();
-    for (const u of debris.slice(0, removalCount)) {
-      removeVehicleWreckCover(this.coverSystem, u);
-      if (u.wreckFire) {
-        removeWreckEffect(u.wreckFire);
-        u.wreckFire = null;
-      }
-      u.dispose(this.scene);
-      removedIds.add(u.id);
-    }
-    if (!removedIds.size) return 0;
-    this.units = this.units.filter((u) => !removedIds.has(u.id));
-    this._rebuildUnitCaches();
-    return removedIds.size;
-  }
-
-  cleanupDead(dt) {
+  cleanupDead() {
     if (this.gameOver) return;
 
     let cachesDirty = false;
-    const unitsBefore = this.units.length;
-    const towerDefenseCleanup = !!this.towerDefense;
-
     for (const u of this.units) {
       if (!u.dead) continue;
       if (u._deathAt == null) u._deathAt = this.matchTime;
       if (!u._wreckCoverRegistered) addVehicleWreckCover(this.coverSystem, u);
-      if (
-        towerDefenseCleanup &&
-        !u._recoverableWreck &&
-        u.team === ENEMY_TEAM &&
-        !u._tdLingerCapped
-      ) {
-        u.corpseTimeLeft = Math.min(
-          u.corpseTimeLeft || TD_ENEMY_CORPSE_LINGER_SEC,
-          TD_ENEMY_CORPSE_LINGER_SEC
-        );
-        u.wreckTimeLeft = Math.min(
-          u.wreckTimeLeft || TD_ENEMY_WRECK_LINGER_SEC,
-          TD_ENEMY_WRECK_LINGER_SEC
-        );
-        u._tdLingerCapped = true;
-      }
-      if (towerDefenseCleanup && !u._recoverableWreck) {
-        if (u.corpseTimeLeft > 0) u.corpseTimeLeft = Math.max(0, u.corpseTimeLeft - dt);
-        if (u.wreckTimeLeft > 0) u.wreckTimeLeft = Math.max(0, u.wreckTimeLeft - dt);
-      }
       if (!u._lossRecorded) {
         if (this.towerDefense && u.team === ENEMY_TEAM) rewardTowerDefenseKill(this, u);
         this.battleStats.recordUnit(u);
       }
-      const corpseLingerExpired =
-        (u.corpseTimeLeft ?? 0) <= 0 && (u.wreckTimeLeft ?? 0) <= 0;
-      if (
-        towerDefenseCleanup &&
-        !u._recoverableWreck &&
-        corpseLingerExpired &&
-        u.mesh?.userData?.deathVisualApplied
-      ) {
-        removeVehicleWreckCover(this.coverSystem, u);
-        if (u.wreckFire) {
-          removeWreckEffect(u.wreckFire);
-          u.wreckFire = null;
-        }
-        u.dispose(this.scene);
-        cachesDirty = true;
-        continue;
-      }
-
       if (!u.mesh?.parent) continue;
 
       if (!u.mesh.userData?.deathVisualApplied) {
@@ -3714,14 +3591,6 @@ export class Game {
         }
       }
     }
-    this.units = this.units.filter(
-      (u) =>
-        !u.dead ||
-        u._recoverableWreck ||
-        !towerDefenseCleanup ||
-        (((u.corpseTimeLeft ?? 0) > 0 || (u.wreckTimeLeft ?? 0) > 0) && u.mesh?.parent)
-    );
-    if (this.units.length !== unitsBefore) cachesDirty = true;
     if (cachesDirty) this._rebuildUnitCaches();
 
     for (const h of this.hqs) {

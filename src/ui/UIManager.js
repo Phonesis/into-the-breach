@@ -5,6 +5,7 @@ import {
   GAME_MODE_LIST,
   ASSAULT_ROLE_LIST,
   CLEARANCE_STYLE_LIST,
+  STANDARD_UNIT_LIMIT,
   getProducibleUnits,
 } from '../data/gameModes.js';
 import { DIFFICULTY_LIST, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
@@ -3352,12 +3353,15 @@ export class UIManager {
     this.setCheatHud(game.cheatMode);
 
     const staging = isPlayerStagingPhase(game);
+    const atUnitLimit = game.production.isAtUnitLimit('player');
     const qEl = this.root.querySelector('#queue-text');
     if (qEl) {
       if (staging) {
         qEl.textContent = this._hudStandardCampaign
           ? 'Quiet sector — launch battle to reinforce · Victory: destroy enemy HQ'
           : 'Quiet sector — launch battle to queue reinforcements';
+      } else if (atUnitLimit && queue.length === 0) {
+        qEl.textContent = `Unit limit reached — ${STANDARD_UNIT_LIMIT}/${STANDARD_UNIT_LIMIT} deployed`;
       } else if (progress) {
         const pct =
           progress.total <= 0
@@ -3405,6 +3409,8 @@ export class UIManager {
         btn.title = buildingName
           ? `Requires ${buildingName} — click that structure on the map`
           : `${def.name} — locked until required structure is built`;
+      } else if (atUnitLimit) {
+        btn.title = `${def.name} — ${STANDARD_UNIT_LIMIT}-unit limit reached`;
       } else {
         btn.title = `${def.name} — ${def.designation}`;
       }
