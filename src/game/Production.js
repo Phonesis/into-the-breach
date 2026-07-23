@@ -1,5 +1,6 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { resolveUnitSpawnPosition } from './Spawner.js';
 
 const MAX_QUEUE = 4;
 const SPAWN_RING_DIST = 11;
@@ -11,6 +12,7 @@ export class ProductionManager {
     getSpawnPos,
     getScene,
     getMapDef,
+    getScenery = null,
     onSpawn,
     onQueueChange,
     getUnlockedUnits = null,
@@ -29,6 +31,7 @@ export class ProductionManager {
     this.getDeployedUnitCount = getDeployedUnitCount;
     this.getScene = getScene;
     this.getMapDef = getMapDef;
+    this.getScenery = getScenery;
     this.onSpawn = onSpawn;
     this.onQueueChange = onQueueChange;
     this.queues = { player: [], enemy: [] };
@@ -180,10 +183,21 @@ export class ProductionManager {
     const lane = (this.queues[team]?.length ?? 0) % 4;
     const dist = SPAWN_RING_DIST + lane * 2.5;
 
-    const position = {
+    const requestedPosition = {
       x: base.x + Math.cos(angle) * dist,
       z: base.z + Math.sin(angle) * dist,
     };
+    const position = resolveUnitSpawnPosition(
+      def,
+      requestedPosition.x,
+      requestedPosition.z,
+      this.getScenery?.(),
+      mapDef
+    );
+    if (!position) {
+      console.warn('Production spawn skipped: no building-free vehicle position', { team, unitType });
+      return null;
+    }
 
     const unit = new Unit({ def, faction, team, position, scene });
     unit._mapDef = mapDef;

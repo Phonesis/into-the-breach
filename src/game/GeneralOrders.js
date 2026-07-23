@@ -115,10 +115,14 @@ export class GeneralOrdersManager {
   }
 
   _applyFullRetreat(hq) {
+    const pathOpts = {
+      mapDef: this.game.mapDef,
+      scenery: this.game.scenery,
+    };
     for (const unit of this._playerUnits()) {
       if (!canReceiveOrder(unit)) continue;
       if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
-      startRetreat(unit, hq);
+      startRetreat(unit, hq, pathOpts);
     }
   }
 
@@ -133,15 +137,23 @@ export class GeneralOrdersManager {
   }
 
   _enforceFullRetreat(hq) {
+    const pathOpts = {
+      mapDef: this.game.mapDef,
+      scenery: this.game.scenery,
+    };
     for (const unit of this._playerUnits()) {
       if (!canReceiveOrder(unit)) continue;
       if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
       if (!unit.retreating) {
-        startRetreat(unit, hq);
+        startRetreat(unit, hq, pathOpts);
         continue;
       }
       unit.clearAttackOrder?.();
-      unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+      unit._bunkerEntryId = null;
+      // Keep an active detour; only re-seed if the path was lost.
+      if (!unit.moveTarget && !unit._movePath?.length) {
+        startRetreat(unit, hq, pathOpts);
+      }
     }
   }
 }

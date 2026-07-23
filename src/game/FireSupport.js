@@ -45,7 +45,6 @@ export class FireSupportManager {
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
-    this._sceneryStrikeCount = 0;
   }
 
   get ownerFaction() {
@@ -72,7 +71,6 @@ export class FireSupportManager {
     this.pending = null;
     this.cooldowns = makeCooldowns();
     this.events = [];
-    this._sceneryStrikeCount = 0;
     this.clearPreview();
   }
 
@@ -267,7 +265,7 @@ export class FireSupportManager {
           at: t,
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'strafe', this.game._terrainMesh);
-            this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15, 'machineGun');
+            this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15, 'strafe');
           },
         });
       }
@@ -432,10 +430,15 @@ export class FireSupportManager {
       h.takeDamage(dmg);
     }
 
-    this._sceneryStrikeCount++;
-    if (this._sceneryStrikeCount % 4 === 0) {
-      this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * 1.1);
-    }
+    const strafe = attackerType === 'strafe';
+    // Forward every visible impact so a shell that lands on a roof always leaves
+    // a matching mark. The old path forwarded one in four impacts at 1.1x damage;
+    // 0.275x per impact preserves that structural damage budget.
+    this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * 0.275, {
+      weaponType: attackerType,
+      impact: { x, z },
+      explosive: !strafe,
+    });
   }
 
   update(dt) {

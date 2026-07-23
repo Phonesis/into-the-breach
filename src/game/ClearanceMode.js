@@ -1,5 +1,6 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { resolveUnitSpawnPosition } from './Spawner.js';
 
 /** Defender layout scaled by difficulty.enemyArmyMult in spawn. */
 export const CLEARANCE_DEFENDER_LAYOUT = [
@@ -155,10 +156,18 @@ function spawnReinforcementPackage(game, team, types, wave) {
     if (!def) continue;
     const lateral = (i - (types.length - 1) / 2) * 4.6;
     const depth = 3 + i * 1.8;
-    const position = {
+    const requestedPosition = {
       x: base.x + sideX * lateral - facingX * depth,
       z: base.z + sideZ * lateral - facingZ * depth,
     };
+    const position = resolveUnitSpawnPosition(
+      def,
+      requestedPosition.x,
+      requestedPosition.z,
+      game.scenery,
+      game.mapDef
+    );
+    if (!position) continue;
     const unit = new Unit({ def, faction, team, position, scene: game.scene });
     unit._mapDef = game.mapDef;
     unit.position.y = sampleTerrainHeight(position.x, position.z, game.mapDef);
@@ -339,6 +348,7 @@ export function spawnClearanceDefenders({
   capturePoints,
   enemyArmyMult = 1,
   attackerUnits = [],
+  scenery = null,
 }) {
   let layout = CLEARANCE_DEFENDER_LAYOUT.map((s) => ({
     ...s,
@@ -359,7 +369,7 @@ export function spawnClearanceDefenders({
       const anchor = positions[posIdx % positions.length];
       posIdx++;
       const jitter = 2.2;
-      const position = {
+      let position = {
         x: anchor.x + (Math.random() - 0.5) * jitter,
         z: anchor.z + (Math.random() - 0.5) * jitter,
       };
@@ -391,6 +401,9 @@ export function spawnClearanceDefenders({
           position.z = nextZ;
         }
       }
+
+      position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef);
+      if (!position) continue;
 
       const unit = new Unit({ def, faction, team, position, scene });
       unit.defensiveHold = {

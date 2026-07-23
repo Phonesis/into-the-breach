@@ -25,6 +25,7 @@ export class TargetIndicators {
     this.hoverTarget = null;
     this.engagedTargets = new Set();
     this._hqHoverRing = null;
+    this._sceneryHoverRing = null;
     this._linePool = [];
     this._lineMat = new THREE.LineBasicMaterial({
       color: 0xff6644,
@@ -60,6 +61,12 @@ export class TargetIndicators {
       this._hqHoverRing.material.dispose();
       this._hqHoverRing = null;
     }
+    if (this._sceneryHoverRing) {
+      this.scene.remove(this._sceneryHoverRing);
+      this._sceneryHoverRing.geometry.dispose();
+      this._sceneryHoverRing.material.dispose();
+      this._sceneryHoverRing = null;
+    }
     for (const u of this._lastUnits ?? []) {
       if (u.mesh) setTargetHighlight(u.mesh, false);
     }
@@ -74,13 +81,15 @@ export class TargetIndicators {
   }
 
   _clearHoverVisual(target) {
-    if (!target || target.dead) return;
-    if (isSceneryTarget(target) && target.entry && !target.entry.destroyed) {
-      const ratio = target.entry.maxHp > 0 ? target.entry.hp / target.entry.maxHp : 1;
-      const s = 0.82 + ratio * 0.18;
-      target.mesh?.scale.set(s, s * (0.88 + ratio * 0.12), s);
+    if (!target) return;
+    if (isSceneryTarget(target)) {
+      if (target.entry && !target.entry.destroyed && target.mesh && target.entry.baseScale) {
+        target.mesh.scale.copy(target.entry.baseScale);
+      }
+      if (this._sceneryHoverRing) this._sceneryHoverRing.visible = false;
       return;
     }
+    if (target.dead) return;
     if (target.mesh && target.def) {
       if (!this.engagedTargets.has(target)) setTargetHighlight(target.mesh, false);
     } else if (target.mesh && this._hqHoverRing && target === this.hoverTarget) {
@@ -91,7 +100,29 @@ export class TargetIndicators {
   _applyHoverVisual(target, engaged) {
     if (!target || target.dead) return;
     if (isSceneryTarget(target) && target.mesh) {
-      target.mesh.scale.setScalar(1.02);
+      if (target.entry?.baseScale) target.mesh.scale.copy(target.entry.baseScale);
+      if (!this._sceneryHoverRing) {
+        const geo = new THREE.RingGeometry(0.84, 1, 40);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xff5533,
+          transparent: true,
+          opacity: 0.86,
+          side: THREE.DoubleSide,
+          depthTest: false,
+        });
+        this._sceneryHoverRing = new THREE.Mesh(geo, mat);
+        this._sceneryHoverRing.rotation.x = -Math.PI / 2;
+        this._sceneryHoverRing.renderOrder = 10;
+        this.scene.add(this._sceneryHoverRing);
+      }
+      const radius = Math.max(1.5, target.entry?.radius ?? target.hitRadius ?? 2.5);
+      this._sceneryHoverRing.position.set(
+        target.position.x,
+        (target.position.y ?? target.mesh.position.y ?? 0) + 0.12,
+        target.position.z
+      );
+      this._sceneryHoverRing.scale.setScalar(radius);
+      this._sceneryHoverRing.visible = true;
       return;
     }
     if (target.mesh && target.def) {

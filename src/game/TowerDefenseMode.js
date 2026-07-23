@@ -1,6 +1,7 @@
 import { sounds } from '../audio/SoundManager.js';
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { resolveUnitSpawnPosition } from './Spawner.js';
 import { repositionFrontlineVisual } from '../world/Frontline.js';
 import { getFrontlineDef } from './AssaultMode.js';
 import {
@@ -484,19 +485,27 @@ function spawnWaveUnit(game, type) {
   const profile = td?.assaultProfile ?? getWaveAssaultProfile(td?.wave ?? 1);
   const sector = sectors[td?.spawned % sectors.length];
   const spawn = computeSpawnForSector(game, sector, profile);
+  const position = resolveUnitSpawnPosition(
+    def,
+    spawn.x,
+    spawn.z,
+    game.scenery,
+    game.mapDef
+  );
+  if (!position) return;
 
   const unit = new Unit({
     def,
     faction: game.enemyFaction,
     team: ENEMY,
-    position: { x: spawn.x, z: spawn.z },
+    position,
     scene: game.scene,
   });
   unit._mapDef = game.mapDef;
   unit._tdAttacker = true;
   unit._tdFrontlineTarget = { x: spawn.targetX, z: spawn.targetZ };
   unit._tdSpawnSector = spawn.sectorLabel;
-  unit.position.y = sampleTerrainHeight(spawn.x, spawn.z, game.mapDef);
+  unit.position.y = sampleTerrainHeight(position.x, position.z, game.mapDef);
   unit.moveTarget = { x: spawn.targetX, z: spawn.targetZ };
   game.units.push(unit);
   game._rebuildUnitCaches();

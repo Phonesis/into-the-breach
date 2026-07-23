@@ -41,6 +41,7 @@ function noise2(x, y, seed) {
 
 function terrainKind(mapDef) {
   const t = mapDef?.terrain ?? 'bocage';
+  if (t === 'urban') return 'urban';
   if (t === 'desert') return 'desert';
   if (t === 'steppe') return 'steppe';
   if (t === 'hills') return 'hills';
@@ -49,6 +50,17 @@ function terrainKind(mapDef) {
 
 function craterStyle(mapDef) {
   const kind = terrainKind(mapDef);
+  if (kind === 'urban') {
+    return {
+      kind,
+      pit: '#171817',
+      wall: '#292824',
+      rim: '#706b61',
+      outer: '#393a36',
+      grass: null,
+      streak: '#9a8e7c',
+    };
+  }
   if (kind === 'desert') {
     return {
       kind,
@@ -115,12 +127,20 @@ function paintCraterTexture(mapDef, seed, heavy) {
     for (let x = 0; x < size; x++) {
       const dx = (x - cx) / cx;
       const dy = (y - cy) / cy;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const radialDistance = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+      const urbanEdge =
+        style.kind === 'urban'
+          ? 0.88 +
+            Math.sin(angle * 7 + seed * 0.17) * 0.055 +
+            Math.sin(angle * 13 - seed * 0.11) * 0.035 +
+            (noise2(Math.cos(angle) * 5, Math.sin(angle) * 5, seed + 29) - 0.5) * 0.08
+          : 1;
+      const dist = radialDistance / urbanEdge;
       if (dist > 1.02) continue;
 
       const n = noise2(x * 0.08, y * 0.08, seed);
       const n2 = noise2(x * 0.19, y * 0.15, seed + 11);
-      const angle = Math.atan2(dy, dx);
       const streak = 0.5 + 0.5 * Math.sin(angle * (style.kind === 'desert' ? 7 : 5) + n * 4);
 
       let colorA = palette.pit;
@@ -147,6 +167,10 @@ function paintCraterTexture(mapDef, seed, heavy) {
           colorB = palette.outer;
           colorMix = t * 0.65;
           alpha = (0.72 - t * 0.35) * (0.55 + streak * 0.45);
+        } else if (style.kind === 'urban') {
+          colorB = palette.outer;
+          colorMix = t * 0.82;
+          alpha = (0.74 - t * 0.48) * (0.68 + n * 0.22);
         } else {
           colorB = palette.grass;
           colorMix = t;
@@ -159,6 +183,10 @@ function paintCraterTexture(mapDef, seed, heavy) {
           colorB = palette.streak;
           colorMix = streak * 0.5;
           alpha = (0.38 - t * 0.34) * (0.4 + streak * 0.35);
+        } else if (style.kind === 'urban') {
+          colorB = palette.streak;
+          colorMix = Math.max(0, streak - 0.58) * 0.42;
+          alpha = (0.24 - t * 0.22) * (0.45 + n * 0.28);
         } else {
           colorB = palette.grass;
           colorMix = 0.35 + t * 0.4;
@@ -170,7 +198,7 @@ function paintCraterTexture(mapDef, seed, heavy) {
       let green = colorA[1] + (colorB[1] - colorA[1]) * colorMix;
       let blue = colorA[2] + (colorB[2] - colorA[2]) * colorMix;
 
-      if (style.kind !== 'desert' && dist > 0.48 && dist < 0.9 && n2 > 0.62) {
+      if (style.grass && dist > 0.48 && dist < 0.9 && n2 > 0.62) {
         red += (palette.grass[0] - red) * 0.35;
         green += (palette.grass[1] - green) * 0.35;
         blue += (palette.grass[2] - blue) * 0.35;
@@ -193,7 +221,46 @@ function paintCraterTexture(mapDef, seed, heavy) {
   }
   ctx.putImageData(image, 0, 0);
 
-  if (style.kind === 'desert') {
+  if (style.kind === 'urban') {
+    // Fractured asphalt/cobbles: radial cracks and pale angular road fragments
+    // replace the soft grass ring used on rural maps.
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < (heavy ? 23 : 16); i++) {
+      const ang = (i / (heavy ? 23 : 16)) * Math.PI * 2 + seed * 0.071;
+      const start = size * (0.2 + seededCraterNoise(i, seed, 1) * 0.08);
+      const end = size * (0.37 + seededCraterNoise(i, seed, 2) * 0.1);
+      const bend = (seededCraterNoise(i, seed, 3) - 0.5) * 0.2;
+      ctx.strokeStyle = `rgba(12,13,12,${0.34 + seededCraterNoise(i, seed, 4) * 0.24})`;
+      ctx.lineWidth = 0.9 + seededCraterNoise(i, seed, 5) * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * start, cy + Math.sin(ang) * start);
+      ctx.lineTo(
+        cx + Math.cos(ang + bend) * (start + end) * 0.52,
+        cy + Math.sin(ang + bend) * (start + end) * 0.52
+      );
+      ctx.lineTo(cx + Math.cos(ang - bend * 0.45) * end, cy + Math.sin(ang - bend * 0.45) * end);
+      ctx.stroke();
+    }
+    for (let i = 0; i < (heavy ? 58 : 38); i++) {
+      const ang = seededCraterNoise(i, seed, 6) * Math.PI * 2;
+      const rad = size * (0.2 + seededCraterNoise(i, seed, 7) * 0.21);
+      const x = cx + Math.cos(ang) * rad;
+      const y = cy + Math.sin(ang) * rad;
+      const width = 1.8 + seededCraterNoise(i, seed, 8) * 5.2;
+      const height = 1.2 + seededCraterNoise(i, seed, 9) * 3.4;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang + seededCraterNoise(i, seed, 10));
+      ctx.fillStyle = i % 4 === 0
+        ? 'rgba(183,169,145,0.6)'
+        : i % 3 === 0
+          ? 'rgba(117,105,88,0.55)'
+          : 'rgba(67,64,58,0.58)';
+      ctx.fillRect(-width * 0.5, -height * 0.5, width, height);
+      ctx.restore();
+    }
+  } else if (style.kind === 'desert') {
     ctx.globalCompositeOperation = 'source-over';
     for (let i = 0; i < (heavy ? 16 : 10); i++) {
       const ang = (i / 10) * Math.PI * 2 + seed * 0.1;
@@ -232,6 +299,10 @@ function paintCraterTexture(mapDef, seed, heavy) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   return tex;
+}
+
+function seededCraterNoise(index, seed, salt) {
+  return noise2(index * 0.73 + salt * 0.19, seed * 0.013 + salt, seed + salt * 17);
 }
 
 function craterTextureKey(mapDef, x, z, heavy) {
@@ -402,7 +473,11 @@ export function addTerrainCrater(scene, mapDef, x, z, opts = {}) {
   if (now - lastCraterAt < minGap) return null;
   lastCraterAt = now;
 
-  const radius = opts.radius ?? tier?.radius ?? 3.5;
+  const radiusBase = opts.radius ?? tier?.radius ?? 3.5;
+  const radius =
+    terrainKind(mapDef) === 'urban' && !opts.radiusIsFinal
+      ? radiusBase * 0.74
+      : radiusBase;
   const heavy = opts.heavy ?? tier?.heavy ?? false;
   const y = sampleTerrainHeight(x, z, mapDef);
   const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
@@ -429,12 +504,17 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
   if (now - lastCraterAt < minGap) return null;
   lastCraterAt = now;
 
+  const radiusBase = opts.radius ?? profile.radius;
+  const radius =
+    terrainKind(mapDef) === 'urban' && !opts.radiusIsFinal
+      ? radiusBase * 0.74
+      : radiusBase;
   const deformTerrain = opts.deformTerrain !== false;
   if (terrainMesh && deformTerrain) {
-    deformTerrainAt(terrainMesh, mapDef, x, z, profile.radius, profile.depth);
+    const depth = terrainKind(mapDef) === 'urban' ? profile.depth * 0.7 : profile.depth;
+    deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth);
   }
 
-  const radius = opts.radius ?? profile.radius;
   const heavy = opts.heavy ?? profile.heavy;
   const y = sampleTerrainHeight(x, z, mapDef);
   const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
@@ -476,6 +556,7 @@ export function restoreTerrainDamage(scene, mapDef, terrainMesh, savedCraters) {
         minGap: 0,
         radius: crater.radius,
         heavy: crater.heavy,
+        radiusIsFinal: true,
       });
       continue;
     }
@@ -491,6 +572,7 @@ export function restoreTerrainDamage(scene, mapDef, terrainMesh, savedCraters) {
         radius: crater.radius,
         heavy: crater.heavy,
         deformTerrain: crater.deformTerrain !== false,
+        radiusIsFinal: true,
       }
     );
   }

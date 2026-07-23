@@ -20,6 +20,8 @@ const EXPLOSION_EVICTABLE_TYPES = new Set([
   'armorRicochet',
   'tankMuzzle',
   'collapseDust',
+  'buildingDamageDust',
+  'waterImpact',
   'smokeShellImpact',
 ]);
 const active = [];
@@ -516,6 +518,40 @@ export function updateCombatEffects(dt) {
       }
       fx.ring.scale.multiplyScalar(1 + dt * 2.2);
       fx.ringMaterial.opacity = 0.28 * fade * fade;
+    } else if (fx.type === 'buildingDamageDust') {
+      const t = 1 - Math.max(0, fx.life / fx.maxLife);
+      const fade = 1 - THREE.MathUtils.smoothstep(t, 0.38, 1);
+      for (const puff of fx.puffs) {
+        puff.velocity.multiplyScalar(Math.max(0, 1 - dt * 0.82));
+        puff.mesh.position.addScaledVector(puff.velocity, dt);
+        puff.mesh.position.y += dt * puff.rise;
+        puff.mesh.scale.multiplyScalar(1 + dt * puff.growth);
+        puff.material.opacity = puff.opacity * fade;
+      }
+    } else if (fx.type === 'waterImpact') {
+      const t = THREE.MathUtils.clamp(1 - fx.life / fx.maxLife, 0, 1);
+      const plumeArc = Math.sin(Math.PI * Math.min(1, t * 1.08));
+      fx.plume.scale.set(0.82 + t * 0.62, 0.08 + plumeArc * 1.32, 0.82 + t * 0.62);
+      fx.plume.position.y = fx.baseY + fx.plumeHeight * fx.plume.scale.y * 0.5;
+      fx.plumeMaterial.opacity = 0.56 * (1 - THREE.MathUtils.smoothstep(t, 0.5, 1));
+      for (const jet of fx.jets) {
+        jet.mesh.scale.y = 0.06 + plumeArc * jet.heightScale;
+        jet.mesh.position.y = fx.baseY + jet.height * jet.mesh.scale.y * 0.5;
+        jet.material.opacity = 0.58 * (1 - THREE.MathUtils.smoothstep(t, 0.44, 1));
+      }
+      fx.crown.scale.setScalar(1 + t * 4.2);
+      fx.crownMaterial.opacity = 0.62 * (1 - t) * (1 - t);
+      for (const drop of fx.droplets) {
+        drop.velocity.y -= 9.2 * dt;
+        drop.mesh.position.addScaledVector(drop.velocity, dt);
+        if (drop.mesh.position.y <= fx.baseY) drop.mesh.visible = false;
+        drop.material.opacity = Math.max(0, 0.82 * (1 - t));
+      }
+      for (const mist of fx.mist) {
+        mist.mesh.position.addScaledVector(mist.velocity, dt);
+        mist.mesh.scale.multiplyScalar(1 + dt * 1.9);
+        mist.material.opacity = mist.opacity * (1 - t) * (1 - t);
+      }
     } else if (fx.type === 'smokeShellImpact') {
       fx.elapsed += dt;
       const t = THREE.MathUtils.clamp(fx.elapsed / fx.maxLife, 0, 1);
@@ -1090,6 +1126,225 @@ export function spawnCollapseDust(scene, pos, radius = 2.5, direction = null) {
     ring,
     ringMaterial,
     geometries: [geometry, ringGeometry],
+    materials,
+    life,
+    maxLife: life,
+  });
+  return true;
+}
+
+/** Lingering masonry dust from a shell breach or a collapsing upper storey. */
+export function spawnBuildingDamageDust(
+  scene,
+  pos,
+  radius = 1,
+  direction = null,
+  { heavy = false } = {}
+) {
+  if (!scene || !canSpawnEffect()) return false;
+  const group = new THREE.Group();
+  group.name = 'buildingDamageDust';
+  group.position.copy(toVec3(pos));
+  const geometry = new THREE.SphereGeometry(1, 7, 5);
+  const materials = [];
+  const puffs = [];
+  const dir = new THREE.Vector3(direction?.x ?? 0, 0, direction?.z ?? 0);
+  if (dir.lengthSq() > 0.001) dir.normalize();
+  const count = heavy ? 11 : 7;
+
+  for (let i = 0; i < count; i++) {
+    const outward = new THREE.Vector3(
+      dir.x + (Math.random() - 0.5) * 0.95,
+      0,
+      dir.z + (Math.random() - 0.5) * 0.95
+    );
+    if (outward.lengthSq() < 0.01) outward.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+    outward.normalize();
+    const material = new THREE.MeshBasicMaterial({
+      color: i % 4 === 0 ? 0x514c45 : i % 3 === 0 ? 0x8f826e : i % 3 === 1 ? 0x6f685c : 0xa0937d,
+      transparent: true,
+      opacity: (heavy ? 0.28 : 0.38) + Math.random() * (heavy ? 0.1 : 0.14),
+      depthWrite: false,
+      depthTest: heavy,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(
+      (Math.random() - 0.5) * radius * 0.45,
+      (Math.random() - 0.38) * radius * 0.42,
+      (Math.random() - 0.5) * radius * 0.45
+    );
+    const base = radius * (heavy ? 0.28 : 0.32) * (0.8 + Math.random() * 0.65);
+    mesh.scale.set(base * (1.15 + Math.random() * 0.55), base, base * 0.85);
+    group.add(mesh);
+    materials.push(material);
+    puffs.push({
+      mesh,
+      material,
+      opacity: material.opacity,
+      velocity: outward.multiplyScalar((heavy ? 0.72 : 0.48) + Math.random() * 0.72),
+      rise: (heavy ? 0.32 : 0.22) + Math.random() * 0.4,
+      growth: (heavy ? 0.48 : 0.36) + Math.random() * 0.42,
+    });
+  }
+
+  scene.add(group);
+  const life = heavy ? 2.65 : 1.8;
+  registerEffect({
+    type: 'buildingDamageDust',
+    group,
+    puffs,
+    geometries: [geometry],
+    materials,
+    life,
+    maxLife: life,
+  });
+  return true;
+}
+
+/** Vertical water column, expanding crown, spray, and mist for shells landing in a canal. */
+export function spawnWaterImpact(scene, pos, scale = 1) {
+  if (!scene || !canSpawnEffect()) return false;
+  const resolvedScale = THREE.MathUtils.clamp(scale, 0.45, 2.1);
+  const baseY = pos.y ?? 0.08;
+  const group = new THREE.Group();
+  group.name = 'waterImpact';
+  group.position.set(pos.x, 0, pos.z);
+
+  const plumeHeight = 7.2 * resolvedScale;
+  const plumeGeometry = new THREE.CylinderGeometry(
+    1.05 * resolvedScale,
+    0.22 * resolvedScale,
+    plumeHeight,
+    10,
+    1,
+    true
+  );
+  const plumeMaterial = new THREE.MeshBasicMaterial({
+    color: 0xc3dddc,
+    transparent: true,
+    opacity: 0.56,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const plume = new THREE.Mesh(plumeGeometry, plumeMaterial);
+  plume.position.y = baseY + 0.18;
+  plume.scale.y = 0.08;
+  plume.renderOrder = 7;
+  group.add(plume);
+
+  const jetHeight = 4.8 * resolvedScale;
+  const jetGeometry = new THREE.ConeGeometry(0.34 * resolvedScale, jetHeight, 7, 1, true);
+  const jets = [];
+  for (let i = 0; i < 4; i++) {
+    const material = new THREE.MeshBasicMaterial({
+      color: i % 2 ? 0xb9d7d5 : 0xe1f0ef,
+      transparent: true,
+      opacity: 0.58,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(jetGeometry, material);
+    const angle = (i / 4) * Math.PI * 2 + 0.35;
+    mesh.position.set(
+      Math.cos(angle) * 0.72 * resolvedScale,
+      baseY + 0.12,
+      Math.sin(angle) * 0.72 * resolvedScale
+    );
+    mesh.rotation.z = Math.cos(angle) * 0.16;
+    mesh.rotation.x = -Math.sin(angle) * 0.16;
+    mesh.scale.y = 0.06;
+    mesh.renderOrder = 7;
+    group.add(mesh);
+    jets.push({ mesh, material, height: jetHeight, heightScale: 0.76 + i * 0.07 });
+  }
+
+  const crownGeometry = new THREE.TorusGeometry(1.1 * resolvedScale, 0.17 * resolvedScale, 6, 20);
+  const crownMaterial = new THREE.MeshBasicMaterial({
+    color: 0xe1eeee,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+  });
+  const crown = new THREE.Mesh(crownGeometry, crownMaterial);
+  crown.rotation.x = Math.PI * 0.5;
+  crown.position.y = baseY + 0.09;
+  crown.renderOrder = 8;
+  group.add(crown);
+
+  const dropletGeometry = new THREE.SphereGeometry(0.11 * resolvedScale, 5, 4);
+  const droplets = [];
+  const materials = [plumeMaterial, crownMaterial, ...jets.map((jet) => jet.material)];
+  for (let i = 0; i < 24; i++) {
+    const material = new THREE.MeshBasicMaterial({
+      color: i % 3 === 0 ? 0xf0f6f4 : 0xaecbc9,
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(dropletGeometry, material);
+    mesh.position.y = baseY + 0.22;
+    const angle = Math.random() * Math.PI * 2;
+    const outward = (1.5 + Math.random() * 3.7) * resolvedScale;
+    group.add(mesh);
+    materials.push(material);
+    droplets.push({
+      mesh,
+      material,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * outward,
+        (4.2 + Math.random() * 6.2) * resolvedScale,
+        Math.sin(angle) * outward
+      ),
+    });
+  }
+
+  const mistGeometry = new THREE.SphereGeometry(1, 7, 5);
+  const mist = [];
+  for (let i = 0; i < 7; i++) {
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xc2d6d4,
+      transparent: true,
+      opacity: 0.2 + Math.random() * 0.12,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(mistGeometry, material);
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 0.18 + Math.random() * 0.34;
+    mesh.position.set(
+      Math.cos(angle) * radius,
+      baseY + 0.35 + Math.random() * 0.5,
+      Math.sin(angle) * radius
+    );
+    mesh.scale.setScalar((0.46 + Math.random() * 0.42) * resolvedScale);
+    group.add(mesh);
+    materials.push(material);
+    mist.push({
+      mesh,
+      material,
+      opacity: material.opacity,
+      velocity: new THREE.Vector3(
+        Math.cos(angle) * (0.3 + Math.random() * 0.5),
+        0.8 + Math.random() * 0.65,
+        Math.sin(angle) * (0.3 + Math.random() * 0.5)
+      ),
+    });
+  }
+
+  scene.add(group);
+  const life = 1.35;
+  registerEffect({
+    type: 'waterImpact',
+    group,
+    plume,
+    plumeHeight,
+    plumeMaterial,
+    jets,
+    crown,
+    crownMaterial,
+    droplets,
+    mist,
+    baseY,
+    geometries: [plumeGeometry, jetGeometry, crownGeometry, dropletGeometry, mistGeometry],
     materials,
     life,
     maxLife: life,

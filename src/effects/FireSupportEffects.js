@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { isUrbanCanalWater } from '../world/UrbanScenery.js';
 import { addExplosionCrater, prewarmExplosionCraterTextures } from '../world/TerrainDamage.js';
 import {
   prewarmArtilleryExplosionAssets,
   spawnArtilleryExplosion,
   spawnShellExplosionLite,
+  spawnWaterImpact,
 } from './CombatEffects.js';
 
 const active = [];
@@ -130,6 +132,10 @@ export function spawnStrafePlane(scene, mapDef, x, z, dirX, dirZ, life = 2.5, al
  * @param {'strafe'|'barrage'|'creeping'} kind
  */
 export function spawnStrikeImpact(scene, mapDef, x, z, kind = 'barrage', terrainMesh = null) {
+  if (isUrbanCanalWater(x, z, mapDef)) {
+    spawnWaterImpact(scene, { x, y: 0.09, z }, kind === 'strafe' ? 0.48 : 1.35);
+    return;
+  }
   const y = sampleTerrainHeight(x, z, mapDef);
   const pos = { x, y: y + 0.5, z };
 

@@ -653,7 +653,7 @@ function restoreMapScenery(game, sceneryStates) {
     if (Number.isFinite(state.scale)) obj.group.scale.setScalar(state.scale);
 
     if (state.destroyed) {
-      game.scenery.destroyObject(obj, { effects: false });
+      game.scenery.destroyObject(obj, { effects: false, instant: true });
     } else {
       game.scenery._updateDamageVisual(obj);
     }
@@ -671,7 +671,7 @@ function destroySavedScenery(game, destroyedList) {
         Math.abs(o.x - ref.x) < tol &&
         Math.abs(o.z - ref.z) < tol
     );
-    if (obj) game.scenery.destroyObject(obj);
+    if (obj) game.scenery.destroyObject(obj, { effects: false, instant: true });
   }
 }
 
@@ -1155,7 +1155,9 @@ export function applyBattleSave(game, snapshot) {
       z: uData.z,
       scene: game.scene,
       mapDef: game.mapDef,
+      scenery: game.scenery,
     });
+    if (!unit) continue;
     unit.id = uData.id;
     unit.hp = uData.hp;
     unit.maxHp = uData.maxHp;
@@ -1202,7 +1204,12 @@ export function applyBattleSave(game, snapshot) {
     unit.lastStandEchelon = uData.lastStandEchelon ?? null;
     unit.lastStandStance = uData.lastStandStance ?? null;
     unit._clearanceProbe = uData.clearanceProbe ? { ...uData.clearanceProbe } : null;
-    unit.position.y = uData.y ?? sampleTerrainHeight(uData.x, uData.z, game.mapDef);
+    const restoredAtSavedPosition =
+      Math.abs(unit.position.x - uData.x) < 0.01 &&
+      Math.abs(unit.position.z - uData.z) < 0.01;
+    unit.position.y = restoredAtSavedPosition && Number.isFinite(uData.y)
+      ? uData.y
+      : sampleTerrainHeight(unit.position.x, unit.position.z, game.mapDef);
     if (unit.mesh) unit.mesh.rotation.y = uData.yaw ?? 0;
     if (unit.dead) {
       unit._preWreckYaw = uData.preWreckYaw ?? uData.yaw ?? 0;

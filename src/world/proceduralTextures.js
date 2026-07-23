@@ -76,6 +76,8 @@ export function createGroundTexture(mapDef) {
   // normal RTS camera heights without obscuring units or capture markings.
   const macroPalette = terrain === 'desert'
     ? [rgba(c2, 0.2), 'rgba(239,211,157,0.12)', 'rgba(113,82,47,0.1)', 'rgba(171,132,77,0.09)']
+    : terrain === 'urban'
+      ? [rgba(c2, 0.22), 'rgba(126,123,114,0.12)', 'rgba(45,43,39,0.12)', 'rgba(105,89,69,0.08)']
     : terrain === 'steppe'
       ? [rgba(c2, 0.16), 'rgba(133,119,67,0.13)', 'rgba(50,75,39,0.11)', 'rgba(91,73,39,0.08)']
       : [rgba(c2, 0.16), 'rgba(73,98,47,0.12)', 'rgba(33,58,29,0.1)', 'rgba(112,91,57,0.07)'];
@@ -143,6 +145,14 @@ export function createGroundTexture(mapDef) {
       ctx.bezierCurveTo(x + 15, y - 3, x + 35, y + 3, x + 55 + random() * 50, y - 1);
       ctx.stroke();
     }
+  } else if (terrain === 'urban') {
+    for (let i = 0; i < 1200; i++) {
+      const x = random() * size;
+      const y = random() * size;
+      const w = 2 + random() * 7;
+      ctx.fillStyle = random() > 0.2 ? 'rgba(184,181,170,0.055)' : 'rgba(66,58,48,0.08)';
+      ctx.fillRect(x, y, w, 0.7 + random() * 1.4);
+    }
   } else if (terrain === 'bocage' || terrain === 'hills') {
     ctx.strokeStyle = 'rgba(25,45,20,0.12)';
     ctx.lineWidth = 1.5;
@@ -200,7 +210,7 @@ export function createGroundTexture(mapDef) {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = terrain === 'desert' ? 3.2 : 5.5;
+  const repeats = terrain === 'desert' ? 3.2 : terrain === 'urban' ? 4.2 : 5.5;
   tex.repeat.set(repeats, repeats);
   tex.anisotropy = 16;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -215,7 +225,7 @@ export function createRoughnessMap(mapDef) {
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(size, size);
   const seed = (mapDef?.id?.length ?? 1) * 7;
-  const base = mapDef?.terrain === 'desert' ? 200 : 175;
+  const base = mapDef?.terrain === 'desert' ? 200 : mapDef?.terrain === 'urban' ? 214 : 175;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -233,7 +243,7 @@ export function createRoughnessMap(mapDef) {
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = mapDef?.terrain === 'desert' ? 3.2 : 5.5;
+  const repeats = mapDef?.terrain === 'desert' ? 3.2 : mapDef?.terrain === 'urban' ? 4.2 : 5.5;
   tex.repeat.set(repeats, repeats);
   return tex;
 }
@@ -255,13 +265,16 @@ export function createNormalMap(mapDef = null) {
     if (terrain === 'desert') {
       return broad * 0.45 + medium * 0.45 + Math.sin(x * 0.11 + y * 0.025) * 0.045 + fine * 0.35;
     }
+    if (terrain === 'urban') {
+      return broad * 0.34 + medium * 0.42 + fine * 0.55;
+    }
     if (terrain === 'steppe') {
       return broad * 0.62 + medium * 0.7 + fine * 0.58;
     }
     return broad * 0.78 + medium + fine;
   };
 
-  const strength = terrain === 'desert' ? 1.35 : terrain === 'steppe' ? 1.6 : 1.85;
+  const strength = terrain === 'desert' ? 1.35 : terrain === 'urban' ? 1.25 : terrain === 'steppe' ? 1.6 : 1.85;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * strength;
@@ -307,7 +320,7 @@ export function createAOMap(mapDef) {
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = mapDef?.terrain === 'desert' ? 3.2 : 5.5;
+  const repeats = mapDef?.terrain === 'desert' ? 3.2 : mapDef?.terrain === 'urban' ? 4.2 : 5.5;
   tex.repeat.set(repeats, repeats);
   return tex;
 }

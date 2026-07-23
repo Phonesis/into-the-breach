@@ -10,6 +10,7 @@ import { removeCoverMarker } from '../visual/CoverMarkers.js';
 
 const SURRENDER_ELIGIBLE = new Set([
   'infantry',
+  'paratrooper',
   'machineGun',
   'sniper',
   'mortar',
@@ -67,6 +68,27 @@ function markerHeight(unit) {
   return 2.85;
 }
 
+function syncSurrenderMarkerTransform(unit) {
+  const marker = unit?.surrenderMarker;
+  const mesh = unit?.mesh;
+  if (!marker || !mesh) return;
+  const worldSpace = !!unit._garrisonBunkerId && !mesh.visible && !!mesh.parent;
+  const desiredParent = worldSpace ? mesh.parent : mesh;
+  if (marker.parent !== desiredParent) desiredParent.add(marker);
+  marker.userData.worldSpace = worldSpace;
+  const bob = Math.sin(performance.now() * 0.005) * 0.12;
+  if (worldSpace) {
+    const slotLift = Math.min(3, unit._garrisonSlotIndex ?? 0) * 0.16;
+    marker.position.set(
+      unit.position.x,
+      (unit.position.y ?? 0) + (unit._garrisonMarkerLift ?? 6.6) + slotLift + bob,
+      unit.position.z
+    );
+  } else {
+    marker.position.set(0, markerHeight(unit) + bob, 0);
+  }
+}
+
 export function attachSurrenderMarker(unit) {
   if (!unit.mesh || unit.surrenderMarker) return;
   const mat = new THREE.SpriteMaterial({
@@ -78,10 +100,9 @@ export function attachSurrenderMarker(unit) {
   const sprite = new THREE.Sprite(mat);
   sprite.name = 'surrenderMarker';
   sprite.scale.set(4.4, 2.2, 1);
-  sprite.position.y = markerHeight(unit);
   sprite.renderOrder = 27;
-  unit.mesh.add(sprite);
   unit.surrenderMarker = sprite;
+  syncSurrenderMarkerTransform(unit);
 }
 
 export function removeSurrenderMarker(unit) {
@@ -388,8 +409,7 @@ export function updateSurrenderState(game, units, dt) {
     if (captor) beginCaptureExit(unit, captor);
 
     if (unit.surrenderMarker) {
-      unit.surrenderMarker.position.y =
-        markerHeight(unit) + Math.sin(performance.now() * 0.005) * 0.12;
+      syncSurrenderMarkerTransform(unit);
     }
   }
 

@@ -4,7 +4,7 @@ export const LAST_STAND_DEPLOY_MODES = {
   manual: {
     id: 'manual',
     name: 'Manual Deployment',
-    subtitle: '2,000 supplies per side — place units anywhere (any map size).',
+    subtitle: '2,000 supplies — place units anywhere; enemy matches your unit count (any map size).',
   },
   presetForce: {
     id: 'presetForce',

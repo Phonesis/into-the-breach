@@ -4,7 +4,14 @@ import { isUnitMounted } from './TankRiders.js';
 
 export const BUNKER_GARRISON_COVER_MULT = 0.12;
 
-const GARRISON_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer']);
+const GARRISON_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'sniper',
+  'medic',
+  'engineer',
+]);
 
 export function canGarrisonType(unitType) {
   return GARRISON_TYPES.has(unitType);
@@ -20,8 +27,14 @@ export function getGarrisonCoverMultiplier(unit) {
 
 /** How close a unit must be to a bunker center to enter (uses building footprint). */
 export function getBunkerEnterRange(bunker) {
-  const footprint = bunker?.def?.hitRadius ?? bunker?.def?.radius ?? 3.4;
-  return footprint + 1.1;
+  // Scenery buildings store radius on the entry; field bunkers use def.radius.
+  const footprint =
+    bunker?.def?.hitRadius ??
+    bunker?.def?.radius ??
+    bunker?.radius ??
+    bunker?.coverRadius ??
+    3.4;
+  return Math.max(4.2, footprint * 0.72 + 1.4);
 }
 
 /** Collect managers that own garrison-capable bunkers / shelters. */
@@ -42,10 +55,14 @@ function normalizeGarrisonSources(sources) {
   return [sources];
 }
 
-function findBunkerEntry(id, sources) {
+function findBunkerEntry(id, sources, { includeDestroyed = false } = {}) {
   for (const src of sources) {
-    const entry = src.getEntryById?.(id);
-    if (entry && !entry.destroyed) return { entry, manager: src };
+    let entry = src.getEntryById?.(id);
+    if (!entry && includeDestroyed) {
+      entry = src.objects?.find?.((candidate) => candidate.id === id)
+        ?? src.entries?.find?.((candidate) => candidate.id === id);
+    }
+    if (entry && (includeDestroyed || !entry.destroyed)) return { entry, manager: src };
   }
   return null;
 }
@@ -76,34 +93,169 @@ function finishGarrisonEnter(unit) {
   unit._bunkerEntryId = null;
 }
 
-export function releaseFromBunker(unit, sources) {
+function bunkerVisualRoot(bunker) {
+  return bunker?.mesh ?? bunker?.group ?? null;
+}
+
+function garrisonMarkerLift(bunker) {
+  const root = bunkerVisualRoot(bunker);
+  const bounds = root?.userData?.damageBounds;
+  const roof = root?.userData?.roofDamageProfile;
+  const structuralHeight = Math.max(
+    bounds?.height ?? 0,
+    (roof?.bodyHeight ?? 0) + (roof?.roofHeight ?? 0)
+  );
+  return Math.max(6.6, structuralHeight * Math.max(0.01, root?.scale?.y ?? 1) + 1.35);
+}
+
+function findVisibleSquadMember(unit) {
+  let member = null;
+  unit?.mesh?.traverse?.((child) => {
+    if (!member && child.name === 'squadMember' && child.visible) member = child;
+  });
+  return member;
+}
+
+function removeGarrisonLookout(bunker, unitId) {
+  const root = bunkerVisualRoot(bunker);
+  if (!root) return;
+  const lookout = root.children.find(
+    (child) => child.userData?.garrisonLookoutUnitId === unitId
+  );
+  lookout?.removeFromParent();
+}
+
+function clearGarrisonLookouts(bunker) {
+  const root = bunkerVisualRoot(bunker);
+  if (!root) return;
+  for (const child of [...root.children]) {
+    if (child.userData?.garrisonLookoutUnitId) child.removeFromParent();
+  }
+}
+
+/** Show a waist-up copy of the actual faction soldier at one of the modelled windows. */
+function ensureGarrisonLookout(bunker, unit, slotIndex) {
+  const root = bunkerVisualRoot(bunker);
+  const windows = root?.userData?.garrisonWindows;
+  if (!root || !Array.isArray(windows) || windows.length === 0) return;
+
+  if (unit.surrendered || bunker.destroyed || (root.userData.damageStage ?? 0) >= 5) {
+    removeGarrisonLookout(bunker, unit.id);
+    return;
+  }
+
+  let lookout = root.children.find(
+    (child) => child.userData?.garrisonLookoutUnitId === unit.id
+  );
+  if (!lookout) {
+    const sourceSoldier = findVisibleSquadMember(unit);
+    if (!sourceSoldier) return;
+    const soldier = sourceSoldier.clone(true);
+    // Window proxies share the live unit's geometry and materials; never dispose them with scenery.
+    soldier.traverse((child) => {
+      child.userData.garrisonSharedVisual = true;
+    });
+    soldier.position.set(0, -0.55, 0);
+    soldier.rotation.set(0, 0, 0);
+    soldier.scale.setScalar(1.28);
+    for (const child of [...soldier.children]) {
+      const part = child.userData?.infantryPart;
+      if (part === 'legL' || part === 'legR') soldier.remove(child);
+    }
+
+    lookout = new THREE.Group();
+    lookout.name = 'garrisonLookout';
+    lookout.userData.garrisonLookoutUnitId = unit.id;
+    lookout.add(soldier);
+    root.add(lookout);
+  }
+
+  // Spread occupants across floors/facades while preferring already-broken panes.
+  const ordered = windows
+    .map((window, index) => ({ window, index }))
+    .sort((a, b) => Number(b.window.broken) - Number(a.window.broken) || a.index - b.index);
+  const capacity = Math.max(1, bunker.def?.garrisonCapacity ?? 2);
+  const picked = ordered[Math.floor((Math.max(0, slotIndex) * ordered.length) / capacity) % ordered.length].window;
+  lookout.position.set(picked.position.x, picked.position.y, picked.position.z);
+  lookout.rotation.set(0, picked.rotationY ?? 0, 0);
+  // The landmark church is enlarged as a whole; compensate so its occupants remain human-sized.
+  const rootScale = Math.max(root.scale?.x ?? 1, 0.01);
+  lookout.scale.setScalar(1 / rootScale);
+  lookout.visible = true;
+}
+
+/**
+ * Leave a bunker/building.
+ * @param {{ eject?: boolean, toward?: {x:number,z:number}|null, scenery?: object, mapDef?: object }} [options]
+ *        eject places the unit on clear ground outside the footprint so they
+ *        can path away instead of re-entering from the interior.
+ */
+export function releaseFromBunker(unit, sources, options = {}) {
   if (!unit?._garrisonBunkerId) return;
   const list = normalizeGarrisonSources(sources);
-  const found = findBunkerEntry(unit._garrisonBunkerId, list);
-  if (found?.entry?.garrison) {
-    found.entry.garrison = found.entry.garrison.filter((id) => id !== unit.id);
-    if (found.entry.garrison.length === 0 && found.entry.neutralGarrison) {
-      found.entry.garrisonTeam = null;
+  const found = findBunkerEntry(unit._garrisonBunkerId, list, { includeDestroyed: true });
+  const bunker = found?.entry ?? null;
+  if (bunker?.garrison) {
+    removeGarrisonLookout(bunker, unit.id);
+    bunker.garrison = bunker.garrison.filter((id) => id !== unit.id);
+    if (bunker.garrison.length === 0 && bunker.neutralGarrison) {
+      bunker.garrisonTeam = null;
     }
-    syncBunkerOccupancyVisual(found.entry);
+    syncBunkerOccupancyVisual(bunker);
   }
   unit._garrisonBunkerId = null;
   unit._garrisonSlotIndex = null;
+  unit._garrisonMarkerLift = null;
   unit.garrisoned = false;
-  if (unit.mesh) unit.mesh.visible = true;
+  unit._bunkerEntryId = null;
+  // Brief lockout so leave orders are not immediately swallowed by re-entry.
+  unit._garrisonExitUntil = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 1400;
+  // A casualty inside a building should clear occupancy without making its
+  // previously hidden squad mesh reappear outside as a misplaced corpse.
+  if (unit.mesh) unit.mesh.visible = !unit.dead;
+
+  if (options.eject === false || unit.dead || !bunker) return;
+
+  const scenery = options.scenery ?? list.find((src) => typeof src.findClearVehiclePlacement === 'function');
+  const mapDef = options.mapDef ?? scenery?.mapDef ?? null;
+  const radius = 1.15;
+  const reach = (bunker.radius ?? bunker.def?.radius ?? 4) + 3.2;
+  const toward = options.toward ?? unit._finalMoveGoal ?? unit.moveTarget ?? null;
+  let exit = null;
+
+  if (toward && scenery?.findClearVehiclePlacement) {
+    const dx = toward.x - bunker.x;
+    const dz = toward.z - bunker.z;
+    const len = Math.hypot(dx, dz) || 1;
+    exit = scenery.findClearVehiclePlacement(
+      bunker.x + (dx / len) * reach,
+      bunker.z + (dz / len) * reach,
+      radius,
+      mapDef
+    );
+  }
+  if (!exit && scenery?.findClearVehiclePlacement) {
+    exit = scenery.findClearVehiclePlacement(bunker.x, bunker.z, radius, mapDef);
+  }
+  if (exit) {
+    unit.position.x = exit.x;
+    unit.position.z = exit.z;
+  }
 }
 
 /** Green roof badge showing how many troops are inside a bunker. */
 export function syncBunkerOccupancyVisual(bunker) {
-  if (!bunker?.mesh) return;
+  const root = bunkerVisualRoot(bunker);
+  if (!root) return;
   const n = bunker.garrison?.length ?? 0;
   const cap = bunker.def?.garrisonCapacity ?? 2;
-  let badge = bunker.mesh.getObjectByName('garrisonOccupancyBadge');
+  let badge = root.getObjectByName('garrisonOccupancyBadge');
 
   if (n <= 0) {
     if (badge) {
       badge.visible = false;
     }
+    clearGarrisonLookouts(bunker);
     return;
   }
 
@@ -124,7 +276,7 @@ export function syncBunkerOccupancyVisual(bunker) {
     badge.scale.set(3.8, 1.9, 1);
     badge.renderOrder = 28;
     badge.position.set(0, 4.2, 0);
-    bunker.mesh.add(badge);
+    root.add(badge);
   }
 
   const canvas = badge.material.map.userData.canvas;
@@ -176,6 +328,7 @@ export function tryEnterBunker(unit, bunker, sources) {
   bunker.garrison.push(unit.id);
   unit._garrisonBunkerId = bunker.id;
   unit._garrisonSlotIndex = bunker.garrison.length - 1;
+  unit._garrisonMarkerLift = garrisonMarkerLift(bunker);
   unit.garrisoned = true;
   unit.attackOrder = null;
   unit.target = null;
@@ -185,14 +338,28 @@ export function tryEnterBunker(unit, bunker, sources) {
   unit.retreating = false;
   unit.position.x = bunker.x + (bunker.garrison.length - 1) * 0.35 - 0.35;
   unit.position.z = bunker.z;
-  // Always hide the unit mesh while inside — field icons + INSIDE banner show occupancy
+  // Hide the gameplay squad; a lightweight faction-correct lookout represents it at a window.
   if (unit.mesh) unit.mesh.visible = false;
+  ensureGarrisonLookout(bunker, unit, unit._garrisonSlotIndex);
   syncBunkerOccupancyVisual(bunker);
   return true;
 }
 
-export function updateBunkerGarrison(units, sources) {
+/**
+ * @param {object[]} units
+ * @param {object|object[]} sources
+ * @param {{ scenery?: object, mapDef?: object, applyObstaclePath?: Function }} [options]
+ */
+export function updateBunkerGarrison(units, sources, options = {}) {
   const list = normalizeGarrisonSources(sources);
+  const scenery =
+    options.scenery ??
+    list.find((src) => typeof src.findClearVehiclePlacement === 'function') ??
+    null;
+  const mapDef = options.mapDef ?? scenery?.mapDef ?? null;
+  const applyObstaclePath = options.applyObstaclePath ?? null;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
   if (!list.length) {
     for (const unit of units) {
       if (unit._garrisonBunkerId) releaseFromBunker(unit, list);
@@ -202,42 +369,60 @@ export function updateBunkerGarrison(units, sources) {
   }
 
   for (const unit of units) {
-    if (unit.dead) continue;
+    if (unit.dead) {
+      if (unit._garrisonBunkerId) releaseFromBunker(unit, list, { eject: false });
+      unit._bunkerEntryId = null;
+      continue;
+    }
 
     if (unit._garrisonBunkerId) {
       const found = findBunkerEntry(unit._garrisonBunkerId, list);
       const bunker = found?.entry;
       if (!bunker || bunker.destroyed || bunker.building) {
-        releaseFromBunker(unit, list);
+        releaseFromBunker(unit, list, { eject: true, scenery, mapDef });
         continue;
       }
-      if (unit.moveTarget) {
-        releaseFromBunker(unit, list);
+      if (unit._captureExit) {
+        releaseFromBunker(unit, list, { eject: true, scenery, mapDef });
+        continue;
+      }
+      // Move / retreat order — leave the building and path from the street.
+      if (unit.moveTarget || unit.retreating || unit._userMoveOrder) {
+        const goal = unit._finalMoveGoal ?? unit.moveTarget;
+        releaseFromBunker(unit, list, {
+          eject: true,
+          toward: goal,
+          scenery,
+          mapDef,
+        });
+        if (goal && mapDef && scenery && applyObstaclePath) {
+          applyObstaclePath(unit, goal.x, goal.z, mapDef, scenery);
+        }
         continue;
       }
       const idx = bunker.garrison.indexOf(unit.id);
       unit._garrisonSlotIndex = idx >= 0 ? idx : 0;
+      unit._garrisonMarkerLift = garrisonMarkerLift(bunker);
       unit.position.x = bunker.x + unit._garrisonSlotIndex * 0.35 - 0.35;
       unit.position.z = bunker.z;
       unit.garrisoned = true;
       if (unit.mesh) unit.mesh.visible = false;
+      ensureGarrisonLookout(bunker, unit, unit._garrisonSlotIndex);
       syncBunkerOccupancyVisual(bunker);
       continue;
     }
 
     if (unit.retreating || unit.surrendered || isUnitMounted(unit)) continue;
+    // Only enter when explicitly ordered (or AI set entry id). Auto-enter from
+    // a nearby moveTarget caused units to re-garrison when trying to leave.
+    if (!unit._bunkerEntryId) continue;
+    if (unit._garrisonExitUntil && now < unit._garrisonExitUntil) continue;
 
-    let bunker = null;
-    if (unit._bunkerEntryId) {
-      bunker = findBunkerEntry(unit._bunkerEntryId, list)?.entry ?? null;
-      if (!bunker) unit._bunkerEntryId = null;
+    const bunker = findBunkerEntry(unit._bunkerEntryId, list)?.entry ?? null;
+    if (!bunker) {
+      unit._bunkerEntryId = null;
+      continue;
     }
-
-    if (!bunker && unit.moveTarget) {
-      bunker = pickBunkerAtAny(unit.moveTarget.x, unit.moveTarget.z, unit.team, list, 6.5);
-    }
-
-    if (!bunker) continue;
 
     const enterRange = getBunkerEnterRange(bunker);
     const distToBunker = distanceToPoint(unit, bunkerCenter(bunker));
@@ -245,7 +430,7 @@ export function updateBunkerGarrison(units, sources) {
     const closeEnough =
       distToBunker <= enterRange ||
       distToDest <= enterRange + 0.6 ||
-      (!unit.moveTarget && distToBunker <= enterRange + 0.4);
+      (unit._bunkerEntryId === bunker.id && distToBunker <= enterRange * 1.15);
 
     if (!closeEnough) continue;
 

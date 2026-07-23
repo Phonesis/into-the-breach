@@ -27,6 +27,29 @@ export function getMapSizePreset(sizeId = 'medium') {
   return MAP_SIZE_PRESETS[sizeId] ?? MAP_SIZE_PRESETS.medium;
 }
 
+/** Allowed size ids for a map (defaults to all presets). */
+export function getMapSizeOptions(mapDefOrBase) {
+  const options = mapDefOrBase?.mapSizeOptions;
+  if (Array.isArray(options) && options.length) {
+    return options.filter((id) => MAP_SIZE_PRESETS[id]);
+  }
+  return MAP_SIZE_LIST.map((preset) => preset.id);
+}
+
+export function getDefaultMapSize(mapDefOrBase) {
+  const preferred = mapDefOrBase?.defaultMapSize;
+  const allowed = getMapSizeOptions(mapDefOrBase);
+  if (preferred && allowed.includes(preferred)) return preferred;
+  if (allowed.includes('medium')) return 'medium';
+  return allowed[0] ?? 'medium';
+}
+
+export function resolveMapSizeId(mapDefOrBase, requestedSizeId) {
+  const allowed = getMapSizeOptions(mapDefOrBase);
+  if (requestedSizeId && allowed.includes(requestedSizeId)) return requestedSizeId;
+  return getDefaultMapSize(mapDefOrBase);
+}
+
 function scaleXZ(point, scale) {
   if (!point) return point;
   const out = { ...point };
@@ -37,7 +60,8 @@ function scaleXZ(point, scale) {
 
 /** Apply a size preset to a base theater definition. */
 export function buildMapDef(baseMap, sizeId = 'medium') {
-  const preset = getMapSizePreset(sizeId);
+  const resolvedSizeId = resolveMapSizeId(baseMap, sizeId);
+  const preset = getMapSizePreset(resolvedSizeId);
   const scale = preset.scale;
 
   const built = {

@@ -26,7 +26,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Assault &amp; Defend</strong> — Pick <strong>Attack</strong> or <strong>Defend</strong> after choosing the mode. Central frontline (★) starts with the defender; flanks are neutral. Both sides field anti-tank guns; defenders start with an extra AT piece. The top HUD shows your role, objective, and a <strong>countdown timer</strong>: defenders see <strong>Hold until</strong> (8 minutes); attackers see <strong>Defender reinforcements</strong> counting down the same window. <strong>Attackers</strong> win by capturing the frontline and holding it for <strong>45 seconds</strong>, destroying the defender HQ, or wiping defenders when they cannot reinforce. <strong>Defenders</strong> win if the 8-minute timer expires, the assault HQ is destroyed, or the assault army is eliminated with no way to rebuild.',
       '<strong>Tower Defence</strong> — On the theater screen choose <strong>Wave Mode</strong> (<strong>12 Waves</strong> or <strong>Endless</strong>) and <strong>Defence Style</strong>: <strong>Emplacements</strong> (no player army — start with <strong>82 defense points</strong>, enough for one MG nest and one bunker; earn further points gradually while an assault is active and by destroying enemies, with tougher units worth more; no points accrue during the quiet preparation periods; spend them on bunkers, MG nests, mortar pits, AT guns, mines, wire, and artillery pits) or <strong>HQ Defense</strong> (spawn <strong>any unit type</strong> from your HQ with supplies — your troops <strong>cannot cross the frontline</strong> into enemy territory; if enemies stay past your side of the line for <strong>10 seconds</strong> the <strong>frontline retreats</strong> toward HQ). Assaults hit <strong>sections of the frontline</strong> from different angles; from roughly <strong>wave 10</strong> expect wider <strong>multi-sector flanking</strong>. Emplacement mode: guns fire automatically; <strong>barrage</strong> needs an artillery pit. HQ Defense: strafe/barrage available; earn supplies from HQ income and destroying attackers. Between waves, <strong>Start Wave Now</strong> skips the prepare timer. <strong>Emplacements</strong> — lose if the line is breached (10 s grace) or HQ falls. <strong>HQ Defense</strong> — lose only if HQ is destroyed (12 waves still wins in standard mode).',
       '<strong>Battle Simulation</strong> — two deployment styles on the theater screen:',
-      '<strong>Manual Deployment</strong> — <strong>2,000</strong> supplies per side on any map size. Pick units and <strong>LMB</strong> anywhere to place; the enemy deploys in parallel. <strong>Begin Battle</strong> when ready.',
+      '<strong>Manual Deployment</strong> — <strong>2,000</strong> supplies on any map size. Pick units and <strong>LMB</strong> anywhere to place; the enemy fields the <strong>same number of units</strong> (it chooses its own mix). Enemy AI uses the same battle-plan mix as Preset Battle Group (armored thrust, defensive belt, infantry assault, flanking hook, and others), which also shapes what it deploys. <strong>Begin Battle</strong> when ready.',
       '<strong>Preset Battle Group</strong> — <strong>Large map only</strong>. Both sides field a full combined-arms force (~68 units each) in realistic echelons: rifle line, mortars/AT/artillery support, armor reserve. A <strong>field briefing</strong> (date, location, weather, enemy plan) appears before combat. Enemy AI picks one of several battle plans each engagement — armored thrust, defensive belt, infantry assault, flanking hook, recon push, fire preparation, or general advance. <strong>Begin Battle</strong> when ready.',
       'No HQ, capture points, or reinforcements in either style. Strafe and barrage unlock once battle begins. Win by destroying every enemy unit; lose if your army is wiped out.',
     ],
@@ -52,8 +52,11 @@ export const GAME_GUIDE_SECTIONS = [
       ['RMB (construction unit)', 'Move the selected unit; cancels its pending placement or active sandbag, trench, or tent construction'],
       ['Shift + LMB', 'Fire at open ground or cover (trees, hedges, bunkers) — all combat units in range'],
       ['Alt + Shift + LMB', 'One ready selected artillery piece fires smoke at open ground — 45s cooldown; blocks line of sight for 60s'],
+      ['Ctrl + E', 'Select the nearest available engineer to the current selection, or to the camera centre'],
+      ['Ctrl + M', 'Select the nearest available medic to the current selection, or to the camera centre'],
+      ['Ctrl + A', 'Select the nearest available artillery piece to the current selection, or to the camera centre'],
       ['Esc', 'Cancel fire-support targeting, active unit fire missions, engineer field-work placement, base building construction, Battle Simulation placement, or pending TD build'],
-      ['WASD / arrows', 'Pan camera · wheel zoom'],
+      ['WASD / arrows', 'Pan camera · left/right arrows rotate · wheel zoom'],
       ['P', 'Pause / resume — camera still pans while paused; orders are blocked'],
       ['Tactical map', 'Bottom-right minimap — toggle with the header button; green = friendlies, red = enemies; fading yellow/red traces show live fire exchanges; click to pan the main camera (preference saved)'],
       ['Forces list', 'Click a unit row to select; Shift-click to add — each row shows an HP bar and %'],
@@ -93,7 +96,7 @@ export const GAME_GUIDE_SECTIONS = [
     title: 'Supplies & capture points',
     body: [
       'Supplies pay for reinforcements (top HUD). Your HQ generates passive income every second; each captured flank point adds more.',
-      'Three capture zones per map (not used in Battle Simulation or Tower Defence). In <strong>Standard</strong>, all three start <strong>neutral</strong> — fight to secure the flanks for extra supplies. In Assault, the center frontline starts with the defender; flanks are neutral.',
+      'Three capture zones per map (not used in Battle Simulation or Tower Defence). In <strong>Standard</strong>, all three start <strong>neutral</strong> and the two flank sectors are spread farther from the central frontline — fight across the wider front for extra supplies. In Assault, the center frontline starts with the defender; flanks are neutral.',
       '<strong>Map size</strong> on the theater screen: <strong>Small</strong> (tight, close-quarters), <strong>Medium</strong> (default — expanded maneuver room), or <strong>Large</strong> (grand theater with long flanks). Larger maps scale bases, capture points, and deploy rings.',
       '<strong>Quiet sector</strong> (~32 s in Standard / Assault): no combat fire; both sides stay inside the HQ staging ring. <strong>Neither side</strong> can queue reinforcements or build base structures (in-progress construction pauses) until battle begins. Move orders only reposition troops in a <strong>tight ring around your HQ</strong> — not toward capture points (captures are frozen until launch). Click <strong>Launch Battle Now</strong> when ready (or wait for the timer). <strong>Clear Defenses starts live immediately</strong>: defenders engage as soon as attackers enter their actual weapon range.',
       'In <strong>Classic</strong> Standard each side begins with one infantry squad at HQ — train the rest from the Reinforcements panel as supplies accrue (the AI does the same from its HQ).',
@@ -164,7 +167,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Direction matters:</strong> nearby cover only protects against fire passing through it. Flanking or rear fire bypasses the position. Bunkers and occupied trenches protect more broadly because troops are inside them.',
       '<strong>Weapon matters:</strong> rifles and machine guns are strongly checked by cover, while mortar bombs, tank shells, artillery, and other blast weapons retain more of their damage through or around it.',
       'Bonus only while the unit stays in the zone. <strong>Stationary tanks, tank destroyers, super-heavies, and armored cars</strong> create neutral cover usable by either side; anti-tank guns do not. Living-vehicle cover disappears as soon as that vehicle begins moving. Destroyed vehicle and field-gun wrecks also provide cover. Use <strong>Shift + LMB</strong> on scenery to destroy other cover objects. Selected foot troops show an <strong>IN COVER</strong> tag, foot ring, and % on the selection panel.',
-      '<strong>Seek Cover</strong> (General Orders panel) — toggle <strong>On</strong> so infantry, MG, sniper, medic, and engineer <strong>move orders</strong> route to the nearest cover near your click (hedges, pits, sandbags, bunkers) instead of open ground. Tanks and other vehicles still go where you click. Preference is saved in the browser.',
+      '<strong>Seek Cover</strong> (General Orders panel) — toggle <strong>On</strong> so infantry, airborne, engineers, medics, MG teams, mortar crews, and snipers <strong>move orders</strong> route to the nearest cover near your click (hedges, pits, sandbags, bunkers) instead of open ground. Tanks, anti-tank guns, and artillery still go where you click. Preference is saved in the browser.',
     ],
   },
     {
@@ -193,7 +196,7 @@ export const GAME_GUIDE_SECTIONS = [
       'Command-wide orders from the <strong>General Orders</strong> HUD panel (below Fire Support, collapsible like that panel). One order active at a time; each button has a <strong>3-minute cooldown</strong> and the effect lasts <strong>30 seconds</strong>. Either order can be <strong>cancelled early</strong> — click the same button again (it reads <strong>Cancel Retreat</strong> or <strong>Cancel Hold</strong>) or press <strong>Esc</strong>.',
       '<strong>Full Retreat</strong> — Every friendly unit is ordered to withdraw toward your HQ immediately. For the full 30 s, any unit not yet at HQ is kept retreating (overrides manual move orders until cancelled or the timer ends). Cancelling stops the withdrawal and troops accept new orders. Use when a push fails or the line must fall back in one motion.',
       '<strong>Hold Ground</strong> — Troops are ordered to stand firm. Panic-retreat chance is greatly reduced for 30 s but <strong>not eliminated</strong> — battered or isolated units can still break. Cancel if the situation changes and you need normal morale again. Use before a major advance so riflemen and gun crews stay on the objective.',
-      '<strong>Seek Cover</strong> — Persistent toggle (no cooldown). When <strong>On</strong>, right-click move orders for cover-capable foot troops snap to the nearest cover zone near the destination. When <strong>Off</strong>, units move to the ground you clicked. Does not affect tanks, guns, or artillery. Saved between sessions.',
+      '<strong>Seek Cover</strong> — Persistent toggle (no cooldown). When <strong>On</strong>, right-click move orders for infantry, airborne, engineers, medics, MG teams, mortar crews, and snipers snap to the nearest cover zone near the destination. When <strong>Off</strong>, units move to the ground you clicked. Does not affect tanks, anti-tank guns, or artillery. Saved between sessions.',
       'Cooldown orders (Retreat / Hold) are not available in Tower Defence (Emplacements) or during Battle Simulation deployment; <strong>Seek Cover</strong> is available in any mode with move orders. Retreat and Hold are available in Tower Defence HQ Defense, Standard, Assault, Clear Defenses, Training, and Last Stand.',
     ],
   },
@@ -421,6 +424,7 @@ function renderFactionAtGunTable() {
         <td><img class="guide-faction-flag" src="${escapeHtml(f.flag)}" alt="" width="28" height="18" loading="lazy" /> ${escapeHtml(f.name)}</td>
         <td>${escapeHtml(at.name)}</td>
         <td>${escapeHtml(range)}</td>
+        <td>${at.shellReload?.toFixed(1) ?? (1 / at.attackSpeed).toFixed(1)}s</td>
         <td>${at.cost} · ${at.buildTime}s</td>
       </tr>
     `;
@@ -429,7 +433,7 @@ function renderFactionAtGunTable() {
     <div class="guide-faction-block">
       <h4 class="guide-subhead">Faction anti-tank guns</h4>
       <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Designation</th><th>Range</th><th>Cost · build</th></tr></thead>
+        <thead><tr><th>Nation</th><th>Designation</th><th>Range</th><th>Reload</th><th>Cost · build</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p class="guide-table-note">Towed guns hold position while firing. Strong vs tanks and armored cars; weak vs infantry.</p>

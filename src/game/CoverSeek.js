@@ -2,7 +2,9 @@
 
 const SEEK_COVER_UNIT_TYPES = new Set([
   'infantry',
+  'paratrooper',
   'machineGun',
+  'mortar',
   'sniper',
   'medic',
   'engineer',

@@ -7,15 +7,16 @@ import { pickLastStandTactic, getLastStandTactic } from '../data/lastStandTactic
 import { buildLastStandBriefing } from '../data/lastStandBriefing.js';
 
 export { isLastStandMode, LAST_STAND_SUPPLIES };
-import { spawnUnitAt } from './Spawner.js';
+import { resolveUnitSpawnPosition, spawnUnitAt } from './Spawner.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 
 /** Minimum gap between placed units (game meters). */
 export const LAST_STAND_MIN_SPACING = 3.8;
 
-const ENEMY_DEPLOY_INTERVAL = 0.95;
-const ENEMY_DEPLOY_BURST = 3;
+const ENEMY_DEPLOY_INTERVAL = 0.85;
+const ENEMY_DEPLOY_BURST = 4;
 
+/** Base mix for manual-deploy AI — composition is chosen freely, not copied. */
 const ENEMY_TYPE_WEIGHTS = {
   infantry: 5,
   medic: 1,
@@ -26,8 +27,68 @@ const ENEMY_TYPE_WEIGHTS = {
   antiTankGun: 3,
   armoredCar: 2,
   tank: 3,
+  tankDestroyer: 2,
   superHeavyTank: 1,
   artillery: 2,
+};
+
+/** Tactic-driven bias so the enemy plan shapes its own roster. */
+const TACTIC_TYPE_WEIGHT_MULT = {
+  armoredThrust: {
+    tank: 2.4,
+    superHeavyTank: 2.1,
+    tankDestroyer: 1.4,
+    armoredCar: 1.2,
+    antiTankGun: 1.15,
+    infantry: 0.85,
+  },
+  defensiveBelt: {
+    antiTankGun: 2.2,
+    machineGun: 1.8,
+    mortar: 1.7,
+    artillery: 1.6,
+    infantry: 1.25,
+    tank: 0.7,
+    armoredCar: 0.65,
+  },
+  infantryAssault: {
+    infantry: 2.2,
+    machineGun: 1.7,
+    medic: 1.4,
+    engineer: 1.3,
+    sniper: 1.2,
+    tank: 0.75,
+    superHeavyTank: 0.5,
+  },
+  flankingHook: {
+    armoredCar: 2.3,
+    tank: 1.8,
+    tankDestroyer: 1.3,
+    infantry: 1.1,
+    artillery: 0.75,
+  },
+  reconnaissancePush: {
+    armoredCar: 2.6,
+    sniper: 1.5,
+    infantry: 1.15,
+    tank: 1.1,
+    superHeavyTank: 0.45,
+    artillery: 0.7,
+  },
+  firePreparation: {
+    artillery: 2.4,
+    mortar: 2.2,
+    machineGun: 1.3,
+    infantry: 1.05,
+    tank: 0.85,
+  },
+  generalAdvance: {
+    infantry: 1.35,
+    machineGun: 1.2,
+    tank: 1.2,
+    antiTankGun: 1.1,
+    mortar: 1.1,
+  },
 };
 
 const PRESET_ECHELON_DEPTH = {
@@ -47,7 +108,16 @@ const PRESET_ROLE_BY_TYPE = {
   artillery: 'arty',
   armoredCar: 'recon',
   tank: 'armor',
+  tankDestroyer: 'armor',
   superHeavyTank: 'armor',
+};
+
+const PRESET_ECHELON_BY_ROLE = {
+  line: 'front',
+  support: 'support',
+  arty: 'support',
+  recon: 'reserve',
+  armor: 'reserve',
 };
 
 export function createLastStandState(deployMode = 'manual') {
@@ -63,7 +133,7 @@ export function createLastStandState(deployMode = 'manual') {
   };
 }
 
-export function canPlaceUnitAt(x, z, mapDef, units) {
+export function canPlaceUnitAt(x, z, mapDef, units, def = null, scenery = null) {
   const half = (mapDef?.size ?? 120) * 0.5 - 4;
   if (Math.abs(x) > half || Math.abs(z) > half) return false;
 
@@ -72,10 +142,14 @@ export function canPlaceUnitAt(x, z, mapDef, units) {
     const d = Math.hypot(u.position.x - x, u.position.z - z);
     if (d < LAST_STAND_MIN_SPACING) return false;
   }
+  if (def && scenery?.findClearVehiclePlacement) {
+    const resolved = resolveUnitSpawnPosition(def, x, z, scenery, mapDef);
+    if (!resolved || resolved.x !== x || resolved.z !== z) return false;
+  }
   return true;
 }
 
-function pickDeployPosition(mapDef, units, biasBase) {
+function pickDeployPosition(mapDef, units, biasBase, def = null, scenery = null) {
   const half = (mapDef.size ?? 120) * 0.5 - 6;
   const base = biasBase ?? { x: 0, z: 0 };
 
@@ -84,13 +158,13 @@ function pickDeployPosition(mapDef, units, biasBase) {
     const dist = 4 + Math.random() * Math.min(half * 0.92, 52);
     const x = Math.max(-half, Math.min(half, base.x + Math.cos(angle) * dist));
     const z = Math.max(-half, Math.min(half, base.z + Math.sin(angle) * dist));
-    if (canPlaceUnitAt(x, z, mapDef, units)) return { x, z };
+    if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) return { x, z };
   }
   return null;
 }
 
-function findFormationPosition(mapDef, units, x, z) {
-  if (canPlaceUnitAt(x, z, mapDef, units)) return { x, z };
+function findFormationPosition(mapDef, units, x, z, def = null, scenery = null) {
+  if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) return { x, z };
 
   for (let ring = 1; ring <= 6; ring++) {
     const step = LAST_STAND_MIN_SPACING * 0.85;
@@ -98,7 +172,7 @@ function findFormationPosition(mapDef, units, x, z) {
       const angle = (a / 12) * Math.PI * 2;
       const tx = x + Math.cos(angle) * step * ring;
       const tz = z + Math.sin(angle) * step * ring;
-      if (canPlaceUnitAt(tx, tz, mapDef, units)) return { x: tx, z: tz };
+      if (canPlaceUnitAt(tx, tz, mapDef, units, def, scenery)) return { x: tx, z: tz };
     }
   }
   return null;
@@ -140,7 +214,7 @@ function spawnPresetUnit(game, { faction, team, unitType, echelon, index, count,
     basis.axisZ * along +
     basis.perpZ * (t * lateralSpan + jitter);
 
-  const pos = findFormationPosition(game.mapDef, game.units, x, z);
+  const pos = findFormationPosition(game.mapDef, game.units, x, z, def, game.scenery);
   if (!pos) return false;
 
   const unit = spawnUnitAt({
@@ -151,9 +225,11 @@ function spawnPresetUnit(game, { faction, team, unitType, echelon, index, count,
     z: pos.z,
     scene: game.scene,
     mapDef: game.mapDef,
+    scenery: game.scenery,
   });
+  if (!unit) return false;
   unit._mapDef = game.mapDef;
-  unit.position.y = sampleTerrainHeight(pos.x, pos.z, game.mapDef);
+  unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, game.mapDef);
   unit.lastStandRole = PRESET_ROLE_BY_TYPE[unitType] ?? 'line';
   unit.lastStandEchelon = echelon;
   game.units.push(unit);
@@ -187,14 +263,45 @@ export function deployLastStandPresetForces(game) {
   }
 }
 
-function pickWeightedUnitType(faction, supplies, weights = ENEMY_TYPE_WEIGHTS) {
-  const types = getProducibleUnits(faction).filter((t) => faction.units[t]?.cost <= supplies);
-  if (!types.length) return null;
+function livingTeamUnits(game, team) {
+  const out = [];
+  for (const unit of game.units) {
+    if (unit.team === team && !unit.dead) out.push(unit);
+  }
+  return out;
+}
+
+function enemyTypeWeightsForTactic(tacticId) {
+  const bias = TACTIC_TYPE_WEIGHT_MULT[tacticId] ?? null;
+  if (!bias) return { ...ENEMY_TYPE_WEIGHTS };
+  const weights = { ...ENEMY_TYPE_WEIGHTS };
+  for (const [type, mult] of Object.entries(bias)) {
+    weights[type] = (weights[type] ?? 1) * mult;
+  }
+  return weights;
+}
+
+/**
+ * AI picks its own unit mix (optionally biased by battle plan).
+ * Only force size is matched to the player — not composition.
+ */
+function pickEnemyDeployType(game, { ignoreSupplies = false } = {}) {
+  const faction = game.enemyFaction;
+  if (!faction?.units) return null;
+  const supplies = ignoreSupplies ? Infinity : game.lastStand?.supplies?.enemy ?? 0;
+  const weights = enemyTypeWeightsForTactic(game.lastStand?.enemyTactic?.id);
+  const types = getProducibleUnits(faction).filter(
+    (type) => (faction.units[type]?.cost ?? Infinity) <= supplies
+  );
+  if (!types.length) {
+    // Budget exhausted: still allow any producible type when matching count for free.
+    return ignoreSupplies ? getProducibleUnits(faction)[0] ?? null : null;
+  }
 
   let total = 0;
   const entries = [];
   for (const type of types) {
-    const w = weights[type] ?? 1;
+    const w = Math.max(0.05, weights[type] ?? 1);
     total += w;
     entries.push({ type, w });
   }
@@ -203,16 +310,30 @@ function pickWeightedUnitType(faction, supplies, weights = ENEMY_TYPE_WEIGHTS) {
     roll -= w;
     if (roll <= 0) return type;
   }
-  return entries[entries.length - 1].type;
+  return entries[entries.length - 1]?.type ?? null;
 }
 
-function placeEnemyUnit(game, unitType) {
+function assignLastStandUnitRole(unit, unitType = unit.def?.type) {
+  if (!unit) return;
+  const role = PRESET_ROLE_BY_TYPE[unitType] ?? 'line';
+  unit.lastStandRole = role;
+  unit.lastStandEchelon = PRESET_ECHELON_BY_ROLE[role] ?? 'front';
+}
+
+function placeEnemyUnit(game, unitType, { free = false } = {}) {
   const state = game.lastStand;
   const faction = game.enemyFaction;
   const def = faction?.units?.[unitType];
-  if (!def || state.supplies.enemy < def.cost) return false;
+  if (!def) return false;
+  if (!free && state.supplies.enemy < def.cost) return false;
 
-  const pos = pickDeployPosition(game.mapDef, game.units, game.mapDef.enemyBase);
+  const pos = pickDeployPosition(
+    game.mapDef,
+    game.units,
+    game.mapDef.enemyBase,
+    def,
+    game.scenery
+  );
   if (!pos) return false;
 
   const unit = spawnUnitAt({
@@ -223,12 +344,26 @@ function placeEnemyUnit(game, unitType) {
     z: pos.z,
     scene: game.scene,
     mapDef: game.mapDef,
+    scenery: game.scenery,
   });
+  if (!unit) return false;
   unit._mapDef = game.mapDef;
-  unit.position.y = sampleTerrainHeight(pos.x, pos.z, game.mapDef);
+  unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, game.mapDef);
+  assignLastStandUnitRole(unit, unitType);
   game.units.push(unit);
-  state.supplies.enemy -= def.cost;
+  if (!free) {
+    state.supplies.enemy = Math.max(0, state.supplies.enemy - def.cost);
+  }
   return true;
+}
+
+/** Place one AI-chosen unit; falls back to free placement if supplies are tight. */
+function placeEnemyChosenUnit(game) {
+  let type = pickEnemyDeployType(game, { ignoreSupplies: false });
+  if (type && placeEnemyUnit(game, type, { free: false })) return true;
+  type = pickEnemyDeployType(game, { ignoreSupplies: true });
+  if (!type) return false;
+  return placeEnemyUnit(game, type, { free: true });
 }
 
 export function tryPlacePlayerUnit(game, unitType, x, z) {
@@ -242,7 +377,9 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
 
   const cheatFree = game.cheatMode;
   if (!cheatFree && state.supplies.player < def.cost) return { ok: false, reason: 'no_supplies' };
-  if (!canPlaceUnitAt(x, z, game.mapDef, game.units)) return { ok: false, reason: 'blocked' };
+  if (!canPlaceUnitAt(x, z, game.mapDef, game.units, def, game.scenery)) {
+    return { ok: false, reason: 'blocked' };
+  }
 
   const unit = spawnUnitAt({
     def,
@@ -252,14 +389,20 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
     z,
     scene: game.scene,
     mapDef: game.mapDef,
+    scenery: game.scenery,
   });
+  if (!unit) return { ok: false, reason: 'blocked' };
   unit._mapDef = game.mapDef;
-  unit.position.y = sampleTerrainHeight(x, z, game.mapDef);
+  unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, game.mapDef);
   game.units.push(unit);
   if (!cheatFree) state.supplies.player -= def.cost;
   return { ok: true, unit };
 }
 
+/**
+ * During manual deploy, the enemy trails the player's force size only.
+ * Unit types are chosen by the AI (biased by battle plan), not copied.
+ */
 export function updateLastStandEnemyDeploy(game, dt) {
   const state = game.lastStand;
   if (!state || state.phase !== 'deploy' || isLastStandPresetDeployMode(state.deployMode)) return;
@@ -269,23 +412,18 @@ export function updateLastStandEnemyDeploy(game, dt) {
 
   state.enemyDeployTimer = ENEMY_DEPLOY_INTERVAL * (0.75 + Math.random() * 0.5);
 
+  const playerCount = livingTeamUnits(game, 'player').length;
+  const enemyCount = livingTeamUnits(game, 'enemy').length;
+  const deficit = playerCount - enemyCount;
+  if (deficit <= 0) return;
+
   let placed = 0;
-  while (placed < ENEMY_DEPLOY_BURST && state.supplies.enemy > 0) {
-    const type = pickWeightedUnitType(game.enemyFaction, state.supplies.enemy);
-    if (!type) break;
-    if (!placeEnemyUnit(game, type)) break;
+  const budget = Math.min(ENEMY_DEPLOY_BURST, deficit);
+  while (placed < budget) {
+    if (!placeEnemyChosenUnit(game)) break;
     placed++;
   }
 }
-
-const LAST_STAND_DEFENSIVE_TYPES = new Set([
-  'mortar',
-  'artillery',
-  'antiTankGun',
-  'sniper',
-  'machineGun',
-]);
-const LAST_STAND_AGGRESSIVE_TYPES = new Set(['tank', 'tankDestroyer', 'armoredCar', 'superHeavyTank']);
 
 function holdRadiusForType(type) {
   if (type === 'artillery' || type === 'mortar') return 12;
@@ -298,7 +436,6 @@ function holdRadiusForType(type) {
 }
 
 function assignDefensiveHold(unit, defendChance) {
-  const type = unit.def.type;
   if (Math.random() >= defendChance) {
     unit.lastStandStance = 'attack';
     unit.defensiveHold = null;
@@ -308,44 +445,50 @@ function assignDefensiveHold(unit, defendChance) {
   unit.defensiveHold = {
     x: unit.position.x,
     z: unit.position.z,
-    radius: holdRadiusForType(type),
+    radius: holdRadiusForType(unit.def?.type),
   };
 }
 
-/** Assign per-unit attack vs hold roles when Last Stand battle begins (manual deploy). */
-export function assignLastStandEnemyStances(game) {
-  for (const unit of game.units) {
-    if (unit.team !== 'enemy' || unit.dead) continue;
-
-    const type = unit.def.type;
-    let defendChance = 0.45;
-    if (LAST_STAND_DEFENSIVE_TYPES.has(type)) defendChance = 0.82;
-    else if (LAST_STAND_AGGRESSIVE_TYPES.has(type)) defendChance = 0.22;
-    else if (type === 'infantry' || type === 'medic' || type === 'engineer') defendChance = 0.5;
-
-    assignDefensiveHold(unit, defendChance);
-  }
-}
-
-/** Roll enemy battle plan and briefing for preset Last Stand (once per engagement). */
+/**
+ * Roll enemy battle plan (and briefing for preset mode).
+ * Manual deploy also gets a tactic so AI uses the same combined-arms mix.
+ */
 export function initLastStandPresetEngagement(game) {
   const state = game.lastStand;
-  if (!state || !isLastStandPresetDeployMode(state.deployMode)) return null;
+  if (!state) return null;
 
   const tactic = pickLastStandTactic();
   state.enemyTactic = tactic;
+  state.enemyTacticId = tactic.id;
   state.flankSide = Math.random() < 0.5 ? -1 : 1;
-  state.briefing = buildLastStandBriefing({
-    mapDef: game.mapDef,
-    playerFaction: game.playerFaction,
-    enemyFaction: game.enemyFaction,
-    tactic,
-  });
-  state.briefingShown = false;
-  return state.briefing;
+
+  if (isLastStandPresetDeployMode(state.deployMode)) {
+    state.briefing = buildLastStandBriefing({
+      mapDef: game.mapDef,
+      playerFaction: game.playerFaction,
+      enemyFaction: game.enemyFaction,
+      tactic,
+    });
+    state.briefingShown = false;
+    return state.briefing;
+  }
+
+  // Manual deploy: tactic drives AI only; no full field briefing overlay.
+  state.briefing = null;
+  state.briefingShown = true;
+  return null;
 }
 
-/** Combined-arms stances for preset battle groups — varies by enemy battle plan. */
+/** Ensure a battle plan exists before combat AI runs (manual begin battle). */
+export function ensureLastStandEngagementTactic(game) {
+  const state = game.lastStand;
+  if (!state) return null;
+  if (state.enemyTactic) return state.enemyTactic;
+  initLastStandPresetEngagement(game);
+  return state.enemyTactic ?? null;
+}
+
+/** Combined-arms stances — varies by enemy battle plan (preset and manual). */
 export function assignLastStandPresetStances(game) {
   const tactic =
     game.lastStand?.enemyTactic ??
@@ -357,6 +500,9 @@ export function assignLastStandPresetStances(game) {
 
     const role = unit.lastStandRole ?? PRESET_ROLE_BY_TYPE[unit.def?.type] ?? 'line';
     unit.lastStandRole = role;
+    if (!unit.lastStandEchelon) {
+      unit.lastStandEchelon = PRESET_ECHELON_BY_ROLE[role] ?? 'front';
+    }
 
     if (unit.team === 'player') {
       unit.lastStandStance = null;
@@ -369,29 +515,36 @@ export function assignLastStandPresetStances(game) {
   }
 }
 
+/**
+ * Top up the enemy army so its size matches the player when Begin Battle is
+ * pressed. Composition stays AI-chosen.
+ */
 export function flushEnemyDeployment(game) {
   const state = game.lastStand;
   if (!state || isLastStandPresetDeployMode(state.deployMode)) return;
 
-  const faction = game.enemyFaction;
-  const types = getProducibleUnits(faction).sort(
-    (a, b) => (faction.units[b]?.cost ?? 0) - (faction.units[a]?.cost ?? 0)
-  );
-
   let guard = 0;
-  while (state.supplies.enemy > 0 && guard < 200) {
+  while (guard < 250) {
     guard++;
-    const affordable = types.filter((t) => (faction.units[t]?.cost ?? Infinity) <= state.supplies.enemy);
-    if (!affordable.length) break;
-    const type = pickWeightedUnitType(faction, state.supplies.enemy) ?? affordable[0];
-    if (!placeEnemyUnit(game, type)) break;
+    const playerCount = livingTeamUnits(game, 'player').length;
+    const enemyCount = livingTeamUnits(game, 'enemy').length;
+    if (enemyCount >= playerCount) break;
+    if (!placeEnemyChosenUnit(game)) break;
   }
 
-  if (game._enemyAlive.length === 0) {
-    for (let i = 0; i < 6; i++) {
-      if (!placeEnemyUnit(game, 'infantry')) break;
-    }
+  // Tag any stragglers placed before roles existed.
+  for (const unit of livingTeamUnits(game, 'enemy')) {
+    if (!unit.lastStandRole) assignLastStandUnitRole(unit);
   }
+}
+
+/** @deprecated Manual mode now uses tactic stances; kept as alias for callers. */
+export function assignLastStandEnemyStances(game) {
+  ensureLastStandEngagementTactic(game);
+  for (const unit of livingTeamUnits(game, 'enemy')) {
+    if (!unit.lastStandRole) assignLastStandUnitRole(unit);
+  }
+  assignLastStandPresetStances(game);
 }
 
 function livingTeamCount(units, team) {

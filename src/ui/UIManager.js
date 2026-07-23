@@ -1,6 +1,12 @@
 import { FACTION_LIST } from '../data/factions.js';
-import { MAP_LIST } from '../data/maps.js';
-import { MAP_SIZE_LIST, formatMapHudLabel } from '../data/mapSizes.js';
+import { MAP_LIST, MAPS } from '../data/maps.js';
+import {
+  MAP_SIZE_LIST,
+  formatMapHudLabel,
+  getMapSizeOptions,
+  getDefaultMapSize,
+  resolveMapSizeId,
+} from '../data/mapSizes.js';
 import {
   GAME_MODE_LIST,
   ASSAULT_ROLE_LIST,
@@ -1054,13 +1060,25 @@ export class UIManager {
       this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
     const lockBaseBuilding =
       this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
+    const mapBase = this.selectedMap ? MAPS[this.selectedMap] : null;
+    const mapAllowed = getMapSizeOptions(mapBase);
+    if (mapBase) {
+      this.selectedMapSize = resolveMapSizeId(mapBase, this.selectedMapSize);
+    }
     grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
       const selected = preset.id === this.selectedMapSize;
+      const mapBlocks = !mapAllowed.includes(preset.id);
       const disabled =
+        mapBlocks ||
         (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) ||
         (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
       let meta = preset.subtitle;
-      if (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
+      if (mapBlocks) {
+        meta =
+          mapAllowed.length === 1
+            ? `${mapBase?.name ?? 'This map'} is fixed at ${MAP_SIZE_LIST.find((p) => p.id === mapAllowed[0])?.name ?? mapAllowed[0]}`
+            : 'Not available on this map';
+      } else if (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
         meta = 'Preset battle groups need a large theater';
       } else if (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE) {
         meta = 'Base Building needs a large theater';
@@ -1268,6 +1286,9 @@ export class UIManager {
         this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
         this.selectedMap = btn.dataset.id;
+        const mapBase = MAPS[this.selectedMap];
+        if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
+        this.renderMapSizes();
         this.root.querySelector('#btn-launch').disabled = false;
       };
     });
@@ -1279,12 +1300,14 @@ export class UIManager {
         const baseBuildingStyle =
           this.selectedGameMode === 'campaign' &&
           this.selectedCampaignStyle === 'baseBuilding';
+        const mapBase = MAPS[this.selectedMap];
+        const mapSize = baseBuildingStyle
+          ? BASE_BUILDING_MIN_MAP_SIZE
+          : resolveMapSizeId(mapBase, this.selectedMapSize ?? 'medium');
         this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
-          mapSize: baseBuildingStyle
-            ? BASE_BUILDING_MIN_MAP_SIZE
-            : this.selectedMapSize ?? 'medium',
+          mapSize,
           campaignStyle:
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
           clearanceStyle:
@@ -1767,7 +1790,7 @@ export class UIManager {
           'Preset battle group: full combined-arms forces deployed · Begin Battle when ready · destroy every enemy unit';
       } else if (lastStand) {
         this._defaultHudHint =
-          'Battle Simulation: pick a unit, LMB on the map to place · enemy deploys in parallel · Begin Battle when ready';
+          'Battle Simulation: pick a unit, LMB on the map to place · enemy matches your unit count · Begin Battle when ready';
       } else if (baseBuilding) {
         this._defaultHudHint =
           'Victory: destroy the enemy HQ · Base Construction unlocks armor & artillery · garrison trains infantry';
@@ -1897,8 +1920,8 @@ export class UIManager {
     btn.classList.toggle('order-running', this.seekCoverMode);
     btn.setAttribute('aria-pressed', this.seekCoverMode ? 'true' : 'false');
     btn.title = this.seekCoverMode
-      ? 'Infantry move orders seek nearest cover (click to disable)'
-      : 'Move orders go to clicked ground — click to seek nearest cover for infantry';
+      ? 'Foot troops and support crews seek nearest cover (click to disable)'
+      : 'Move orders go to clicked ground — click to seek cover for foot troops and support crews';
     const stateEl = btn.querySelector('.seek-cover-state');
     if (stateEl) stateEl.textContent = this.seekCoverMode ? 'On' : 'Off';
     this._syncGeneralOrdersHint();
@@ -1909,7 +1932,7 @@ export class UIManager {
     if (!hint) return;
     const base = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
     hint.textContent = this.seekCoverMode
-      ? `${base} · Seek Cover routes infantry to nearby hedges, pits, and bunkers`
+      ? `${base} · Seek Cover routes foot troops and support crews to nearby cover`
       : base;
   }
 
@@ -3037,7 +3060,7 @@ export class UIManager {
     const preset = isLastStandPresetDeployMode(game.lastStand.deployMode);
     const LAST_STAND_BATTLE_HINT = preset
       ? 'Preset battle group — combined arms clash · destroy all enemy forces to win'
-      : 'Battle Simulation — no reinforcements · wipe out all enemy units to win';
+      : 'Battle Simulation — equal unit counts · no reinforcements · wipe out all enemy units to win';
 
     const banner = this.root.querySelector('#opening-countdown');
     const title = this.root.querySelector('#opening-countdown-title');
@@ -3078,9 +3101,18 @@ export class UIManager {
     }
     if (value) value.textContent = String(playerCount);
     if (sub) {
-      sub.textContent = preset
-        ? `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations on a large theater`
-        : `${supplies} supplies left · ${enemyCount} enemy units placed · Esc cancels selection`;
+      if (preset) {
+        sub.textContent = `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations on a large theater`;
+      } else {
+        const plan = game.lastStand.enemyTactic?.name;
+        const matchNote =
+          enemyCount === playerCount && playerCount > 0
+            ? 'enemy matched'
+            : `enemy matching (${enemyCount}/${playerCount})`;
+        sub.textContent = plan
+          ? `${supplies} supplies left · ${matchNote} · enemy plan: ${plan}`
+          : `${supplies} supplies left · ${matchNote} · Esc cancels selection`;
+      }
     }
     if (fill) fill.style.width = '100%';
     if (launchBtn) {
@@ -3101,9 +3133,13 @@ export class UIManager {
           : 'Preset force — rifle line, support weapons, and armor echelons are in position';
       } else {
         const pending = game.lastStand.pendingType;
+        const plan = game.lastStand.enemyTactic?.name;
+        const forceHint = plan
+          ? `Enemy matches your unit count · plan: ${plan}`
+          : 'Enemy matches your unit count (chooses its own mix)';
         qEl.textContent = pending
-          ? `Placing ${game.playerFaction.units[pending]?.name ?? pending} — click the map`
-          : 'Select a unit type, then click the map to deploy';
+          ? `Placing ${game.playerFaction.units[pending]?.name ?? pending} — click the map · ${forceHint}`
+          : `Select a unit type, then click the map · ${forceHint}`;
       }
     }
 
@@ -3529,7 +3565,7 @@ export class UIManager {
         detail =
           garrisonN > 0
             ? `<strong>${garrisonN}/${cap} inside</strong> — troops are garrisoned in this building (heavy cover). Order them to move to leave.`
-            : `Garrison ${garrisonN}/${cap} — move foot troops onto the bunker to enter. Units inside are hidden and show an <strong>INSIDE</strong> marker above the roof.`;
+            : `Garrison ${garrisonN}/${cap} — move foot troops onto the building to enter. Occupants appear as armed lookouts at the windows, with an <strong>INSIDE</strong> marker above the roof.`;
       } else if ((baseEntry.def.spawns?.length ?? 0) > 0) {
         detail = `Train units from this depot using the panel on the right.`;
       }
@@ -3580,7 +3616,7 @@ export class UIManager {
       const engBuild = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
       let coverBlock = '';
       if (garrisoned) {
-        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.12) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Look for the green <strong>INSIDE</strong> marker over the roof.</p>`;
+        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.12) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Armed lookouts remain visible at the windows beneath the green <strong>INSIDE</strong> marker.</p>`;
       } else if (engBuild) {
         coverBlock = `<p class="unit-support-status unit-building-status"><strong>Building ${engBuild.label}</strong> — ${engBuild.pct}% complete — watch the site marker on the map</p>`;
       } else if (dig) {

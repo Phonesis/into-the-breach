@@ -22,6 +22,22 @@ const AI_PROD_MAX = 13;
 
 /** Prefer sending these types to flip neutral / enemy-held capture zones. */
 const CAPTURE_UNIT_TYPES = new Set(['infantry', 'machineGun', 'armoredCar']);
+const INDIRECT_FIRE_TYPES = new Set(['artillery', 'mortar']);
+
+function isVisibleAttackTarget(unit, target, scenery) {
+  if (!target || INDIRECT_FIRE_TYPES.has(unit.def?.type)) return !!target;
+  return !scenery?.isLineOfFireBlocked?.(unit, target);
+}
+
+function findNearestVisibleEnemy(unit, targets, scenery) {
+  if (!scenery || INDIRECT_FIRE_TYPES.has(unit.def?.type)) {
+    return findNearestEnemy(unit, targets);
+  }
+  return findNearestEnemy(
+    unit,
+    targets.filter((target) => isVisibleAttackTarget(unit, target, scenery))
+  );
+}
 
 export function resetAI(openingDelay = 0, firstProdDelay = 5) {
   aiTimer = Math.max(0, openingDelay);
@@ -135,10 +151,11 @@ export function updateAI({
           mapDef,
           d,
           lastStandTactic,
-          lastStandFlankSide
+          lastStandFlankSide,
+          game?.scenery
         );
       } else {
-        updateLastStandUnit(unit, alivePlayers, mapDef, d);
+        updateLastStandUnit(unit, alivePlayers, mapDef, d, game?.scenery);
       }
       continue;
     }
@@ -165,7 +182,7 @@ export function updateAI({
       continue;
     }
 
-    const focus = pickAttackTarget(unit, alivePlayers);
+    const focus = pickAttackTarget(unit, alivePlayers, game?.scenery);
     if (focus) {
       unit.setAttackOrder(focus);
       if (!isInRange(unit, focus)) {
@@ -196,7 +213,7 @@ export function updateAI({
           continue;
         }
         if (distLine < 28 && alivePlayers.length > 0 && Math.random() < defenderEngageChance) {
-          const nearest = findNearestEnemy(unit, alivePlayers);
+          const nearest = findNearestVisibleEnemy(unit, alivePlayers, game?.scenery);
           if (nearest) {
             unit.setAttackOrder(nearest);
             continue;
@@ -224,7 +241,7 @@ export function updateAI({
 
     if (unit.moveTarget && Math.random() > idleAdvanceChance) continue;
 
-    const nearest = findNearestEnemy(unit, alivePlayers);
+    const nearest = findNearestVisibleEnemy(unit, alivePlayers, game?.scenery);
     if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.35) {
       unit.setAttackOrder(nearest);
       continue;
@@ -317,14 +334,26 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
   aiDefenseTimer = 34 + Math.random() * 22;
 
   const engineers = enemyUnits.filter(
-    (unit) => unit.def?.type === 'engineer' && !unit._sandbagSite && !unit.retreating
+    (unit) =>
+      unit.def?.type === 'engineer' &&
+      !unit._sandbagSite &&
+      !unit.retreating &&
+      !unit._garrisonBunkerId
   );
   if (engineers.length && game.engineerSandbags?.canUse?.()) {
     const engineer = engineers[Math.floor(Math.random() * engineers.length)];
     const buildType = game.engineerSandbags.canBuildSandbags?.()
       ? (assault?.defenderTeam === 'enemy' || Math.random() < 0.65 ? 'sandbags' : 'bunker')
       : 'bunker';
-    if (game.engineerSandbags.tryAiPlace(engineer.position.x, engineer.position.z, 'enemy', buildType)) {
+    // tryAiPlace searches nearby open ground so AI does not dig under tenements.
+    if (
+      game.engineerSandbags.tryAiPlace(
+        engineer.position.x,
+        engineer.position.z,
+        'enemy',
+        buildType
+      )
+    ) {
       return;
     }
   }
@@ -334,7 +363,8 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
       canDigAiTrenchType(unit.def?.type) &&
       !unit._trenchDigSite &&
       !unit._trenchId &&
-      !unit.retreating
+      !unit.retreating &&
+      !unit._garrisonBunkerId
   );
   if (diggers.length && game.infantryTrenches?.canUse?.()) {
     const digger = diggers[Math.floor(Math.random() * diggers.length)];
@@ -354,13 +384,18 @@ function chooseCoverMove(unit, players, game, assault) {
 
   if (canGarrisonType(unit.def?.type)) {
     const bunker = pickFriendlyBunker(unit, getGarrisonBunkerSources(game));
-    if (bunker) return { x: bunker.x, z: bunker.z };
+    if (bunker) {
+      // Allow pathfinding into this shelter; other moves route around buildings.
+      unit._bunkerEntryId = bunker.id;
+      return { x: bunker.x, z: bunker.z };
+    }
   }
 
   const target = averagePosition(players);
   const destination = resolveSeekCoverDestination(unit, target.x, target.z, game.coverSystem);
   if (Math.hypot(destination.x - unit.position.x, destination.z - unit.position.z) < 4) return null;
   if (Math.hypot(destination.x - target.x, destination.z - target.z) < 0.5) return null;
+  unit._bunkerEntryId = null;
   return destination;
 }
 
@@ -460,12 +495,13 @@ function enemyNeedsCapture(points, assault) {
   return points.some((p) => !p.isFrontline && p.owner !== 'enemy');
 }
 
-function pickPresetAttackTarget(unit, players) {
+function pickPresetAttackTarget(unit, players, scenery) {
   if (unit.def?.type === 'antiTankGun' || unit.def?.type === 'tank' || unit.def?.type === 'tankDestroyer' || unit.def?.type === 'superHeavyTank') {
     let best = null;
     let bestScore = Infinity;
     for (const foe of players) {
       if (foe.dead || foe.team === unit.team) continue;
+      if (!isVisibleAttackTarget(unit, foe, scenery)) continue;
       const d = unit.distanceTo(foe);
       if (d > unit.def.range * 1.25) continue;
       const vehicle = isVehicleUnit(foe.def?.type);
@@ -478,7 +514,7 @@ function pickPresetAttackTarget(unit, players) {
     }
     if (best) return best;
   }
-  return pickAttackTarget(unit, players);
+  return pickAttackTarget(unit, players, scenery);
 }
 
 function countAlliesInRole(allies, role, nearUnit, radius) {
@@ -540,7 +576,8 @@ function updateLastStandPresetUnit(
   mapDef,
   difficulty,
   lastStandTactic,
-  flankSide = 1
+  flankSide = 1,
+  scenery = null
 ) {
   const d = difficulty ?? { attackAggressionMult: 1 };
   const tactic = lastStandTactic ?? getLastStandTactic('armoredThrust');
@@ -548,7 +585,7 @@ function updateLastStandPresetUnit(
   const role = unit.lastStandRole ?? 'line';
   const hold = unit.defensiveHold;
   const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
-  const focus = pickPresetAttackTarget(unit, players);
+  const focus = pickPresetAttackTarget(unit, players, scenery);
 
   if (role === 'armor' || role === 'recon') {
     if (focus) {
@@ -636,7 +673,11 @@ function updateLastStandPresetUnit(
       ) {
         unit.lastStandStance = 'attack';
         unit.defensiveHold = null;
-        if (armorLead.attackOrder && !armorLead.attackOrder.dead) {
+        if (
+          armorLead.attackOrder &&
+          !armorLead.attackOrder.dead &&
+          isVisibleAttackTarget(unit, armorLead.attackOrder, scenery)
+        ) {
           unit.setAttackOrder(armorLead.attackOrder);
           unit.moveTarget = getStandoffPosition(unit, armorLead.attackOrder);
         } else if (armorLead.moveTarget) {
@@ -674,14 +715,14 @@ function updateLastStandPresetUnit(
     return;
   }
 
-  updateLastStandUnit(unit, players, mapDef, difficulty);
+  updateLastStandUnit(unit, players, mapDef, difficulty, scenery);
 }
 
-function updateLastStandUnit(unit, players, mapDef, difficulty) {
+function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) {
   const d = difficulty ?? { attackAggressionMult: 1 };
   const hold = unit.defensiveHold;
   const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
-  const focus = pickAttackTarget(unit, players);
+  const focus = pickAttackTarget(unit, players, scenery);
 
   if (isDefensive) {
     const engageChance = 0.55 * d.attackAggressionMult;
@@ -733,7 +774,7 @@ function updateLastStandUnit(unit, players, mapDef, difficulty) {
 
   if (unit.attackOrder && !unit.attackOrder.dead) return;
 
-  const nearest = findNearestEnemy(unit, players);
+  const nearest = findNearestVisibleEnemy(unit, players, scenery);
   if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.75) {
     unit.setAttackOrder(nearest);
     unit.moveTarget = getStandoffPosition(unit, nearest);
@@ -770,7 +811,7 @@ function updateClearanceDefender(unit, players, game = null) {
       return;
     }
 
-    const probeTarget = findNearestEnemy(unit, players);
+    const probeTarget = findNearestVisibleEnemy(unit, players, game?.scenery);
     if (probeTarget) {
       unit.setAttackOrder(probeTarget);
       if (!isInRange(unit, probeTarget)) {
@@ -787,7 +828,7 @@ function updateClearanceDefender(unit, players, game = null) {
   // range, which made snipers acquire and walk toward the assembly area as soon
   // as the ceasefire ended. Only engage once a target is actually in range;
   // pursuit is reserved for the explicit probing-counterattack branch above.
-  const nearest = findNearestEnemy(unit, players);
+  const nearest = findNearestVisibleEnemy(unit, players, game?.scenery);
   const focus = nearest && isInRange(unit, nearest) ? nearest : null;
   if (focus) {
     unit.setAttackOrder(focus);
@@ -819,11 +860,14 @@ function updateClearanceDefender(unit, players, game = null) {
   unit.moveTarget = null;
 }
 
-function pickAttackTarget(unit, players) {
+function pickAttackTarget(unit, players, scenery = null) {
   if (unit.attackOrder && !unit.attackOrder.dead) {
-    if (isInRange(unit, unit.attackOrder) || unit._chasingAttack) return unit.attackOrder;
+    if (
+      isVisibleAttackTarget(unit, unit.attackOrder, scenery) &&
+      (isInRange(unit, unit.attackOrder) || unit._chasingAttack)
+    ) return unit.attackOrder;
   }
-  const nearest = findNearestEnemy(unit, players);
+  const nearest = findNearestVisibleEnemy(unit, players, scenery);
   if (!nearest) return null;
   const d = unit.distanceTo(nearest);
   if (d <= unit.def.range * 1.15) return nearest;

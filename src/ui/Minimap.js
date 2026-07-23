@@ -1,5 +1,9 @@
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { isTankType } from '../units/VehicleTypes.js';
+import {
+  getUrbanRoadExtent,
+  getUrbanStreetSpacing,
+} from '../world/UrbanLayout.js';
 
 export const MINIMAP_VISIBLE_KEY = 'ww2-rts-minimap-visible';
 
@@ -72,6 +76,56 @@ function buildTerrainBitmap(mapDef) {
   }
 
   ctx.putImageData(img, 0, 0);
+  if (mapDef.terrain === 'urban') {
+    const spacing = getUrbanStreetSpacing(mapDef);
+    const width = mapDef.streetWidth ?? 6.4;
+    ctx.fillStyle = 'rgba(42,43,42,0.82)';
+    const toPx = (v) => ((v / mapDef.size) + 0.5) * TERRAIN_RES;
+    const roadPx = Math.max(2, (width / mapDef.size) * TERRAIN_RES);
+    const extent = getUrbanRoadExtent(mapDef);
+    for (let p = -extent; p <= extent; p += spacing) {
+      ctx.fillRect(toPx(p) - roadPx * 0.5, toPx(-extent) - roadPx * 0.5, roadPx, (extent * 2 / mapDef.size) * TERRAIN_RES + roadPx);
+      ctx.fillRect(toPx(-extent) - roadPx * 0.5, toPx(p) - roadPx * 0.5, (extent * 2 / mapDef.size) * TERRAIN_RES + roadPx, roadPx);
+    }
+
+    const blockWidth = spacing - width - 2.75;
+    const blockPx = Math.max(4, (blockWidth / mapDef.size) * TERRAIN_RES);
+    for (const park of [
+      { x: -extent * 0.52, z: extent * 0.52 },
+      { x: -extent * 0.2, z: extent * 0.52 },
+    ]) {
+      ctx.fillStyle = 'rgba(65,83,61,0.94)';
+      ctx.fillRect(toPx(park.x) - blockPx * 0.5, toPx(park.z) - blockPx * 0.5, blockPx, blockPx);
+    }
+
+    const canalX = spacing * (mapDef.canalOffsetCells ?? 1.5);
+    const canalWidth = mapDef.canalWidth ?? 5.4;
+    const canalPx = Math.max(3, (canalWidth / mapDef.size) * TERRAIN_RES);
+    ctx.fillStyle = 'rgba(38,71,76,0.96)';
+    ctx.fillRect(
+      toPx(canalX) - canalPx * 0.5,
+      toPx(-extent) - roadPx * 0.5,
+      canalPx,
+      (extent * 2 / mapDef.size) * TERRAIN_RES + roadPx
+    );
+    ctx.fillStyle = 'rgba(104,103,96,0.96)';
+    for (let z = -extent; z <= extent; z += spacing) {
+      ctx.fillRect(
+        toPx(canalX) - canalPx * 0.65,
+        toPx(z) - roadPx * 0.5,
+        canalPx * 1.3,
+        roadPx
+      );
+    }
+
+    ctx.fillStyle = 'rgba(120,111,91,0.94)';
+    ctx.fillRect(
+      toPx(-spacing * 0.5) - blockPx * 0.5,
+      toPx(-spacing * 0.5) - blockPx * 0.5,
+      blockPx,
+      blockPx
+    );
+  }
   return canvas;
 }
 

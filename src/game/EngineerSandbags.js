@@ -371,12 +371,42 @@ export class EngineerSandbagManager {
     const spacingReason = this._spacingConflict(x, z, preset.minSpacing, buildType);
     if (spacingReason) return spacingReason;
 
+    if (this.game.scenery?.isFieldWorksPlacementBlocked?.(x, z, 1.7)) {
+      return 'Cannot build inside a building.';
+    }
+
     const engineer = this._nearestSelectedEngineer(x, z, team, options.selectedOnly !== false);
     if (!engineer) {
       return 'Select a free engineer to assign this build site.';
     }
 
     return null;
+  }
+
+  /** Nearby open-ground candidates for AI field works (avoids tenement interiors). */
+  _aiPlacementCandidates(x, z) {
+    const candidates = [{ x, z }];
+    const clear = this.game.scenery?.findClearVehiclePlacement?.(
+      x,
+      z,
+      1.7,
+      this.game.mapDef
+    );
+    if (clear && (Math.abs(clear.x - x) > 0.05 || Math.abs(clear.z - z) > 0.05)) {
+      candidates.unshift(clear);
+    }
+    for (let ring = 1; ring <= 5; ring++) {
+      const radius = ring * 3.4;
+      const steps = 6 + ring * 2;
+      for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * Math.PI * 2;
+        candidates.push({
+          x: x + Math.cos(angle) * radius,
+          z: z + Math.sin(angle) * radius,
+        });
+      }
+    }
+    return candidates;
   }
 
   tryPlace(x, z, team, rotationY = null) {
@@ -421,30 +451,39 @@ export class EngineerSandbagManager {
   }
 
   tryAiPlace(x, z, team, buildType) {
-    const reason = this.getPlacementRejectReason(x, z, team, buildType, { selectedOnly: false });
-    if (reason) return false;
+    for (const pos of this._aiPlacementCandidates(x, z)) {
+      const reason = this.getPlacementRejectReason(pos.x, pos.z, team, buildType, {
+        selectedOnly: false,
+      });
+      if (reason) continue;
 
-    const engineer = this._nearestSelectedEngineer(x, z, team, false);
-    if (!engineer) return false;
+      const engineer = this._nearestSelectedEngineer(pos.x, pos.z, team, false);
+      if (!engineer) continue;
 
-    const y = this.game.mapDef ? sampleTerrainHeight(x, z, this.game.mapDef) : 0;
-    const site = {
-      id: nextSiteId++,
-      buildType,
-      x,
-      z,
-      y,
-      team,
-      engineerId: engineer.id,
-      rotationY: this._facingYaw(team, x, z),
-      progress: 0,
-      marker: null,
-    };
-    this.sites.push(site);
-    engineer._sandbagSite = site.id;
-    engineer.clearAttackOrder?.();
-    this._attachSiteMarker(site);
-    return true;
+      const y = this.game.mapDef
+        ? sampleTerrainHeight(pos.x, pos.z, this.game.mapDef)
+        : 0;
+      const site = {
+        id: nextSiteId++,
+        buildType,
+        x: pos.x,
+        z: pos.z,
+        y,
+        team,
+        engineerId: engineer.id,
+        rotationY: this._facingYaw(team, pos.x, pos.z),
+        progress: 0,
+        marker: null,
+      };
+      this.sites.push(site);
+      engineer._sandbagSite = site.id;
+      engineer.clearAttackOrder?.();
+      engineer.moveTo?.(site.x, site.z, this.game.mapDef, true);
+      site.moveOrderIssued = true;
+      this._attachSiteMarker(site);
+      return true;
+    }
+    return false;
   }
 
   _attachSiteMarker(site) {

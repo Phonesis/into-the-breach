@@ -19,32 +19,58 @@ export function buildCoverSites(mapDef, scene, scenery = null, factions = null, 
   const random = createMapRandom(mapDef, 'cover');
 
   const addBunker = (x, z, type = 'medium') => {
-    const y = sampleTerrainHeight(x, z, mapDef);
-    const sideFaction = factionForPosition(x, z, mapDef, factions);
+    let px = x;
+    let pz = z;
+    // Map-gen sandbags must sit on open ground / streets, never inside tenements.
+    if (scenery?.isFieldWorksPlacementBlocked?.(px, pz, 1.7)) {
+      const clear = scenery.findClearVehiclePlacement?.(px, pz, 1.7, mapDef);
+      if (!clear) return false;
+      px = clear.x;
+      pz = clear.z;
+      if (scenery.isFieldWorksPlacementBlocked?.(px, pz, 1.7)) return false;
+    }
+    const y = sampleTerrainHeight(px, pz, mapDef);
+    const sideFaction = factionForPosition(px, pz, mapDef, factions);
     const g = createSandbagEmplacementGroup({
       factionId: sideFaction?.id ?? null,
-      seed: x * 0.13 + z * 0.19,
+      seed: px * 0.13 + pz * 0.19,
     });
-    g.position.set(x, y, z);
+    g.position.set(px, y, pz);
 
     if (scenery) {
-      scenery.register(g, { x, z, kind: 'bunker', coverType: type, source: 'map' });
+      scenery.register(g, { x: px, z: pz, kind: 'bunker', coverType: type, source: 'map' });
     } else {
       scene.add(g);
-      zones.push({ x, z, type });
+      zones.push({ x: px, z: pz, type });
     }
+    return true;
   };
 
   const sizeScale = mapDef.sizeScale ?? 1;
-  const baseCount = mapDef.terrain === 'desert' ? 14 : mapDef.terrain === 'bocage' ? 22 : 18;
+  const baseCount = mapDef.terrain === 'desert' ? 14 : mapDef.terrain === 'bocage' ? 22 : mapDef.terrain === 'urban' ? 12 : 18;
   const count = Math.round(baseCount * sizeScale * (sizeScale > 1 ? 1.1 : 1));
 
-  for (let i = 0; i < count; i++) {
-    const x = (random() - 0.5) * mapDef.size * 0.75;
-    const z = (random() - 0.5) * mapDef.size * 0.75;
+  let placed = 0;
+  let attempts = 0;
+  const maxAttempts = count * 6;
+  while (placed < count && attempts < maxAttempts) {
+    attempts++;
+    let x = (random() - 0.5) * mapDef.size * 0.75;
+    let z = (random() - 0.5) * mapDef.size * 0.75;
+    if (mapDef.terrain === 'urban') {
+      const spacing = mapDef.streetSpacing ?? 21;
+      // Prefer street corridors rather than block centres on urban maps.
+      if (random() < 0.72) {
+        if (random() < 0.5) x = Math.round(x / spacing) * spacing;
+        else z = Math.round(z / spacing) * spacing;
+      } else {
+        x = Math.round(x / spacing) * spacing + (random() - 0.5) * (mapDef.streetWidth ?? 6.4) * 0.35;
+        z = Math.round(z / spacing) * spacing + (random() - 0.5) * (mapDef.streetWidth ?? 6.4) * 0.35;
+      }
+    }
     if (Math.abs(x) < 10 * sizeScale && Math.abs(z) < 8 * sizeScale) continue;
     const t = random() < 0.25 ? 'heavy' : 'medium';
-    addBunker(x, z, t);
+    if (addBunker(x, z, t)) placed++;
   }
 
   if (mapDef.terrain === 'bocage') {

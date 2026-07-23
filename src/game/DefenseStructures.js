@@ -35,6 +35,23 @@ import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 
 const ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
+/** Emplacements that must sit on open ground, never inside solid buildings. */
+const BUILDING_CLEARANCE_DEFENSE_TYPES = new Set([
+  'bunker',
+  'bunkerHeavy',
+  'mgNest',
+  'mgNestMk2',
+  'mortarNest',
+  'mortarNestMk2',
+  'atGun',
+  'atGun88',
+  'artillery',
+  'artilleryHeavy',
+  'tankTrap',
+  'tankTrapHeavy',
+  'barbedWire',
+  'mine',
+]);
 
 const MORTAR_SOUND_BY_FACTION = {
   germany: 'mortar_germany',
@@ -73,6 +90,13 @@ function emplacementWeaponVolume(def) {
   return 0.8;
 }
 
+function getDirectFireProxy(entry) {
+  return {
+    position: { x: entry.x, z: entry.z },
+    def: { type: entry.def.weaponType ?? 'machineGun' },
+  };
+}
+
 function disposeMeshTree(mesh) {
   if (!mesh) return;
   mesh.traverse((c) => {
@@ -90,6 +114,7 @@ export class DefenseStructureManager {
     mapDef,
     getEnemyUnits,
     getTerrainMesh,
+    getScenery,
     onChange,
     onFireTrace,
     factionId = 'germany',
@@ -99,6 +124,7 @@ export class DefenseStructureManager {
     this.mapDef = mapDef;
     this.getEnemyUnits = getEnemyUnits;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
+    this.getScenery = getScenery ?? (() => null);
     this.onChange = onChange;
     this.onFireTrace = onFireTrace ?? null;
     this.factionId = factionId;
@@ -194,10 +220,15 @@ export class DefenseStructureManager {
     return (x - this._fl.x) * this._front.x + (z - this._fl.z) * this._front.z;
   }
 
-  canPlaceAt(x, z) {
+  canPlaceAt(x, z, typeId = null) {
     if (!this.mapDef || !this._fl) return false;
     const half = this.mapDef.size * 0.5 - 5;
     if (Math.abs(x) > half || Math.abs(z) > half) return false;
+
+    if (
+      (!typeId || BUILDING_CLEARANCE_DEFENSE_TYPES.has(typeId)) &&
+      this.getScenery()?.isFieldWorksPlacementBlocked?.(x, z, 2.0)
+    ) return false;
 
     const along = this._alongFront(x, z);
     if (along > 6) return false;
@@ -227,6 +258,10 @@ export class DefenseStructureManager {
     if (!this.mapDef || !this._fl) return 'Frontline not ready';
     const half = this.mapDef.size * 0.5 - 5;
     if (Math.abs(x) > half || Math.abs(z) > half) return 'Outside the map';
+    if (
+      (!typeId || BUILDING_CLEARANCE_DEFENSE_TYPES.has(typeId)) &&
+      this.getScenery()?.isFieldWorksPlacementBlocked?.(x, z, 2.0)
+    ) return 'Cannot place inside a building';
     if (this._alongFront(x, z) > 6) return 'Place on your side of the frontline';
     if (Math.hypot(x - this._fl.x, z - this._fl.z) > this.mapDef.size * 0.48) {
       return 'Too far from the frontline';
@@ -322,7 +357,7 @@ export class DefenseStructureManager {
     const def = DEFENSE_TYPES[typeId];
     if (!def || typeof def.cost !== 'number' || def.cost <= 0) return false;
     if (typeId === 'artillery' && this.isArtilleryPitCapReached()) return false;
-    if (!this.canPlaceAt(x, z)) return false;
+    if (!this.canPlaceAt(x, z, typeId)) return false;
     if (!spend(def.cost)) return false;
 
     this._attachEntry(typeId, x, z);
@@ -510,10 +545,17 @@ export class DefenseStructureManager {
     }
   }
 
-  _fireWeapon(entry, target, bestD, scene, mapDef) {
+  _fireWeapon(entry, target, bestD, scene, mapDef, directFireProxy = null) {
     const def = entry.def;
     const perShot = def.ammoPerShot ?? 1;
     if (entry.maxAmmo && (entry.ammo ?? 0) < perShot) return;
+    if (
+      def.weaponType !== 'mortar' &&
+      this.getScenery()?.isLineOfFireBlocked?.(
+        directFireProxy ?? getDirectFireProxy(entry),
+        target
+      )
+    ) return false;
 
     const isArmor = ARMOR_TYPES.has(target.def.type);
     let damage = def.damage;
@@ -615,6 +657,7 @@ export class DefenseStructureManager {
         sounds.playImpact(armorHit.deflected ? 'bullet' : 'tank_round', target.position, 0.08 + bestD / 180);
       }
     }
+    return true;
   }
 
   update(dt, scene, mapDef) {
@@ -632,10 +675,18 @@ export class DefenseStructureManager {
 
       let best = null;
       let bestD = Infinity;
+      const directFireProxy = getDirectFireProxy(entry);
 
       for (const u of enemies) {
         const d = Math.hypot(u.position.x - entry.x, u.position.z - entry.z);
         if (d > entry.def.range) continue;
+        if (
+          entry.def.weaponType !== 'mortar' &&
+          this.getScenery()?.isLineOfFireBlocked?.(
+            directFireProxy,
+            u
+          )
+        ) continue;
         if (entry.def.antiArmor && !ARMOR_TYPES.has(u.def.type) && (entry.def.softMult ?? 0) <= 0) {
           continue;
         }
@@ -648,6 +699,13 @@ export class DefenseStructureManager {
       if (!best && entry.def.antiArmor && entry.def.softMult > 0) {
         for (const u of enemies) {
           const d = Math.hypot(u.position.x - entry.x, u.position.z - entry.z);
+          if (
+            entry.def.weaponType !== 'mortar' &&
+            this.getScenery()?.isLineOfFireBlocked?.(
+              directFireProxy,
+              u
+            )
+          ) continue;
           if (d <= entry.def.range && d < bestD) {
             bestD = d;
             best = u;
@@ -656,7 +714,7 @@ export class DefenseStructureManager {
       }
 
       if (!best) continue;
-      this._fireWeapon(entry, best, bestD, scene, mapDef);
+      this._fireWeapon(entry, best, bestD, scene, mapDef, directFireProxy);
     }
   }
 

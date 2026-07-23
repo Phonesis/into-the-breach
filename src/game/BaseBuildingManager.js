@@ -282,6 +282,10 @@ export class BaseBuildingManager {
       if (Math.hypot(s.x - x, s.z - z) < spacing) return 'Too close to a build in progress.';
     }
 
+    if (this.game.scenery?.isFieldWorksPlacementBlocked?.(x, z, 2.2)) {
+      return 'Cannot build inside a building.';
+    }
+
     const map = this.game.mapDef;
     if (map) {
       const half = map.size * 0.46;

@@ -1,4 +1,4 @@
-/** Enemy battle plans for Battle Simulation preset mode — varied combined-arms behavior. */
+/** Enemy battle plans for Battle Simulation (preset and manual) — varied combined-arms behavior. */
 
 export const LAST_STAND_TACTICS = {
   armoredThrust: {

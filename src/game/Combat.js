@@ -11,7 +11,13 @@ import {
   advanceUnitOnTerrain,
   updateUnitTerrainPose,
 } from '../world/Terrain.js';
-import { advanceMovePath } from './MovePath.js';
+import {
+  advanceMovePath,
+  applyObstaclePath,
+  buildMovePath,
+  unitPathPlanRadius,
+  unitPathRadius,
+} from './MovePath.js';
 
 import {
   distanceBetween,
@@ -44,6 +50,7 @@ import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import {
   getMoveReachConfig,
   isTankType,
+  isVehicleUnit,
   shouldUseTacticalReverse,
 } from '../units/VehicleTypes.js';
 import { isUnitMounted } from './TankRiders.js';
@@ -62,6 +69,7 @@ import {
   markInfantryFireAim,
   updateInfantryWalkAnimation,
   usesInfantryMuzzleOrigin,
+  isUnitVisuallyProne,
 } from '../units/InfantryVisuals.js';
 import {
   getIndependentVehicleMgMuzzleWorldPosition,
@@ -69,6 +77,8 @@ import {
   usesIndependentVehicleMgMuzzleOrigin,
   usesVehicleCannonMuzzleOrigin,
 } from '../units/VehicleMeshKit.js';
+import { isFootSoldier } from '../units/VehicleTypes.js';
+import { isUnitGarrisoned } from './BunkerGarrison.js';
 
 
 const SMALL_ARMS_TYPES = new Set([
@@ -86,13 +96,90 @@ const CRUSHING_VEHICLE_TYPES = new Set([
   'superHeavyTank',
   'armoredCar',
 ]);
+/** Only tracked armour flattens trenches and runs over prone / dug-in infantry. */
+const TRACK_CRUSH_VEHICLE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
+const CREW_SERVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
+const INDIRECT_FIRE_TYPES = new Set(['artillery', 'mortar']);
 export const HAND_GRENADE_RANGE = 8;
 export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
 const HAND_GRENADE_DAMAGE = 12;
+
+/** Foot troops low enough that a tank can grind them under the tracks. */
+function isCrushableFootTarget(unit) {
+  if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
+  if (!isFootSoldier(unit.def?.type) && unit.def?.type !== 'engineer') return false;
+  if (isUnitMounted(unit) || isUnitGarrisoned(unit)) return false;
+  if (unit._trenchId || unit._diggingTrench) return true;
+  if (isUnitVisuallyProne(unit)) return true;
+  // Stationary MG / sniper crews hug the dirt while firing even without full prone pose.
+  if (
+    (unit.def?.type === 'machineGun' || unit.def?.type === 'sniper') &&
+    !unit.moveTarget &&
+    (unit.target || unit.attackOrder) &&
+    (unit.attackCooldown ?? 0) < 0.85
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function trackCrushRadius(type) {
+  if (type === 'superHeavyTank') return 2.9;
+  if (type === 'tankDestroyer') return 2.35;
+  return 2.2;
+}
+
+/**
+ * Tracked vehicles kill prone / trench infantry they drive over and collapse
+ * any finished trenches under the hull.
+ */
+function applyTrackCrush(vehicle, units, options, vehicleRadius) {
+  if (!TRACK_CRUSH_VEHICLE_TYPES.has(vehicle.def?.type)) return;
+  const radius = Math.max(vehicleRadius, trackCrushRadius(vehicle.def.type));
+  const vx = vehicle.position.x;
+  const vz = vehicle.position.z;
+  const impactFrom = { x: vx, z: vz };
+
+  for (const target of units) {
+    if (target === vehicle || target.dead) continue;
+    if (target.team === vehicle.team) continue;
+    if (!isCrushableFootTarget(target)) continue;
+    const dist = Math.hypot(target.position.x - vx, target.position.z - vz);
+    if (dist > radius) continue;
+    // Super-heavies always finish the job; medium tanks still deal lethal crush.
+    const damage = target.hp + 40 + (vehicle.def.type === 'superHeavyTank' ? 40 : 0);
+    // Align tread grooves on the corpse with the tank's path.
+    const dirX = options._crushDirX ?? 0;
+    const dirZ = options._crushDirZ ?? 0;
+    if (Math.hypot(dirX, dirZ) > 0.01) {
+      target._crushTrackYaw = Math.atan2(dirX, dirZ);
+    } else if (vehicle.mesh?.rotation?.y != null) {
+      target._crushTrackYaw = vehicle.mesh.rotation.y;
+    }
+    target.takeDamage(damage, {
+      cause: 'crush',
+      crushed: true,
+      impactFrom,
+    });
+  }
+
+  options.infantryTrenches?.crushAt?.(vx, vz, radius * 0.92, {
+    impactFrom,
+    directionX: options._crushDirX ?? 0,
+    directionZ: options._crushDirZ ?? 0,
+    crusherTeam: vehicle.team,
+  });
+}
+
+function getDirectFireBlocker(attacker, target, scenery) {
+  if (!scenery?.getLineOfFireBlocker || !attacker || !target) return null;
+  if (INDIRECT_FIRE_TYPES.has(attacker.def?.type)) return null;
+  return scenery.getLineOfFireBlocker(attacker, target);
+}
 
 export function canThrowHandGrenadeAt(attacker, target) {
   if (!attacker || !target || attacker.dead || target.dead) return false;
@@ -103,11 +190,12 @@ export function canThrowHandGrenadeAt(attacker, target) {
   return distanceBetween(attacker, target) <= HAND_GRENADE_RANGE;
 }
 
-function findHandGrenadeTarget(attacker, candidates) {
+function findHandGrenadeTarget(attacker, candidates, scenery = null) {
   let nearest = null;
   let nearestDistance = Infinity;
   for (const target of candidates) {
     if (!canThrowHandGrenadeAt(attacker, target)) continue;
+    if (scenery?.isLineOfFireBlocked?.(attacker, target)) continue;
     const distance = distanceBetween(attacker, target);
     if (distance < nearestDistance) {
       nearest = target;
@@ -117,8 +205,8 @@ function findHandGrenadeTarget(attacker, candidates) {
   return nearest;
 }
 
-function tryThrowHandGrenade(attacker, candidates, scene, mapDef, onFire) {
-  const target = findHandGrenadeTarget(attacker, candidates);
+function tryThrowHandGrenade(attacker, candidates, scene, mapDef, onFire, scenery = null) {
+  const target = findHandGrenadeTarget(attacker, candidates, scenery);
   if (!target) return false;
 
   const map = attacker._mapDef || mapDef;
@@ -246,16 +334,44 @@ export function updateCombat(
       attacker.def.damage <= 0
     )
       continue;
+    if (
+      CREW_SERVED_GUN_TYPES.has(attacker.def.type) &&
+      scenery?.getUnitPlacementBlocker?.(
+        attacker.position.x,
+        attacker.position.z,
+        1.65
+      )
+    ) {
+      // A gun carriage embedded in masonry cannot acquire or discharge. New
+      // spawns are relocated, while this also makes old saves fail safely.
+      attacker.target = null;
+      if (attacker.attackOrder) attacker.clearAttackOrder();
+      continue;
+    }
     if (openingCeasefire && !attacker.attackOrder) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
 
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
     const localAcquire = filterAcquireNearAttacker(attacker, acquire);
-    tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire);
+    tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire, scenery);
     const hadAttackOrder = !!attacker.attackOrder;
-    const target = resolveAttackTarget(attacker, targets, localAcquire);
-    if (!target) continue;
+    const target = resolveAttackTarget(attacker, targets, localAcquire, scenery);
+    if (!target) {
+      attacker.target = null;
+      continue;
+    }
+
+    // Validate again immediately before aiming. This prevents a moving target
+    // slipping behind a building after an AI order was assigned.
+    if (getDirectFireBlocker(attacker, target, scenery)) {
+      attacker.target = null;
+      if (attacker.attackOrder === target) {
+        attacker.clearAttackOrder();
+        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+      }
+      continue;
+    }
 
     attacker.target = target;
     if (
@@ -339,7 +455,7 @@ export function updateCombat(
     if (!canFireMain && !canFireCoax) continue;
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
-      fire(
+      const firedCoax = fire(
         attacker,
         target,
         targets,
@@ -356,7 +472,7 @@ export function updateCombat(
         options,
         { coax: true }
       );
-      attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
+      if (firedCoax !== false) attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
     }
 
     const fireMainGun =
@@ -366,7 +482,7 @@ export function updateCombat(
 
     if (!fireMainGun) continue;
 
-    fire(
+    const firedMain = fire(
       attacker,
       target,
       targets,
@@ -382,6 +498,7 @@ export function updateCombat(
       hqs,
       options
     );
+    if (firedMain === false) continue;
     const paratrooperAt =
       attacker.def.type === 'paratrooper' && isParatrooperAtShot(attacker, target);
     attacker.attackCooldown = paratrooperAt
@@ -400,7 +517,7 @@ function scalePracticeHqDamage(target, damage, options) {
   return damage * mult;
 }
 
-function resolveAttackTarget(attacker, targets, acquireTargets) {
+function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
   if (attacker.attackOrder) {
     if (
       attacker._stancePursuitOrder &&
@@ -442,6 +559,14 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
         attacker.clearAttackOrder();
         return null;
       }
+      if (getDirectFireBlocker(attacker, attacker.attackOrder, scenery)) {
+        // A direct-fire order does not remain locked through solid masonry.
+        // Clearing it for both teams also removes misleading target lines and
+        // lets normal acquisition select an actually exposed unit next tick.
+        attacker.clearAttackOrder();
+        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+        return null;
+      }
       return attacker.attackOrder;
     }
     attacker.clearAttackOrder();
@@ -451,7 +576,16 @@ function resolveAttackTarget(attacker, targets, acquireTargets) {
     attacker.def.type === 'sniper'
       ? acquireTargets.filter((target) => !target.def || !isTankType(target.def.type))
       : acquireTargets;
-  return findNearestEnemyInRange(attacker, validAcquireTargets, 1);
+  const maxAcquireRange = Math.max(
+    attacker.def.range,
+    isTankType(attacker.def.type) ? attacker.def.coaxMG?.range ?? 0 : 0
+  );
+  const visibleAcquireTargets = validAcquireTargets.filter(
+    (target) =>
+      distanceBetween(attacker, target) <= maxAcquireRange &&
+      !getDirectFireBlocker(attacker, target, scenery)
+  );
+  return findNearestEnemyInRange(attacker, visibleAcquireTargets, 1);
 }
 
 const _muzzleFrom = new THREE.Vector3();
@@ -535,6 +669,11 @@ function fire(
         x: target.position?.x ?? target.mesh.position.x,
         z: target.position?.z ?? target.mesh.position.z,
       };
+
+  // Last-moment interception guard: target acquisition and aiming already
+  // reject blocked shots, but no direct projectile may apply damage or emit a
+  // tracer if the target moved behind an intact building before fire resolves.
+  if (getDirectFireBlocker(attacker, target, scenery)) return false;
 
   const dist = isGroundShot
     ? distanceToPoint(attacker, impact)
@@ -679,7 +818,26 @@ function fire(
     isBaseBuildingTarget(target) ||
     isHqTarget(target)
   ) {
-    target.takeDamage(isHqTarget(target) ? scalePracticeHqDamage(target, damage, options) : damage);
+    const structureDamage = isHqTarget(target)
+      ? scalePracticeHqDamage(target, damage, options)
+      : damage;
+    if (isSceneryTarget(target)) {
+      target.takeDamage(structureDamage, {
+        weaponType: coax ? 'machineGun' : paratrooperAt ? 'antiTankGun' : attacker.def.type,
+        impact: { x: impact.x, z: impact.z },
+        impactFrom: { x: attacker.position.x, z: attacker.position.z },
+        explosive:
+          !coax &&
+          (attacker.def.type === 'artillery' ||
+            attacker.def.type === 'mortar' ||
+            attacker.def.type === 'antiTankGun' ||
+            isTankType(attacker.def.type) ||
+            paratrooperAt),
+        coax,
+      });
+    } else {
+      target.takeDamage(structureDamage);
+    }
     if (target.dead && attacker.attackOrder === target) attacker.clearAttackOrder();
   } else {
     if (!target.surrendered) {
@@ -704,6 +862,7 @@ function fire(
             generalOrders: options.generalOrders,
             clearance: options.clearance,
             mapDef,
+            scenery,
           });
         }
       }
@@ -726,9 +885,24 @@ function fire(
               : attacker.def.type === 'armoredCar'
                 ? 3
                 : 2;
-      scenery.damageAt(ix, iz, r, damage * 0.55);
+      scenery.damageAt(ix, iz, r, damage * 0.55, {
+        weaponType: paratrooperAt ? 'antiTankGun' : attacker.def.type,
+        impact: { x: ix, z: iz },
+        impactFrom: { x: attacker.position.x, z: attacker.position.z },
+        explosive:
+          attacker.def.type === 'artillery' ||
+          attacker.def.type === 'mortar' ||
+          attacker.def.type === 'antiTankGun' ||
+          isTankType(attacker.def.type) ||
+          paratrooperAt,
+      });
     } else if (scenery && coax) {
-      scenery.damageAt(impact.x, impact.z, 2, damage * 0.4);
+      scenery.damageAt(impact.x, impact.z, 2, damage * 0.4, {
+        weaponType: 'machineGun',
+        impact: { x: impact.x, z: impact.z },
+        impactFrom: { x: attacker.position.x, z: attacker.position.z },
+        coax: true,
+      });
     }
   }
 
@@ -795,7 +969,12 @@ function applySplashDamage(
           : 2.5;
 
   if (scenery) {
-    scenery.damageAt(point.x, point.z, splash + 1, baseDamage * 0.85);
+    scenery.damageAt(point.x, point.z, splash + 1, baseDamage * 0.85, {
+      weaponType: attacker.def.type,
+      impact: { x: point.x, z: point.z },
+      impactFrom: { x: attacker.position.x, z: attacker.position.z },
+      explosive: true,
+    });
   }
 
   for (const other of targets) {
@@ -823,6 +1002,7 @@ function applySplashDamage(
             generalOrders: options.generalOrders,
             clearance: options.clearance,
             mapDef: options.mapDef,
+            scenery: options.scenery,
           });
         }
       }
@@ -835,6 +1015,12 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
     if (isUnitMounted(unit)) continue;
+    // Garrisoned troops stay put; leave is handled by updateBunkerGarrison
+    // (eject + repath). Moving while still "inside" caused façade thrash.
+    if (isUnitGarrisoned(unit)) {
+      updateUnitTerrainPose(unit, mapDef, dt);
+      continue;
+    }
     if (unit._mobilityDamaged) {
       unit.moveTarget = null;
       unit._movePath = null;
@@ -853,9 +1039,29 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       if (!hq) {
         clearRetreat(unit);
         unit.moveTarget = null;
+        unit._movePath = null;
       } else {
-        unit.moveTarget = { x: hq.position.x, z: hq.position.z };
         unit.clearAttackOrder();
+        unit._bunkerEntryId = null;
+        const dest = { x: hq.position.x, z: hq.position.z };
+        unit._finalMoveGoal = dest;
+        // Don't stomp an active detour path every frame — repath only if lost.
+        const needPath =
+          !unit.moveTarget ||
+          !unit._movePath?.length ||
+          unit._autoMoveOrderX == null ||
+          Math.hypot(dest.x - (unit._autoMoveOrderX ?? 0), dest.z - (unit._autoMoveOrderZ ?? 0)) > 2;
+        if (needPath) {
+          unit._autoMoveOrderX = dest.x;
+          unit._autoMoveOrderZ = dest.z;
+          unit._pathRepathAttempts = 0;
+          if (options.scenery) {
+            applyObstaclePath(unit, dest.x, dest.z, mapDef, options.scenery);
+          } else {
+            unit._movePath = null;
+            unit.moveTarget = dest;
+          }
+        }
       }
     }
 
@@ -926,20 +1132,35 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         unit.moveTarget = null;
         unit._chasingAttack = false;
       } else {
-        // AI orders normally assign moveTarget directly rather than calling
-        // Unit.moveTo(). Classify each new destination with the same short
-        // rear-arc rule used by player orders, excluding panic retreats.
-        if (!unit._userMoveOrder && !unit.retreating && isTankType(unit.def?.type)) {
-          const newAutoOrder =
-            unit._autoMoveOrderX == null ||
-            Math.hypot(
-              dest.x - unit._autoMoveOrderX,
-              dest.z - unit._autoMoveOrderZ
-            ) > 0.5;
-          if (newAutoOrder) {
+        // AI / retreat / chase assign moveTarget directly. Do not repath on every
+        // path-waypoint advance or tiny standoff drift — that caused units to
+        // regenerate A* routes continuously and "float" after move orders.
+        if (!unit._userMoveOrder) {
+          const followingExistingPath =
+            !!unit._movePath?.length &&
+            Math.hypot(dest.x - unit._movePath[0].x, dest.z - unit._movePath[0].z) < 0.35;
+          const goal = unit._finalMoveGoal;
+          const goalDrift = goal
+            ? Math.hypot(dest.x - goal.x, dest.z - goal.z)
+            : Infinity;
+          // New order: no path yet, or the requested destination moved a lot.
+          const needsPath =
+            !followingExistingPath &&
+            (!unit._movePath?.length || goalDrift > 10);
+          if (needsPath) {
             unit._autoMoveOrderX = dest.x;
             unit._autoMoveOrderZ = dest.z;
-            unit._reverseMoveOrder = shouldUseTacticalReverse(unit, dest.x, dest.z);
+            unit._finalMoveGoal = { x: dest.x, z: dest.z };
+            unit._pathRepathAttempts = 0;
+            unit._urbanCanalRoute = null;
+            if (isTankType(unit.def?.type) && !unit.retreating) {
+              unit._reverseMoveOrder = shouldUseTacticalReverse(unit, dest.x, dest.z);
+            }
+            if (options.scenery) {
+              applyObstaclePath(unit, dest.x, dest.z, mapDef, options.scenery);
+            } else {
+              unit._movePath = null;
+            }
           }
         }
         let moveDt = dt;
@@ -951,25 +1172,111 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
         const directionX = unit.position.x - beforeX;
         const directionZ = unit.position.z - beforeZ;
-        if (
-          options.scenery &&
-          CRUSHING_VEHICLE_TYPES.has(unit.def?.type) &&
-          Math.hypot(directionX, directionZ) > 0.01
-        ) {
-          options.scenery.crushAt?.(
-            unit.position.x,
-            unit.position.z,
-            unit.def.type === 'superHeavyTank'
-              ? 2.8
-              : unit.def.type === 'armoredCar'
-                ? 1.45
-                : 2.1,
-            {
+        if (options.scenery && Math.hypot(directionX, directionZ) > 0.01) {
+          const pathRadius = unitPathRadius(unit.def?.type);
+          const allowBuildingId = unit._bunkerEntryId ?? null;
+          let blockedByBuilding = false;
+
+          if (isVehicleUnit(unit.def?.type)) {
+            const collisionOptions = {
               vehicleClass: unit.def.type === 'armoredCar' ? 'light' : 'tracked',
               directionX,
               directionZ,
+            };
+            const blockingBuilding = options.scenery.blockVehicleAtBuildings?.(
+              unit,
+              beforeX,
+              beforeZ,
+              pathRadius,
+              collisionOptions
+            );
+            if (blockingBuilding) {
+              blockedByBuilding = true;
+              unit.position.x = beforeX;
+              unit.position.z = beforeZ;
+            } else if (CRUSHING_VEHICLE_TYPES.has(unit.def?.type)) {
+              options.scenery.crushAt?.(
+                unit.position.x,
+                unit.position.z,
+                pathRadius,
+                collisionOptions
+              );
+              if (TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type)) {
+                options._crushDirX = directionX;
+                options._crushDirZ = directionZ;
+                applyTrackCrush(unit, units, options, pathRadius);
+              }
             }
-          );
+          } else {
+            // Infantry / foot support: stop at masonry unless ordered inside.
+            const blocker = options.scenery.getUnitPlacementBlocker?.(
+              unit.position.x,
+              unit.position.z,
+              pathRadius,
+              { allowBuildingId }
+            );
+            if (blocker) {
+              blockedByBuilding = true;
+              unit.position.x = beforeX;
+              unit.position.z = beforeZ;
+            }
+          }
+
+          if (blockedByBuilding) {
+            // Repath around the obstacle instead of cancelling the move order.
+            // Throttle repaths so tanks don't thrash/hug façades after every clip.
+            const goal = unit._finalMoveGoal ?? dest;
+            const attempts = unit._pathRepathAttempts ?? 0;
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            const lastRepath = unit._lastPathRepathAt ?? 0;
+            const canRepath = attempts < 4 && goal && now - lastRepath > 450;
+            let repathed = false;
+            if (canRepath) {
+              unit._pathRepathAttempts = attempts + 1;
+              unit._lastPathRepathAt = now;
+              const { pathSegment } = getMoveReachConfig(unit.def.type);
+              const path = buildMovePath(
+                beforeX,
+                beforeZ,
+                goal.x,
+                goal.z,
+                mapDef,
+                pathSegment,
+                {
+                  scenery: options.scenery,
+                  // Plan with clearance so retries also avoid façade hugging.
+                  radius: unitPathPlanRadius(unit.def?.type, mapDef),
+                  avoidBuildings: true,
+                  allowBuildingId,
+                  preferUrbanRoads: isVehicleUnit(unit.def?.type),
+                  allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type),
+                }
+              );
+              if (path?.length) {
+                unit._movePath = path;
+                while (
+                  unit._movePath.length > 1 &&
+                  Math.hypot(
+                    unit._movePath[0].x - beforeX,
+                    unit._movePath[0].z - beforeZ
+                  ) < 2
+                ) {
+                  unit._movePath.shift();
+                }
+                unit.moveTarget = { ...unit._movePath[0] };
+                repathed = true;
+              }
+            }
+            if (!repathed && attempts >= 4) {
+              unit.moveTarget = null;
+              unit._movePath = null;
+              unit._userMoveOrder = false;
+              unit._reverseMoveOrder = false;
+              unit._urbanCanalRoute = null;
+              unit._chasingAttack = false;
+              unit._finalMoveGoal = null;
+            }
+          }
         }
         advanceMovePath(unit, mapDef);
         if (!unit.moveTarget) unit._chasingAttack = false;

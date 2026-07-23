@@ -14,6 +14,11 @@ const LABELS = {
   fieldFence: 'Field fence',
   cart: 'Abandoned cart',
   stump: 'Stump',
+  urbanHouse: 'Townhouse',
+  apartmentBlock: 'Tenement block',
+  factory: 'Factory',
+  church: 'Church',
+  urbanWall: 'Courtyard wall',
 };
 
 export function isSceneryTarget(target) {
@@ -53,12 +58,12 @@ export function wrapSceneryTarget(entry, scenery) {
     hitRadius: entry.radius + 1.2,
     position,
     mesh: entry.group,
-    takeDamage(amount) {
+    takeDamage(amount, options = {}) {
       if (entry.destroyed) {
         this.dead = true;
         return;
       }
-      scenery.damageObject(entry, amount);
+      scenery.damageObject(entry, amount, options);
       if (entry.destroyed) this.dead = true;
     },
   };

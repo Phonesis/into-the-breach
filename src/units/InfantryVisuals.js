@@ -24,6 +24,18 @@ const WEAPON_POSE_TYPES = new Set([
   'vehicleCrew',
 ]);
 const PRONE_FIRE_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
+
+/** True while a foot squad is visually prone (stationary and firing). */
+export function isUnitVisuallyProne(unit) {
+  if (!unit?.mesh || unit.dead || unit._trenchId || unit._mountedOnTankId) return false;
+  if (!PRONE_FIRE_TYPES.has(unit.def?.type)) return false;
+  let maxBlend = 0;
+  unit.mesh.traverse((child) => {
+    if (child.name !== 'squadMember' || !child.visible) return;
+    maxBlend = Math.max(maxBlend, child.userData.proneBlend ?? 0);
+  });
+  return maxBlend >= 0.45;
+}
 const TACTICAL_FORMATION_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const FOOT_MUZZLE_UNIT_TYPES = new Set([

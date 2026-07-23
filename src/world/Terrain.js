@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getMoveReachConfig, isTankType } from '../units/VehicleTypes.js';
+import { getMoveReachConfig, isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 import { faceUnitTowardMovement } from '../units/VehicleRotation.js';
 import {
   createAOMap,
@@ -8,6 +8,12 @@ import {
   createRoughnessMap,
 } from './proceduralTextures.js';
 import { createMapRandom } from './MapRandom.js';
+import {
+  addUrbanDistrict,
+  getUrbanCanalDefinition,
+  isUrbanCanalBridge,
+  nearestUrbanCanalBridgeZ,
+} from './UrbanScenery.js';
 
 let activeMapRandom = null;
 const mapRandom = () => (activeMapRandom ? activeMapRandom() : Math.random());
@@ -77,6 +83,9 @@ export function buildTerrain(mapDef, scene, scenery = null) {
 }
 
 function heightAt(x, z, mapDef, seed) {
+  if (mapDef.terrain === 'urban') {
+    return 0;
+  }
   if (mapDef.terrain === 'bocage') {
     return noise2(x, z, seed) * 2.5 + ridge(x, z, 0.08) * 1.5;
   }
@@ -105,6 +114,9 @@ function dune(x, z) {
 }
 
 function terrainDecorationPalette(terrain) {
+  if (terrain === 'urban') {
+    return { trunk: 0x44362b, leaf: 0x394535, leafDark: 0x273329, leafLight: 0x59604b, bush: 0x47513b, dry: 0x706548, rock: 0x77736b, earth: 0x504a42 };
+  }
   if (terrain === 'desert') {
     return { trunk: 0x58432d, leaf: 0x7d7448, leafDark: 0x5c5836, leafLight: 0x9a8a55, bush: 0x82764a, dry: 0x9a8354, rock: 0x7b6d58, earth: 0x8a704b };
   }
@@ -231,6 +243,13 @@ function consolidateGroupMeshes(group) {
 }
 
 function addDecorations(mapDef, scene, size, seed, scenery) {
+  if (mapDef.terrain === 'urban') {
+    addUrbanDistrict(mapDef, scene, scenery, {
+      random: mapRandom,
+      sampleHeight: (x, z) => heightAt(x, z, mapDef, seed),
+    });
+    return;
+  }
   const palette = terrainDecorationPalette(mapDef.terrain);
   const vegetationTextures = getVegetationDetailTextures();
   const trunkMat = new THREE.MeshStandardMaterial({
@@ -901,6 +920,31 @@ function createFarmBuilding(kind, mats) {
     g.add(chimney);
   }
 
+  g.userData.damageBounds = { width: w, depth: d, height: h };
+  g.userData.roofDamageProfile = {
+    bodyHeight: h,
+    roofHeight: 0.82,
+    width: w,
+    depth: d,
+    heightAt(localX, localZ) {
+      // The rural buildings use a shallow four-sided pitched roof. Keep impact
+      // marks on its visible surface instead of floating at a generic height.
+      const edgeRatio = Math.max(
+        Math.abs(localX) / Math.max(0.5, w * 0.58),
+        Math.abs(localZ) / Math.max(0.5, d * 0.52)
+      );
+      return h + 0.06 + 0.82 * Math.max(0, 1 - edgeRatio);
+    },
+    normalAt(localX, localZ) {
+      const halfWidth = Math.max(0.5, w * 0.58);
+      const halfDepth = Math.max(0.5, d * 0.52);
+      if (Math.abs(localX) / halfWidth >= Math.abs(localZ) / halfDepth) {
+        return { x: Math.sign(localX) * 0.82 / halfWidth, y: 1, z: 0 };
+      }
+      return { x: 0, y: 1, z: Math.sign(localZ) * 0.82 / halfDepth };
+    },
+  };
+
   return g;
 }
 
@@ -1177,48 +1221,206 @@ export function hasReachedMoveDest(
   return heightGap < heightThresh;
 }
 
+function clearCanalMoveRoute(unit) {
+  unit._urbanCanalRoute = null;
+}
+
+function cancelMoveAtWaterEdge(unit) {
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  clearCanalMoveRoute(unit);
+}
+
+/** Route all ground units over an urban bridge and stop orders placed directly in water. */
+function resolveUrbanCanalMoveTarget(unit, dest, mapDef, cfg) {
+  const canal = getUrbanCanalDefinition(mapDef);
+  if (!canal) {
+    clearCanalMoveRoute(unit);
+    return { target: dest, blockedDestination: false };
+  }
+
+  // Use the ultimate order goal for canal decisions. Intermediate path waypoints
+  // zigzagging near the canal were constantly re-routing units to bridges and
+  // looked like random floating after a move order.
+  const goal = unit._finalMoveGoal ?? dest;
+  const vehicleMargin = isVehicleUnit(unit.def?.type) ? 0.68 : 0.22;
+  const bankDistance = canal.halfWidth + vehicleMargin;
+  const currentDelta = unit.position.x - canal.x;
+  const goalDelta = goal.x - canal.x;
+  const destDelta = dest.x - canal.x;
+  const currentSide = Math.sign(currentDelta) || Math.sign(goalDelta) || 1;
+  const goalOnBridge = isUrbanCanalBridge(goal.z, mapDef, -0.18);
+  const destOnBridge = isUrbanCanalBridge(dest.z, mapDef, -0.18);
+
+  // Order ends in the water — hold on the near bank.
+  if (Math.abs(goalDelta) < bankDistance && !goalOnBridge) {
+    clearCanalMoveRoute(unit);
+    return {
+      target: {
+        x: canal.x + currentSide * (bankDistance - cfg.horiz + 0.12),
+        z: goal.z,
+      },
+      blockedDestination: true,
+    };
+  }
+
+  const goalSide = Math.sign(goalDelta) || currentSide;
+  // Already on the goal's side of the canal: follow the normal path waypoint.
+  // Do not re-route just because an intermediate cell sits near the water.
+  if (currentSide === goalSide && !unit._urbanCanalRoute) {
+    if (Math.abs(destDelta) < bankDistance && !destOnBridge) {
+      // Intermediate waypoint in water — skip ahead to goal along this bank.
+      return {
+        target: {
+          x: canal.x + currentSide * (bankDistance + 0.4),
+          z: dest.z,
+        },
+        blockedDestination: false,
+      };
+    }
+    return { target: dest, blockedDestination: false };
+  }
+
+  let route = unit._urbanCanalRoute;
+  const routeChanged =
+    !route ||
+    Math.hypot(route.destinationX - goal.x, route.destinationZ - goal.z) > 4;
+  if (routeChanged) {
+    route = {
+      destinationX: goal.x,
+      destinationZ: goal.z,
+      fromSide: currentSide,
+      bridgeZ: nearestUrbanCanalBridgeZ(unit.position.z, mapDef, goal.z),
+      phase: 'approach',
+    };
+    unit._urbanCanalRoute = route;
+  }
+
+  const approachX = canal.x + route.fromSide * bankDistance;
+  if (route.phase === 'approach') {
+    const approachDistance = Math.hypot(
+      unit.position.x - approachX,
+      unit.position.z - route.bridgeZ
+    );
+    if (approachDistance <= cfg.horiz + 0.2) route.phase = 'cross';
+    else {
+      return {
+        target: { x: approachX, z: route.bridgeZ },
+        blockedDestination: false,
+      };
+    }
+  }
+
+  const crossedToFarBank =
+    (unit.position.x - canal.x) * route.fromSide < -(bankDistance - 0.18);
+  if (crossedToFarBank) {
+    clearCanalMoveRoute(unit);
+    return { target: dest, blockedDestination: false };
+  }
+
+  return {
+    target: {
+      x: canal.x - route.fromSide * (bankDistance + cfg.horiz + 0.85),
+      z: route.bridgeZ,
+    },
+    blockedDestination: false,
+  };
+}
+
+/** Vehicles cannot strafe — only drive along the hull axis (forward or reverse). */
+function usesHullAlignedDrive(unit) {
+  return isVehicleUnit(unit?.def?.type);
+}
+
 /**
  * Move one step toward dest, snapping Y to terrain. Returns false if already there.
- * Uses a minimum step so units do not stall below steep goals.
+ * Vehicles turn the hull toward the travel direction and only roll along that axis
+ * (no sideways sliding). Infantry may still step freely.
  */
 export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
   if (!dest || !mapDef) return false;
 
   const cfg = getMoveReachConfig(unit.def?.type);
-  if (hasReachedMoveDest(unit, dest, mapDef, cfg.horiz, cfg.height)) return false;
+  const canalMove = resolveUrbanCanalMoveTarget(unit, dest, mapDef, cfg);
+  const movementDest = canalMove.target;
+  if (hasReachedMoveDest(unit, movementDest, mapDef, cfg.horiz, cfg.height)) {
+    if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
+    return false;
+  }
 
-  const destY = sampleTerrainHeight(dest.x, dest.z, mapDef);
+  const destY = sampleTerrainHeight(movementDest.x, movementDest.z, mapDef);
   const substeps = cfg.substeps;
   const subDt = dt / substeps;
+  const hullDrive = usesHullAlignedDrive(unit);
   const reversing =
     unit._reverseMoveOrder &&
     !unit.retreating &&
     isTankType(unit.def?.type);
   const reverseSpeedMultiplier = reversing ? 0.55 : 1;
+  // How aligned the hull must be before committing full drive speed.
+  const alignDotMin = reversing ? -0.82 : 0.78;
 
   for (let s = 0; s < substeps; s++) {
-    if (hasReachedMoveDest(unit, dest, mapDef, cfg.horiz, cfg.height)) return false;
+    if (hasReachedMoveDest(unit, movementDest, mapDef, cfg.horiz, cfg.height)) {
+      if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
+      return false;
+    }
 
-    const dx = dest.x - unit.position.x;
-    const dz = dest.z - unit.position.z;
+    const dx = movementDest.x - unit.position.x;
+    const dz = movementDest.z - unit.position.z;
     const horiz = Math.hypot(dx, dz);
+    if (horiz < 0.001) return false;
+
+    const nx = dx / horiz;
+    const nz = dz / horiz;
     const uphill = destY - unit.position.y;
+
+    // Desired travel yaw: reverse orders keep the nose pointed away from dest.
+    const desiredNx = reversing ? -nx : nx;
+    const desiredNz = reversing ? -nz : nz;
+
+    if (hullDrive && unit.mesh && !unit._mobilityDamaged) {
+      faceUnitTowardMovement(unit, desiredNx, desiredNz, subDt);
+    } else if (!hullDrive) {
+      faceUnitTowardMovement(unit, nx, nz, subDt);
+    }
+
+    const yaw = unit.mesh?.rotation?.y ?? Math.atan2(nx, nz);
+    const fwdX = Math.sin(yaw);
+    const fwdZ = Math.cos(yaw);
+    // Projection of desired travel onto hull forward (negative = reverse).
+    const forwardDot = nx * fwdX + nz * fwdZ;
 
     if (horiz < cfg.horiz * 0.9) {
       const groundY = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
       unit.position.y = groundY + (destY - groundY) * Math.min(1, subDt * 5);
       if (Math.abs(unit.position.y - destY) < 0.4 && horiz < cfg.horiz) return false;
-      if (horiz > 0.08) {
+      // Final creep: only along the hull axis so vehicles don't slide in.
+      if (horiz > 0.08 && (!hullDrive || Math.abs(forwardDot) > 0.55)) {
+        const axisX = hullDrive ? fwdX * Math.sign(forwardDot || 1) : nx;
+        const axisZ = hullDrive ? fwdZ * Math.sign(forwardDot || 1) : nz;
         const creep = Math.min(
           horiz,
           unit.def.speed * reverseSpeedMultiplier * subDt * 0.45
         );
-        unit.position.x += (dx / horiz) * creep;
-        unit.position.z += (dz / horiz) * creep;
+        unit.position.x += axisX * creep;
+        unit.position.z += axisZ * creep;
         unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
-        if (!reversing) faceUnitTowardMovement(unit, dx / horiz, dz / horiz, subDt);
       }
       continue;
+    }
+
+    // Turn-in-place when the hull is badly misaligned — no crab-walk.
+    if (hullDrive && !unit._mobilityDamaged) {
+      const aligned = reversing
+        ? forwardDot <= alignDotMin
+        : forwardDot >= alignDotMin;
+      if (!aligned) {
+        // Nudge slowly only if mostly forward/back already; otherwise pure turn.
+        if (Math.abs(forwardDot) < 0.35) continue;
+      }
     }
 
     let speed = unit.def.speed * reverseSpeedMultiplier * subDt;
@@ -1226,14 +1428,27 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     else if (uphill > 0.6) speed *= 1.25;
     else if (uphill < -1.5) speed *= 0.92;
 
-    const nx = dx / horiz;
-    const nz = dz / horiz;
-    const step = Math.min(speed, horiz);
-
-    unit.position.x += nx * step;
-    unit.position.z += nz * step;
-    unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
-    if (!reversing) faceUnitTowardMovement(unit, nx, nz, subDt);
+    if (hullDrive) {
+      // Drive along hull forward; scale by alignment so sharp turns slow naturally.
+      const drive = reversing
+        ? Math.min(0, forwardDot) // reverse only when nose is away from dest
+        : Math.max(0, forwardDot);
+      const alignScale = Math.max(0, Math.min(1, (Math.abs(drive) - 0.35) / 0.55));
+      speed *= 0.15 + 0.85 * alignScale;
+      const step = Math.min(speed, horiz);
+      const sign = drive < 0 || reversing ? -1 : 1;
+      // Only roll when we have meaningful forward/back commitment.
+      if (Math.abs(drive) > 0.25 && step > 0.001) {
+        unit.position.x += fwdX * sign * step;
+        unit.position.z += fwdZ * sign * step;
+        unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+      }
+    } else {
+      const step = Math.min(speed, horiz);
+      unit.position.x += nx * step;
+      unit.position.z += nz * step;
+      unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+    }
   }
 
   return true;

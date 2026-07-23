@@ -7,7 +7,10 @@ import {
 } from '../game/TankRiders.js';
 import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
 import { createGroundTarget, isInRange } from '../game/Targeting.js';
-import { getGarrisonBunkerSources } from '../game/BunkerGarrison.js';
+import {
+  canGarrisonType,
+  getGarrisonBunkerSources,
+} from '../game/BunkerGarrison.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder, canSmokeShellOrder, isSmokeShellReady } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
@@ -409,11 +412,25 @@ export class RTSController {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const groundHit = this._raycastGroundHit();
     const sceneryHit = this._raycastSceneryHit();
-    const sceneryBias = 0.6;
+    // Tall Berlin façades often ray-hit farther than the street pavement under the
+    // cursor. Prefer solid buildings/walls with a generous bias so Shift-fire
+    // actually orders an attack on the structure you clicked.
+    const kind = sceneryHit?.target?.entry?.kind;
+    const urbanSolid =
+      kind === 'urbanHouse' ||
+      kind === 'apartmentBlock' ||
+      kind === 'factory' ||
+      kind === 'church' ||
+      kind === 'urbanWall' ||
+      kind === 'farmHouse' ||
+      kind === 'barn' ||
+      kind === 'outbuilding';
+    const sceneryBias = urbanSolid ? 14 : 0.6;
 
-    if (sceneryHit && groundHit && sceneryHit.distance < groundHit.distance - sceneryBias) {
+    if (sceneryHit && groundHit && sceneryHit.distance < groundHit.distance + sceneryBias) {
       return { kind: 'scenery', target: sceneryHit.target };
     }
+    if (sceneryHit && !groundHit) return { kind: 'scenery', target: sceneryHit.target };
     if (groundHit) return { kind: 'ground', point: groundHit.point };
     if (sceneryHit) return { kind: 'scenery', target: sceneryHit.target };
     return null;
@@ -973,13 +990,20 @@ export class RTSController {
     let snapX = clamped.x;
     let snapZ = clamped.z;
     let bunkerSnap = null;
-    for (const src of garrisonSources) {
-      const bunker = src.pickBunkerAt?.(clamped.x, clamped.z, player, 6.5);
-      if (bunker) {
-        snapX = bunker.x;
-        snapZ = bunker.z;
-        bunkerSnap = bunker;
-        break;
+    // Only units that can actually garrison may turn a nearby ground click
+    // into an enter-building order. In Berlin the generous tenement footprint
+    // otherwise captured road clicks from tanks and guns, making them turn
+    // straight toward the façade and bypass vehicle road snapping.
+    if (selected.every((unit) => canGarrisonType(unit.def?.type))) {
+      for (const src of garrisonSources) {
+        // Large tenements need a generous click radius (footprint, not just 6.5 m).
+        const bunker = src.pickBunkerAt?.(clamped.x, clamped.z, player, 12);
+        if (bunker) {
+          snapX = bunker.x;
+          snapZ = bunker.z;
+          bunkerSnap = bunker;
+          break;
+        }
       }
     }
 
@@ -987,7 +1011,6 @@ export class RTSController {
       ? selected.map((unit) => ({ unit, x: snapX, z: snapZ }))
       : spreadGroupMoveDestinations(selected, snapX, snapZ);
     for (const { unit, x, z } of destinations) {
-      unit.clearAttackOrder();
       let destX = x;
       let destZ = z;
       if (seekCover && coverSystem && !bunkerSnap) {
@@ -996,8 +1019,11 @@ export class RTSController {
         destZ = coverDest.z;
       }
       const pt = this.clampDeployPoint(destX, destZ);
-      unit.moveTo(pt.x, pt.z, mapDef, true);
-      unit._bunkerEntryId = bunkerSnap?.id ?? null;
+      // Pass allowBuildingId into moveTo — clearAttackOrder inside moveTo would
+      // otherwise wipe a pre-set _bunkerEntryId and block entry pathing.
+      unit.moveTo(pt.x, pt.z, mapDef, true, this.getScenery?.() ?? null, {
+        allowBuildingId: bunkerSnap?.id ?? null,
+      });
     }
     if (this.onOrder) this.onOrder('move', selected);
   }

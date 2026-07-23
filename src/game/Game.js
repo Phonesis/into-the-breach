@@ -76,6 +76,7 @@ import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js'
 import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
+import { applyObstaclePath } from './MovePath.js';
 import { dismountAllRiders, updateTankRiders } from './TankRiders.js';
 import {
   isBaseBuildingCampaign,
@@ -86,6 +87,11 @@ import {
 } from '../data/baseBuildings.js';
 
 const DESTROYED_GUN_BLAST_TYPES = new Set(['artillery', 'antiTankGun']);
+const UNIT_SELECTION_SHORTCUTS = new Map([
+  ['KeyE', { type: 'engineer', label: 'engineer' }],
+  ['KeyM', { type: 'medic', label: 'medic' }],
+  ['KeyA', { type: 'artillery', label: 'artillery' }],
+]);
 
 function shellCraterTier(def) {
   if (def?.type === 'artillery' || (def?.caliber ?? 0) >= 105) return 'heavy';
@@ -139,9 +145,11 @@ import {
   CAMPAIGN_BALANCE,
   applyCampaignUnitHp,
   getCampaignDifficulty,
+  spreadCampaignCapturePoints,
 } from '../data/campaignPace.js';
 import { teamIsEliminated, estimateTeamIncomePerSec } from './EliminationRules.js';
 import { buildTerrain, sampleTerrainHeight } from '../world/Terrain.js';
+import { isUrbanCanalWater } from '../world/UrbanScenery.js';
 import {
   disposeBattleScene,
   queueMeshDispose,
@@ -177,13 +185,14 @@ import {
   spawnArtilleryExplosion,
   spawnArmorRicochet,
   spawnShellExplosion,
+  spawnWaterImpact,
   updateCombatEffects,
   clearCombatEffects,
 } from '../effects/CombatEffects.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
-import { spawnArmy } from './Spawner.js';
+import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
 import { updateCombat, updateMovement, tickUnitCooldowns } from './Combat.js';
 import { updateAI, resetAI } from './AI.js';
 import {
@@ -396,6 +405,7 @@ export class Game {
       },
       getScene: () => this.scene,
       getMapDef: () => this.mapDef,
+      getScenery: () => this.scenery,
       onSpawn: (team, _unitType, unit) => {
         if (this.campaign && unit) applyCampaignUnitHp(unit);
         if (team === PLAYER_TEAM) {
@@ -576,6 +586,23 @@ export class Game {
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     if (isTabletLikeDevice()) this._bindPinchZoom(canvas);
     window.addEventListener('keydown', (e) => {
+      const selectionShortcut =
+        e.ctrlKey && !e.metaKey && !e.altKey && !this._isTextInputFocused(e.target)
+          ? UNIT_SELECTION_SHORTCUTS.get(e.code)
+          : null;
+      if (selectionShortcut && this.running && !this.gameOver) {
+        // Keep selection shortcuts discrete so they never feed the held-key
+        // camera movement path.
+        this.keys[e.code] = false;
+        e.preventDefault();
+        if (!e.repeat) {
+          const selected = this.selectNearestAvailablePlayerUnit(selectionShortcut.type);
+          if (!selected) {
+            this.ui?.showSaveToast?.(`No available ${selectionShortcut.label} unit.`);
+          }
+        }
+        return;
+      }
       this.keys[e.code] = true;
       this._onCheatKeyDown(e);
       if (
@@ -815,11 +842,15 @@ export class Game {
     } else if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
       mapSizeId = 'large';
     }
+    // Maps like Berlin may only allow certain sizes (enforced in buildMapDef).
     if (campaignStyle === 'baseBuilding' && !canUseBaseBuildingOnMap(mapSizeId)) {
       campaignStyle = 'classic';
     }
     this.campaignStyle = campaignStyle;
     this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
+    if (this.campaign) {
+      this.mapDef = spreadCampaignCapturePoints(this.mapDef);
+    }
     setActiveVehicleTheatre(this.mapDef.id);
     const mapScale = this.mapDef.sizeScale ?? 1;
     this.zoomMax = Math.round(100 * mapScale);
@@ -873,6 +904,8 @@ export class Game {
       this.baseBuildings.enable();
     }
 
+    setupRenderer(this.renderer);
+    this._setRenderPixelRatio(this._nativePixelRatio);
     setupSceneEnvironment(this.scene, this.mapDef, this.renderer);
     this.lights = setupLighting(this.scene);
 
@@ -980,6 +1013,7 @@ export class Game {
           mapDef: this.mapDef,
           getEnemyUnits: () => this._enemyAlive,
           getTerrainMesh: () => this._terrainMesh,
+          getScenery: () => this.scenery,
           factionId: this.playerFaction?.id ?? 'germany',
           factionAccent: this.playerFaction?.accent ?? 0xc9a227,
           onChange: () => {
@@ -1042,9 +1076,10 @@ export class Game {
           tutorial: this.tutorial,
           roster: playerRoster,
           clearanceSpawn: this.clearance,
-          mapDef: this.clearance ? this.mapDef : null,
+          mapDef: this.mapDef,
           campaign: this.campaign,
           baseBuilding: baseBuildingCampaign,
+          scenery: this.scenery,
         });
 
     if (this.clearance) {
@@ -1057,6 +1092,7 @@ export class Game {
           capturePoints: this.capturePoints,
           enemyArmyMult: this.difficulty.enemyArmyMult,
           attackerUnits: this.units,
+          scenery: this.scenery,
         })
       );
     } else if (!this.tutorial && !this.towerDefense && !this.lastStand) {
@@ -1072,16 +1108,21 @@ export class Game {
           offsetSign: assault && this.assaultRole === 'attack' ? 1 : -1,
           roster: enemyRoster,
           enemyArmyMult: enemyArmyScale,
+          mapDef: this.mapDef,
           campaign: this.campaign,
           baseBuilding: baseBuildingCampaign,
+          scenery: this.scenery,
         })
       );
     }
 
     if (this.campaign) applyCampaignUnitHp(this.units);
 
-    if (this.lastStand && isLastStandPresetForce(this) && !restoreSnapshot) {
-      deployLastStandPresetForces(this);
+    if (this.lastStand && !restoreSnapshot) {
+      if (isLastStandPresetForce(this)) {
+        deployLastStandPresetForces(this);
+      }
+      // Preset: full briefing. Manual: roll a battle plan for like-for-like AI tactics.
       initLastStandPresetEngagement(this);
     }
 
@@ -1114,6 +1155,7 @@ export class Game {
       this._faceUnitsToward(this.units.filter((u) => u.team === PLAYER_TEAM), enemyFocus);
       this._faceUnitsToward(this.units.filter((u) => u.team === ENEMY_TEAM), camFocus);
     }
+    this._relocateEmbeddedCrewServedGuns();
     this._rosterKey = '';
 
     const deployTeams = restoreSnapshot ? this._getDeployZoneTeamsAt(this.matchTime) : this._getDeployZoneTeamsAt(0);
@@ -1493,6 +1535,40 @@ export class Game {
     }
   }
 
+  _relocateEmbeddedCrewServedGuns() {
+    if (!this.scenery?.getUnitPlacementBlocker || !this.mapDef) return 0;
+    let relocated = 0;
+    for (const unit of this.units) {
+      if (
+        unit.dead ||
+        (unit.def?.type !== 'antiTankGun' && unit.def?.type !== 'artillery') ||
+        !this.scenery.getUnitPlacementBlocker(unit.position.x, unit.position.z, 1.65)
+      ) continue;
+      const position = resolveUnitSpawnPosition(
+        unit.def,
+        unit.position.x,
+        unit.position.z,
+        this.scenery,
+        this.mapDef
+      );
+      if (!position) continue;
+      unit.position.x = position.x;
+      unit.position.z = position.z;
+      unit.position.y = sampleTerrainHeight(position.x, position.z, this.mapDef);
+      unit.target = null;
+      unit.clearAttackOrder();
+      unit.moveTarget = null;
+      unit._movePath = null;
+      unit._userMoveOrder = false;
+      if (unit.defensiveHold) {
+        unit.defensiveHold.x = position.x;
+        unit.defensiveHold.z = position.z;
+      }
+      relocated++;
+    }
+    return relocated;
+  }
+
   _syncUnitRoster() {
     if (!this.ui) return;
     const alive = this.units.filter((u) => u.team === PLAYER_TEAM && !u.dead);
@@ -1596,6 +1672,49 @@ export class Game {
     this.controller?._notifySelection(teamUnits, null);
   }
 
+  /**
+   * Select the closest usable support unit to the current tactical context.
+   * A current unit selection is the anchor (for example, a damaged tank);
+   * otherwise use the centre of the camera view.
+   */
+  selectNearestAvailablePlayerUnit(unitType) {
+    if (!this.running || this.gameOver || !unitType) return null;
+    const teamUnits = this.units.filter((unit) => unit.team === PLAYER_TEAM);
+    const isAvailable = (unit) =>
+      !unit.dead &&
+      !unit.surrendered &&
+      !unit._captureExit;
+    const candidates = teamUnits.filter(
+      (unit) => isAvailable(unit) && unit.def?.type === unitType
+    );
+    if (candidates.length === 0) return null;
+
+    const selected = teamUnits.filter(
+      (unit) => isAvailable(unit) && unit.selected
+    );
+    let anchorX = this.cameraTarget.x;
+    let anchorZ = this.cameraTarget.z;
+    if (selected.length > 0) {
+      anchorX = selected.reduce((sum, unit) => sum + unit.position.x, 0) / selected.length;
+      anchorZ = selected.reduce((sum, unit) => sum + unit.position.z, 0) / selected.length;
+    }
+
+    const nearest = candidates.reduce((best, unit) => {
+      const distanceSq =
+        (unit.position.x - anchorX) ** 2 +
+        (unit.position.z - anchorZ) ** 2;
+      if (!best || distanceSq < best.distanceSq) return { unit, distanceSq };
+      if (distanceSq === best.distanceSq && unit.id < best.unit.id) {
+        return { unit, distanceSq };
+      }
+      return best;
+    }, null)?.unit;
+    if (!nearest) return null;
+
+    this.selectPlayerUnitById(nearest.id, false);
+    return nearest;
+  }
+
   replay() {
     const s = this.lastSession;
     if (!s) return;
@@ -1668,6 +1787,8 @@ export class Game {
     if (isLastStandPresetForce(this)) {
       assignLastStandPresetStances(this);
     } else {
+      // Match the player's unit count (AI chooses its own mix), then apply the
+      // same combined-arms battle plans used by Preset Battle Group.
       flushEnemyDeployment(this);
       assignLastStandEnemyStances(this);
     }
@@ -1745,6 +1866,7 @@ export class Game {
 
   _spawnExplosionCrater(x, z, tier = 'medium') {
     if (!this.scene || !this.mapDef) return;
+    if (isUrbanCanalWater(x, z, this.mapDef)) return;
     // Keep combat craters as decals. Recomputing the entire terrain mesh's
     // normals immediately after a blast caused an intermittent frame-length
     // stall and also reintroduced the raised/deformed crater appearance.
@@ -3004,6 +3126,14 @@ export class Game {
         def.type === 'antiTankGun' ||
         isTankType(def.type) ||
         (def.type === 'paratrooper' && paratrooperAtFire));
+    const waterShellImpact =
+      groundImpact &&
+      isUrbanCanalWater(to.x, to.z, this.mapDef) &&
+      (def.type === 'artillery' ||
+        def.type === 'mortar' ||
+        def.type === 'antiTankGun' ||
+        isTankType(def.type) ||
+        (def.type === 'paratrooper' && paratrooperAtFire));
 
     if (armorHit?.deflected && !killed) {
       const ricochetY = this.mapDef
@@ -3040,7 +3170,11 @@ export class Game {
             def.type === 'antiTankGun' ||
             isTankType(def.type))))
     ) {
-      if (targetIsArmored) {
+      if (waterShellImpact) {
+        const waterY = 0.09;
+        const calibreScale = THREE.MathUtils.clamp((def.caliber ?? 75) / 88, 0.68, 1.85);
+        spawnWaterImpact(this.scene, { x: to.x, y: waterY, z: to.z }, calibreScale);
+      } else if (targetIsArmored) {
         triggerVehicleKillFx(this, target, to);
       } else if (destroyedGunByShell) {
         const destroyedGunTier = target.def.type === 'artillery' ? 'heavy' : 'medium';
@@ -3244,13 +3378,20 @@ export class Game {
             : null,
           scenery: this.scenery,
           clearance: this.clearance,
+          infantryTrenches: this.infantryTrenches,
         });
         this.scenery?.update(dt);
         if (
           getGarrisonBunkerSources(this).length > 0 ||
-          this._aliveUnits.some((u) => u._garrisonBunkerId || u._bunkerEntryId)
+          this.units.some((u) => u._garrisonBunkerId || u._bunkerEntryId)
         ) {
-          updateBunkerGarrison(this._aliveUnits, this);
+          // Include casualties so a unit killed inside a building is removed
+          // from its occupancy roster and cannot leave a stale INSIDE badge.
+          updateBunkerGarrison(this.units, this, {
+            scenery: this.scenery,
+            mapDef: this.mapDef,
+            applyObstaclePath,
+          });
         }
         for (const u of this._aliveUnits) {
           if (u._trenchId || u._diggingTrench || u.mesh?.userData?.trenchSink) {

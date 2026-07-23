@@ -39,7 +39,7 @@ export const GAME_MODES = {
     id: 'lastStand',
     name: 'Battle Simulation',
     subtitle:
-      'Manual deployment (2,000 supplies) or preset combined-arms battle groups on large maps. Pure force-on-force — no HQ or reinforcements.',
+      'Manual deployment (enemy matches your unit count) or preset battle groups on large maps. Pure force-on-force — no HQ or reinforcements.',
   },
 };
 

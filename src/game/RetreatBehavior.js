@@ -6,6 +6,7 @@ import { getRankMoralePressure, getRankRetreatMultiplier } from './EliteBehavior
 import { getCommanderRetreatMultiplier } from './GeneralOrders.js';
 import { getClearanceStagingAnchor } from './ClearanceMode.js';
 import { getCoverStatus } from './CoverSystem.js';
+import { applyObstaclePath } from './MovePath.js';
 
 const _retreatTex = { tex: null };
 
@@ -92,11 +93,41 @@ export function removeRetreatMarker(unit) {
   unit.retreatMarker = null;
 }
 
-export function startRetreat(unit, hq) {
+/**
+ * Begin retreat toward HQ / staging. When mapDef + scenery are provided, path
+ * around buildings instead of walking straight into them.
+ * @param {object} unit
+ * @param {object} hq
+ * @param {{ mapDef?: object, scenery?: object }} [options]
+ */
+export function startRetreat(unit, hq, options = {}) {
   if (!hq || hq.dead || unit.dead || unit.retreating) return;
   unit.retreating = true;
   unit.clearAttackOrder();
-  unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+  unit._bunkerEntryId = null;
+  unit._userMoveOrder = false;
+  unit._finalMoveGoal = { x: hq.position.x, z: hq.position.z };
+  unit._pathRepathAttempts = 0;
+  unit._autoMoveOrderX = hq.position.x;
+  unit._autoMoveOrderZ = hq.position.z;
+  const mapDef = options.mapDef ?? unit._mapDef ?? null;
+  const scenery = options.scenery ?? null;
+  if (mapDef && scenery) {
+    const routed = applyObstaclePath(
+      unit,
+      hq.position.x,
+      hq.position.z,
+      mapDef,
+      scenery
+    );
+    if (!routed) {
+      unit._movePath = null;
+      unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+    }
+  } else {
+    unit._movePath = null;
+    unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+  }
   attachRetreatMarker(unit);
 }
 
@@ -114,7 +145,9 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
 
   // Back-compat: fifth arg used to be generalOrders manager directly
   const options =
-    opts && typeof opts === 'object' && ('generalOrders' in opts || 'clearance' in opts || 'mapDef' in opts)
+    opts &&
+    typeof opts === 'object' &&
+    ('generalOrders' in opts || 'clearance' in opts || 'mapDef' in opts || 'scenery' in opts)
       ? opts
       : { generalOrders: opts };
 
@@ -142,7 +175,10 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
   chance *= getCoverRetreatMultiplier(unit);
 
   if (Math.random() < chance) {
-    startRetreat(unit, hq);
+    startRetreat(unit, hq, {
+      mapDef: options.mapDef ?? unit._mapDef ?? null,
+      scenery: options.scenery ?? null,
+    });
   }
 }
 
@@ -164,7 +200,11 @@ export function updateRetreatState(unit, hq, mapDef) {
   }
 
   const hqDest = { x: hq.position.x, z: hq.position.z };
-  unit.moveTarget = hqDest;
+  unit._finalMoveGoal = hqDest;
+  // Keep an existing building-aware path; only re-issue if lost.
+  if (!unit.moveTarget && !unit._movePath?.length) {
+    unit.moveTarget = hqDest;
+  }
 
   const dx = unit.position.x - hq.position.x;
   const dz = unit.position.z - hq.position.z;
@@ -180,6 +220,7 @@ export function updateRetreatState(unit, hq, mapDef) {
     clearRetreat(unit);
     unit.moveTarget = null;
     unit._movePath = null;
+    unit._finalMoveGoal = null;
     return;
   }
 

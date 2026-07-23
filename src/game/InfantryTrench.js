@@ -211,6 +211,10 @@ export class InfantryTrenchManager {
       if (Math.abs(px) > half || Math.abs(pz) > half) return 'Too close to the map edge.';
     }
 
+    if (this.game.scenery?.isFieldWorksPlacementBlocked?.(px, pz, 1.55)) {
+      return 'Cannot dig a trench inside a building.';
+    }
+
     if (this._teamTrenchCount(team) >= TRENCH_MAX_PER_TEAM) {
       return `Maximum ${TRENCH_MAX_PER_TEAM} trenches per side.`;
     }
@@ -223,6 +227,32 @@ export class InfantryTrenchManager {
     }
 
     return null;
+  }
+
+  /** Nearby open-ground candidates for AI dig sites (avoids tenement interiors). */
+  _aiPlacementCandidates(x, z) {
+    const candidates = [{ x, z }];
+    const clear = this.game.scenery?.findClearVehiclePlacement?.(
+      x,
+      z,
+      1.55,
+      this.game.mapDef
+    );
+    if (clear && (Math.abs(clear.x - x) > 0.05 || Math.abs(clear.z - z) > 0.05)) {
+      candidates.unshift(clear);
+    }
+    for (let ring = 1; ring <= 5; ring++) {
+      const radius = ring * 3.1;
+      const steps = 6 + ring * 2;
+      for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * Math.PI * 2;
+        candidates.push({
+          x: x + Math.cos(angle) * radius,
+          z: z + Math.sin(angle) * radius,
+        });
+      }
+    }
+    return candidates;
   }
 
   tryPlace(x, z, team, rotationY = null) {
@@ -271,29 +301,38 @@ export class InfantryTrenchManager {
   }
 
   tryAiPlace(x, z, team) {
-    const reason = this.getPlacementRejectReason(x, z, team, { selectedOnly: false });
-    if (reason) return false;
+    for (const pos of this._aiPlacementCandidates(x, z)) {
+      const reason = this.getPlacementRejectReason(pos.x, pos.z, team, {
+        selectedOnly: false,
+      });
+      if (reason) continue;
 
-    const digger = this._nearestDigger(x, z, team, false);
-    if (!digger) return false;
+      const digger = this._nearestDigger(pos.x, pos.z, team, false);
+      if (!digger) continue;
 
-    const y = this.game.mapDef ? sampleTerrainHeight(x, z, this.game.mapDef) : 0;
-    const site = {
-      id: nextTrenchId++,
-      x,
-      z,
-      y,
-      team,
-      diggerId: digger.id,
-      rotationY: this._facingYaw(team, x, z),
-      progress: 0,
-      marker: null,
-    };
-    this.sites.push(site);
-    digger._trenchDigSite = site.id;
-    digger.clearAttackOrder?.();
-    this._attachSiteMarker(site);
-    return true;
+      const y = this.game.mapDef
+        ? sampleTerrainHeight(pos.x, pos.z, this.game.mapDef)
+        : 0;
+      const site = {
+        id: nextTrenchId++,
+        x: pos.x,
+        z: pos.z,
+        y,
+        team,
+        diggerId: digger.id,
+        rotationY: this._facingYaw(team, pos.x, pos.z),
+        progress: 0,
+        marker: null,
+      };
+      this.sites.push(site);
+      digger._trenchDigSite = site.id;
+      digger.clearAttackOrder?.();
+      digger.moveTo?.(site.x, site.z, this.game.mapDef, true);
+      site.moveOrderIssued = true;
+      this._attachSiteMarker(site);
+      return true;
+    }
+    return false;
   }
 
   _attachSiteMarker(site) {
@@ -447,6 +486,78 @@ export class InfantryTrenchManager {
       progress: Math.min(1, site.progress),
       label: 'Digging trench',
     };
+  }
+
+  /**
+   * Tracked armour rolling over a finished trench collapses it and kills anyone
+   * still dug in. Returns how many trenches were crushed.
+   */
+  crushAt(x, z, radius = 2.4, options = {}) {
+    let crushed = 0;
+    for (const trench of this.trenches) {
+      if (trench.destroyed) continue;
+      const hitRadius = radius + Math.max(1.6, (trench.mesh?.userData?.trenchLength ?? 4.2) * 0.28);
+      if (Math.hypot(trench.x - x, trench.z - z) > hitRadius) continue;
+      this.destroyTrench(trench, {
+        crushed: true,
+        impactFrom: options.impactFrom ?? { x, z },
+        directionX: options.directionX ?? 0,
+        directionZ: options.directionZ ?? 0,
+      });
+      crushed++;
+    }
+    return crushed;
+  }
+
+  /** Collapse a trench: kill enemy garrison, remove cover, leave flattened dirt. */
+  destroyTrench(trench, options = {}) {
+    if (!trench || trench.destroyed) return;
+    trench.destroyed = true;
+
+    const impactFrom = options.impactFrom ?? { x: trench.x, z: trench.z };
+    const garrisonIds = [...(trench.garrison ?? [])];
+    for (const id of garrisonIds) {
+      const unit = this.game.units.find((u) => u.id === id);
+      if (!unit || unit.dead) continue;
+      // Friendly troops scramble out of a collapsing trench rather than dying to
+      // their own armour. Enemy dig-ins under the tracks are finished.
+      if (options.crusherTeam && unit.team === options.crusherTeam) continue;
+      const dirX = options.directionX ?? 0;
+      const dirZ = options.directionZ ?? 0;
+      if (Math.hypot(dirX, dirZ) > 0.01) {
+        unit._crushTrackYaw = Math.atan2(dirX, dirZ);
+      }
+      unit.takeDamage(unit.hp + 80, {
+        cause: 'crush',
+        crushed: true,
+        impactFrom,
+      });
+    }
+    this._releaseAllFromTrench(trench);
+
+    if (this.game.coverSystem) {
+      this.game.coverSystem.removeZoneAt(trench.x, trench.z, TRENCH_COVER_RADIUS + 1);
+    }
+
+    const mesh = trench.mesh;
+    if (mesh) {
+      // Squashed revetment left as a low mud scar rather than vanishing.
+      mesh.scale.y *= 0.18;
+      mesh.position.y -= 0.12;
+      const dirX = options.directionX ?? 0;
+      const dirZ = options.directionZ ?? 0;
+      if (Math.hypot(dirX, dirZ) > 0.01) {
+        mesh.rotation.x += dirZ * 0.04;
+        mesh.rotation.z -= dirX * 0.04;
+      }
+      mesh.traverse((child) => {
+        if (!child.isMesh || !child.material) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of mats) {
+          if (material?.color) material.color.multiplyScalar(0.72);
+        }
+      });
+    }
   }
 }
 

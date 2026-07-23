@@ -19,8 +19,17 @@ import {
   distanceBetween,
   getStandoffPosition,
 } from '../game/Targeting.js';
-import { buildMovePath } from '../game/MovePath.js';
-import { getMoveReachConfig, shouldUseTacticalReverse } from './VehicleTypes.js';
+import {
+  buildMovePath,
+  snapUrbanRoadDestination,
+  unitPathPlanRadius,
+} from '../game/MovePath.js';
+import {
+  getMoveReachConfig,
+  isVehicleUnit,
+  shouldUseTacticalReverse,
+  TANK_TYPES,
+} from './VehicleTypes.js';
 import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
 import { removeWreckEffect } from '../effects/WreckEffects.js';
 import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
@@ -199,8 +208,10 @@ export class Unit {
    * @param {number} z
    * @param {object} [mapDef]
    * @param {boolean} [playerOrder] — player-issued moves are not cancelled by combat auto-fire
+   * @param {object|null} [scenery]
+   * @param {{ allowBuildingId?: string|null }} [options] — building id to enter (garrison)
    */
-  moveTo(x, z, mapDef = null, playerOrder = false) {
+  moveTo(x, z, mapDef = null, playerOrder = false, scenery = null, options = {}) {
     if (this.surrendered || this._captureExit) return;
     if (this._mobilityDamaged) {
       this.moveTarget = null;
@@ -208,12 +219,32 @@ export class Unit {
       this._userMoveOrder = false;
       return;
     }
+    // Preserve enter-building order across clearAttackOrder (which resets entry id).
+    const allowBuildingId = options.allowBuildingId ?? null;
+    if (playerOrder && !allowBuildingId) {
+      const snapped = snapUrbanRoadDestination(
+        x,
+        z,
+        this.def.type,
+        mapDef,
+        this.position.x,
+        this.position.z,
+        scenery
+      );
+      x = snapped.x;
+      z = snapped.z;
+    }
     clearRetreat(this);
     this.clearAttackOrder();
+    this._bunkerEntryId = allowBuildingId;
     this._userMoveOrder = playerOrder;
     this._chasingAttack = false;
     this._autoMoveOrderX = null;
     this._autoMoveOrderZ = null;
+    this._finalMoveGoal = { x, z };
+    this._pathRepathAttempts = 0;
+    this._urbanCanalRoute = null;
+    this._lastPathRepathAt = 0;
     if (playerOrder) this._pendingMountTankId = null;
 
     // A short click into a tank's rear arc is a tactical withdrawal: retain
@@ -222,15 +253,26 @@ export class Unit {
     this._reverseMoveOrder =
       playerOrder && shouldUseTacticalReverse(this, x, z);
 
-    if (mapDef && playerOrder) {
+    // All ground units path around buildings unless ordered into one (garrison).
+    // Use inflated plan radius so vehicles stay in street centres, not façades.
+    if (mapDef && (playerOrder || scenery)) {
       const { pathSegment } = getMoveReachConfig(this.def.type);
+      const radius = unitPathPlanRadius(this.def.type, mapDef);
       this._movePath = buildMovePath(
         this.position.x,
         this.position.z,
         x,
         z,
         mapDef,
-        pathSegment
+        pathSegment,
+        {
+          scenery,
+          radius,
+          avoidBuildings: !!scenery,
+          allowBuildingId,
+          preferUrbanRoads: isVehicleUnit(this.def.type),
+          allowTrackedBuildingCrush: TANK_TYPES.has(this.def.type),
+        }
       );
       while (
         this._movePath.length > 1 &&
@@ -295,7 +337,9 @@ export class Unit {
       this._recoverableWreck = knockout.recoverable && !this._crewBailedOut;
       this._preWreckYaw = this.mesh.rotation?.y ?? 0;
       this.dead = true;
-      if (opts.explosive || opts.cause === 'explosion') {
+      if (opts.cause === 'crush' || opts.crushed) {
+        this._deathCause = 'crush';
+      } else if (opts.explosive || opts.cause === 'explosion') {
         this._deathCause = 'explosion';
       }
       clearRetreat(this);

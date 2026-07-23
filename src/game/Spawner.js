@@ -1,4 +1,5 @@
 import { Unit } from '../units/Unit.js';
+import { isVehicleUnit } from '../units/VehicleTypes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { BASE_BUILDING_STARTING_ARMY } from '../data/baseBuildings.js';
 
@@ -125,6 +126,29 @@ function getClearanceDeploymentOffset(type, index, count) {
   };
 }
 
+function vehicleSpawnRadius(type) {
+  if (type === 'superHeavyTank') return 2.8;
+  if (type === 'armoredCar') return 1.45;
+  if (type === 'artillery' || type === 'antiTankGun') return 1.65;
+  return 2.1;
+}
+
+/**
+ * Relocate units out of intact building footprints before creation.
+ * Vehicles always search; foot troops are also nudged clear so AI does not
+ * start (and dig trenches) inside Berlin tenements.
+ */
+export function resolveUnitSpawnPosition(def, x, z, scenery, mapDef = null) {
+  if (!scenery?.findClearVehiclePlacement) return { x, z };
+  if (isVehicleUnit(def?.type)) {
+    return scenery.findClearVehiclePlacement(x, z, vehicleSpawnRadius(def.type), mapDef);
+  }
+  if (scenery.isFieldWorksPlacementBlocked?.(x, z, 1.25)) {
+    return scenery.findClearVehiclePlacement(x, z, 1.25, mapDef) ?? { x, z };
+  }
+  return { x, z };
+}
+
 export function spawnArmy({
   faction,
   team,
@@ -138,6 +162,7 @@ export function spawnArmy({
   mapDef = null,
   campaign = false,
   baseBuilding = false,
+  scenery = null,
 }) {
   let layout = resolveLayout({ roster, tutorial, team, campaign, baseBuilding });
   if (team === 'enemy' && !tutorial) {
@@ -188,7 +213,8 @@ export function spawnArmy({
         x = Math.max(-half, Math.min(half, x));
         z = Math.max(-half, Math.min(half, z));
       }
-      const position = { x, z };
+      const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef);
+      if (!position) continue;
 
       units.push(
         new Unit({
@@ -206,17 +232,19 @@ export function spawnArmy({
   return units;
 }
 
-export function spawnUnitAt({ def, faction, team, x, z, scene, mapDef = null }) {
+export function spawnUnitAt({ def, faction, team, x, z, scene, mapDef = null, scenery = null }) {
+  const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef);
+  if (!position) return null;
   const unit = new Unit({
     def,
     faction,
     team,
-    position: { x, z },
+    position,
     scene,
   });
   if (mapDef) {
     unit._mapDef = mapDef;
-    unit.position.y = sampleTerrainHeight(x, z, mapDef);
+    unit.position.y = sampleTerrainHeight(position.x, position.z, mapDef);
   }
   return unit;
 }

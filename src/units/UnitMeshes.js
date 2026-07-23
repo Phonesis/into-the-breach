@@ -389,29 +389,51 @@ function removeDetachedCorpse(unit, squadIndex) {
 function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex, rotY = 0, animateFall = true) {
   const scene = unit.mesh?.parent;
   if (!scene || !unit.mesh) return null;
+  const crushed = unit._deathCause === 'crush';
 
   const worldPos = new THREE.Vector3(localOffset.x, localOffset.y, localOffset.z);
   unit.mesh.localToWorld(worldPos);
 
-  const groundY = sampleTerrainHeight(worldPos.x, worldPos.z, unit._mapDef) + 0.02;
-  const startY = animateFall ? worldPos.y + 0.52 : groundY;
+  // Crushed bodies already lie flat under tracks — no pop-up fall animation.
+  const groundY = sampleTerrainHeight(worldPos.x, worldPos.z, unit._mapDef) + (crushed ? 0.008 : 0.02);
+  const startY = animateFall && !crushed ? worldPos.y + 0.52 : groundY;
 
   const anchor = new THREE.Group();
   anchor.name = 'detachedCorpse';
   anchor.userData.unitId = unit.id;
   anchor.userData.squadIndex = squadIndex;
+  if (crushed) anchor.userData.crushed = true;
 
-  const body = buildFallenSoldierBody(factionId, { ghillie: unitType === 'sniper' });
-  body.rotation.y = rotY + (Math.random() - 0.5) * 1.2;
-  body.rotation.z = (Math.random() - 0.5) * 0.15;
+  // Align track grooves roughly with the tank's travel direction when available.
+  const trackYaw =
+    unit._crushTrackYaw ??
+    unit.mesh.rotation?.y ??
+    rotY ??
+    0;
+
+  let body;
+  if (crushed) {
+    body = buildCrushedSoldierBody(factionId, {
+      ghillie: unitType === 'sniper',
+      trackYaw: trackYaw + (Math.random() - 0.5) * 0.2,
+    });
+    // Slight overall yaw scatter so squadmates don't stamp identically.
+    body.rotation.y = (Math.random() - 0.5) * 0.55;
+    addCrushedGroundMess(anchor, squadIndex);
+  } else {
+    body = buildFallenSoldierBody(factionId, { ghillie: unitType === 'sniper' });
+    body.rotation.y = rotY + (Math.random() - 0.5) * 1.2;
+    body.rotation.z = (Math.random() - 0.5) * 0.15;
+    addBloodPoolAt(anchor, 0, 0, 0.3 + Math.random() * 0.16, squadIndex);
+  }
   anchor.add(body);
 
-  addBloodPoolAt(anchor, 0, 0, 0.3 + Math.random() * 0.16, squadIndex);
-
   anchor.position.set(worldPos.x, startY, worldPos.z);
-  anchor.rotation.y = rotY + (Math.random() - 0.5) * 0.4;
+  anchor.rotation.y = crushed
+    ? trackYaw + (Math.random() - 0.5) * 0.35
+    : rotY + (Math.random() - 0.5) * 0.4;
 
-  if (animateFall) {
+  if (animateFall && !crushed) {
     anchor.rotation.x = -1.05;
     anchor.userData.fall = {
       elapsed: 0,
@@ -423,7 +445,9 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     };
     activeCorpseAnchors.add(anchor);
   } else {
-    anchor.rotation.x = (Math.random() - 0.5) * 0.12;
+    // Crushed remains sit flush; only a hair of roll so they aren't laser-flat.
+    anchor.rotation.x = crushed ? (Math.random() - 0.5) * 0.04 : (Math.random() - 0.5) * 0.12;
+    if (crushed) anchor.rotation.z = (Math.random() - 0.5) * 0.05;
   }
 
   scene.add(anchor);
@@ -880,6 +904,244 @@ function buildFallenSoldierBody(factionId, { ghillie = false } = {}) {
   return group;
 }
 
+/**
+ * Track-crushed remains: still readable as a soldier, but mass has been pressed
+ * into the dirt with splayed limbs, mud soak, and tread grooves — not a paper
+ * cutout of the standing mesh.
+ */
+function buildCrushedSoldierBody(factionId, { ghillie = false, trackYaw = 0 } = {}) {
+  const group = new THREE.Group();
+  group.name = 'fallenBody';
+  group.userData.crushed = true;
+
+  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
+  const uniformMat = createCamoMaterial(0xffffff, uniformTex, ghillie ? [1.4, 1] : [1.1, 0.75], {
+    rough: 0.97,
+  });
+  // Mud + blood soak: darken camo without pure black.
+  uniformMat.color.multiplyScalar(0.42);
+  uniformMat.color.offsetHSL(0.02, 0.05, -0.04);
+  if (uniformMat.emissive) {
+    uniformMat.emissive.setHex(0x140404);
+    uniformMat.emissiveIntensity = 0.08;
+  }
+
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: 0x5c4034,
+    roughness: 0.95,
+    metalness: 0.02,
+  });
+  skinMat.color.multiplyScalar(0.72);
+  const bloodMat = new THREE.MeshStandardMaterial({
+    color: 0x4a1010,
+    roughness: 0.88,
+    metalness: 0.04,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const mudMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3228,
+    roughness: 1,
+    metalness: 0,
+  });
+  const gearMats = getInfantryMaterials(factionId);
+  const leather = gearMats.leather.clone();
+  leather.color.multiplyScalar(0.45);
+  leather.roughness = 0.98;
+
+  // Main mass: flattened torso pancake with slight bulk (not zero-thickness).
+  const torso = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), uniformMat);
+  torso.scale.set(1.55, 0.22, 0.95);
+  torso.position.set(0.02, 0.035, 0.01);
+  torso.rotation.y = (Math.random() - 0.5) * 0.25;
+  torso.castShadow = true;
+  torso.receiveShadow = true;
+  group.add(torso);
+
+  // Secondary body lobe — irregular silhouette of pressed kit/torso.
+  const torsoLobe = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), uniformMat);
+  torsoLobe.scale.set(1.1, 0.18, 1.35);
+  torsoLobe.position.set(-0.12, 0.028, -0.06 + (Math.random() - 0.5) * 0.08);
+  torsoLobe.rotation.y = 0.4 + Math.random() * 0.3;
+  torsoLobe.receiveShadow = true;
+  group.add(torsoLobe);
+
+  // Wet blood soak on the main mass.
+  const soak = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), bloodMat);
+  soak.scale.set(1.4, 0.12, 0.9);
+  soak.position.set(0.06, 0.042, 0.02);
+  group.add(soak);
+
+  // Head — crushed flatter, slightly detached offset.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), skinMat);
+  head.scale.set(1.35, 0.28, 1.15);
+  head.position.set(0.38 + (Math.random() - 0.5) * 0.06, 0.03, 0.05 + (Math.random() - 0.5) * 0.08);
+  head.rotation.z = (Math.random() - 0.5) * 0.5;
+  head.castShadow = true;
+  group.add(head);
+
+  // Helmet knocked aside and partly buried.
+  if (!ghillie) {
+    const helm = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 8, 6),
+      gearMats.helmet.clone()
+    );
+    helm.material.color.multiplyScalar(0.55);
+    helm.scale.set(1.05, 0.32, 1.05);
+    helm.position.set(
+      0.42 + (Math.random() - 0.5) * 0.12,
+      0.025,
+      -0.14 + (Math.random() - 0.5) * 0.1
+    );
+    helm.rotation.set(0.4, Math.random() * Math.PI, 0.3);
+    group.add(helm);
+  } else {
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.2), uniformMat);
+    hood.position.set(0.36, 0.028, 0.04);
+    group.add(hood);
+  }
+
+  // Splayed legs — pressed thin, flung outward under the track path.
+  const legSpecs = [
+    { x: -0.34, z: 0.2, yaw: 0.55, stretch: 1.05 },
+    { x: -0.3, z: -0.22, yaw: -0.7, stretch: 0.95 },
+  ];
+  for (const spec of legSpecs) {
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.22, 3, 6), uniformMat);
+    leg.scale.set(1.15, 0.22, 1.5 * spec.stretch);
+    leg.position.set(spec.x, 0.025, spec.z);
+    leg.rotation.z = Math.PI / 2;
+    leg.rotation.y = spec.yaw;
+    leg.receiveShadow = true;
+    group.add(leg);
+
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.1), leather);
+    boot.position.set(spec.x - 0.22, 0.02, spec.z + Math.sin(spec.yaw) * 0.08);
+    boot.rotation.y = spec.yaw * 0.6;
+    group.add(boot);
+  }
+
+  // Arms — one forward, one crushed under torso.
+  const armOut = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.18, 3, 6), uniformMat);
+  armOut.scale.set(1.1, 0.2, 1.35);
+  armOut.position.set(0.08, 0.022, 0.28);
+  armOut.rotation.set(0.1, 0.2, Math.PI / 2 + 0.4);
+  group.add(armOut);
+  const handOut = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 5), skinMat);
+  handOut.scale.set(1.2, 0.35, 1.1);
+  handOut.position.set(-0.06, 0.02, 0.38);
+  group.add(handOut);
+
+  const armIn = new THREE.Mesh(new THREE.CapsuleGeometry(0.038, 0.14, 3, 5), uniformMat);
+  armIn.scale.set(1.05, 0.18, 1.1);
+  armIn.position.set(0.04, 0.02, -0.16);
+  armIn.rotation.set(-0.15, -0.5, Math.PI / 2 - 0.25);
+  group.add(armIn);
+
+  // Flattened pack / gear pancake.
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.16), leather);
+  pack.position.set(-0.1, 0.03, -0.02);
+  pack.rotation.y = 0.2;
+  group.add(pack);
+
+  // Mud pressed out from under the body.
+  for (const [mx, mz, s] of [
+    [0.15, 0.18, 0.7],
+    [-0.2, -0.12, 0.55],
+    [0.05, -0.22, 0.45],
+  ]) {
+    const mud = new THREE.Mesh(new THREE.SphereGeometry(0.12 * s, 6, 5), mudMat);
+    mud.scale.set(1.6, 0.14, 1.2);
+    mud.position.set(mx, 0.012, mz);
+    group.add(mud);
+  }
+
+  // Track grooves — elongated ruts across the remains (tank path direction).
+  const grooveMat = new THREE.MeshBasicMaterial({
+    color: 0x1a120e,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+  });
+  const grooveCount = 2 + (Math.random() < 0.45 ? 1 : 0);
+  for (let i = 0; i < grooveCount; i++) {
+    const groove = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.15 + Math.random() * 0.25, 0.07 + Math.random() * 0.03),
+      grooveMat
+    );
+    groove.rotation.x = -Math.PI / 2;
+    groove.rotation.z = trackYaw + (i - (grooveCount - 1) * 0.5) * 0.04 + (Math.random() - 0.5) * 0.08;
+    groove.position.set(
+      (Math.random() - 0.5) * 0.12,
+      0.018 + i * 0.002,
+      (i - (grooveCount - 1) * 0.5) * 0.11
+    );
+    groove.renderOrder = 3;
+    groove.name = 'bloodPool';
+    group.add(groove);
+
+    // Cleat nicks along the groove for tread texture.
+    for (let c = 0; c < 5; c++) {
+      const cleat = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.05, 0.09),
+        grooveMat
+      );
+      cleat.rotation.x = -Math.PI / 2;
+      cleat.rotation.z = groove.rotation.z + Math.PI * 0.5;
+      cleat.position.set(
+        -0.4 + c * 0.2 + (Math.random() - 0.5) * 0.04,
+        0.019 + i * 0.002,
+        groove.position.z
+      );
+      cleat.renderOrder = 4;
+      cleat.name = 'bloodPool';
+      group.add(cleat);
+    }
+  }
+
+  return group;
+}
+
+function addCrushedGroundMess(parent, squadIndex = null) {
+  // Broad dark mud/blood stain under the remains.
+  const mud = createBloodPoolMesh(0.72 + Math.random() * 0.2, {
+    color: 0x2c1810,
+    opacity: 0.55,
+    lobes: 6,
+  });
+  mud.position.set(0, 0.006, 0);
+  mud.scale.set(1.35, 1, 0.85);
+  mud.renderOrder = 1;
+  mud.name = 'bloodPool';
+  if (squadIndex != null) mud.userData.squadIndex = squadIndex;
+  parent.add(mud);
+
+  const blood = createBloodPoolMesh(0.48 + Math.random() * 0.18, {
+    color: 0x4a0e0e,
+    opacity: 0.5,
+    lobes: 5,
+  });
+  blood.position.set((Math.random() - 0.5) * 0.12, 0.008, (Math.random() - 0.5) * 0.1);
+  blood.renderOrder = 2;
+  blood.name = 'bloodPool';
+  if (squadIndex != null) blood.userData.squadIndex = squadIndex;
+  parent.add(blood);
+
+  // Elongated smear in the drive direction.
+  const smear = createBloodPoolMesh(0.55, {
+    color: 0x1f0a0a,
+    opacity: 0.42,
+    lobes: 3,
+  });
+  smear.position.set((Math.random() - 0.5) * 0.08, 0.007, (Math.random() - 0.5) * 0.06);
+  smear.scale.set(2.1, 1, 0.42);
+  smear.rotation.z = (Math.random() - 0.5) * 0.35;
+  smear.renderOrder = 2;
+  smear.name = 'bloodPool';
+  if (squadIndex != null) smear.userData.squadIndex = squadIndex;
+  parent.add(smear);
+}
+
 function hideLivingUnitMesh(mesh) {
   for (const child of mesh.children) {
     if (child.name === 'corpseStain' || child.name === 'fallenBody' || child.name === 'bloodPool') {
@@ -908,33 +1170,45 @@ export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
   const factionId = mesh.userData.factionId ?? 'germany';
   const members = getSquadMembers(mesh);
   const blastKill = unit?._deathCause === 'explosion';
+  const crushKill = unit?._deathCause === 'crush';
 
   if (unit && members.length) {
     for (const member of members) {
       if (member.visible) spawnCasualtyAtMember(unit, member, factionId, unitType);
     }
   } else if (unit) {
-    // Blast kills scatter bodies a bit wider
+    // Blast kills scatter bodies a bit wider; crush deaths pile under the tracks.
     const count = corpseBodyCount(unitType);
-    const spread = (unitType === 'infantry' ? 1.35 : 1.05) * (blastKill ? 1.55 : 1);
+    const spread =
+      (unitType === 'infantry' ? 1.35 : 1.05) *
+      (blastKill ? 1.55 : crushKill ? 0.72 : 1);
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * spread * (blastKill ? 0.85 : 0.55);
+      const dist = Math.random() * spread * (blastKill ? 0.85 : crushKill ? 0.4 : 0.55);
       placeDetachedCorpse(
         unit,
         new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist),
         factionId,
         unitType,
         -1 - i,
-        angle + (Math.random() - 0.5) * 0.8,
-        blastKill // animate fall more often on blast
+        angle + (Math.random() - 0.5) * (crushKill ? 1.4 : 0.8),
+        blastKill && !crushKill // animate fall more often on blast
       );
     }
   }
 
   // Occasional flying limbs / helmets on explosive kills
-  if (unit && blastKill) {
+  if (unit && blastKill && !crushKill) {
     spawnExplosionGibs(unit, factionId, unitType);
+  }
+
+  if (crushKill && !mesh.children.some((c) => c.name === 'corpseStain')) {
+    // Darker, wider mud/blood scar under the whole squad stamp.
+    const stain = new THREE.Group();
+    stain.name = 'corpseStain';
+    stain.renderOrder = 1;
+    addCrushedGroundMess(stain, null);
+    mesh.add(stain);
   }
 
   if (unitType === 'machineGun' && unit?.mesh?.parent) {

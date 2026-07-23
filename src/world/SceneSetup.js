@@ -197,6 +197,7 @@ export function setupLighting(scene) {
 
   const sun = new THREE.DirectionalLight(0xfff0dc, 1.85);
   sun.position.set(-58, 82, 44);
+  sun.userData.shadowOffset = sun.position.clone();
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   sun.shadow.bias = -0.00008;
@@ -225,15 +226,26 @@ export function setupLighting(scene) {
   bounce.position.set(0, 12, -40);
   scene.add(bounce);
 
-  return { sun, hemi, fill, rim };
+  return { sun, hemi, fill, rim, bounce };
 }
 
 /** Keep shadow focus on the active battlefield (console-style cascaded feel). */
 export function updateLightingForTarget(lights, x, z) {
   if (!lights?.sun) return;
-  lights.sun.target.position.set(x, 0, z);
-  lights.sun.target.updateMatrixWorld();
-  lights.sun.shadow.camera.position.copy(lights.sun.position);
-  lights.sun.shadow.camera.lookAt(lights.sun.target.position);
-  lights.sun.shadow.camera.updateProjectionMatrix();
+  const sun = lights.sun;
+  const shadowCamera = sun.shadow.camera;
+  const shadowWidth = shadowCamera.right - shadowCamera.left;
+  const mapWidth = sun.shadow.mapSize.x || 4096;
+  const texelWorldSize = shadowWidth / mapWidth;
+  const snappedX = Math.round(x / texelWorldSize) * texelWorldSize;
+  const snappedZ = Math.round(z / texelWorldSize) * texelWorldSize;
+  const offset = sun.userData.shadowOffset ?? new THREE.Vector3(-58, 82, 44);
+
+  // Move the light and target together so the shadow projection keeps a fixed
+  // orientation. Texel snapping prevents rooftops from shimmering while the
+  // camera pans by sub-pixel amounts.
+  sun.target.position.set(snappedX, 0, snappedZ);
+  sun.position.set(snappedX + offset.x, offset.y, snappedZ + offset.z);
+  sun.target.updateMatrixWorld();
+  sun.updateMatrixWorld();
 }

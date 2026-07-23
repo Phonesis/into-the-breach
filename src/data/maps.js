@@ -85,8 +85,48 @@ export const MAPS = {
     ],
     features: ['Hill country', 'Olive groves', 'Mountain mist'],
   },
+  berlin: {
+    id: 'berlin',
+    name: 'Berlin',
+    subtitle: 'Battle of Berlin — outer districts, April 1945',
+    terrain: 'urban',
+    groundColor: 0x5b5a54,
+    groundColor2: 0x454641,
+    fogColor: 0x777b7b,
+    fogDensity: 0.0068,
+    skyColor: 0x5f6b72,
+    size: 128,
+    // Dense urban geometry is expensive — keep the theater at medium only.
+    defaultMapSize: 'medium',
+    mapSizeOptions: ['medium'],
+    streetSpacing: 21,
+    streetWidth: 6.4,
+    canalOffsetCells: 1.5,
+    canalWidth: 5.4,
+    playerBase: { x: -44, z: 0 },
+    enemyBase: { x: 44, z: 0 },
+    frontline: { x: 0, z: 0, name: 'Frankfurter Allee' },
+    capturePoints: [
+      { id: 'cp-center', name: 'Alexanderplatz Approach', x: 0, z: 0, frontline: true },
+      { id: 'cp-north', name: 'Moabit Rail Yards', x: -13, z: -31 },
+      { id: 'cp-south', name: 'Tempelhof District', x: 15, z: 30 },
+    ],
+    features: [
+      'Dense streets',
+      'Central church square',
+      'Canal bridges & bombed parkland',
+    ],
+  },
 };
 
 export const MAP_LIST = Object.values(MAPS);
 
-export { buildMapDef, getMapSizePreset, MAP_SIZE_LIST, MAP_SIZE_PRESETS } from './mapSizes.js';
+export {
+  buildMapDef,
+  getMapSizePreset,
+  getMapSizeOptions,
+  getDefaultMapSize,
+  resolveMapSizeId,
+  MAP_SIZE_LIST,
+  MAP_SIZE_PRESETS,
+} from './mapSizes.js';
