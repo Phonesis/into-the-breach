@@ -155,9 +155,16 @@ const VEHICLE_BLOCKING_BUILDING_KINDS = new Set([
   'church',
 ]);
 // Direct fire is stricter than vehicle collision: light outbuildings and
-// courtyard walls can be crushed, but remain solid to bullets and shells until
-// their destruction state actually removes them.
+// courtyard walls can be crushed, but remain solid to bullets until destroyed.
+// High-velocity tank / AT shells still punch through light rural timber
+// (barns, farmhouses, sheds). Berlin masonry and heavy urban structures do not.
 const LINE_OF_FIRE_BLOCKING_BUILDING_KINDS = new Set(BUILDING_KINDS);
+/** Wooden / light rural buildings — solid to small arms, not to direct shells. */
+const SHELL_PENETRABLE_BUILDING_KINDS = new Set([
+  'farmHouse',
+  'barn',
+  'outbuilding',
+]);
 
 function segmentBoundsEntryT(startX, startZ, endX, endZ, halfWidth, halfDepth) {
   const deltaX = endX - startX;
@@ -536,9 +543,17 @@ export class DestructibleScenery {
         // Released rubble no longer blocks; a still-parented collapsing shell does.
         if (obj.lineOfFireReleased) continue;
         if (obj.destroyed && !obj.group?.parent) continue;
+        // Tank / AT shells punch through barns and other light rural timber;
+        // Berlin tenements, factories, churches, and masonry walls still stop them.
+        if (
+          strictDirectShell &&
+          SHELL_PENETRABLE_BUILDING_KINDS.has(obj.kind)
+        ) {
+          continue;
+        }
         // Occupants may fire out through their own windows. Only small arms may
         // engage a visible lookout in the target building; AT/tank shells must
-        // treat the intact structure as solid masonry rather than pass through it.
+        // treat intact heavy structures as solid masonry rather than pass through.
         if (attacker._garrisonBunkerId === obj.id) continue;
         if (
           target._garrisonBunkerId === obj.id &&

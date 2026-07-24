@@ -84,6 +84,8 @@ const UNIT_SELECT_COUNT = 6;
 const UNIT_SELECT_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
 const UNIT_UNDERFIRE_COUNT = 12;
 const UNIT_UNDERFIRE_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_RETREAT_COUNT = 6;
+const UNIT_RETREAT_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
 /** Fire-support + general-order commander radio lines (baked edge-tts). */
 const COMMANDER_ORDER_KINDS = [
   'strafe',
@@ -176,6 +178,8 @@ export class SoundManager {
     this.unitSelectBuffers = { usa: [], uk: [], germany: [], russia: [] };
     /** @type {Record<string, AudioBuffer[]>} */
     this.unitUnderFireBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    /** @type {Record<string, AudioBuffer[]>} */
+    this.unitRetreatBuffers = { usa: [], uk: [], germany: [], russia: [] };
     /**
      * Commander order lines: buffers[faction][kind] = AudioBuffer
      * @type {Record<string, Record<string, AudioBuffer>>}
@@ -423,6 +427,27 @@ export class SoundManager {
       }
     }
     await Promise.all(underFireLoads);
+
+    const retreatLoads = [];
+    for (const faction of UNIT_RETREAT_FACTIONS) {
+      for (let i = 1; i <= UNIT_RETREAT_COUNT; i++) {
+        const num = String(i).padStart(2, '0');
+        retreatLoads.push(
+          (async () => {
+            try {
+              const res = await fetch(publicUrl(`sounds/unit-retreat-${faction}-${num}.wav`));
+              if (!res.ok) return;
+              const ab = await res.arrayBuffer();
+              const buf = await this.ctx.decodeAudioData(ab);
+              this.unitRetreatBuffers[faction].push(buf);
+            } catch {
+              /* missing */
+            }
+          })()
+        );
+      }
+    }
+    await Promise.all(retreatLoads);
 
     const commanderLoads = [];
     for (const faction of COMMANDER_ORDER_FACTIONS) {
@@ -938,6 +963,64 @@ export class SoundManager {
         vol,
         rate: 0.99 + Math.random() * 0.04,
         wet: 0.28,
+      });
+    });
+  }
+
+  /**
+   * Faction-specific withdrawal call when a unit first enters retreat state.
+   * The retreat transition itself is one-shot; this global throttle also keeps
+   * simultaneous morale breaks and full-army withdrawals from becoming a wall
+   * of overlapping voices.
+   * @param {object|null} worldPos
+   * @param {string|null} factionId
+   * @param {object} [opts]
+   * @param {'player'|'enemy'|string} [opts.team]
+   * @param {boolean} [opts.radio] — friendly troops use the radio net by default
+   * @param {number} [opts.delay] — seconds before playback (for commander orders)
+   */
+  playRetreat(worldPos = null, factionId = null, opts = {}) {
+    this._runWhenReady(() => {
+      const key = unitUnderFireVoiceKey(factionId);
+      const bufs = this.unitRetreatBuffers[key];
+      if (!bufs?.length) return;
+
+      const now = performance.now();
+      if (now < (this._retreatVoiceBusyUntil ?? 0)) return;
+
+      const buf = this._pickFromPool(bufs, '_lastRetreatVoice');
+      if (!buf) return;
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const isEnemy = opts.team === 'enemy';
+      const useRadio = !isEnemy && opts.radio !== false;
+      const delay = Math.max(0, opts.delay ?? 0);
+      const rate = 0.98 + Math.random() * 0.04;
+      // Reserve the voice channel through delayed playback and a short tail.
+      // This prevents a second break from scheduling over a line not yet heard.
+      this._retreatVoiceBusyUntil =
+        now + delay * 1000 + (buf.duration / rate) * 1000 + 800;
+
+      if (useRadio) {
+        const vol = Math.min(1.22, this._distanceGain(dist) * 1.08);
+        this._playRadioVoice(buf, {
+          pan,
+          vol,
+          rate,
+          staticLevel: 0.23,
+          presence: 1,
+          delay,
+        });
+        return;
+      }
+
+      const vol = Math.min(0.68, this._distanceGain(dist) * 0.54);
+      this._playBuffer(buf, {
+        pan,
+        vol,
+        rate,
+        wet: 0.3,
+        delay,
       });
     });
   }

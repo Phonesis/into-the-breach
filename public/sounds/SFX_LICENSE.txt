@@ -13,6 +13,10 @@ regenerated in two ways:
    API key is never stored in this repo — set ELEVENLABS_API_KEY in your shell.
    Docs: https://elevenlabs.io/docs/overview/capabilities/sound-effects
 
+Faction rifle masters use the same ElevenLabs Sound Effects terms:
+  Files: rifle-{germany,usa,uk,russia}-el-01.wav … 06.wav
+  Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-rifles
+
 Aircraft fly-by and vehicle engine loops remain procedural
 (bake-gun-sounds / bake-engine-sounds).
 Infantry death voices: see VOICES_LICENSE.txt.

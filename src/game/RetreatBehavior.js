@@ -7,6 +7,7 @@ import { getCommanderRetreatMultiplier } from './GeneralOrders.js';
 import { getClearanceStagingAnchor } from './ClearanceMode.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { applyObstaclePath } from './MovePath.js';
+import { sounds } from '../audio/SoundManager.js';
 
 const _retreatTex = { tex: null };
 
@@ -98,7 +99,7 @@ export function removeRetreatMarker(unit) {
  * around buildings instead of walking straight into them.
  * @param {object} unit
  * @param {object} hq
- * @param {{ mapDef?: object, scenery?: object }} [options]
+ * @param {{ mapDef?: object, scenery?: object, voiceDelay?: number }} [options]
  */
 export function startRetreat(unit, hq, options = {}) {
   if (!hq || hq.dead || unit.dead || unit.retreating) return;
@@ -129,6 +130,20 @@ export function startRetreat(unit, hq, options = {}) {
     unit.moveTarget = { x: hq.position.x, z: hq.position.z };
   }
   attachRetreatMarker(unit);
+  const factionId =
+    unit.faction?.id ?? unit.faction?.factionId ?? unit.def?.factionId ?? null;
+  const recentlyCalledUnderFire =
+    performance.now() - (unit._lastUnderFireVoiceAt ?? -Infinity) < 450;
+  sounds.playRetreat(
+    { x: unit.position.x, z: unit.position.z },
+    factionId,
+    {
+      team: unit.team,
+      radio: unit.team === 'player',
+      // Let an immediately preceding hit reaction finish before the withdrawal call.
+      delay: Math.max(options.voiceDelay ?? 0, recentlyCalledUnderFire ? 1.05 : 0),
+    }
+  );
 }
 
 export function clearRetreat(unit) {

@@ -118,6 +118,8 @@ export class GeneralOrdersManager {
     const pathOpts = {
       mapDef: this.game.mapDef,
       scenery: this.game.scenery,
+      // The HQ commander speaks first; one throttled unit withdrawal call follows.
+      voiceDelay: 2.2,
     };
     for (const unit of this._playerUnits()) {
       if (!canReceiveOrder(unit)) continue;
@@ -140,6 +142,7 @@ export class GeneralOrdersManager {
     const pathOpts = {
       mapDef: this.game.mapDef,
       scenery: this.game.scenery,
+      voiceDelay: 2.2,
     };
     for (const unit of this._playerUnits()) {
       if (!canReceiveOrder(unit)) continue;

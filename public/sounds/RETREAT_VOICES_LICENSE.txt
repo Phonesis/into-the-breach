@@ -1,0 +1,11 @@
+Unit retreat voice lines
+========================
+
+Generated through ElevenLabs multilingual text-to-speech.
+
+Files: unit-retreat-{faction}-01.wav … 06.wav
+Factions: usa, uk, germany, russia
+Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-retreat
+
+The API key is never stored in this repository. Generated audio is subject to
+ElevenLabs Terms of Service and the account plan used to create it.
