@@ -1294,13 +1294,51 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
               }
             }
             if (!repathed && attempts >= 4) {
-              unit.moveTarget = null;
-              unit._movePath = null;
-              unit._userMoveOrder = false;
-              unit._reverseMoveOrder = false;
-              unit._urbanCanalRoute = null;
-              unit._chasingAttack = false;
-              unit._finalMoveGoal = null;
+              // Keep enter-building orders alive: façade thrash near dense Berlin
+              // blocks used to cancel the path while _bunkerEntryId was still set,
+              // so troops never got close enough to garrison.
+              if (unit._bunkerEntryId && goal) {
+                unit._pathRepathAttempts = 0;
+                unit._lastPathRepathAt = 0;
+                unit._lastPathRepathX = beforeX;
+                unit._lastPathRepathZ = beforeZ;
+                const { pathSegment } = getMoveReachConfig(unit.def.type);
+                const retry = buildMovePath(
+                  beforeX,
+                  beforeZ,
+                  goal.x,
+                  goal.z,
+                  mapDef,
+                  pathSegment,
+                  {
+                    scenery: options.scenery,
+                    radius: unitPathPlanRadius(unit.def?.type, mapDef),
+                    avoidBuildings: true,
+                    allowBuildingId: unit._bunkerEntryId,
+                    preferUrbanRoads: isVehicleUnit(unit.def?.type),
+                    allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(
+                      unit.def?.type
+                    ),
+                  }
+                );
+                if (retry?.length) {
+                  unit._movePath = retry;
+                  unit.moveTarget = { ...unit._movePath[0] };
+                  unit._userMoveOrder = true;
+                } else {
+                  unit.moveTarget = { x: goal.x, z: goal.z };
+                  unit._movePath = null;
+                  unit._userMoveOrder = true;
+                }
+              } else {
+                unit.moveTarget = null;
+                unit._movePath = null;
+                unit._userMoveOrder = false;
+                unit._reverseMoveOrder = false;
+                unit._urbanCanalRoute = null;
+                unit._chasingAttack = false;
+                unit._finalMoveGoal = null;
+              }
             }
           }
         }

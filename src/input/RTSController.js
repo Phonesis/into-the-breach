@@ -995,25 +995,87 @@ export class RTSController {
     // otherwise captured road clicks from tanks and guns, making them turn
     // straight toward the façade and bypass vehicle road snapping.
     if (selected.every((unit) => canGarrisonType(unit.def?.type))) {
-      for (const src of garrisonSources) {
-        // Large tenements need a generous click radius (footprint, not just 6.5 m).
-        const bunker = src.pickBunkerAt?.(clamped.x, clamped.z, player, 12);
-        if (bunker) {
-          snapX = bunker.x;
-          snapZ = bunker.z;
-          bunkerSnap = bunker;
-          break;
+      // Prefer a direct mesh hit on the building (façade / roof). Perspective
+      // ground rays often land on the pavement in front of tall Berlin blocks,
+      // so footprint-only ground picks miss many intentional enter clicks.
+      this.raycaster.setFromCamera(this.pointer, this.camera);
+      const groundHit = this._raycastGroundHit();
+      const sceneryHit = this._raycastSceneryHit();
+      const meshEntry = sceneryHit?.target?.entry ?? null;
+      if (
+        meshEntry &&
+        !meshEntry.destroyed &&
+        meshEntry.def?.garrison &&
+        !(meshEntry.garrisonTeam && meshEntry.garrisonTeam !== player)
+      ) {
+        const kind = meshEntry.kind;
+        const tallSolid =
+          kind === 'urbanHouse' ||
+          kind === 'apartmentBlock' ||
+          kind === 'factory' ||
+          kind === 'church' ||
+          kind === 'farmHouse' ||
+          kind === 'barn' ||
+          kind === 'outbuilding';
+        const bias = tallSolid ? 16 : 2.5;
+        if (!groundHit || sceneryHit.distance < groundHit.distance + bias) {
+          bunkerSnap = meshEntry;
+          snapX = meshEntry.x;
+          snapZ = meshEntry.z;
+        }
+      }
+
+      if (!bunkerSnap) {
+        for (const src of garrisonSources) {
+          // Footprint-based ground pick (see DestructibleScenery.pickBunkerAt).
+          const bunker = src.pickBunkerAt?.(clamped.x, clamped.z, player, 10);
+          if (bunker) {
+            snapX = bunker.x;
+            snapZ = bunker.z;
+            bunkerSnap = bunker;
+            break;
+          }
         }
       }
     }
 
-    const destinations = bunkerSnap
-      ? selected.map((unit) => ({ unit, x: snapX, z: snapZ }))
-      : spreadGroupMoveDestinations(selected, snapX, snapZ);
-    for (const { unit, x, z } of destinations) {
+    // Already-garrisoned troops ordered onto their *current* building must leave
+    // toward the click (or a clear exterior), not re-enter the same room.
+    // Without this, Berlin façade snaps turned every leave attempt into a loop.
+    if (bunkerSnap && selected.some((unit) => unit._garrisonBunkerId)) {
+      const allAlreadyInSnap = selected.every(
+        (unit) =>
+          !canGarrisonType(unit.def?.type) ||
+          unit._garrisonBunkerId === bunkerSnap.id
+      );
+      const anyInSnap = selected.some((unit) => unit._garrisonBunkerId === bunkerSnap.id);
+      if (anyInSnap && allAlreadyInSnap) {
+        bunkerSnap = null;
+        snapX = clamped.x;
+        snapZ = clamped.z;
+      }
+    }
+
+    // Per-unit destinations: units already inside bunkerSnap leave to the ground
+    // click; others receive the enter-building order.
+    let destinations;
+    if (bunkerSnap) {
+      destinations = selected.map((unit) => {
+        if (unit._garrisonBunkerId === bunkerSnap.id) {
+          return { unit, x: clamped.x, z: clamped.z, allowBuildingId: null };
+        }
+        return { unit, x: snapX, z: snapZ, allowBuildingId: bunkerSnap.id };
+      });
+    } else {
+      destinations = spreadGroupMoveDestinations(selected, snapX, snapZ).map((d) => ({
+        ...d,
+        allowBuildingId: null,
+      }));
+    }
+    for (const { unit, x, z, allowBuildingId } of destinations) {
       let destX = x;
       let destZ = z;
-      if (seekCover && coverSystem && !bunkerSnap) {
+      if (seekCover && coverSystem && !allowBuildingId) {
         const coverDest = resolveSeekCoverDestination(unit, x, z, coverSystem);
         destX = coverDest.x;
         destZ = coverDest.z;
@@ -1022,7 +1084,7 @@ export class RTSController {
       // Pass allowBuildingId into moveTo — clearAttackOrder inside moveTo would
       // otherwise wipe a pre-set _bunkerEntryId and block entry pathing.
       unit.moveTo(pt.x, pt.z, mapDef, true, this.getScenery?.() ?? null, {
-        allowBuildingId: bunkerSnap?.id ?? null,
+        allowBuildingId: allowBuildingId ?? null,
       });
     }
     if (this.onOrder) this.onOrder('move', selected);

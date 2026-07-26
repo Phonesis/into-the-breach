@@ -256,7 +256,7 @@ export class Unit {
       playerOrder && shouldUseTacticalReverse(this, x, z);
 
     // All ground units path around buildings unless ordered into one (garrison).
-    // Use inflated plan radius so vehicles stay in street centres, not façades.
+    // Use inflated plan radius so vehicles stay in the carriageway, not façades.
     if (mapDef && (playerOrder || scenery)) {
       const { pathSegment } = getMoveReachConfig(this.def.type);
       const radius = unitPathPlanRadius(this.def.type, mapDef);

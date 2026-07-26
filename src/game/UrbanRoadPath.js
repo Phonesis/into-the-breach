@@ -228,9 +228,59 @@ function routeBetween(start, goal, coordinates, isBlocked) {
 }
 
 /**
- * Route a mechanical unit over Berlin's connected street graph. Every graph
- * edge follows a rendered road centreline; blocked streets are bypassed via
- * other intersections instead of falling back to free-space building A*.
+ * Shift centreline graph points into a carriageway lane so tanks keep left /
+ * right / mid-road placement instead of always locking to the street axis.
+ * Intermediate corners blend start→goal lateral offset; final destination is
+ * left as ordered (already lane-snapped by snapUrbanRoadDestination).
+ */
+function applyCarriagewayLaneOffset(points, fromX, fromZ, toX, toZ, mapDef) {
+  if (!points?.length) return points;
+  const usable = Math.max(0.45, urbanRoadHalfWidth(mapDef) - 0.9);
+  const clampOffset = (offset) => Math.max(-usable, Math.min(usable, offset));
+
+  const startRoadX = nearestUrbanRoadCenter(fromX, mapDef);
+  const startRoadZ = nearestUrbanRoadCenter(fromZ, mapDef);
+  const goalRoadX = nearestUrbanRoadCenter(toX, mapDef);
+  const goalRoadZ = nearestUrbanRoadCenter(toZ, mapDef);
+  const startLatX = clampOffset(fromX - startRoadX);
+  const startLatZ = clampOffset(fromZ - startRoadZ);
+  const goalLatX = clampOffset(toX - goalRoadX);
+  const goalLatZ = clampOffset(toZ - goalRoadZ);
+
+  const count = points.length;
+  return points.map((point, index) => {
+    const t = count <= 1 ? 1 : index / (count - 1);
+    const latX = startLatX + (goalLatX - startLatX) * t;
+    const latZ = startLatZ + (goalLatZ - startLatZ) * t;
+    const roadX = nearestUrbanRoadCenter(point.x, mapDef);
+    const roadZ = nearestUrbanRoadCenter(point.z, mapDef);
+    const onVerticalCentre = Math.abs(point.x - roadX) <= 0.12;
+    const onHorizontalCentre = Math.abs(point.z - roadZ) <= 0.12;
+
+    // Already off the graph centreline (ordered destination / free point).
+    if (!onVerticalCentre && !onHorizontalCentre) {
+      return { x: point.x, z: point.z };
+    }
+
+    let x = point.x;
+    let z = point.z;
+    if (onVerticalCentre && onHorizontalCentre) {
+      // Intersection — carry both lane offsets through the corner.
+      x = roadX + latX;
+      z = roadZ + latZ;
+    } else if (onVerticalCentre) {
+      x = roadX + latX;
+    } else if (onHorizontalCentre) {
+      z = roadZ + latZ;
+    }
+    return { x, z };
+  });
+}
+
+/**
+ * Route a mechanical unit over Berlin's connected street graph. Graph search
+ * still uses rendered road centrelines; emitted waypoints are then shifted into
+ * the caller's carriageway lane so vehicles are not forced mid-road.
  * Returns null when the requested destination is deliberately off-road or no
  * connected street route exists.
  */
@@ -268,5 +318,6 @@ export function buildUrbanRoadPath(
       }
     }
   }
-  return best;
+  if (!best) return null;
+  return applyCarriagewayLaneOffset(best, fromX, fromZ, toX, toZ, mapDef);
 }

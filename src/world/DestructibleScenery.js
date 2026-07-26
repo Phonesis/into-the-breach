@@ -7,6 +7,7 @@ import {
 } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from './TerrainDamage.js';
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
+import { sounds } from '../audio/SoundManager.js';
 
 const _scorch = new THREE.Color(0x2a2218);
 let nextSceneryId = 1;
@@ -137,12 +138,25 @@ const CRUSHABLE_KINDS = new Set([
   'cart',
   'stump',
   'urbanWall',
+  // Berlin / urban masonry — tracked armor can drive in and collapse them.
+  'urbanHouse',
+  'apartmentBlock',
+  'factory',
+  'church',
 ]);
-/** Compact rural structures that tracked armor can collapse and cross. */
+/**
+ * Structures tracked armor can collapse and cross. Includes rural timber and
+ * large Berlin masonry (tenements, factories, churches) so tanks can ram
+ * through city blocks instead of pathing only along the street grid.
+ */
 const TRACKED_CRUSHABLE_BUILDING_KINDS = new Set([
   'farmHouse',
   'barn',
   'outbuilding',
+  'urbanHouse',
+  'apartmentBlock',
+  'factory',
+  'church',
 ]);
 
 /** Intact full buildings are hard obstacles to vehicles. */
@@ -215,6 +229,28 @@ const GARRISON_CAPACITY = {
   church: 8,
 };
 
+/** Collapse SFX tier by scenery kind (ElevenLabs small / medium / large pools). */
+const BUILDING_COLLAPSE_SFX_SIZE = {
+  outbuilding: 'small',
+  urbanWall: 'small',
+  farmHouse: 'medium',
+  barn: 'medium',
+  urbanHouse: 'medium',
+  apartmentBlock: 'large',
+  factory: 'large',
+  church: 'large',
+};
+
+function collapseSfxSizeForBuilding(obj) {
+  if (!obj) return 'medium';
+  const mapped = BUILDING_COLLAPSE_SFX_SIZE[obj.kind];
+  if (mapped) return mapped;
+  const radius = obj.radius ?? 0;
+  if (radius >= 6.5) return 'large';
+  if (radius <= 3.8) return 'small';
+  return 'medium';
+}
+
 /** Map gen shares one material across all trees/bushes — clone per prop so damage tints stay local. */
 function cloneSceneryMaterials(group) {
   if (group.userData.uniqueSceneryMaterials) return;
@@ -257,15 +293,26 @@ export class DestructibleScenery {
     return `${ix}:${iz}`;
   }
 
+  /**
+   * Radius from object centre that must be indexed so point and ray broad-phases
+   * still find elongated Berlin frontages and expanded shell footprints.
+   * Covers the local footprint half-diagonal, a shell-margin pad, and radius.
+   */
   _objectSpatialExtent(obj) {
+    // Match the strict-shell footprint margin used by getLineOfFireBlocker so
+    // corridor samples that only graze an expanded façade still resolve.
+    const frame = this._buildingLocalFrame(obj, 2.0);
+    if (frame?.worldExtent) {
+      return Math.max(obj.radius ?? 1, frame.worldExtent + 0.5);
+    }
     const bounds = this._buildingFootprint(obj);
     const scaleX = Math.max(0.01, obj.baseScale?.x ?? obj.group?.scale?.x ?? 1);
     const scaleZ = Math.max(0.01, obj.baseScale?.z ?? obj.group?.scale?.z ?? 1);
-    return Math.max(
-      obj.radius ?? 1,
-      (bounds.width ?? 0) * scaleX * 0.55,
-      (bounds.depth ?? 0) * scaleZ * 0.55
+    const halfDiag = Math.hypot(
+      (bounds.width ?? 0) * scaleX * 0.5,
+      (bounds.depth ?? 0) * scaleZ * 0.5
     );
+    return Math.max(obj.radius ?? 1, halfDiag + 2.5);
   }
 
   _indexObject(obj) {
@@ -404,22 +451,43 @@ export class DestructibleScenery {
     return this.objects.find((o) => o.id === id && !o.destroyed) ?? null;
   }
 
+  /**
+   * Pick a garrisonable building under a ground click.
+   * Uses the rectangular footprint (not a large centre radius) so Berlin street
+   * clicks a few metres from a tenement centre remain normal move orders —
+   * only clicks on/near the actual building mass enter.
+   */
   pickBunkerAt(x, z, team, maxDist = 4.5) {
     let best = null;
-    let bestD = maxDist;
+    let bestD = Infinity;
     for (const obj of this.objects) {
       if (obj.destroyed || !GARRISON_BUILDING_KINDS.has(obj.kind)) continue;
       if (obj.garrisonTeam && obj.garrisonTeam !== team) continue;
-      // Prefer footprint reach so clicks on a large tenement façade register.
-      const reach = Math.max(maxDist, (obj.radius ?? 4) + 2.5);
       const d = Math.hypot(obj.x - x, obj.z - z);
-      if (d > reach) continue;
+      // Hard outer bound only — do not inflate reach to radius+N (that made
+      // every Berlin carriageway click snap into a neighbouring tenement).
+      const outer = Math.max(maxDist, (obj.radius ?? 4) + 1.2);
+      if (d > outer) continue;
+      // Façade / curb clicks land slightly outside the solid mesh. Keep the
+      // margin modest so open carriageways still stay as normal move orders.
+      if (!this._pointNearBuildingFootprint(obj, x, z, 2.15)) continue;
       if (d < bestD) {
         bestD = d;
         best = obj;
       }
     }
     return best;
+  }
+
+  /** True when (x,z) lies on the building footprint expanded by margin metres. */
+  _pointNearBuildingFootprint(obj, x, z, margin = 0) {
+    const frame = this._buildingLocalFrame(obj, margin);
+    if (!frame) return false;
+    const dx = x - obj.x;
+    const dz = z - obj.z;
+    const localX = (frame.cos * dx - frame.sin * dz) / frame.scaleX;
+    const localZ = (frame.sin * dx + frame.cos * dz) / frame.scaleZ;
+    return Math.abs(localX) <= frame.halfW && Math.abs(localZ) <= frame.halfD;
   }
 
   /** Combat targets for ordered attacks on cover. */
@@ -534,7 +602,9 @@ export class DestructibleScenery {
     const strictDirectShell = STRICT_DIRECT_SHELL_TYPES.has(attacker.def?.type);
     // AT / tank shells use a generous solid footprint so façade cornices,
     // sealed alleys, and Berlin courtyard corners still count as masonry.
-    const footprintMargin = strictDirectShell ? 1.35 : 0.55;
+    // Slightly wider than small-arms so a 1–2 m visual seam cannot open a
+    // fire lane that reads as “shooting through the block”.
+    const footprintMargin = strictDirectShell ? 1.85 : 0.55;
 
     const targetBuilding =
       target.entry &&
@@ -574,14 +644,15 @@ export class DestructibleScenery {
 
     const candidates = [];
     if (strictDirectShell) {
-      // Three corridor samples: centreline + flanks. Five was too expensive on
-      // dense urban maps with hundreds of building footprints.
+      // Five corridor samples: centreline + near/far flanks. Spatial broad-phase
+      // keeps this cheap on Berlin; outer flanks seal diagonal alley fire that
+      // the centreline alone treats as clear through a 2–3 m seam.
       const dx = bx - ax;
       const dz = bz - az;
       const len = Math.hypot(dx, dz) || 1;
       const nx = -dz / len;
       const nz = dx / len;
-      for (const offset of [0, -1.1, 1.1]) {
+      for (const offset of [0, -1.15, 1.15, -2.35, 2.35]) {
         candidates.push({
           ax: ax + nx * offset,
           az: az + nz * offset,
@@ -703,8 +774,39 @@ export class DestructibleScenery {
 
   damageAt(x, z, radius, damage, options = {}) {
     if (!damage || damage <= 0) return;
-    for (const obj of this._objectsInBounds(x - radius, z - radius, x + radius, z + radius)) {
+    // Expand broad-phase so shell hits on a long tenement façade still resolve
+    // when the registered origin is many metres from the impact point.
+    const searchPad = Math.max(radius + 10, 14);
+    for (const obj of this._objectsInBounds(
+      x - searchPad,
+      z - searchPad,
+      x + searchPad,
+      z + searchPad
+    )) {
       if (obj.destroyed) continue;
+      // Rectangular footprint for buildings — circular radius under-hits elongated
+      // Berlin blocks when the blast only clips a far façade.
+      if (BUILDING_KINDS.has(obj.kind)) {
+        const frame = this._buildingLocalFrame(obj, radius);
+        if (!frame) continue;
+        const dx = x - obj.x;
+        const dz = z - obj.z;
+        const localX = (frame.cos * dx - frame.sin * dz) / frame.scaleX;
+        const localZ = (frame.sin * dx + frame.cos * dz) / frame.scaleZ;
+        if (Math.abs(localX) > frame.halfW || Math.abs(localZ) > frame.halfD) continue;
+        const solidHalfW = Math.max(0, frame.halfW - radius / frame.scaleX);
+        const solidHalfD = Math.max(0, frame.halfD - radius / frame.scaleZ);
+        const outsideX = Math.max(0, Math.abs(localX) - solidHalfW) * frame.scaleX;
+        const outsideZ = Math.max(0, Math.abs(localZ) - solidHalfD) * frame.scaleZ;
+        const edgeDist = Math.hypot(outsideX, outsideZ);
+        const falloff =
+          edgeDist <= 0 ? 1 : 1 - Math.min(1, edgeDist / Math.max(radius, 0.01));
+        this.damageObject(obj, damage * Math.max(0.35, falloff), {
+          ...options,
+          impact: options.impact ?? { x, z },
+        });
+        continue;
+      }
       const d = Math.hypot(obj.x - x, obj.z - z);
       if (d > radius + obj.radius) continue;
       const falloff = 1 - d / (radius + obj.radius);
@@ -733,19 +835,54 @@ export class DestructibleScenery {
     }
   }
 
+  /**
+   * True when a vehicle at (x,z) has driven into a building enough to collapse it.
+   * Uses the rectangular footprint so elongated Berlin tenements crush when the
+   * hull enters the façade — not only when it reaches the geometric centre.
+   */
+  _vehicleCrushesBuildingFootprint(obj, x, z, vehicleRadius = 1.8) {
+    const bounds = this._buildingFootprint(obj);
+    const yaw = obj.group?.rotation?.y ?? 0;
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const dx = x - obj.x;
+    const dz = z - obj.z;
+    const scaleX = Math.max(0.01, obj.baseScale?.x ?? obj.group?.scale?.x ?? 1);
+    const scaleZ = Math.max(0.01, obj.baseScale?.z ?? obj.group?.scale?.z ?? 1);
+    const localX = (cos * dx - sin * dz) / scaleX;
+    const localZ = (sin * dx + cos * dz) / scaleZ;
+    const halfWidth = bounds.width * 0.5;
+    const halfDepth = bounds.depth * 0.5;
+    // Require real penetration past the façade (not a sidewalk scrape).
+    const inset = Math.min(
+      Math.max(vehicleRadius * 0.22, 0.35),
+      Math.min(halfWidth, halfDepth) * 0.35
+    );
+    return Math.abs(localX) <= halfWidth - inset && Math.abs(localZ) <= halfDepth - inset;
+  }
+
   crushAt(x, z, crushRadius = 1.8, options = {}) {
     const lightVehicle = options.vehicleClass === 'light';
     let crushedCount = 0;
+    // Pad the query so elongated building centres still resolve when a tank is
+    // well inside a large Berlin footprint but far from the registered origin.
+    const searchPad = Math.max(crushRadius + 10, 14);
     for (const obj of this._objectsInBounds(
-      x - crushRadius,
-      z - crushRadius,
-      x + crushRadius,
-      z + crushRadius
+      x - searchPad,
+      z - searchPad,
+      x + searchPad,
+      z + searchPad
     )) {
       if (obj.destroyed || !CRUSHABLE_KINDS.has(obj.kind)) continue;
       if (lightVehicle && !LIGHT_VEHICLE_CRUSHABLE_KINDS.has(obj.kind)) continue;
-      const threshold = Math.max(crushRadius + obj.radius * 0.45, obj.radius * 0.72);
-      if (Math.hypot(obj.x - x, obj.z - z) > threshold) continue;
+      if (TRACKED_CRUSHABLE_BUILDING_KINDS.has(obj.kind)) {
+        // Full buildings (rural + Berlin masonry): hull must enter the footprint.
+        // Thin courtyard walls and props keep the circular test below.
+        if (!this._vehicleCrushesBuildingFootprint(obj, x, z, crushRadius)) continue;
+      } else {
+        const threshold = Math.max(crushRadius + obj.radius * 0.45, obj.radius * 0.72);
+        if (Math.hypot(obj.x - x, obj.z - z) > threshold) continue;
+      }
       this.destroyObject(obj, {
         effects: false,
         crushed: true,
@@ -764,11 +901,13 @@ export class DestructibleScenery {
   getUnitPlacementBlocker(x, z, unitRadius = 1.8, options = {}) {
     const allowBuildingId = options.allowBuildingId ?? null;
     const allowTrackedBuildingCrush = options.allowTrackedBuildingCrush === true;
+    // Pad like crush/LOS: elongated Berlin centres sit far from a façade point.
+    const searchPad = Math.max(unitRadius + 10, 14);
     for (const obj of this._objectsInBounds(
-      x - unitRadius,
-      z - unitRadius,
-      x + unitRadius,
-      z + unitRadius
+      x - searchPad,
+      z - searchPad,
+      x + searchPad,
+      z + searchPad
     )) {
       // Placement is stricter than movement/crushing: guns and vehicles may
       // never begin inside even a small outbuilding or courtyard wall.
@@ -807,6 +946,27 @@ export class DestructibleScenery {
   isDestroyedBuildingFootprint(x, z, margin = 0) {
     for (const obj of this._objectsInBounds(x - margin, z - margin, x + margin, z + margin)) {
       if (!obj.destroyed || !BUILDING_KINDS.has(obj.kind)) continue;
+      const frame = this._buildingLocalFrame(obj, margin);
+      if (!frame) continue;
+      const dx = x - obj.x;
+      const dz = z - obj.z;
+      const localX = (frame.cos * dx - frame.sin * dz) / frame.scaleX;
+      const localZ = (frame.sin * dx + frame.cos * dz) / frame.scaleZ;
+      if (Math.abs(localX) <= frame.halfW && Math.abs(localZ) <= frame.halfD) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Intact building that tracked armor may ram through (rural timber or Berlin
+   * masonry). Used so tank move orders onto a tenement stay on the footprint
+   * instead of being snapped back to the nearest street centreline.
+   */
+  isTrackedCrushableBuildingAt(x, z, margin = 0) {
+    for (const obj of this._objectsInBounds(x - margin, z - margin, x + margin, z + margin)) {
+      if (obj.destroyed || !TRACKED_CRUSHABLE_BUILDING_KINDS.has(obj.kind)) continue;
       const frame = this._buildingLocalFrame(obj, margin);
       if (!frame) continue;
       const dx = x - obj.x;
@@ -1604,6 +1764,12 @@ export class DestructibleScenery {
       dz = Math.sin(angle);
     }
 
+    // Size-matched collapse one-shot (tank ram, shell, or fire support).
+    sounds.playBuildingCollapse(collapseSfxSizeForBuilding(obj), {
+      x: obj.x,
+      z: obj.z,
+    });
+
     const group = obj.group;
     const yaw = group.rotation.y;
     const cos = Math.cos(yaw);
@@ -1796,6 +1962,7 @@ export class DestructibleScenery {
       this._removeAndDisposeGroup(anim.group);
     }
     this.objects = [];
+    this._spatialBuckets = new Map();
     this.rubble = [];
     this.crushAnimations = [];
     this.buildingCollapseAnimations = [];

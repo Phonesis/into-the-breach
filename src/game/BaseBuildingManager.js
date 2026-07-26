@@ -20,6 +20,7 @@ import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js
 import { spawnShellExplosion } from '../effects/CombatEffects.js';
 import { isTeamStagingPhase } from './OpeningDeployZone.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
+import { sounds } from '../audio/SoundManager.js';
 
 let nextId = 1;
 
@@ -405,6 +406,13 @@ export class BaseBuildingManager {
 
     // Heavier collapse FX than a small infantry puff
     spawnShellExplosion(this.game.scene, pos, entry.typeId === 'bunker' ? 'medium' : 'heavy');
+    const collapseSize =
+      entry.typeId === 'bunker'
+        ? 'medium'
+        : entry.typeId === 'motorPool' || entry.typeId === 'ordnanceYard'
+          ? 'large'
+          : 'medium';
+    sounds.playBuildingCollapse(collapseSize, { x: entry.x, z: entry.z });
 
     if (this.game.mapDef) {
       addExplosionCrater(

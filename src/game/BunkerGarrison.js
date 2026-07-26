@@ -34,7 +34,42 @@ export function getBunkerEnterRange(bunker) {
     bunker?.radius ??
     bunker?.coverRadius ??
     3.4;
-  return Math.max(4.2, footprint * 0.72 + 1.4);
+  let range = Math.max(4.2, footprint * 0.72 + 1.4);
+  // Large rectangular tenements: centre distance alone under-counts a unit that
+  // reaches a side façade or end of a long frontage. Expand by footprint span.
+  const width = bunker?.footprintWidth ?? bunker?.def?.hitRadius ?? null;
+  const depth = bunker?.footprintDepth ?? bunker?.def?.radius ?? null;
+  if (Number.isFinite(width) && Number.isFinite(depth)) {
+    range = Math.max(range, Math.hypot(width * 0.5, depth * 0.5) + 2.2);
+  }
+  return range;
+}
+
+/** True when a unit is close enough to the building mass to step inside. */
+function unitNearBunkerForEntry(unit, bunker, enterRange) {
+  if (!unit || !bunker) return false;
+  const distToCenter = distanceToPoint(unit, bunkerCenter(bunker));
+  if (distToCenter <= enterRange) return true;
+  // Footprint proximity: standing on/at the façade counts even if the centre
+  // is farther (long Berlin frontages).
+  const w = bunker.footprintWidth;
+  const d = bunker.footprintDepth;
+  const root = bunker.group ?? bunker.mesh;
+  if (!Number.isFinite(w) || !Number.isFinite(d) || !root) {
+    return distToCenter <= enterRange * 1.12;
+  }
+  const yaw = root.rotation?.y ?? 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const scaleX = Math.max(0.01, bunker.baseScale?.x ?? root.scale?.x ?? 1);
+  const scaleZ = Math.max(0.01, bunker.baseScale?.z ?? root.scale?.z ?? 1);
+  const dx = unit.position.x - bunker.x;
+  const dz = unit.position.z - bunker.z;
+  const localX = (cos * dx - sin * dz) / scaleX;
+  const localZ = (sin * dx + cos * dz) / scaleZ;
+  const halfW = w * 0.5 + 1.6 / scaleX;
+  const halfD = d * 0.5 + 1.6 / scaleZ;
+  return Math.abs(localX) <= halfW && Math.abs(localZ) <= halfD;
 }
 
 /** Collect managers that own garrison-capable bunkers / shelters. */
@@ -320,7 +355,7 @@ export function tryEnterBunker(unit, bunker, sources) {
   if ((bunker.garrison?.length ?? 0) >= cap) return false;
 
   const enterRange = getBunkerEnterRange(bunker);
-  if (distanceToPoint(unit, bunkerCenter(bunker)) > enterRange) return false;
+  if (!unitNearBunkerForEntry(unit, bunker, enterRange)) return false;
 
   releaseFromBunker(unit, sources);
   bunker.garrison = bunker.garrison ?? [];
@@ -388,15 +423,36 @@ export function updateBunkerGarrison(units, sources, options = {}) {
       }
       // Move / retreat order — leave the building and path from the street.
       if (unit.moveTarget || unit.retreating || unit._userMoveOrder) {
-        const goal = unit._finalMoveGoal ?? unit.moveTarget;
+        const bunkerLeft = bunker;
+        let goal = unit._finalMoveGoal ?? unit.moveTarget;
+        // Only treat a leave goal as "into self" when it is the building centre
+        // (enter-snap), not any point within enter-range — nearby streets often
+        // sit only ~6 m from a Berlin tenement centre.
+        const goalIntoSelf =
+          goal &&
+          Math.hypot(goal.x - bunkerLeft.x, goal.z - bunkerLeft.z) <= 2.4;
+        if (goalIntoSelf) {
+          goal = null;
+          unit._finalMoveGoal = null;
+          unit._bunkerEntryId = null;
+        }
         releaseFromBunker(unit, list, {
           eject: true,
           toward: goal,
           scenery,
           mapDef,
         });
+        // releaseFromBunker clears entry id; keep it cleared so post-exit
+        // lockout cannot immediately re-swallow a leave that was mis-tagged.
+        unit._bunkerEntryId = null;
         if (goal && mapDef && scenery && applyObstaclePath) {
           applyObstaclePath(unit, goal.x, goal.z, mapDef, scenery);
+        } else if (mapDef && scenery && applyObstaclePath) {
+          // Explicit leave without a far goal: step further from the façade so
+          // the unit does not idle on the doorstep and look "stuck inside".
+          const exitX = unit.position.x;
+          const exitZ = unit.position.z;
+          applyObstaclePath(unit, exitX, exitZ, mapDef, scenery);
         }
         continue;
       }
@@ -428,9 +484,9 @@ export function updateBunkerGarrison(units, sources, options = {}) {
     const distToBunker = distanceToPoint(unit, bunkerCenter(bunker));
     const distToDest = unit.moveTarget ? distanceToPoint(unit, unit.moveTarget) : Infinity;
     const closeEnough =
-      distToBunker <= enterRange ||
+      unitNearBunkerForEntry(unit, bunker, enterRange) ||
       distToDest <= enterRange + 0.6 ||
-      (unit._bunkerEntryId === bunker.id && distToBunker <= enterRange * 1.15);
+      (unit._bunkerEntryId === bunker.id && distToBunker <= enterRange * 1.2);
 
     if (!closeEnough) continue;
 

@@ -2086,7 +2086,22 @@ function placeTenementFrontage(
       z = cell.z + sequence;
       yaw = streetSide > 0 ? Math.PI * 0.5 : -Math.PI * 0.5;
     }
-    if (isReserved(x, z, mapDef, Math.max(5.2, frontage * 0.6))) continue;
+    if (isReserved(x, z, mapDef, Math.max(5.2, frontage * 0.6))) {
+      // HQ / capture clearances must not leave open fire lanes through an
+      // otherwise solid street wall — plug the plot with a LOS-blocking wall
+      // aligned with the missing frontage (same yaw as the tenement face).
+      placeBlockingWall(
+        scenery,
+        scene,
+        sampleHeight,
+        random,
+        x,
+        z,
+        Math.max(frontage * 0.92, 3.2),
+        yaw
+      );
+      continue;
+    }
     const kind = random() < 0.42 ? 'apartmentBlock' : 'urbanHouse';
     const floors = kind === 'apartmentBlock' ? 4 + Math.floor(random() * 2) : 3 + Math.floor(random() * 2);
     const group = createPeriodBuilding(kind, frontage, depth, floors, random);
@@ -2147,8 +2162,9 @@ function addTenementRow(cell, layout, mapDef, scene, scenery, sampleHeight, rand
     });
   }
 
-  // One courtyard divider wall is enough for LOS; extra plugs were costly.
-  if (!isReserved(cell.x, cell.z, mapDef, 4.2) && random() < 0.7) {
+  // Always plug the Hof — empty courtyards let AT shells cross the block
+  // when a street frontage is thin or a reserved plot opened one side.
+  if (!isReserved(cell.x, cell.z, mapDef, 4.2)) {
     placeBlockingWall(
       scenery,
       scene,
@@ -2156,7 +2172,7 @@ function addTenementRow(cell, layout, mapDef, scene, scenery, sampleHeight, rand
       random,
       cell.x,
       cell.z,
-      blockSize * (0.38 + random() * 0.1),
+      blockSize * (0.42 + random() * 0.12),
       random() < 0.5 ? 0 : Math.PI * 0.5
     );
   }

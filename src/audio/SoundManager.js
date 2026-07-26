@@ -69,6 +69,18 @@ const FIRE_SUPPORT_SALVO_FILES = {
   ],
 };
 
+/** Scenery / structure collapse one-shots (ElevenLabs) by building scale. */
+const BUILDING_COLLAPSE_FILES = {
+  small: ['building-collapse-small-01.wav', 'building-collapse-small-02.wav'],
+  medium: ['building-collapse-medium-01.wav', 'building-collapse-medium-02.wav'],
+  large: ['building-collapse-large-01.wav', 'building-collapse-large-02.wav'],
+};
+const BUILDING_COLLAPSE_GAIN = {
+  small: 1.05,
+  medium: 1.28,
+  large: 1.52,
+};
+
 // TEMP originals-only: keep all EL gens; pitch-clone filter only applies to weapons
 const EXPLOSION_SAMPLE_FILES = EXPLOSION_SAMPLE_FILES_FULL;
 const IMPACT_SAMPLE_FILES = IMPACT_SAMPLE_FILES_FULL;
@@ -162,10 +174,15 @@ export class SoundManager {
     this.artilleryImpactBuffers = [];
     /** @type {Record<string, AudioBuffer[]>} */
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
+    /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
+    this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     this._atmosSrc = null;
     this._atmosGain = null;
     this._lastExplosionFile = null;
     this._lastImpactFile = null;
+    this._lastBuildingCollapseSmall = null;
+    this._lastBuildingCollapseMedium = null;
+    this._lastBuildingCollapseLarge = null;
     this.unlocked = false;
     this.muted = false;
     this._loadPromise = null;
@@ -508,6 +525,7 @@ export class SoundManager {
     this.radioStaticBuffers = [];
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
+    this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
@@ -515,6 +533,9 @@ export class SoundManager {
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
+    }
+    for (const [size, files] of Object.entries(BUILDING_COLLAPSE_FILES)) {
+      loadPool(files, this.buildingCollapseBuffers[size]);
     }
     await Promise.all(poolLoads);
 
@@ -1149,6 +1170,54 @@ export class SoundManager {
         vol: distanceMix * (kind === 'creepingBarrage' ? 0.98 : 0.92),
         rate: 0.98 + Math.random() * 0.035,
         wet: 0.42,
+      });
+    });
+  }
+
+  /**
+   * Masonry / timber structure collapse (scenery or base buildings).
+   * @param {'small'|'medium'|'large'} size
+   * @param {{x:number,z:number}|null} [worldPos]
+   */
+  playBuildingCollapse(size = 'medium', worldPos = null) {
+    this._runWhenReady(() => {
+      const key = size === 'small' || size === 'large' ? size : 'medium';
+      const now = performance.now();
+      const minGap = key === 'large' ? 140 : key === 'medium' ? 110 : 90;
+      if (now - (this._lastByType._buildingCollapse ?? 0) < minGap) return;
+
+      const pool =
+        this.buildingCollapseBuffers[key]?.length
+          ? this.buildingCollapseBuffers[key]
+          : this.buildingCollapseBuffers.medium?.length
+            ? this.buildingCollapseBuffers.medium
+            : this.explosionBuffers;
+      const lastKey =
+        key === 'small'
+          ? '_lastBuildingCollapseSmall'
+          : key === 'large'
+            ? '_lastBuildingCollapseLarge'
+            : '_lastBuildingCollapseMedium';
+      const buf =
+        this._pickFromPool(pool, lastKey) ??
+        this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
+        this.buffers.explosion;
+      if (!buf) return;
+      this._lastByType._buildingCollapse = now;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const gain = BUILDING_COLLAPSE_GAIN[key] ?? BUILDING_COLLAPSE_GAIN.medium;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * gain,
+        rate:
+          key === 'large'
+            ? 0.92 + Math.random() * 0.08
+            : key === 'small'
+              ? 0.98 + Math.random() * 0.1
+              : 0.95 + Math.random() * 0.09,
+        wet: key === 'large' ? 0.34 + Math.random() * 0.08 : 0.26 + Math.random() * 0.08,
       });
     });
   }

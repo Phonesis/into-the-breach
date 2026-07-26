@@ -498,10 +498,10 @@ export function unitPathPlanRadius(unitType, mapDef = null) {
 }
 
 /**
- * Keep mechanical units on the centreline when an order already lands within
- * an urban carriageway. Perspective makes a visually central road click a
- * little imprecise; chasing that final lateral error made vehicles slew toward
- * a façade just before stopping.
+ * Keep mechanical units on the urban carriageway without always locking them
+ * to the painted centreline. Lane / side-of-road clicks are preserved (clamped
+ * inside a safe band) so tanks can advance up the left or right of a street.
+ * Only pulls fully off-road clicks back onto the nearest road.
  */
 export function snapUrbanRoadDestination(
   x,
@@ -525,7 +525,24 @@ export function snapUrbanRoadDestination(
     return { x, z };
   }
 
+  // Tracked armor can drive into intact tenements / factories / churches and
+  // collapse them. Keep those clicks on the building so pathing rams the hull
+  // in rather than resolving to the street in front of the façade.
+  if (
+    TANK_TYPES.has(unitType) &&
+    scenery?.isTrackedCrushableBuildingAt?.(
+      x,
+      z,
+      Math.max(0.2, unitPathRadius(unitType) * 0.2)
+    )
+  ) {
+    return { x, z };
+  }
+
   const roadHalfWidth = urbanRoadHalfWidth(mapDef);
+  const hull = unitPathRadius(unitType);
+  // Leave a kerb margin so preserved lane offsets do not park the hull in a façade.
+  const usableHalf = Math.max(0.4, roadHalfWidth - Math.min(1.05, hull * 0.42));
   const roadX = nearestUrbanRoadCenter(x, mapDef);
   const roadZ = nearestUrbanRoadCenter(z, mapDef);
   let onVerticalRoad = Math.abs(x - roadX) <= roadHalfWidth;
@@ -540,16 +557,15 @@ export function snapUrbanRoadDestination(
     scenery?.isVehiclePlacementBlocked?.(
       x,
       z,
-      unitPathRadius(unitType) + 0.45
+      hull + 0.45
     ) === false
   ) {
     return { x, z };
   }
 
   // A perspective click can look central on a Berlin road while its ground
-  // intersection lands just beyond the narrow numerical carriageway. Vehicles
-  // are road-bound here: resolve those clicks to the nearest street instead of
-  // letting the general pathfinder chase an off-road point into a façade.
+  // intersection lands just beyond the narrow numerical carriageway. Pull
+  // those back onto the street but keep the side of the road they intended.
   if (!onVerticalRoad && !onHorizontalRoad) {
     if (Math.abs(x - roadX) <= Math.abs(z - roadZ)) onVerticalRoad = true;
     else onHorizontalRoad = true;
@@ -565,9 +581,18 @@ export function snapUrbanRoadDestination(
     else onHorizontalRoad = false;
   }
 
+  const clampLane = (value, center) => {
+    const offset = value - center;
+    if (offset > usableHalf) return center + usableHalf;
+    if (offset < -usableHalf) return center - usableHalf;
+    return value;
+  };
+
   return {
-    x: onVerticalRoad ? roadX : x,
-    z: onHorizontalRoad ? roadZ : z,
+    // Vertical street: keep along-road Z and the click's lateral X (clamped).
+    // Horizontal street: keep along-road X and the click's lateral Z.
+    x: onVerticalRoad ? clampLane(x, roadX) : x,
+    z: onHorizontalRoad ? clampLane(z, roadZ) : z,
   };
 }
 

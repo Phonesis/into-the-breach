@@ -17,6 +17,10 @@ Faction rifle masters use the same ElevenLabs Sound Effects terms:
   Files: rifle-{germany,usa,uk,russia}-el-01.wav … 06.wav
   Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-rifles
 
+Building collapse SFX (small / medium / large masonry one-shots):
+  Files: building-collapse-{small,medium,large}-01.wav / 02.wav
+  Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-building-collapse
+
 Aircraft fly-by and vehicle engine loops remain procedural
 (bake-gun-sounds / bake-engine-sounds).
 Infantry death voices: see VOICES_LICENSE.txt.
