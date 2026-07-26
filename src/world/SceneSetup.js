@@ -188,7 +188,7 @@ function addMapSkyBorder(scene, horizonColor, fogColor, skyColor, groundHex, map
   scene.add(group);
 }
 
-export function setupLighting(scene) {
+export function setupLighting(scene, mapDef = null) {
   const hemi = new THREE.HemisphereLight(0xb8d4ff, 0x3d5230, 0.55);
   scene.add(hemi);
 
@@ -199,13 +199,18 @@ export function setupLighting(scene) {
   sun.position.set(-58, 82, 44);
   sun.userData.shadowOffset = sun.position.clone();
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  const urbanShadow = mapDef?.terrain === 'urban';
+  // Berlin's dense caster count makes an oversized 176 m shadow footprint
+  // disproportionately expensive. A tighter 144 m focus at 3072px retains
+  // nearly the same world-space texel density while drawing substantially less.
+  const shadowMapSize = urbanShadow ? 3072 : 4096;
+  sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
   sun.shadow.bias = -0.00008;
   sun.shadow.normalBias = 0.022;
   sun.shadow.radius = 3;
   sun.shadow.camera.near = 10;
   sun.shadow.camera.far = 220;
-  const s = 88;
+  const s = urbanShadow ? 72 : 88;
   sun.shadow.camera.left = -s;
   sun.shadow.camera.right = s;
   sun.shadow.camera.top = s;

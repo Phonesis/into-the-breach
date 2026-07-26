@@ -591,7 +591,7 @@ function addDamageableWallShell(
     masonryMaterial,
     masonryTransforms,
     'progressiveBreachMasonry',
-    { castShadow: true }
+    { castShadow: false }
   );
   const exposedTimbers = createInstances(
     group,
@@ -599,7 +599,7 @@ function addDamageableWallShell(
     timberMaterial,
     timberTransforms,
     'progressiveExposedTimbers',
-    { castShadow: true }
+    { castShadow: false }
   );
   if (breachMasonry) breachMasonry.count = 0;
   if (exposedTimbers) exposedTimbers.count = 0;
@@ -666,6 +666,100 @@ function createInstances(group, geometry, mat, transforms, name, options = {}) {
   mesh.instanceMatrix.needsUpdate = true;
   group.add(mesh);
   return mesh;
+}
+
+function mergeGeometryList(geometries) {
+  const expanded = geometries.map((geometry) =>
+    geometry.index ? geometry.toNonIndexed() : geometry
+  );
+  const merged = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const attributes = expanded.map((geometry) => geometry.getAttribute(name));
+    if (attributes.some((attribute) => !attribute)) continue;
+    const itemSize = attributes[0].itemSize;
+    const length = attributes.reduce((sum, attribute) => sum + attribute.array.length, 0);
+    const array = new Float32Array(length);
+    let offset = 0;
+    for (const attribute of attributes) {
+      array.set(attribute.array, offset);
+      offset += attribute.array.length;
+    }
+    merged.setAttribute(name, new THREE.Float32BufferAttribute(array, itemSize));
+  }
+  for (let index = 0; index < expanded.length; index++) {
+    if (expanded[index] !== geometries[index]) expanded[index].dispose();
+  }
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+/**
+ * Bake non-animated building trim sharing a material into one mesh. Geometry,
+ * textures and damage-capable parts remain unchanged; only draw submissions
+ * are consolidated.
+ */
+function consolidateStaticBuildingDetails(group) {
+  const dynamicNames = new Set([
+    'buildingWall',
+    'buildingInterior',
+    'buildingWindows',
+    'progressiveBreachMasonry',
+    'progressiveExposedTimbers',
+  ]);
+  const buckets = new Map();
+
+  for (const child of [...group.children]) {
+    if (
+      (!child.isMesh && !child.isInstancedMesh) ||
+      Array.isArray(child.material) ||
+      dynamicNames.has(child.name)
+    ) {
+      continue;
+    }
+    child.updateMatrix();
+    const bucket = buckets.get(child.material) ?? {
+      geometries: [],
+      castShadow: false,
+      receiveShadow: false,
+    };
+    if (child.isInstancedMesh) {
+      const instanceMatrix = new THREE.Matrix4();
+      const combinedMatrix = new THREE.Matrix4();
+      for (let index = 0; index < child.count; index++) {
+        child.getMatrixAt(index, instanceMatrix);
+        combinedMatrix.multiplyMatrices(child.matrix, instanceMatrix);
+        const geometry = child.geometry.clone();
+        geometry.applyMatrix4(combinedMatrix);
+        bucket.geometries.push(geometry);
+      }
+    } else {
+      const geometry = child.geometry.clone();
+      geometry.applyMatrix4(child.matrix);
+      bucket.geometries.push(geometry);
+    }
+    bucket.castShadow ||= child.castShadow;
+    bucket.receiveShadow ||= child.receiveShadow;
+    buckets.set(child.material, bucket);
+    group.remove(child);
+    child.geometry.dispose();
+  }
+
+  for (const [buildingMaterial, bucket] of buckets) {
+    if (!bucket.geometries.length) continue;
+    const geometry =
+      bucket.geometries.length === 1
+        ? bucket.geometries[0]
+        : mergeGeometryList(bucket.geometries);
+    if (bucket.geometries.length > 1) {
+      for (const source of bucket.geometries) source.dispose();
+    }
+    const mesh = new THREE.Mesh(geometry, buildingMaterial);
+    mesh.name = 'batchedBuildingDetail';
+    mesh.castShadow = bucket.castShadow;
+    mesh.receiveShadow = bucket.receiveShadow;
+    group.add(mesh);
+  }
 }
 
 function addFacadeWindows(group, width, depth, floors, floorHeight, damaged, mats, random) {
@@ -767,22 +861,36 @@ function addDamageDetails(group, width, depth, bodyHeight, mats, random) {
   exposedBrick.castShadow = false;
   exposedBrick.receiveShadow = false;
   group.add(exposedBrick);
+  const stoneRubble = [];
+  const timberRubble = [];
   for (let i = 0; i < 7; i++) {
-    const rubble = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.18 + random() * 0.26, 0),
-      i % 3 === 0 ? mats.timber : mats.stone
-    );
-    rubble.position.set(
-      (random() - 0.5) * width * 0.78,
-      0.14 + random() * 0.13,
-      breachSide * (depth * 0.5 + 0.28 + random() * 0.65)
-    );
-    rubble.scale.set(1.4 + random(), 0.48 + random() * 0.35, 0.8 + random() * 0.6);
-    rubble.rotation.set(random(), random() * Math.PI, random());
-    rubble.castShadow = true;
-    rubble.receiveShadow = true;
-    group.add(rubble);
+    const radius = 0.18 + random() * 0.26;
+    const transform = {
+      position: new THREE.Vector3(
+        (random() - 0.5) * width * 0.78,
+        0.14 + random() * 0.13,
+        breachSide * (depth * 0.5 + 0.28 + random() * 0.65)
+      ),
+      rotation: {
+        x: random(),
+        y: random() * Math.PI,
+        z: random(),
+      },
+      scale: new THREE.Vector3(
+        radius * (1.4 + random()),
+        radius * (0.48 + random() * 0.35),
+        radius * (0.8 + random() * 0.6)
+      ),
+    };
+    (i % 3 === 0 ? timberRubble : stoneRubble).push(transform);
   }
+  const rubbleGeometry = new THREE.DodecahedronGeometry(1, 0);
+  createInstances(group, rubbleGeometry, mats.stone, stoneRubble, 'battleRubble', {
+    castShadow: false,
+  });
+  createInstances(group, rubbleGeometry, mats.timber, timberRubble, 'battleRubble', {
+    castShadow: false,
+  });
 }
 
 function createPeriodBuilding(kind, width, depth, floors, random) {
@@ -842,7 +950,9 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
       timber: mats.timber,
     }
   );
-  box(group, width + 0.18, 0.62, depth + 0.18, mats.stone, 0, 0.31, 0, 'buildingPlinth');
+  box(group, width + 0.18, 0.62, depth + 0.18, mats.stone, 0, 0.31, 0, 'buildingPlinth', {
+    castShadow: false,
+  });
 
   const roofless = damaged && !factory && random() < (heavilyDamaged ? 0.62 : 0.29);
   if (factory) {
@@ -851,11 +961,12 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
     });
   } else if (roofless) {
     const parapetY = bodyHeight + 0.28;
-    box(group, width + 0.14, 0.56, 0.28, mats.facade, 0, parapetY, depth * 0.5, 'buildingRoof');
-    box(group, width + 0.14, 0.56, 0.28, mats.facade, 0, parapetY, -depth * 0.5, 'buildingRoof');
-    box(group, 0.28, 0.56, depth, mats.facade, width * 0.5, parapetY, 0, 'buildingRoof');
-    box(group, 0.28, 0.56, depth, mats.facade, -width * 0.5, parapetY, 0, 'buildingRoof');
+    box(group, width + 0.14, 0.56, 0.28, mats.facade, 0, parapetY, depth * 0.5, 'buildingRoof', { castShadow: false });
+    box(group, width + 0.14, 0.56, 0.28, mats.facade, 0, parapetY, -depth * 0.5, 'buildingRoof', { castShadow: false });
+    box(group, 0.28, 0.56, depth, mats.facade, width * 0.5, parapetY, 0, 'buildingRoof', { castShadow: false });
+    box(group, 0.28, 0.56, depth, mats.facade, -width * 0.5, parapetY, 0, 'buildingRoof', { castShadow: false });
     box(group, width * 0.72, 0.16, depth * 0.68, mats.soot, 0, bodyHeight + 0.09, 0, 'burnedRoofDeck', {
+      castShadow: false,
       receiveShadow: false,
     });
     const rafters = [];
@@ -866,6 +977,7 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
       });
     }
     createInstances(group, new THREE.BoxGeometry(1, 1, 1), mats.timber, rafters, 'exposedRoofRafters', {
+      castShadow: false,
       receiveShadow: false,
     });
   } else {
@@ -876,25 +988,39 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
     roof.receiveShadow = false;
     group.add(roof);
     box(group, width + 0.58, 0.13, 0.16, mats.metal, 0, bodyHeight + roofHeight + 0.075, 0, 'roofRidge', {
+      castShadow: false,
       receiveShadow: false,
     });
   }
 
   addFacadeWindows(group, width, depth, floors, floorHeight, damaged, mats, random);
 
+  const facadeCourses = [];
   for (let floor = 1; floor < floors; floor++) {
     const y = floor * floorHeight;
-    box(group, width + 0.08, 0.09, 0.14, mats.surround, 0, y, depth * 0.5 + 0.045, 'facadeCourse', {
-      castShadow: false,
+    facadeCourses.push({
+      position: new THREE.Vector3(0, y, depth * 0.5 + 0.045),
+      scale: new THREE.Vector3(width + 0.08, 0.09, 0.14),
     });
-    box(group, width + 0.08, 0.09, 0.14, mats.surround, 0, y, -depth * 0.5 - 0.045, 'facadeCourse', {
-      castShadow: false,
+    facadeCourses.push({
+      position: new THREE.Vector3(0, y, -depth * 0.5 - 0.045),
+      scale: new THREE.Vector3(width + 0.08, 0.09, 0.14),
     });
   }
-  box(group, width + 0.24, 0.22, depth + 0.24, mats.surround, 0, bodyHeight - 0.12, 0, 'buildingCornice');
+  createInstances(
+    group,
+    new THREE.BoxGeometry(1, 1, 1),
+    mats.surround,
+    facadeCourses,
+    'facadeCourse',
+    { castShadow: false }
+  );
+  box(group, width + 0.24, 0.22, depth + 0.24, mats.surround, 0, bodyHeight - 0.12, 0, 'buildingCornice', {
+    castShadow: false,
+  });
 
-  box(group, 1.12, 1.92, 0.15, mats.timber, -width * 0.24, 0.96, depth * 0.5 + 0.09, 'buildingDoor');
-  box(group, 1.35, 0.22, 0.65, mats.metal, -width * 0.24, 2.0, depth * 0.5 + 0.34, 'doorCanopy');
+  box(group, 1.12, 1.92, 0.15, mats.timber, -width * 0.24, 0.96, depth * 0.5 + 0.09, 'buildingDoor', { castShadow: false });
+  box(group, 1.35, 0.22, 0.65, mats.metal, -width * 0.24, 2.0, depth * 0.5 + 0.34, 'doorCanopy', { castShadow: false });
 
   if (!factory && random() < 0.38) {
     const balconyY = 2.75 + Math.floor(random() * Math.max(1, floors - 2)) * floorHeight;
@@ -907,7 +1033,8 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
       width * 0.18,
       balconyY,
       depth * 0.5 + 0.34,
-      'balcony'
+      'balcony',
+      { castShadow: false }
     );
     const railTransforms = [];
     for (let i = -2; i <= 2; i++) {
@@ -943,12 +1070,12 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
     factory ? mats.facade : mats.stone,
     chimneys,
     'buildingChimney',
-    { receiveShadow: false }
+    { castShadow: false, receiveShadow: false }
   );
 
   if (!factory && random() < 0.34) {
-    box(group, width * 0.38, 1.35, 0.12, mats.boarded, width * 0.19, 0.82, depth * 0.5 + 0.11, 'boardedShopfront');
-    box(group, width * 0.4, 0.28, 0.24, mats.surround, width * 0.19, 1.64, depth * 0.5 + 0.14, 'shopLintel');
+    box(group, width * 0.38, 1.35, 0.12, mats.boarded, width * 0.19, 0.82, depth * 0.5 + 0.11, 'boardedShopfront', { castShadow: false });
+    box(group, width * 0.4, 0.28, 0.24, mats.surround, width * 0.19, 1.64, depth * 0.5 + 0.14, 'shopLintel', { castShadow: false });
   }
 
   if (damaged) addDamageDetails(group, width, depth, bodyHeight, mats, random);
@@ -964,6 +1091,7 @@ function createPeriodBuilding(kind, width, depth, floors, random) {
     : damaged
       ? 0.66 + random() * 0.22
       : 1;
+  consolidateStaticBuildingDetails(group);
   return group;
 }
 

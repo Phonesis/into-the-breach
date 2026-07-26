@@ -243,6 +243,8 @@ export class Unit {
     this._autoMoveOrderZ = null;
     this._finalMoveGoal = { x, z };
     this._pathRepathAttempts = 0;
+    this._lastPathRepathX = null;
+    this._lastPathRepathZ = null;
     this._urbanCanalRoute = null;
     this._lastPathRepathAt = 0;
     if (playerOrder) this._pendingMountTankId = null;

@@ -11,7 +11,7 @@ import {
   nearestUrbanRoadCenter,
   urbanRoadHalfWidth,
 } from '../world/UrbanLayout.js';
-import { buildUrbanRoadPath, isUrbanRoadPoint } from './UrbanRoadPath.js';
+import { buildUrbanRoadPath } from './UrbanRoadPath.js';
 
 const DEFAULT_SEGMENT_LEN = 7;
 const RIDGE_HEIGHT_DELTA = 2.4;
@@ -426,7 +426,6 @@ export function buildMovePath(
   };
 
   if (preferUrbanRoads && scenery && mapDef?.terrain === 'urban') {
-    const roadDestination = isUrbanRoadPoint(toX, toZ, mapDef);
     const roadPath = buildUrbanRoadPath(
       fromX,
       fromZ,
@@ -440,17 +439,21 @@ export function buildMovePath(
           bx,
           bz,
           scenery,
-          radius * 0.78,
+          // Runtime building collision permits a shallow track/wheel overlap.
+          // Use the matching effective hull clearance for the road graph;
+          // near-full planning radius falsely disconnects Berlin's rendered
+          // carriageways and pushes otherwise valid routes into fallback A*.
+          Math.max(1, radius * 0.58),
           allowBuildingId,
           allowTrackedBuildingCrush
         )
     );
     if (roadPath?.length) return refineWaypoints(roadPath);
-    // An on-road vehicle order must never silently degrade to free-space A*:
-    // that fallback is what made Berlin vehicles leave the carriageway and
-    // point into façades. If the road network is genuinely disconnected, hold
-    // position instead of inventing a route through a building-lined block.
-    if (roadDestination) return [{ x: fromX, z: fromZ }];
+    // Rubble, church footprints, canal crossings, or a vehicle starting close
+    // to a façade can temporarily disconnect the strict street graph. Continue
+    // into the clearance-aware urban A* below instead of replacing the order
+    // with a zero-length path. Its Berlin-aligned grid and inflated vehicle
+    // radius still keep the resulting recovery route out of intact masonry.
   }
 
   if (avoidBuildings) {
@@ -611,14 +614,43 @@ export function applyObstaclePath(unit, destX, destZ, mapDef, scenery) {
   return true;
 }
 
+export function movePathHorizontalReach(unit, mapDef) {
+  const cfg = getMoveReachConfig(unit.def?.type);
+  const intermediate = unit._movePath && unit._movePath.length > 1;
+  const nextWaypoint = intermediate ? unit._movePath[1] : null;
+  const incomingX = unit.moveTarget.x - unit.position.x;
+  const incomingZ = unit.moveTarget.z - unit.position.z;
+  const outgoingX = nextWaypoint ? nextWaypoint.x - unit.moveTarget.x : 0;
+  const outgoingZ = nextWaypoint ? nextWaypoint.z - unit.moveTarget.z : 0;
+  const incomingLength = Math.hypot(incomingX, incomingZ);
+  const outgoingLength = Math.hypot(outgoingX, outgoingZ);
+  const cornerDot =
+    incomingLength > 0.001 && outgoingLength > 0.001
+      ? (incomingX * outgoingX + incomingZ * outgoingZ) /
+        (incomingLength * outgoingLength)
+      : 1;
+  const sharpUrbanVehicleCorner =
+    intermediate &&
+    mapDef.terrain === 'urban' &&
+    isVehicleUnit(unit.def?.type) &&
+    cornerDot < 0.82;
+  // Mild early reach on ordinary intermediate nodes — large thresholds skipped
+  // nodes and made units wander between regenerated paths. At Berlin's
+  // 90-degree junctions, reach the centreline before targeting the next street
+  // so wide hulls do not cut across a tenement corner.
+  return sharpUrbanVehicleCorner
+    ? Math.min(1.35, cfg.horiz * 0.48)
+    : intermediate
+      ? cfg.horiz * 1.12
+      : cfg.horiz;
+}
+
 export function advanceMovePath(unit, mapDef) {
   if (!unit.moveTarget || !mapDef) return;
 
   const cfg = getMoveReachConfig(unit.def?.type);
   const intermediate = unit._movePath && unit._movePath.length > 1;
-  // Mild early reach on corners only — large thresholds skipped nodes and made
-  // units wander between regenerated paths.
-  const horizReach = intermediate ? cfg.horiz * 1.12 : cfg.horiz;
+  const horizReach = movePathHorizontalReach(unit, mapDef);
   if (
     hasReachedMoveDest(unit, unit.moveTarget, mapDef, horizReach, cfg.height, {
       horizOnly: intermediate,

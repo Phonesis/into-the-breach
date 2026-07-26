@@ -233,6 +233,11 @@ export class DestructibleScenery {
     this.mapDef = mapDef;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.objects = [];
+    // Dense urban maps contain hundreds of entries. Collision, routing, blast,
+    // and LOS checks use this broad phase instead of scanning all of Berlin for
+    // every moving unit and every shot.
+    this._spatialCellSize = mapDef?.terrain === 'urban' ? 12 : 18;
+    this._spatialBuckets = new Map();
     this.rubble = [];
     this.crushAnimations = [];
     this.buildingCollapseAnimations = [];
@@ -246,6 +251,59 @@ export class DestructibleScenery {
     for (const obj of this.objects) {
       this._attachCoverZone(obj);
     }
+  }
+
+  _spatialKey(ix, iz) {
+    return `${ix}:${iz}`;
+  }
+
+  _objectSpatialExtent(obj) {
+    const bounds = this._buildingFootprint(obj);
+    const scaleX = Math.max(0.01, obj.baseScale?.x ?? obj.group?.scale?.x ?? 1);
+    const scaleZ = Math.max(0.01, obj.baseScale?.z ?? obj.group?.scale?.z ?? 1);
+    return Math.max(
+      obj.radius ?? 1,
+      (bounds.width ?? 0) * scaleX * 0.55,
+      (bounds.depth ?? 0) * scaleZ * 0.55
+    );
+  }
+
+  _indexObject(obj) {
+    const cell = this._spatialCellSize;
+    const extent = this._objectSpatialExtent(obj);
+    const minIx = Math.floor((obj.x - extent) / cell);
+    const maxIx = Math.floor((obj.x + extent) / cell);
+    const minIz = Math.floor((obj.z - extent) / cell);
+    const maxIz = Math.floor((obj.z + extent) / cell);
+    for (let ix = minIx; ix <= maxIx; ix++) {
+      for (let iz = minIz; iz <= maxIz; iz++) {
+        const key = this._spatialKey(ix, iz);
+        let bucket = this._spatialBuckets.get(key);
+        if (!bucket) {
+          bucket = [];
+          this._spatialBuckets.set(key, bucket);
+        }
+        bucket.push(obj);
+      }
+    }
+  }
+
+  _objectsInBounds(minX, minZ, maxX, maxZ) {
+    if (!this._spatialBuckets.size) return this.objects;
+    const cell = this._spatialCellSize;
+    const minIx = Math.floor(minX / cell);
+    const maxIx = Math.floor(maxX / cell);
+    const minIz = Math.floor(minZ / cell);
+    const maxIz = Math.floor(maxZ / cell);
+    const matches = new Set();
+    for (let ix = minIx; ix <= maxIx; ix++) {
+      for (let iz = minIz; iz <= maxIz; iz++) {
+        const bucket = this._spatialBuckets.get(this._spatialKey(ix, iz));
+        if (!bucket) continue;
+        for (const obj of bucket) matches.add(obj);
+      }
+    }
+    return matches;
   }
 
   _attachCoverZone(entry) {
@@ -310,6 +368,7 @@ export class DestructibleScenery {
     };
     group.userData.destructible = entry;
     this.objects.push(entry);
+    this._indexObject(entry);
     this.scene.add(group);
     this._attachCoverZone(entry);
     wrapSceneryTarget(entry, this);
@@ -538,7 +597,13 @@ export class DestructibleScenery {
     let nearest = null;
     let nearestEntryT = Infinity;
     for (const ray of candidates) {
-      for (const obj of this.objects) {
+      const rayObjects = this._objectsInBounds(
+        Math.min(ray.ax, ray.bx) - footprintMargin,
+        Math.min(ray.az, ray.bz) - footprintMargin,
+        Math.max(ray.ax, ray.bx) + footprintMargin,
+        Math.max(ray.az, ray.bz) + footprintMargin
+      );
+      for (const obj of rayObjects) {
         if (!LINE_OF_FIRE_BLOCKING_BUILDING_KINDS.has(obj.kind)) continue;
         // Released rubble no longer blocks; a still-parented collapsing shell does.
         if (obj.lineOfFireReleased) continue;
@@ -613,7 +678,7 @@ export class DestructibleScenery {
     const maxX = Math.max(ax, bx) + radius;
     const minZ = Math.min(az, bz) - radius;
     const maxZ = Math.max(az, bz) + radius;
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(minX, minZ, maxX, maxZ)) {
       if (obj.destroyed || !BUILDING_KINDS.has(obj.kind)) continue;
       if (allowTrackedBuildingCrush && TRACKED_CRUSHABLE_BUILDING_KINDS.has(obj.kind)) {
         continue;
@@ -638,7 +703,7 @@ export class DestructibleScenery {
 
   damageAt(x, z, radius, damage, options = {}) {
     if (!damage || damage <= 0) return;
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(x - radius, z - radius, x + radius, z + radius)) {
       if (obj.destroyed) continue;
       const d = Math.hypot(obj.x - x, obj.z - z);
       if (d > radius + obj.radius) continue;
@@ -671,7 +736,12 @@ export class DestructibleScenery {
   crushAt(x, z, crushRadius = 1.8, options = {}) {
     const lightVehicle = options.vehicleClass === 'light';
     let crushedCount = 0;
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(
+      x - crushRadius,
+      z - crushRadius,
+      x + crushRadius,
+      z + crushRadius
+    )) {
       if (obj.destroyed || !CRUSHABLE_KINDS.has(obj.kind)) continue;
       if (lightVehicle && !LIGHT_VEHICLE_CRUSHABLE_KINDS.has(obj.kind)) continue;
       const threshold = Math.max(crushRadius + obj.radius * 0.45, obj.radius * 0.72);
@@ -694,7 +764,12 @@ export class DestructibleScenery {
   getUnitPlacementBlocker(x, z, unitRadius = 1.8, options = {}) {
     const allowBuildingId = options.allowBuildingId ?? null;
     const allowTrackedBuildingCrush = options.allowTrackedBuildingCrush === true;
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(
+      x - unitRadius,
+      z - unitRadius,
+      x + unitRadius,
+      z + unitRadius
+    )) {
       // Placement is stricter than movement/crushing: guns and vehicles may
       // never begin inside even a small outbuilding or courtyard wall.
       if (obj.destroyed || !BUILDING_KINDS.has(obj.kind)) continue;
@@ -730,7 +805,7 @@ export class DestructibleScenery {
    * ordinary off-road click that should still resolve to the street network.
    */
   isDestroyedBuildingFootprint(x, z, margin = 0) {
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(x - margin, z - margin, x + margin, z + margin)) {
       if (!obj.destroyed || !BUILDING_KINDS.has(obj.kind)) continue;
       const frame = this._buildingLocalFrame(obj, margin);
       if (!frame) continue;
@@ -799,7 +874,12 @@ export class DestructibleScenery {
     if (!unit?.position) return null;
     const candidateX = unit.position.x;
     const candidateZ = unit.position.z;
-    for (const obj of this.objects) {
+    for (const obj of this._objectsInBounds(
+      candidateX - vehicleRadius,
+      candidateZ - vehicleRadius,
+      candidateX + vehicleRadius,
+      candidateZ + vehicleRadius
+    )) {
       // Rubble is persistent scenery, but no longer retains the original
       // building's invisible collision footprint.
       if (obj.destroyed || !VEHICLE_BLOCKING_BUILDING_KINDS.has(obj.kind)) continue;
@@ -834,6 +914,28 @@ export class DestructibleScenery {
       const edgeClipAllowance = THREE.MathUtils.clamp(vehicleRadius * 0.32, 0.42, 0.72);
       const shallowEdgeClip = !centerInside && penetration <= edgeClipAllowance;
 
+      // Vehicles can spawn or be nudged a few centimetres into a façade edge.
+      // Never restore an outward step in that state: doing so pins the hull at
+      // the same invalid position forever. Collision remains solid for lateral
+      // or deeper motion, but steadily decreasing overlap is allowed to escape.
+      const beforeDx = beforeX - obj.x;
+      const beforeDz = beforeZ - obj.z;
+      const beforeLocalX = (cos * beforeDx - sin * beforeDz) / scaleX;
+      const beforeLocalZ = (sin * beforeDx + cos * beforeDz) / scaleZ;
+      const beforeClosestX = THREE.MathUtils.clamp(beforeLocalX, -halfWidth, halfWidth);
+      const beforeClosestZ = THREE.MathUtils.clamp(beforeLocalZ, -halfDepth, halfDepth);
+      const beforeOffsetX = (beforeLocalX - beforeClosestX) * scaleX;
+      const beforeOffsetZ = (beforeLocalZ - beforeClosestZ) * scaleZ;
+      const beforeDistance = Math.hypot(beforeOffsetX, beforeOffsetZ);
+      const beforeCenterInside =
+        Math.abs(beforeLocalX) <= halfWidth && Math.abs(beforeLocalZ) <= halfDepth;
+      const beforePenetration = beforeCenterInside
+        ? vehicleRadius
+        : vehicleRadius - beforeDistance;
+      if (beforePenetration > 0 && penetration < beforePenetration - 0.001) {
+        continue;
+      }
+
       const contactLocalX = closestX * scaleX;
       const contactLocalZ = closestZ * scaleZ;
       const contactX = obj.x + cos * contactLocalX + sin * contactLocalZ;
@@ -855,6 +957,59 @@ export class DestructibleScenery {
       // the vehicle's movement. Deeper contact still restores its last safe
       // position so intact buildings cannot be driven through.
       if (shallowEdgeClip) continue;
+
+      // Preserve the tangential part of a diagonal step into a façade. Without
+      // this, restoring both axes pins a turning hull against the same corner
+      // and every deterministic replan repeats the collision. The slide is
+      // accepted only when it does not deepen the overlap with this building.
+      let normalX = 0;
+      let normalZ = 0;
+      if (!centerInside && distanceToFootprint > 0.0001) {
+        normalX = (candidateX - contactX) / distanceToFootprint;
+        normalZ = (candidateZ - contactZ) / distanceToFootprint;
+      } else {
+        const exitX = halfWidth - Math.abs(localX);
+        const exitZ = halfDepth - Math.abs(localZ);
+        if (exitX <= exitZ) {
+          const sign = Math.sign(localX || beforeLocalX || 1);
+          normalX = cos * sign;
+          normalZ = -sin * sign;
+        } else {
+          const sign = Math.sign(localZ || beforeLocalZ || 1);
+          normalX = sin * sign;
+          normalZ = cos * sign;
+        }
+      }
+      const stepX = candidateX - beforeX;
+      const stepZ = candidateZ - beforeZ;
+      const inwardStep = stepX * normalX + stepZ * normalZ;
+      if (inwardStep < -0.0001) {
+        const slideX = beforeX + stepX - normalX * inwardStep;
+        const slideZ = beforeZ + stepZ - normalZ * inwardStep;
+        const slideDx = slideX - obj.x;
+        const slideDz = slideZ - obj.z;
+        const slideLocalX = (cos * slideDx - sin * slideDz) / scaleX;
+        const slideLocalZ = (sin * slideDx + cos * slideDz) / scaleZ;
+        const slideClosestX = THREE.MathUtils.clamp(slideLocalX, -halfWidth, halfWidth);
+        const slideClosestZ = THREE.MathUtils.clamp(slideLocalZ, -halfDepth, halfDepth);
+        const slideOffsetX = (slideLocalX - slideClosestX) * scaleX;
+        const slideOffsetZ = (slideLocalZ - slideClosestZ) * scaleZ;
+        const slideDistance = Math.hypot(slideOffsetX, slideOffsetZ);
+        const slideCenterInside =
+          Math.abs(slideLocalX) <= halfWidth && Math.abs(slideLocalZ) <= halfDepth;
+        const slidePenetration = slideCenterInside
+          ? vehicleRadius
+          : vehicleRadius - slideDistance;
+        if (
+          Math.hypot(slideX - beforeX, slideZ - beforeZ) > 0.0001 &&
+          slidePenetration <= beforePenetration + 0.001
+        ) {
+          unit.position.x = slideX;
+          unit.position.z = slideZ;
+          return null;
+        }
+      }
+
       unit.position.x = beforeX;
       unit.position.z = beforeZ;
       return obj;

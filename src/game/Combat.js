@@ -15,6 +15,7 @@ import {
   advanceMovePath,
   applyObstaclePath,
   buildMovePath,
+  movePathHorizontalReach,
   unitPathPlanRadius,
   unitPathRadius,
 } from './MovePath.js';
@@ -1153,6 +1154,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             unit._autoMoveOrderZ = dest.z;
             unit._finalMoveGoal = { x: dest.x, z: dest.z };
             unit._pathRepathAttempts = 0;
+            unit._lastPathRepathX = null;
+            unit._lastPathRepathZ = null;
             unit._urbanCanalRoute = null;
             if (isTankType(unit.def?.type) && !unit.retreating) {
               unit._reverseMoveOrder = shouldUseTacticalReverse(unit, dest.x, dest.z);
@@ -1170,7 +1173,9 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         }
         const beforeX = unit.position.x;
         const beforeZ = unit.position.z;
-        advanceUnitOnTerrain(unit, dest, mapDef, moveDt);
+        advanceUnitOnTerrain(unit, dest, mapDef, moveDt, {
+          horizReach: movePathHorizontalReach(unit, mapDef),
+        });
         const directionX = unit.position.x - beforeX;
         const directionZ = unit.position.z - beforeZ;
         if (options.scenery && Math.hypot(directionX, directionZ) > 0.01) {
@@ -1227,7 +1232,19 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             // Repath around the obstacle instead of cancelling the move order.
             // Throttle repaths so tanks don't thrash/hug façades after every clip.
             const goal = unit._finalMoveGoal ?? dest;
-            const attempts = unit._pathRepathAttempts ?? 0;
+            let attempts = unit._pathRepathAttempts ?? 0;
+            const lastRepathX = unit._lastPathRepathX;
+            const lastRepathZ = unit._lastPathRepathZ;
+            if (
+              Number.isFinite(lastRepathX) &&
+              Number.isFinite(lastRepathZ) &&
+              Math.hypot(beforeX - lastRepathX, beforeZ - lastRepathZ) >= 3.5
+            ) {
+              // This is a new obstruction farther along the route, not repeated
+              // failure at the same façade. Restore the local recovery budget.
+              attempts = 0;
+              unit._pathRepathAttempts = 0;
+            }
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
             const lastRepath = unit._lastPathRepathAt ?? 0;
             const canRepath = attempts < 4 && goal && now - lastRepath > 450;
@@ -1235,6 +1252,14 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             if (canRepath) {
               unit._pathRepathAttempts = attempts + 1;
               unit._lastPathRepathAt = now;
+              if (
+                attempts === 0 ||
+                !Number.isFinite(unit._lastPathRepathX) ||
+                !Number.isFinite(unit._lastPathRepathZ)
+              ) {
+                unit._lastPathRepathX = beforeX;
+                unit._lastPathRepathZ = beforeZ;
+              }
               const { pathSegment } = getMoveReachConfig(unit.def.type);
               const path = buildMovePath(
                 beforeX,

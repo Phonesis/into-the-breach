@@ -43,6 +43,28 @@ function dedupe(points) {
   return result;
 }
 
+/** Remove intermediate nodes on the same street while retaining real corners. */
+function simplifyStreetSegments(points) {
+  const clean = dedupe(points);
+  if (clean.length < 3) return clean;
+  const result = [clean[0]];
+  for (let index = 1; index < clean.length - 1; index++) {
+    const previous = result[result.length - 1];
+    const current = clean[index];
+    const next = clean[index + 1];
+    const incomingX = current.x - previous.x;
+    const incomingZ = current.z - previous.z;
+    const outgoingX = next.x - current.x;
+    const outgoingZ = next.z - current.z;
+    const cross = Math.abs(incomingX * outgoingZ - incomingZ * outgoingX);
+    const dot = incomingX * outgoingX + incomingZ * outgoingZ;
+    if (cross <= EPSILON && dot >= 0) continue;
+    result.push(current);
+  }
+  result.push(clean[clean.length - 1]);
+  return result;
+}
+
 function routeLength(fromX, fromZ, points) {
   let length = 0;
   let x = fromX;
@@ -202,7 +224,7 @@ function routeBetween(start, goal, coordinates, isBlocked) {
 
   const intersections = findIntersectionRoute(start, goal, coordinates, isBlocked);
   if (!intersections) return null;
-  return dedupe([start, ...intersections, goal]);
+  return simplifyStreetSegments([start, ...intersections, goal]);
 }
 
 /**
@@ -230,12 +252,15 @@ export function buildUrbanRoadPath(
   let best = null;
   let bestLength = Infinity;
   for (const start of starts) {
-    if (isBlocked(fromX, fromZ, start.x, start.z)) continue;
+    // A vehicle may begin with a shallow façade overlap or just outside the
+    // numerical carriageway. Keep its short connector to the nearest road:
+    // runtime collision allows only steps that reduce that existing overlap,
+    // so the hull can escape outward without opening a route through masonry.
     for (const goal of goals) {
       if (isBlocked(goal.x, goal.z, toX, toZ)) continue;
       const between = routeBetween(start, goal, coordinates, isBlocked);
       if (!between) continue;
-      const points = dedupe([...between, { x: toX, z: toZ }]);
+      const points = simplifyStreetSegments([...between, { x: toX, z: toZ }]);
       const length = routeLength(fromX, fromZ, points);
       if (length < bestLength) {
         best = points;

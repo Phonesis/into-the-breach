@@ -1418,13 +1418,14 @@ function usesHullAlignedDrive(unit) {
  * Vehicles turn the hull toward the travel direction and only roll along that axis
  * (no sideways sliding). Infantry may still step freely.
  */
-export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
+export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
   if (!dest || !mapDef) return false;
 
   const cfg = getMoveReachConfig(unit.def?.type);
+  const horizReach = options.horizReach ?? cfg.horiz;
   const canalMove = resolveUrbanCanalMoveTarget(unit, dest, mapDef, cfg);
   const movementDest = canalMove.target;
-  if (hasReachedMoveDest(unit, movementDest, mapDef, cfg.horiz, cfg.height)) {
+  if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
     if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
     return false;
   }
@@ -1447,7 +1448,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
   const alignDotMin = reversing ? -0.82 : 0.78;
 
   for (let s = 0; s < substeps; s++) {
-    if (hasReachedMoveDest(unit, movementDest, mapDef, cfg.horiz, cfg.height)) {
+    if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
       if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
       return false;
     }
@@ -1495,7 +1496,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
         mapDef
       );
       unit.position.y = groundY + (destY - groundY) * Math.min(1, subDt * 5);
-      if (Math.abs(unit.position.y - destY) < 0.4 && horiz < cfg.horiz) return false;
+      if (Math.abs(unit.position.y - destY) < 0.4 && horiz < horizReach) return false;
       // Final creep: only along the hull axis so vehicles don't slide in.
       if (horiz > 0.08 && (!hullDrive || Math.abs(forwardDot) > 0.55)) {
         const axisX = hullDrive ? fwdX * Math.sign(forwardDot || 1) : nx;

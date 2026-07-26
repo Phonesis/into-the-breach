@@ -1473,6 +1473,18 @@ function addGunTube(group, body, dark, tube, mount, part = null) {
   return gun;
 }
 
+function addShellEjectionPoint(group, tube, mountY, mountZ) {
+  const point = new THREE.Object3D();
+  point.name = 'shellEjectionPoint';
+  point.position.set(
+    0.28,
+    mountY + 0.04,
+    mountZ - (tube.breechLen ?? 0.34) * 0.72
+  );
+  group.add(point);
+  group.userData.shellEjectionPoint = point;
+}
+
 function addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ) {
   const handwheel = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 6, 14), dark);
   handwheel.position.set(d.shield.w * 0.35, mountY - 0.12, mountZ - 0.24);
@@ -1582,6 +1594,7 @@ export function buildArtilleryFromDesign(group, body, detail, dark, d) {
   }
 
   addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
+  addShellEjectionPoint(group, d.tube, mountY, mountZ);
   addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ);
 
   if (sh.style !== 'box') {
@@ -1616,6 +1629,7 @@ export function buildAtGunFromDesign(group, body, detail, dark, d) {
   });
 
   addGunTube(group, body, dark, d.tube, { x: 0, y: mountY, z: mountZ }, 'barrel');
+  addShellEjectionPoint(group, d.tube, mountY, mountZ);
   addTowedGunIdentityDetails(group, body, detail, dark, d, mountY, mountZ);
 
   const trailLock = new THREE.Mesh(

@@ -189,6 +189,11 @@ import {
   updateCombatEffects,
   clearCombatEffects,
 } from '../effects/CombatEffects.js';
+import {
+  spawnShellCasing,
+  updateShellCasings,
+  clearShellCasings,
+} from '../effects/ShellCasings.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
@@ -310,6 +315,9 @@ export class Game {
       highFpsFor: 0,
       qualityCooldown: 0,
     };
+    this._devRenderMetrics = import.meta.env.DEV
+      ? { lastFrameAt: 0, frameTimeEma: 1 / 60, lastPublishAt: 0 }
+      : null;
     this.viewingBattlefield = false;
     this._fireSupportUiAccum = 0;
     this._fieldIconUiAccum = 0;
@@ -909,7 +917,7 @@ export class Game {
     setupRenderer(this.renderer);
     this._setRenderPixelRatio(this._nativePixelRatio);
     setupSceneEnvironment(this.scene, this.mapDef, this.renderer);
-    this.lights = setupLighting(this.scene);
+    this.lights = setupLighting(this.scene, this.mapDef);
 
     this.scenery = new DestructibleScenery(this.scene, this.mapDef, () => this._terrainMesh);
     this.coverSystem = new CoverSystem([]);
@@ -1324,6 +1332,42 @@ export class Game {
   _renderFrame() {
     updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this.renderer.render(this.scene, this.camera);
+    const metrics = this._devRenderMetrics;
+    if (metrics) {
+      const now = performance.now();
+      if (metrics.lastFrameAt > 0) {
+        const frameTime = Math.min(0.1, (now - metrics.lastFrameAt) / 1000);
+        metrics.frameTimeEma = metrics.frameTimeEma * 0.94 + frameTime * 0.06;
+      }
+      metrics.lastFrameAt = now;
+      if (now - metrics.lastPublishAt >= 500) {
+        metrics.lastPublishAt = now;
+        const render = this.renderer.info.render;
+        this.canvas.dataset.qaRender = JSON.stringify({
+          fps: Math.round(1 / Math.max(metrics.frameTimeEma, 1 / 120)),
+          calls: render.calls,
+          triangles: render.triangles,
+          points: render.points,
+          lines: render.lines,
+        });
+        this.canvas.dataset.qaVehicles = JSON.stringify(
+          this._playerAlive
+            .filter((unit) => isArmoredCombatVehicle(unit.def?.type))
+            .map((unit) => ({
+              id: unit.id,
+              type: unit.def.type,
+              x: Number(unit.position.x.toFixed(2)),
+              z: Number(unit.position.z.toFixed(2)),
+              yaw: Number((unit.mesh?.rotation?.y ?? 0).toFixed(3)),
+              targetX: unit.moveTarget ? Number(unit.moveTarget.x.toFixed(2)) : null,
+              targetZ: unit.moveTarget ? Number(unit.moveTarget.z.toFixed(2)) : null,
+              moving: !!unit.moveTarget,
+              pathNodes: unit._movePath?.length ?? 0,
+              repaths: unit._pathRepathAttempts ?? 0,
+            }))
+        );
+      }
+    }
   }
 
   _selectionUiKeyFor(selected, hover = null) {
@@ -1905,6 +1949,7 @@ export class Game {
     this.rangeRings.clear();
     clearTerrainDamage(this.scene);
     clearCombatEffects();
+    clearShellCasings(this.scene);
     clearWreckEffects();
     clearVehicleCookOffs(this);
     clearDetachedCorpseFalls();
@@ -3046,6 +3091,13 @@ export class Game {
     armorHit,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
+    if (
+      !coaxFire &&
+      !paratrooperAtFire &&
+      (def?.type === 'antiTankGun' || def?.type === 'artillery')
+    ) {
+      spawnShellCasing(this.scene, attacker);
+    }
     const pos = { x: from.x, z: from.z };
     const factionId = attacker.faction?.id;
 
@@ -3246,6 +3298,7 @@ export class Game {
         updateVehicleCookOffs(this, dt);
         updateHqBurnEffects(dt, this.camera, this.hqs);
         updateCombatEffects(dt);
+        updateShellCasings(dt, this.mapDef, this._terrainMesh);
         updateDetachedCorpseFalls(dt);
         this._renderFrame();
         return;
@@ -3257,6 +3310,7 @@ export class Game {
       updateVehicleCookOffs(this, dt);
       updateHqBurnEffects(dt, this.camera, this.hqs);
       updateCombatEffects(dt);
+      updateShellCasings(dt, this.mapDef, this._terrainMesh);
       updateDetachedCorpseFalls(dt);
       this._postMatchRenderAccum += dt;
       if (this._postMatchRenderAccum < 0.05) return;
@@ -3587,6 +3641,7 @@ export class Game {
           this.rangeRings.updateForUnits(this._aliveUnits);
           this.targetIndicators.update(playerSelected, this._playerAlive);
           updateCombatEffects(dt);
+          updateShellCasings(dt, this.mapDef, this._terrainMesh);
           this._fireSupportUiAccum += dt;
           if (this._fireSupportUiAccum >= 0.15) {
             this._fireSupportUiAccum = 0;
