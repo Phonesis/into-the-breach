@@ -37,6 +37,16 @@ const DEFAULT_TURRET_TRAVERSE_DEG = {
   tankDestroyer: 6,
   superHeavyTank: 10,
 };
+const STATIONARY_HULL_TRAVERSE_DEG = {
+  tank: 18,
+  tankDestroyer: 15,
+  superHeavyTank: 12,
+};
+const MOVING_HULL_TRAVERSE_DEG = {
+  tank: 28,
+  tankDestroyer: 24,
+  superHeavyTank: 18,
+};
 
 function getTurretTraverseRate(unit) {
   const degreesPerSecond =
@@ -159,8 +169,26 @@ export function canWeaponBearOnTarget(unit, target, maxFixedArc = 0.3) {
   return Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <= maxFixedArc;
 }
 
-export function faceUnitTowardMovement(unit, nx, nz, dt) {
+export function faceUnitTowardMovement(
+  unit,
+  nx,
+  nz,
+  dt,
+  { stationaryTurn = false } = {}
+) {
   const yaw = Math.atan2(nx, nz);
+  const type = unit?.def?.type;
+  const trackedRateDeg = stationaryTurn
+    ? STATIONARY_HULL_TRAVERSE_DEG[type]
+    : MOVING_HULL_TRAVERSE_DEG[type];
+  if (trackedRateDeg != null) {
+    unit.mesh.rotation.y = moveAngleToward(
+      unit.mesh.rotation.y,
+      yaw,
+      trackedRateDeg * DEG_TO_RAD * Math.max(0, dt)
+    );
+    return;
+  }
   if (hasTurretPivot(unit.mesh)) {
     slewHullYaw(unit.mesh, yaw, dt);
     return;

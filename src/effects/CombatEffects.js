@@ -110,6 +110,7 @@ const activeAtRecoil = [];
 
 const flashTextures = new Map();
 const tracerHeadTextures = new Map();
+let artilleryShaderProgramsWarmed = false;
 
 function getFlashTexture(color) {
   const key = color;
@@ -227,7 +228,7 @@ export function clearCombatEffects() {
   activeAtRecoil.length = 0;
 }
 
-/** Generate the shared canvas textures before the first scheduled heavy impact. */
+/** Generate and compile shared artillery assets before the first scheduled heavy impact. */
 export function prewarmArtilleryExplosionAssets(renderer = null) {
   const textures = [
     getFlameTexture(),
@@ -237,6 +238,98 @@ export function prewarmArtilleryExplosionAssets(renderer = null) {
     getFlashTexture(0xffb250),
   ];
   for (const texture of textures) renderer?.initTexture?.(texture);
+  if (!renderer?.compile || artilleryShaderProgramsWarmed) return;
+
+  const warmScene = new THREE.Scene();
+  const warmCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  warmCamera.position.z = 3;
+  const materials = [
+    new THREE.SpriteMaterial({
+      map: textures[0],
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+    }),
+    new THREE.SpriteMaterial({
+      map: textures[1],
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+    }),
+    new THREE.SpriteMaterial({
+      map: textures[2],
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+    }),
+    new THREE.SpriteMaterial({
+      map: textures[4],
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    }),
+  ];
+  for (let i = 0; i < materials.length; i++) {
+    const sprite = new THREE.Sprite(materials[i]);
+    sprite.position.x = -0.6 + i * 0.4;
+    warmScene.add(sprite);
+  }
+
+  const pointGeometry = new THREE.BufferGeometry();
+  pointGeometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 0, 0], 3)
+  );
+  const pointMaterials = [
+    new THREE.PointsMaterial({
+      map: textures[3],
+      alphaMap: textures[3],
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      alphaTest: 0.025,
+    }),
+    new THREE.PointsMaterial({
+      map: textures[3],
+      alphaMap: textures[3],
+      transparent: true,
+      depthWrite: false,
+      alphaTest: 0.025,
+    }),
+  ];
+  warmScene.add(
+    new THREE.Points(pointGeometry, pointMaterials[0]),
+    new THREE.Points(pointGeometry, pointMaterials[1])
+  );
+
+  const craterGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+  const craterMaterial = new THREE.MeshStandardMaterial({
+    map: textures[1],
+    transparent: true,
+    alphaTest: 0.04,
+    roughness: 0.97,
+    metalness: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
+  });
+  warmScene.add(new THREE.Mesh(craterGeometry, craterMaterial));
+  warmScene.add(new THREE.AmbientLight(0xffffff, 1));
+
+  try {
+    renderer.compile(warmScene, warmCamera);
+    artilleryShaderProgramsWarmed = true;
+  } finally {
+    materials.forEach((material) => material.dispose());
+    pointMaterials.forEach((material) => material.dispose());
+    craterMaterial.dispose();
+    pointGeometry.dispose();
+    craterGeometry.dispose();
+  }
 }
 
 export function triggerParatrooperAtRecoil(unitMesh) {

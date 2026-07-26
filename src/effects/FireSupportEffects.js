@@ -146,7 +146,6 @@ export function spawnStrikeImpact(scene, mapDef, x, z, kind = 'barrage', terrain
 
   spawnArtilleryExplosion(scene, pos, kind);
   addExplosionCrater(scene, mapDef, x, z, 'medium', terrainMesh, {
-    deformTerrain: false,
     heavy: false,
     radius: 3.1,
     minGap: 90,

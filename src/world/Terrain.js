@@ -1114,6 +1114,65 @@ export function sampleTerrainHeight(x, z, mapDef) {
   return heightAt(x, z, mapDef, seed);
 }
 
+/** Sample the rendered terrain triangles, including persistent crater deformation. */
+export function sampleTerrainMeshHeight(terrainMesh, worldX, worldZ, mapDef = null) {
+  const fallbackHeight = sampleTerrainHeight(worldX, worldZ, mapDef);
+  const geo = terrainMesh?.geometry;
+  const pos = geo?.attributes?.position;
+  const params = geo?.parameters;
+  if (
+    !pos ||
+    params?.width == null ||
+    params?.height == null ||
+    params.widthSegments == null ||
+    params.heightSegments == null
+  ) {
+    return fallbackHeight;
+  }
+
+  const wSeg = params.widthSegments;
+  const hSeg = params.heightSegments;
+  if (wSeg < 1 || hSeg < 1) return fallbackHeight;
+  const cols = wSeg + 1;
+  const localX = worldX - (terrainMesh.position?.x ?? 0);
+  const localZ = worldZ - (terrainMesh.position?.z ?? 0);
+  const gridX = THREE.MathUtils.clamp(
+    ((localX + params.width * 0.5) / params.width) * wSeg,
+    0,
+    wSeg
+  );
+  const gridY = THREE.MathUtils.clamp(
+    ((localZ + params.height * 0.5) / params.height) * hSeg,
+    0,
+    hSeg
+  );
+  const x0 = Math.min(wSeg - 1, Math.floor(gridX));
+  const y0 = Math.min(hSeg - 1, Math.floor(gridY));
+  const tx = gridX - x0;
+  const ty = gridY - y0;
+  const i00 = y0 * cols + x0;
+  const i10 = i00 + 1;
+  const i01 = i00 + cols;
+  const i11 = i01 + 1;
+  let height;
+  if (tx + ty <= 1) {
+    height =
+      pos.getY(i00) +
+      (pos.getY(i10) - pos.getY(i00)) * tx +
+      (pos.getY(i01) - pos.getY(i00)) * ty;
+  } else {
+    height =
+      pos.getY(i11) +
+      (pos.getY(i01) - pos.getY(i11)) * (1 - tx) +
+      (pos.getY(i10) - pos.getY(i11)) * (1 - ty);
+  }
+  return height + (terrainMesh.position?.y ?? 0);
+}
+
+function sampleUnitTerrainHeight(unit, x, z, mapDef) {
+  return sampleTerrainMeshHeight(unit?._terrainMesh, x, z, mapDef);
+}
+
 function terrainPoseRadius(type) {
   switch (type) {
     case 'superHeavyTank': return 2.15;
@@ -1151,11 +1210,31 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
   const x = mesh.position.x;
   const z = mesh.position.z;
 
-  const center = sampleTerrainHeight(x, z, mapDef);
-  const front = sampleTerrainHeight(x + forwardX * radius, z + forwardZ * radius, mapDef);
-  const back = sampleTerrainHeight(x - forwardX * radius, z - forwardZ * radius, mapDef);
-  const right = sampleTerrainHeight(x + rightX * radius, z + rightZ * radius, mapDef);
-  const left = sampleTerrainHeight(x - rightX * radius, z - rightZ * radius, mapDef);
+  const center = sampleUnitTerrainHeight(unit, x, z, mapDef);
+  const front = sampleUnitTerrainHeight(
+    unit,
+    x + forwardX * radius,
+    z + forwardZ * radius,
+    mapDef
+  );
+  const back = sampleUnitTerrainHeight(
+    unit,
+    x - forwardX * radius,
+    z - forwardZ * radius,
+    mapDef
+  );
+  const right = sampleUnitTerrainHeight(
+    unit,
+    x + rightX * radius,
+    z + rightZ * radius,
+    mapDef
+  );
+  const left = sampleUnitTerrainHeight(
+    unit,
+    x - rightX * radius,
+    z - rightZ * radius,
+    mapDef
+  );
   const forwardSlope = (front - back) / (radius * 2);
   const rightSlope = (right - left) / (radius * 2);
 
@@ -1172,7 +1251,7 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
     for (const rightSign of [-1, 1]) {
       const sx = x + forwardX * radius * forwardSign + rightX * radius * rightSign;
       const sz = z + forwardZ * radius * forwardSign + rightZ * radius * rightSign;
-      const terrainDelta = sampleTerrainHeight(sx, sz, mapDef) - center;
+      const terrainDelta = sampleUnitTerrainHeight(unit, sx, sz, mapDef) - center;
       const fittedDelta =
         forwardSlope * radius * forwardSign + rightSlope * radius * rightSign;
       convexLift = Math.max(convexLift, terrainDelta - fittedDelta);
@@ -1216,7 +1295,7 @@ export function hasReachedMoveDest(
   const horiz = horizontalDistToPoint(unit, dest);
   if (horiz >= horizThresh) return false;
   if (horizOnly) return true;
-  const destY = sampleTerrainHeight(dest.x, dest.z, mapDef);
+  const destY = sampleUnitTerrainHeight(unit, dest.x, dest.z, mapDef);
   const heightGap = Math.abs(unit.position.y - destY);
   return heightGap < heightThresh;
 }
@@ -1350,7 +1429,12 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     return false;
   }
 
-  const destY = sampleTerrainHeight(movementDest.x, movementDest.z, mapDef);
+  const destY = sampleUnitTerrainHeight(
+    unit,
+    movementDest.x,
+    movementDest.z,
+    mapDef
+  );
   const substeps = cfg.substeps;
   const subDt = dt / substeps;
   const hullDrive = usesHullAlignedDrive(unit);
@@ -1382,7 +1466,17 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     const desiredNz = reversing ? -nz : nz;
 
     if (hullDrive && unit.mesh && !unit._mobilityDamaged) {
-      faceUnitTowardMovement(unit, desiredNx, desiredNz, subDt);
+      const currentYaw = unit.mesh.rotation.y ?? 0;
+      const desiredYaw = Math.atan2(desiredNx, desiredNz);
+      const turnDelta = Math.abs(
+        Math.atan2(
+          Math.sin(desiredYaw - currentYaw),
+          Math.cos(desiredYaw - currentYaw)
+        )
+      );
+      faceUnitTowardMovement(unit, desiredNx, desiredNz, subDt, {
+        stationaryTurn: isTankType(unit.def?.type) && turnDelta > 0.5,
+      });
     } else if (!hullDrive) {
       faceUnitTowardMovement(unit, nx, nz, subDt);
     }
@@ -1394,7 +1488,12 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     const forwardDot = nx * fwdX + nz * fwdZ;
 
     if (horiz < cfg.horiz * 0.9) {
-      const groundY = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+      const groundY = sampleUnitTerrainHeight(
+        unit,
+        unit.position.x,
+        unit.position.z,
+        mapDef
+      );
       unit.position.y = groundY + (destY - groundY) * Math.min(1, subDt * 5);
       if (Math.abs(unit.position.y - destY) < 0.4 && horiz < cfg.horiz) return false;
       // Final creep: only along the hull axis so vehicles don't slide in.
@@ -1407,7 +1506,12 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
         );
         unit.position.x += axisX * creep;
         unit.position.z += axisZ * creep;
-        unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+        unit.position.y = sampleUnitTerrainHeight(
+          unit,
+          unit.position.x,
+          unit.position.z,
+          mapDef
+        );
       }
       continue;
     }
@@ -1424,9 +1528,9 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
     }
 
     let speed = unit.def.speed * reverseSpeedMultiplier * subDt;
-    if (uphill > 2) speed *= 1.5;
-    else if (uphill > 0.6) speed *= 1.25;
-    else if (uphill < -1.5) speed *= 0.92;
+    if (uphill > 2) speed *= 0.58;
+    else if (uphill > 0.6) speed *= 0.78;
+    else if (uphill < -1.5) speed *= 1.05;
 
     if (hullDrive) {
       // Drive along hull forward; scale by alignment so sharp turns slow naturally.
@@ -1441,13 +1545,23 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt) {
       if (Math.abs(drive) > 0.25 && step > 0.001) {
         unit.position.x += fwdX * sign * step;
         unit.position.z += fwdZ * sign * step;
-        unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+        unit.position.y = sampleUnitTerrainHeight(
+          unit,
+          unit.position.x,
+          unit.position.z,
+          mapDef
+        );
       }
     } else {
       const step = Math.min(speed, horiz);
       unit.position.x += nx * step;
       unit.position.z += nz * step;
-      unit.position.y = sampleTerrainHeight(unit.position.x, unit.position.z, mapDef);
+      unit.position.y = sampleUnitTerrainHeight(
+        unit,
+        unit.position.x,
+        unit.position.z,
+        mapDef
+      );
     }
   }
 

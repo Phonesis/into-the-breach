@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { sampleTerrainHeight } from './Terrain.js';
+import { sampleTerrainHeight, sampleTerrainMeshHeight } from './Terrain.js';
 
 const craters = [];
 const texCache = new Map();
@@ -20,6 +20,8 @@ const CRATER_TIERS = {
   medium: { radius: 3.4, depth: 0.44, heavy: false, minGap: 55 },
   light: { radius: 2.3, depth: 0.28, heavy: false, minGap: 45 },
 };
+const CRATER_DECAL_LIFT = 0.045;
+const CRATER_DECAL_SEGMENTS = 12;
 
 function smoothBowl(t) {
   return t * t * (3 - 2 * t);
@@ -262,19 +264,23 @@ function paintCraterTexture(mapDef, seed, heavy) {
     }
   } else if (style.kind === 'desert') {
     ctx.globalCompositeOperation = 'source-over';
-    for (let i = 0; i < (heavy ? 16 : 10); i++) {
-      const ang = (i / 10) * Math.PI * 2 + seed * 0.1;
-      const len = size * (0.34 + (i % 4) * 0.06);
-      const x0 = cx + Math.cos(ang) * size * 0.2;
-      const y0 = cy + Math.sin(ang) * size * 0.2;
-      const x1 = cx + Math.cos(ang) * len;
-      const y1 = cy + Math.sin(ang) * len;
-      ctx.strokeStyle = `rgba(212,184,136,${0.08 + (i % 3) * 0.04})`;
-      ctx.lineWidth = 2 + (i % 2);
+    // Broken ejecta patches read as disturbed sand without the artificial
+    // spoke-like lines produced by long radial strokes.
+    for (let i = 0; i < (heavy ? 22 : 14); i++) {
+      const ang = seededCraterNoise(i, seed, 11) * Math.PI * 2;
+      const rad = size * (0.29 + seededCraterNoise(i, seed, 12) * 0.16);
+      const x = cx + Math.cos(ang) * rad;
+      const y = cy + Math.sin(ang) * rad;
+      const length = size * (0.012 + seededCraterNoise(i, seed, 13) * 0.028);
+      const width = size * (0.004 + seededCraterNoise(i, seed, 14) * 0.009);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang + (seededCraterNoise(i, seed, 15) - 0.5) * 1.1);
+      ctx.fillStyle = `rgba(212,184,136,${0.045 + seededCraterNoise(i, seed, 16) * 0.07})`;
       ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.stroke();
+      ctx.ellipse(0, 0, length, width, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
   } else {
     for (let i = 0; i < (heavy ? 14 : 9); i++) {
@@ -362,7 +368,40 @@ export function prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy 
   scheduleCraterTextureWarm();
 }
 
-function deformVertexAt(pos, colors, i, x, z, r, r2, depth, style) {
+function getCraterDeformationState(geo, pos) {
+  let baseY = geo.userData.craterBaseY;
+  let offsets = geo.userData.craterOffsets;
+  if (!(baseY instanceof Float32Array) || baseY.length !== pos.count) {
+    baseY = new Float32Array(pos.count);
+    offsets = new Float32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) baseY[i] = pos.getY(i);
+    geo.userData.craterBaseY = baseY;
+    geo.userData.craterOffsets = offsets;
+  }
+  return { baseY, offsets };
+}
+
+function mergeCraterOffset(current, next) {
+  // Overlapping shell holes share a disturbed bowl; their depths do not add
+  // into a sinkhole. The deepest bowl wins, while positive lips merge by height.
+  if (next < 0) return Math.min(current, next);
+  if (current < 0) return current;
+  return Math.max(current, next);
+}
+
+function deformVertexAt(
+  pos,
+  colors,
+  baseY,
+  offsets,
+  i,
+  x,
+  z,
+  r,
+  r2,
+  depth,
+  style
+) {
   const vx = pos.getX(i);
   const vz = pos.getZ(i);
   const dx = vx - x;
@@ -371,7 +410,12 @@ function deformVertexAt(pos, colors, i, x, z, r, r2, depth, style) {
   if (d2 > r2) return false;
 
   const f = Math.sqrt(d2) / r;
-  pos.setY(i, pos.getY(i) + craterHeightOffset(f, depth));
+  const mergedOffset = mergeCraterOffset(
+    offsets[i],
+    craterHeightOffset(f, depth)
+  );
+  offsets[i] = mergedOffset;
+  pos.setY(i, baseY[i] + mergedOffset);
 
   if (colors) {
     _vertex.setRGB(colors.getX(i), colors.getY(i), colors.getZ(i));
@@ -388,6 +432,69 @@ function deformVertexAt(pos, colors, i, x, z, r, r2, depth, style) {
   return true;
 }
 
+function markGridAttributeRowsUpdated(attribute, cols, ixMin, ixMax, iyMin, iyMax) {
+  if (!attribute) return;
+  if (typeof attribute.addUpdateRange === 'function') {
+    const rowComponentCount = (ixMax - ixMin + 1) * attribute.itemSize;
+    for (let iy = iyMin; iy <= iyMax; iy++) {
+      attribute.addUpdateRange(
+        (iy * cols + ixMin) * attribute.itemSize,
+        rowComponentCount
+      );
+    }
+  }
+  attribute.needsUpdate = true;
+}
+
+function updateGridTerrainNormals(
+  geo,
+  ixMin,
+  ixMax,
+  iyMin,
+  iyMax,
+  wSeg,
+  hSeg,
+  segW,
+  segH
+) {
+  const pos = geo.attributes.position;
+  const normals = geo.attributes.normal;
+  if (!pos || !normals) return false;
+  const cols = wSeg + 1;
+  const normalIxMin = Math.max(0, ixMin - 1);
+  const normalIxMax = Math.min(wSeg, ixMax + 1);
+  const normalIyMin = Math.max(0, iyMin - 1);
+  const normalIyMax = Math.min(hSeg, iyMax + 1);
+  const normal = new THREE.Vector3();
+
+  for (let iy = normalIyMin; iy <= normalIyMax; iy++) {
+    const downY = Math.max(0, iy - 1);
+    const upY = Math.min(hSeg, iy + 1);
+    const zSpan = Math.max(segH, (upY - downY) * segH);
+    for (let ix = normalIxMin; ix <= normalIxMax; ix++) {
+      const leftX = Math.max(0, ix - 1);
+      const rightX = Math.min(wSeg, ix + 1);
+      const xSpan = Math.max(segW, (rightX - leftX) * segW);
+      const dHeightDx =
+        (pos.getY(iy * cols + rightX) - pos.getY(iy * cols + leftX)) / xSpan;
+      const dHeightDz =
+        (pos.getY(upY * cols + ix) - pos.getY(downY * cols + ix)) / zSpan;
+      normal.set(-dHeightDx, 1, -dHeightDz).normalize();
+      normals.setXYZ(iy * cols + ix, normal.x, normal.y, normal.z);
+    }
+  }
+
+  markGridAttributeRowsUpdated(
+    normals,
+    cols,
+    normalIxMin,
+    normalIxMax,
+    normalIyMin,
+    normalIyMax
+  );
+  return true;
+}
+
 function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   if (!terrainMesh?.geometry || depth <= 0) return;
   const geo = terrainMesh.geometry;
@@ -396,6 +503,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   const r = radius * 1.05;
   const r2 = r * r;
   const style = craterStyle(mapDef);
+  const { baseY, offsets } = getCraterDeformationState(geo, pos);
   let changed = false;
 
   const params = geo.parameters;
@@ -409,40 +517,87 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
     const segH = params.height / hSeg;
     const ixMin = Math.max(0, Math.floor((x - r + halfW) / segW) - 1);
     const ixMax = Math.min(wSeg, Math.ceil((x + r + halfW) / segW) + 1);
-    const iyMin = Math.max(0, Math.floor((-z - r + halfH) / segH) - 1);
-    const iyMax = Math.min(hSeg, Math.ceil((-z + r + halfH) / segH) + 1);
+    const iyMin = Math.max(0, Math.floor((z - r + halfH) / segH) - 1);
+    const iyMax = Math.min(hSeg, Math.ceil((z + r + halfH) / segH) + 1);
 
     for (let iy = iyMin; iy <= iyMax; iy++) {
       const base = iy * cols;
       for (let ix = ixMin; ix <= ixMax; ix++) {
-        if (deformVertexAt(pos, colors, base + ix, x, z, r, r2, depth, style)) {
+        if (
+          deformVertexAt(
+            pos,
+            colors,
+            baseY,
+            offsets,
+            base + ix,
+            x,
+            z,
+            r,
+            r2,
+            depth,
+            style
+          )
+        ) {
           changed = true;
         }
       }
     }
+    if (changed) {
+      markGridAttributeRowsUpdated(pos, cols, ixMin, ixMax, iyMin, iyMax);
+      if (colors) {
+        markGridAttributeRowsUpdated(colors, cols, ixMin, ixMax, iyMin, iyMax);
+      }
+      updateGridTerrainNormals(
+        geo,
+        ixMin,
+        ixMax,
+        iyMin,
+        iyMax,
+        wSeg,
+        hSeg,
+        segW,
+        segH
+      );
+    }
   } else {
     for (let i = 0; i < pos.count; i++) {
-      if (deformVertexAt(pos, colors, i, x, z, r, r2, depth, style)) {
+      if (
+        deformVertexAt(
+          pos,
+          colors,
+          baseY,
+          offsets,
+          i,
+          x,
+          z,
+          r,
+          r2,
+          depth,
+          style
+        )
+      ) {
         changed = true;
       }
     }
   }
 
   if (changed) {
-    pos.needsUpdate = true;
-    if (colors) colors.needsUpdate = true;
-    terrainNormalsDirty.set(terrainMesh, true);
+    if (params?.width == null || params.widthSegments == null) {
+      pos.needsUpdate = true;
+      if (colors) colors.needsUpdate = true;
+      terrainNormalsDirty.set(terrainMesh, true);
+    }
   }
 }
 
-/** Recompute terrain normals at most once per frame after batched crater deformations. */
+/** Fallback for non-grid terrain geometry; regular maps update only the crater region. */
 export function flushTerrainNormals(terrainMesh) {
   if (!terrainMesh?.geometry || !terrainNormalsDirty.get(terrainMesh)) return;
   terrainMesh.geometry.computeVertexNormals();
   terrainNormalsDirty.delete(terrainMesh);
 }
 
-function addCraterDecal(scene, mapDef, x, z, y, radius, heavy) {
+function addCraterDecal(scene, mapDef, x, z, y, radius, heavy, terrainMesh = null) {
   const tex = getCraterTexture(mapDef, x, z, heavy);
   const mat = new THREE.MeshStandardMaterial({
     map: tex,
@@ -457,9 +612,32 @@ function addCraterDecal(scene, mapDef, x, z, y, radius, heavy) {
     polygonOffsetUnits: -3,
   });
 
-  const decal = new THREE.Mesh(new THREE.CircleGeometry(radius * 1.05, 40), mat);
-  decal.rotation.x = -Math.PI / 2;
-  decal.position.set(x, y + 0.045, z);
+  const diameter = radius * 2.1;
+  const geometry = new THREE.PlaneGeometry(
+    diameter,
+    diameter,
+    CRATER_DECAL_SEGMENTS,
+    CRATER_DECAL_SEGMENTS
+  );
+  geometry.rotateX(-Math.PI / 2);
+  const positions = geometry.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const localX = positions.getX(i);
+    const localZ = positions.getZ(i);
+    const worldX = x + localX;
+    const worldZ = z + localZ;
+    positions.setY(
+      i,
+      sampleTerrainMeshHeight(terrainMesh, worldX, worldZ, mapDef) -
+        y +
+        CRATER_DECAL_LIFT
+    );
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const decal = new THREE.Mesh(geometry, mat);
+  decal.position.set(x, y, z);
   decal.receiveShadow = true;
   scene.add(decal);
 
@@ -517,7 +695,7 @@ export function addExplosionCrater(scene, mapDef, x, z, tier = 'medium', terrain
 
   const heavy = opts.heavy ?? profile.heavy;
   const y = sampleTerrainHeight(x, z, mapDef);
-  const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy);
+  const meshes = addCraterDecal(scene, mapDef, x, z, y, radius, heavy, terrainMesh);
 
   const entry = {
     meshes,

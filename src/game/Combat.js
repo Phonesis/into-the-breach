@@ -1013,6 +1013,7 @@ function applySplashDamage(
 
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
+    unit._terrainMesh = options.terrainMesh ?? unit._terrainMesh ?? null;
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
     if (isUnitMounted(unit)) continue;
     // Garrisoned troops stay put; leave is handled by updateBunkerGarrison

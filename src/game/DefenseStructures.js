@@ -434,7 +434,7 @@ export class DefenseStructureManager {
     spawnArtilleryExplosion(this.scene, { x, y: y + 1, z }, 'barrage');
     addExplosionCrater(this.scene, this.mapDef, x, z, 'heavy', this.getTerrainMesh());
     sounds.playWeapon('howitzer_105', { x, z }, { rate: 0.8, volume: 0.9 });
-    sounds.playImpact('shell', { x, z }, 0.35);
+    sounds.playArtilleryImpact({ x, z }, { kind: 'barrage', delaySec: 0.35 });
     const barrageAmmoCost = ammoPit.def.barrageAmmoCost ?? 6;
     ammoPit.ammo = Math.max(0, (ammoPit.ammo ?? 0) - barrageAmmoCost);
     this._syncAmmoVisual(ammoPit);
@@ -622,8 +622,7 @@ export class DefenseStructureManager {
           target.position.x,
           target.position.z,
           craterTier,
-          this.getTerrainMesh(),
-          { deformTerrain: false }
+          this.getTerrainMesh()
         );
       } else {
         spawnMuzzleFlash(scene, from, to, wType);

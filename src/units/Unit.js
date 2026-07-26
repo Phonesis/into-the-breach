@@ -33,7 +33,7 @@ import {
 import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
 import { removeWreckEffect } from '../effects/WreckEffects.js';
 import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
-import { sampleTerrainHeight } from '../world/Terrain.js';
+import { sampleTerrainMeshHeight } from '../world/Terrain.js';
 
 let nextId = 1;
 
@@ -363,7 +363,12 @@ export class Unit {
     const parent = oldMesh.parent;
     const position = oldMesh.position.clone();
     if (this._mapDef) {
-      position.y = sampleTerrainHeight(position.x, position.z, this._mapDef);
+      position.y = sampleTerrainMeshHeight(
+        this._terrainMesh,
+        position.x,
+        position.z,
+        this._mapDef
+      );
     }
     const yaw = this._preWreckYaw ?? oldMesh.rotation.y ?? 0;
     if (this.wreckFire) {

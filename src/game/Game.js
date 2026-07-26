@@ -236,6 +236,7 @@ import { GeneralOrdersManager } from './GeneralOrders.js';
 import {
   updateFireSupportEffects,
   clearFireSupportEffects,
+  prewarmStrikeImpacts,
 } from '../effects/FireSupportEffects.js';
 import {
   updateParachuteDrops,
@@ -318,6 +319,7 @@ export class Game {
     this.seekCoverMode = false;
     this.autoBuildMode = false;
     this.showFrontline = true;
+    this.showCapturePoints = true;
     this.matchTime = 0;
     this._hqThreat = null;
     this._hqAlertPlayed = false;
@@ -914,6 +916,9 @@ export class Game {
     this.scenery.setCoverSystem(this.coverSystem);
     const terrain = buildTerrain(this.mapDef, this.scene, this.scenery);
     this._terrainMesh = terrain?.ground ?? null;
+    // Warm shared artillery textures and shader programs during general setup;
+    // exact crater variants are still queued from known impacts during warning.
+    prewarmStrikeImpacts(this.renderer, this.mapDef, [], false);
     const coverZones = buildCoverSites(
       this.mapDef,
       this.scene,
@@ -1128,6 +1133,7 @@ export class Game {
 
     for (const u of this.units) {
       u._mapDef = this.mapDef;
+      u._terrainMesh = this._terrainMesh;
       u.position.y = sampleTerrainHeight(u.position.x, u.position.z, this.mapDef);
     }
 
@@ -1240,6 +1246,8 @@ export class Game {
     }
     this.showFrontline = this.ui.showFrontline;
     syncFrontlineVisual(this.scene, this.showFrontline);
+    this.showCapturePoints = this.ui.showCapturePoints;
+    this.setCapturePointsVisible(this.showCapturePoints);
     if (isBaseBuildingCampaign(this)) {
       const playerHq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
       if (playerHq) {
@@ -1618,6 +1626,14 @@ export class Game {
     syncFrontlineVisual(this.scene, this.showFrontline);
   }
 
+  setCapturePointsVisible(enabled) {
+    this.showCapturePoints = !!enabled;
+    const visible = this.showCapturePoints && !this.towerDefense;
+    for (const capturePoint of this.capturePoints ?? []) {
+      capturePoint.group.visible = visible;
+    }
+  }
+
   panCameraTo(x, z) {
     if (!this.mapDef) return;
     const half = this.mapDef.size / 2 - 5;
@@ -1867,12 +1883,7 @@ export class Game {
   _spawnExplosionCrater(x, z, tier = 'medium') {
     if (!this.scene || !this.mapDef) return;
     if (isUrbanCanalWater(x, z, this.mapDef)) return;
-    // Keep combat craters as decals. Recomputing the entire terrain mesh's
-    // normals immediately after a blast caused an intermittent frame-length
-    // stall and also reintroduced the raised/deformed crater appearance.
-    addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh, {
-      deformTerrain: false,
-    });
+    addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh);
   }
 
   stopGame() {
@@ -3096,7 +3107,14 @@ export class Game {
 
     if (def.type === 'artillery' || def.type === 'mortar') {
       const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
-      sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
+      if (def.type === 'artillery') {
+        sounds.playArtilleryImpact(
+          { x: to.x, z: to.z },
+          { kind: 'artillery', delaySec: delay }
+        );
+      } else {
+        sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
+      }
     } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
       sounds.playImpact(armorHit?.deflected ? 'bullet' : 'tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
@@ -3373,6 +3391,7 @@ export class Game {
         }
 
         updateMovement(this._aliveUnits, dt, this.mapDef, this.hqs, {
+          terrainMesh: this._terrainMesh,
           getWireSlowMult: this.defenses
             ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
             : null,

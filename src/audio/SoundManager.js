@@ -57,6 +57,17 @@ const IMPACT_SAMPLE_FILES_FULL = [
 ];
 const ATMOS_SAMPLE_FILES_FULL = ['battle-atmos.wav', 'battle-atmos-close.wav'];
 const RADIO_STATIC_FILES = ['radio-static-a.wav', 'radio-static-b.wav', 'radio-static-c.wav'];
+const ARTILLERY_IMPACT_FILES = Array.from(
+  { length: 6 },
+  (_, index) => `artillery-impact-el-${String(index + 1).padStart(2, '0')}.wav`
+);
+const FIRE_SUPPORT_SALVO_FILES = {
+  barrage: ['barrage-salvo-el-01.wav', 'barrage-salvo-el-02.wav'],
+  creepingBarrage: [
+    'creeping-barrage-salvo-el-01.wav',
+    'creeping-barrage-salvo-el-02.wav',
+  ],
+};
 
 // TEMP originals-only: keep all EL gens; pitch-clone filter only applies to weapons
 const EXPLOSION_SAMPLE_FILES = EXPLOSION_SAMPLE_FILES_FULL;
@@ -147,6 +158,10 @@ export class SoundManager {
     this.atmosBuffers = [];
     /** @type {AudioBuffer[]} */
     this.radioStaticBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.artilleryImpactBuffers = [];
+    /** @type {Record<string, AudioBuffer[]>} */
+    this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this._atmosSrc = null;
     this._atmosGain = null;
     this._lastExplosionFile = null;
@@ -491,10 +506,16 @@ export class SoundManager {
     this.impactBuffers = [];
     this.atmosBuffers = [];
     this.radioStaticBuffers = [];
+    this.artilleryImpactBuffers = [];
+    this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
+    loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
+    for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
+      loadPool(files, this.fireSupportSalvoBuffers[kind]);
+    }
     await Promise.all(poolLoads);
 
     // Keep legacy single-key buffers as first of pool for any code that still uses them
@@ -1084,6 +1105,50 @@ export class SoundManager {
         rate: useExplosion ? 0.88 + Math.random() * 0.12 : 0.9 + Math.random() * 0.14,
         wet: useExplosion ? 0.28 + Math.random() * 0.1 : 0.4,
         delay: delaySec,
+      });
+    });
+  }
+
+  /** Dedicated heavy shell burst used by field guns and fire-support impacts. */
+  playArtilleryImpact(worldPos, { kind = 'artillery', delaySec = 0 } = {}) {
+    this._runWhenReady(() => {
+      const now = performance.now();
+      if (now - (this._lastByType._artilleryImpact ?? 0) < 75) return;
+      const buf =
+        this._pickFromPool(this.artilleryImpactBuffers, '_lastArtilleryImpactFile') ??
+        this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
+        this.buffers.explosion;
+      if (!buf) return;
+      this._lastByType._artilleryImpact = now;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const kindGain =
+        kind === 'creepingBarrage' ? 1.58 : kind === 'barrage' ? 1.5 : 1.46;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * kindGain,
+        rate: 0.94 + Math.random() * 0.09,
+        wet: 0.32 + Math.random() * 0.08,
+        delay: delaySec,
+      });
+    });
+  }
+
+  /** Rolling battery report at the start of a barrage or creeping barrage. */
+  playFireSupportSalvo(kind, worldPos = null) {
+    this._runWhenReady(() => {
+      const pool = this.fireSupportSalvoBuffers[kind];
+      const buf = this._pickFromPool(pool, `_last${kind}SalvoFile`);
+      if (!buf) return;
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) * 0.35 : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const distanceMix = 0.72 + this._distanceGain(dist) * 0.28;
+      this._playBuffer(buf, {
+        pan,
+        vol: distanceMix * (kind === 'creepingBarrage' ? 0.98 : 0.92),
+        rate: 0.98 + Math.random() * 0.035,
+        wet: 0.42,
       });
     });
   }

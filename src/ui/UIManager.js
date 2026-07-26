@@ -115,6 +115,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
+const CAPTURE_POINTS_VISIBLE_KEY = 'ww2-rts-capture-points-visible';
 const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
 const AUTO_BUILD_MODE_KEYS = {
   classic: 'ww2-rts-auto-build-mode-classic',
@@ -177,6 +178,7 @@ export class UIManager {
     this._hudStandardCampaign = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
+    this.showCapturePoints = localStorage.getItem(CAPTURE_POINTS_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
     /** When true, all in-battle HUD chrome is hidden (toggle from pause menu). */
     this.hudHidden = false;
@@ -199,6 +201,7 @@ export class UIManager {
     this.showMinimap = this.minimap.visible;
     this._syncFieldIconToggle();
     this._syncFrontlineToggle();
+    this._syncCapturePointToggle();
     this._syncFireSupportCollapse();
     this._syncGeneralOrdersCollapse();
     this._syncDefenseCollapse();
@@ -363,6 +366,17 @@ export class UIManager {
             >
               <span class="frontline-toggle-swatch" aria-hidden="true"></span>
               <span class="frontline-toggle-label">Frontline</span>
+            </button>
+            <button
+              type="button"
+              class="capture-points-toggle interactive hidden"
+              id="btn-toggle-capture-points"
+              title="Hide capture point circles"
+              aria-label="Hide capture point circles"
+              aria-pressed="true"
+            >
+              <span class="capture-points-toggle-icon" aria-hidden="true"></span>
+              <span>Capture circles</span>
             </button>
             <div class="laststand-banner hidden" id="laststand-banner">
               Battle Simulation — deploy your army, then engage. No HQ or reinforcements.
@@ -1130,6 +1144,10 @@ export class UIManager {
         this.callbacks.onToggleFrontline(this.showFrontline);
       }
     });
+    this.root.querySelector('#btn-toggle-capture-points')?.addEventListener('click', () => {
+      this.setCapturePointsVisible(!this.showCapturePoints);
+      this.callbacks.onToggleCapturePoints?.(this.showCapturePoints);
+    });
     this.root.querySelector('#btn-toggle-hud-visibility')?.addEventListener('click', () => {
       this.setHudHidden(!this.hudHidden);
     });
@@ -1731,6 +1749,15 @@ export class UIManager {
     this._hudHasFrontline = assault || towerDefense;
     this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
     this._syncFrontlineToggle();
+    const hasCapturePoints =
+      !towerDefense &&
+      !lastStand &&
+      !clearance &&
+      (mapDef.capturePoints?.length ?? 0) > 0;
+    this.root
+      .querySelector('#btn-toggle-capture-points')
+      ?.classList.toggle('hidden', !hasCapturePoints);
+    this._syncCapturePointToggle();
     const hideCommandPanels = (towerDefense && !tdHqDefense) || lastStand;
     this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', hideCommandPanels);
     this.root.querySelector('#generalorders-panel')?.classList.toggle('hidden', hideCommandPanels);
@@ -1969,6 +1996,26 @@ export class UIManager {
     btn.title = this.showFrontline
       ? 'Hide red frontline on the map'
       : 'Show red frontline on the map';
+  }
+
+  setCapturePointsVisible(on) {
+    this.showCapturePoints = !!on;
+    localStorage.setItem(CAPTURE_POINTS_VISIBLE_KEY, on ? '1' : '0');
+    this._syncCapturePointToggle();
+  }
+
+  _syncCapturePointToggle() {
+    const btn = this.root.querySelector('#btn-toggle-capture-points');
+    if (!btn) return;
+    btn.classList.toggle('off', !this.showCapturePoints);
+    btn.setAttribute('aria-pressed', this.showCapturePoints ? 'true' : 'false');
+    btn.setAttribute(
+      'aria-label',
+      this.showCapturePoints ? 'Hide capture point circles' : 'Show capture point circles'
+    );
+    btn.title = this.showCapturePoints
+      ? 'Hide capture point circles'
+      : 'Show capture point circles';
   }
 
   setDefenseExpanded(on) {

@@ -6,12 +6,98 @@ const CAPTURE_SPEED = 0.22;
 const FLAG_POLE_TOP = 3.5;
 const FLAG_DOWN_ANGLE = Math.PI / 2;
 const FLAG_LERP = 10;
+const MARKER_SEGMENTS = 72;
+const PAD_RADIAL_SEGMENTS = 5;
+const PAD_CLEARANCE = 0.1;
+const RING_CLEARANCE = 0.22;
 
 const TEAM_COLORS = {
   player: 0x3b82f6,
   enemy: 0xef4444,
   neutral: 0x888888,
 };
+
+function markerLocalY(mapDef, centerX, centerZ, baseY, x, z, clearance) {
+  return sampleTerrainHeight(centerX + x, centerZ + z, mapDef) - baseY + clearance;
+}
+
+/** Terrain-following disc so sloped capture points do not disappear into the ground. */
+function makeTerrainDiscGeometry(mapDef, centerX, centerZ, radius, baseY) {
+  const positions = [0, PAD_CLEARANCE, 0];
+  const indices = [];
+
+  for (let radial = 1; radial <= PAD_RADIAL_SEGMENTS; radial++) {
+    const r = radius * (radial / PAD_RADIAL_SEGMENTS);
+    for (let segment = 0; segment < MARKER_SEGMENTS; segment++) {
+      const angle = (segment / MARKER_SEGMENTS) * Math.PI * 2;
+      const x = Math.cos(angle) * r;
+      const z = Math.sin(angle) * r;
+      positions.push(
+        x,
+        markerLocalY(mapDef, centerX, centerZ, baseY, x, z, PAD_CLEARANCE),
+        z
+      );
+    }
+  }
+
+  for (let segment = 0; segment < MARKER_SEGMENTS; segment++) {
+    const current = 1 + segment;
+    const next = 1 + ((segment + 1) % MARKER_SEGMENTS);
+    indices.push(0, next, current);
+  }
+
+  for (let radial = 1; radial < PAD_RADIAL_SEGMENTS; radial++) {
+    const innerStart = 1 + (radial - 1) * MARKER_SEGMENTS;
+    const outerStart = innerStart + MARKER_SEGMENTS;
+    for (let segment = 0; segment < MARKER_SEGMENTS; segment++) {
+      const nextSegment = (segment + 1) % MARKER_SEGMENTS;
+      const inner = innerStart + segment;
+      const innerNext = innerStart + nextSegment;
+      const outer = outerStart + segment;
+      const outerNext = outerStart + nextSegment;
+      indices.push(inner, innerNext, outer, innerNext, outerNext, outer);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** Terrain-following annulus for a fully visible capture boundary on hills. */
+function makeTerrainRingGeometry(mapDef, centerX, centerZ, innerRadius, outerRadius, baseY) {
+  const positions = [];
+  const indices = [];
+
+  for (let segment = 0; segment <= MARKER_SEGMENTS; segment++) {
+    const angle = (segment / MARKER_SEGMENTS) * Math.PI * 2;
+    for (const radius of [innerRadius, outerRadius]) {
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      positions.push(
+        x,
+        markerLocalY(mapDef, centerX, centerZ, baseY, x, z, RING_CLEARANCE),
+        z
+      );
+    }
+  }
+
+  for (let segment = 0; segment < MARKER_SEGMENTS; segment++) {
+    const inner = segment * 2;
+    const outer = inner + 1;
+    const innerNext = inner + 2;
+    const outerNext = inner + 3;
+    indices.push(inner, innerNext, outer, innerNext, outerNext, outer);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 export class CapturePoint {
   constructor({ def, mapDef, scene }) {
@@ -33,7 +119,7 @@ export class CapturePoint {
     this.group.position.set(def.x, y, def.z);
 
     const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(RADIUS * 0.85, RADIUS * 0.85, 0.12, 40),
+      makeTerrainDiscGeometry(mapDef, def.x, def.z, RADIUS * 0.85, y),
       new THREE.MeshStandardMaterial({
         color: 0x5a5a52,
         emissive: 0x222222,
@@ -42,14 +128,23 @@ export class CapturePoint {
         opacity: 0.5,
         roughness: 0.85,
         metalness: 0.08,
+        depthWrite: false,
+        side: THREE.DoubleSide,
       })
     );
-    pad.position.y = 0.08;
     pad.name = 'capturePad';
+    pad.renderOrder = 2;
     this.group.add(pad);
 
     this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(RADIUS * 0.72, RADIUS * 0.84, 56),
+      makeTerrainRingGeometry(
+        mapDef,
+        def.x,
+        def.z,
+        RADIUS * 0.72,
+        RADIUS * 0.84,
+        y
+      ),
       new THREE.MeshStandardMaterial({
         color: 0x888888,
         emissive: 0x444444,
@@ -58,10 +153,13 @@ export class CapturePoint {
         opacity: 0.75,
         side: THREE.DoubleSide,
         roughness: 0.5,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       })
     );
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.position.y = 0.2;
+    this.ring.renderOrder = 3;
     this.group.add(this.ring);
 
     const pole = new THREE.Mesh(

@@ -1228,6 +1228,53 @@ body,
   box-shadow: none;
 }
 
+.capture-points-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  margin-top: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #dce8f5;
+  background: rgba(20, 34, 48, 0.84);
+  border: 1px solid rgba(110, 174, 230, 0.48);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.capture-points-toggle:hover {
+  border-color: rgba(130, 195, 250, 0.82);
+  background: rgba(24, 45, 64, 0.94);
+}
+
+.capture-points-toggle.off {
+  opacity: 0.55;
+  color: rgba(220, 232, 245, 0.62);
+  border-color: rgba(110, 174, 230, 0.24);
+}
+
+.capture-points-toggle.hidden {
+  display: none;
+}
+
+.capture-points-toggle-icon {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 2px solid #78baf0;
+  border-radius: 50%;
+  box-shadow: 0 0 5px rgba(80, 165, 235, 0.55);
+}
+
+.capture-points-toggle.off .capture-points-toggle-icon {
+  border-color: #526a7d;
+  box-shadow: none;
+}
+
 .unit-roster-list {
   display: flex;
   flex-direction: column;
@@ -3417,7 +3464,8 @@ body,
 #hud.hud-post-match-view #clearance-banner,
 #hud.hud-post-match-view #td-banner,
 #hud.hud-post-match-view #laststand-banner,
-#hud.hud-post-match-view #btn-toggle-frontline {
+#hud.hud-post-match-view #btn-toggle-frontline,
+#hud.hud-post-match-view #btn-toggle-capture-points {
   display: none !important;
 }
 

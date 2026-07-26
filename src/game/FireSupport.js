@@ -11,7 +11,7 @@ import {
 } from '../effects/FireSupportEffects.js';
 import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
-import { sounds, mgProfileForFaction, resolveWeaponProfile } from '../audio/SoundManager.js';
+import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 
 const PLAYER = 'player';
@@ -271,11 +271,7 @@ export class FireSupportManager {
       }
     } else if (type === 'barrage') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.radius, true);
-      const artyProfile = resolveWeaponProfile(
-        this.ownerFaction?.units?.artillery ?? { type: 'artillery' },
-        this.ownerFaction?.id
-      );
-      sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.7, volume: 0.8 });
+      sounds.playFireSupportSalvo('barrage', { x: tx, z: tz });
 
       const impacts = [];
       for (let i = 0; i < def.shellCount; i++) {
@@ -290,7 +286,10 @@ export class FireSupportManager {
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'barrage', this.game._terrainMesh);
             this.applyDamage(ix, iz, def.radius * 0.35, def.damage, def.hqDamage * 0.2, 'artillery');
-            sounds.playImpact('shell', { x: ix, z: iz }, 0.05);
+            sounds.playArtilleryImpact(
+              { x: ix, z: iz },
+              { kind: 'barrage', delaySec: 0.05 }
+            );
           },
         });
       }
@@ -303,11 +302,7 @@ export class FireSupportManager {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.targetRadius, true);
       spawnStrikeWarning(scene, mapDef, startX, startZ, def.laneWidth * 0.55, true);
 
-      const artyProfile = resolveWeaponProfile(
-        this.ownerFaction?.units?.artillery ?? { type: 'artillery' },
-        this.ownerFaction?.id
-      );
-      sounds.playWeapon(artyProfile, { x: tx, z: tz }, { rate: 0.62, volume: 0.85 });
+      sounds.playFireSupportSalvo('creepingBarrage', { x: tx, z: tz });
 
       const impacts = [];
       for (let i = 0; i < def.shellCount; i++) {
@@ -331,7 +326,13 @@ export class FireSupportManager {
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'creeping', this.game._terrainMesh);
             this.applyDamage(ix, iz, shellRadius, shellDamage, def.hqDamage * hqMult, 'artillery');
-            sounds.playImpact('shell', { x: ix, z: iz }, atTarget ? 0.09 : 0.05);
+            sounds.playArtilleryImpact(
+              { x: ix, z: iz },
+              {
+                kind: 'creepingBarrage',
+                delaySec: atTarget ? 0.09 : 0.05,
+              }
+            );
           },
         });
       }

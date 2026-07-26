@@ -151,6 +151,9 @@ const ui = new UIManager(uiRoot, {
   onToggleFrontline(enabled) {
     game?.setShowFrontlineEnabled(enabled);
   },
+  onToggleCapturePoints(enabled) {
+    game?.setCapturePointsVisible(enabled);
+  },
   onToggleSeekCover(enabled) {
     game?.setSeekCoverMode(enabled);
   },
