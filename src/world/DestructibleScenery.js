@@ -593,18 +593,17 @@ export class DestructibleScenery {
    * deliberate Shift-fire on a tenement is not cancelled by a neighbour row
    * sharing a sealed alley gap with the aim-point at the target centre.
    */
-  getLineOfFireBlocker(attacker, target) {
+  getLineOfFireBlocker(attacker, target, options = {}) {
     if (!attacker?.position || !target) return null;
     const targetPosition = target.position ?? target.mesh?.position;
     if (!targetPosition) return null;
     const ax = attacker.position.x;
     const az = attacker.position.z;
     const strictDirectShell = STRICT_DIRECT_SHELL_TYPES.has(attacker.def?.type);
-    // AT / tank shells use a generous solid footprint so façade cornices,
-    // sealed alleys, and Berlin courtyard corners still count as masonry.
-    // Slightly wider than small-arms so a 1–2 m visual seam cannot open a
-    // fire lane that reads as “shooting through the block”.
-    const footprintMargin = strictDirectShell ? 1.85 : 0.55;
+    // A shell follows its centreline rather than occupying a road-wide
+    // corridor. Keep a modest tolerance for visual façade thickness without
+    // letting neighbouring Berlin buildings close a clear carriageway.
+    const footprintMargin = strictDirectShell ? 0.72 : 0.42;
 
     const targetBuilding =
       target.entry &&
@@ -642,38 +641,19 @@ export class DestructibleScenery {
       if (targetHitT == null) targetHitT = 1;
     }
 
-    const candidates = [];
-    if (strictDirectShell) {
-      // Five corridor samples: centreline + near/far flanks. Spatial broad-phase
-      // keeps this cheap on Berlin; outer flanks seal diagonal alley fire that
-      // the centreline alone treats as clear through a 2–3 m seam.
-      const dx = bx - ax;
-      const dz = bz - az;
-      const len = Math.hypot(dx, dz) || 1;
-      const nx = -dz / len;
-      const nz = dx / len;
-      for (const offset of [0, -1.15, 1.15, -2.35, 2.35]) {
-        candidates.push({
-          ax: ax + nx * offset,
-          az: az + nz * offset,
-          bx: bx + nx * offset,
-          bz: bz + nz * offset,
-          lateral: offset !== 0,
-        });
-      }
-    } else {
-      candidates.push({ ax, az, bx, bz, lateral: false });
-    }
+    const candidates = [{ ax, az, bx, bz, lateral: false }];
 
     let nearest = null;
     let nearestEntryT = Infinity;
     for (const ray of candidates) {
-      const rayObjects = this._objectsInBounds(
-        Math.min(ray.ax, ray.bx) - footprintMargin,
-        Math.min(ray.az, ray.bz) - footprintMargin,
-        Math.max(ray.ax, ray.bx) + footprintMargin,
-        Math.max(ray.az, ray.bz) + footprintMargin
-      );
+      const rayObjects = options.fullScan
+        ? this.objects
+        : this._objectsInBounds(
+            Math.min(ray.ax, ray.bx) - footprintMargin,
+            Math.min(ray.az, ray.bz) - footprintMargin,
+            Math.max(ray.ax, ray.bx) + footprintMargin,
+            Math.max(ray.az, ray.bz) + footprintMargin
+          );
       for (const obj of rayObjects) {
         if (!LINE_OF_FIRE_BLOCKING_BUILDING_KINDS.has(obj.kind)) continue;
         // Released rubble no longer blocks; a still-parented collapsing shell does.
@@ -727,8 +707,7 @@ export class DestructibleScenery {
           nearestEntryT = entryT;
         }
       }
-      // Centreline hit is enough; keep scanning lateral rays only while clear.
-      if (nearest && !ray.lateral) return nearest;
+      if (nearest) return nearest;
     }
     return nearest;
   }

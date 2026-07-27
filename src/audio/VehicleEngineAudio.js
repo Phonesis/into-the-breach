@@ -1,6 +1,7 @@
-/** Looping baked diesel / track engine audio for moving vehicles. */
+/** Looping baked engine and track audio for moving or pivoting vehicles. */
 
 const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery']);
+const TRACKED_PIVOT_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
 const BUFFER_KEYS = {
   tank: 'engine_tank',
@@ -55,6 +56,7 @@ const PROFILES = {
 
 const MAX_VOICES = 12;
 const MOVE_SPEED_THRESHOLD = 0.35;
+const PIVOT_TURN_RATE_THRESHOLD = 0.075;
 const FADE_SEC = 0.28;
 const IDLE_TAIL_SEC = 0.22;
 
@@ -118,16 +120,35 @@ class EngineVoice {
       this.exhaustGain.connect(this.panner);
     }
 
+    this.pivotSrc = null;
+    this.pivotGain = null;
+    if (buffers.pivot) {
+      this.pivotFilter = ctx.createBiquadFilter();
+      this.pivotFilter.type = 'bandpass';
+      this.pivotFilter.frequency.value = 1050;
+      this.pivotFilter.Q.value = 0.48;
+      this.pivotGain = ctx.createGain();
+      this.pivotGain.gain.value = 0;
+      this.pivotSrc = ctx.createBufferSource();
+      this.pivotSrc.buffer = buffers.pivot;
+      this.pivotSrc.loop = true;
+      this.pivotSrc.connect(this.pivotFilter);
+      this.pivotFilter.connect(this.pivotGain);
+      this.pivotGain.connect(this.panner);
+    }
+
     this.wetSend = ctx.createGain();
     this.wetSend.gain.value = 0.12;
     this.mainFilter.connect(this.wetSend);
+    this.pivotFilter?.connect(this.wetSend);
     this.wetSend.connect(wetBus);
 
     this.mainSrc.start();
     this.exhaustSrc?.start();
+    this.pivotSrc?.start();
   }
 
-  setThrottle(throttle, worldPos, listener, muted) {
+  setThrottle(throttle, worldPos, listener, muted, pivotIntensity = 0) {
     if (!this.mainSrc) return;
     const t = this.ctx.currentTime;
     const p = this.profile;
@@ -148,12 +169,18 @@ class EngineVoice {
       this.exhaustGain.gain.setTargetAtTime(exhaustGain * (0.4 + throttle * 0.7), t, 0.1);
       this.exhaustFilter.frequency.setTargetAtTime(180 + throttle * 380, t, 0.1);
     }
+    if (this.pivotGain) {
+      this.pivotGain.gain.setTargetAtTime(0.7 * pivotIntensity, t, 0.055);
+      this.pivotSrc.playbackRate.setTargetAtTime(0.86 + pivotIntensity * 0.24, t, 0.08);
+      this.pivotFilter.frequency.setTargetAtTime(780 + pivotIntensity * 820, t, 0.08);
+    }
 
     const dist = distToListener({ position: worldPos }, listener);
-    const vol = muted ? 0 : (p.vol ?? 0.4) * distanceGain(dist) * (0.28 + throttle * 0.82);
+    const load = Math.max(throttle, pivotIntensity * 0.62);
+    const vol = muted ? 0 : (p.vol ?? 0.4) * distanceGain(dist) * (0.28 + load * 0.82);
     this.master.gain.setTargetAtTime(vol, t, 0.08);
     this.panner.pan.setTargetAtTime(calcPan(worldPos.x, listener.x), t, 0.06);
-    this.wetSend.gain.setTargetAtTime(0.08 + throttle * 0.1, t, 0.1);
+    this.wetSend.gain.setTargetAtTime(0.08 + Math.max(throttle, pivotIntensity) * 0.1, t, 0.1);
   }
 
   fadeOut() {
@@ -179,6 +206,9 @@ class EngineVoice {
       this.exhaustFilter,
       this.exhaustGain,
       this.exhaustSrc,
+      this.pivotFilter,
+      this.pivotGain,
+      this.pivotSrc,
       this.wetSend,
     ];
     for (const n of nodes) {
@@ -205,8 +235,11 @@ export class VehicleEngineAudio {
     const main = this.sm.buffers[key];
     const exhaust = this.sm.buffers[`${key}_exhaust`] ??
       (type === 'tankDestroyer' ? this.sm.buffers.engine_tank_exhaust : null);
+    const pivot = TRACKED_PIVOT_TYPES.has(type)
+      ? this.sm.buffers.engine_tank_pivot_tracks
+      : null;
     if (!main) return null;
-    return { main, exhaust: exhaust ?? null };
+    return { main, exhaust: exhaust ?? null, pivot: pivot ?? null };
   }
 
   clear() {
@@ -214,13 +247,20 @@ export class VehicleEngineAudio {
     this.voices.clear();
   }
 
-  _measureSpeed(unit, dt) {
+  _measureMotion(unit, dt) {
     const px = unit._engineLastX ?? unit.position.x;
     const pz = unit._engineLastZ ?? unit.position.z;
+    const yaw = unit.mesh?.rotation?.y ?? 0;
+    const previousYaw = unit._engineLastYaw ?? yaw;
     unit._engineLastX = unit.position.x;
     unit._engineLastZ = unit.position.z;
-    if (dt <= 0) return 0;
-    return Math.hypot(unit.position.x - px, unit.position.z - pz) / dt;
+    unit._engineLastYaw = yaw;
+    if (dt <= 0) return { speed: 0, turnRate: 0 };
+    const yawDelta = Math.atan2(Math.sin(yaw - previousYaw), Math.cos(yaw - previousYaw));
+    return {
+      speed: Math.hypot(unit.position.x - px, unit.position.z - pz) / dt,
+      turnRate: Math.abs(yawDelta) / dt,
+    };
   }
 
   update(units, dt, listener) {
@@ -240,15 +280,25 @@ export class VehicleEngineAudio {
       if (!ENGINE_TYPES.has(u.def?.type) || u.dead) continue;
       if (!this._buffersFor(u.def.type, u.faction?.id)) continue;
 
-      const speed = this._measureSpeed(u, dt);
+      const { speed, turnRate } = this._measureMotion(u, dt);
       const throttle = Math.min(1, speed / Math.max(u.def.speed * 0.85, 2));
+      const pivoting =
+        TRACKED_PIVOT_TYPES.has(u.def.type) &&
+        speed < MOVE_SPEED_THRESHOLD &&
+        turnRate >= PIVOT_TURN_RATE_THRESHOLD;
+      const pivotIntensity = pivoting
+        ? Math.max(0.3, Math.min(1, turnRate / 0.72))
+        : 0;
       const entry = this.voices.get(u.id);
 
       if (speed >= MOVE_SPEED_THRESHOLD) {
-        active.push({ unit: u, throttle: Math.max(0.28, throttle) });
+        active.push({ unit: u, throttle: Math.max(0.28, throttle), pivotIntensity: 0 });
+        if (entry) entry.idleUntil = now + IDLE_TAIL_SEC * 1000;
+      } else if (pivoting) {
+        active.push({ unit: u, throttle: 0.42, pivotIntensity });
         if (entry) entry.idleUntil = now + IDLE_TAIL_SEC * 1000;
       } else if (entry && entry.idleUntil > now) {
-        active.push({ unit: u, throttle: 0.24 });
+        active.push({ unit: u, throttle: 0.24, pivotIntensity: 0 });
       }
     }
 
@@ -264,7 +314,7 @@ export class VehicleEngineAudio {
       }
     }
 
-    for (const { unit, throttle } of active.slice(0, MAX_VOICES)) {
+    for (const { unit, throttle, pivotIntensity } of active.slice(0, MAX_VOICES)) {
       let entry = this.voices.get(unit.id);
       if (!entry) {
         const buffers = this._buffersFor(unit.def.type, unit.faction?.id);
@@ -274,7 +324,13 @@ export class VehicleEngineAudio {
         entry = { voice, idleUntil: 0 };
         this.voices.set(unit.id, entry);
       }
-      entry.voice.setThrottle(throttle, unit.position, listener, this.sm.muted);
+      entry.voice.setThrottle(
+        throttle,
+        unit.position,
+        listener,
+        this.sm.muted,
+        pivotIntensity
+      );
     }
   }
 }

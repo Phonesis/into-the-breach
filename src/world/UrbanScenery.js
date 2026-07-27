@@ -15,6 +15,7 @@ const FACADE_COLORS = [
 ];
 
 let detailTextures = null;
+let canalWaterTextures = null;
 
 function makeTexture(size, draw, { colorSpace = true, repeat = true } = {}) {
   const canvas = document.createElement('canvas');
@@ -34,6 +35,95 @@ function makeTexture(size, draw, { colorSpace = true, repeat = true } = {}) {
 function seededNoise(index, salt = 0) {
   const value = Math.sin(index * 91.713 + salt * 37.119) * 43758.5453;
   return value - Math.floor(value);
+}
+
+function getCanalWaterTextures() {
+  if (canalWaterTextures) return canalWaterTextures;
+
+  const color = makeTexture(512, (ctx, size) => {
+    const depth = ctx.createLinearGradient(0, 0, size, 0);
+    depth.addColorStop(0, '#31565a');
+    depth.addColorStop(0.22, '#284b50');
+    depth.addColorStop(0.54, '#203f44');
+    depth.addColorStop(0.8, '#294c50');
+    depth.addColorStop(1, '#345a5d');
+    ctx.fillStyle = depth;
+    ctx.fillRect(0, 0, size, size);
+
+    for (let i = 0; i < 170; i++) {
+      const x = seededNoise(i, 70) * size;
+      const y = seededNoise(i, 71) * size;
+      const length = 18 + seededNoise(i, 72) * 72;
+      const bend = (seededNoise(i, 73) - 0.5) * 13;
+      ctx.strokeStyle = seededNoise(i, 74) > 0.46
+        ? `rgba(166,198,199,${0.025 + seededNoise(i, 75) * 0.055})`
+        : `rgba(5,24,27,${0.035 + seededNoise(i, 76) * 0.065})`;
+      ctx.lineWidth = 0.7 + seededNoise(i, 77) * 2;
+      ctx.beginPath();
+      ctx.moveTo(x - length * 0.5, y);
+      ctx.quadraticCurveTo(x, y + bend, x + length * 0.5, y);
+      ctx.stroke();
+    }
+
+    // Occasional circular disturbances keep the canal from reading as a
+    // scrolling painted strip.
+    for (let i = 0; i < 14; i++) {
+      const x = seededNoise(i, 78) * size;
+      const y = seededNoise(i, 79) * size;
+      const radius = 5 + seededNoise(i, 80) * 16;
+      ctx.strokeStyle = `rgba(174,205,204,${0.035 + seededNoise(i, 81) * 0.045})`;
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.ellipse(x, y, radius, radius * 0.36, seededNoise(i, 82) * Math.PI, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
+
+  const bump = makeTexture(512, (ctx, size) => {
+    ctx.fillStyle = '#777777';
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 260; i++) {
+      const x = seededNoise(i, 83) * size;
+      const y = seededNoise(i, 84) * size;
+      const length = 12 + seededNoise(i, 85) * 58;
+      const bend = (seededNoise(i, 86) - 0.5) * 10;
+      const light = seededNoise(i, 87) > 0.48;
+      const shade = light ? 148 + seededNoise(i, 88) * 34 : 80 + seededNoise(i, 89) * 34;
+      ctx.strokeStyle = `rgb(${shade},${shade},${shade})`;
+      ctx.lineWidth = 0.65 + seededNoise(i, 90) * 1.7;
+      ctx.beginPath();
+      ctx.moveTo(x - length * 0.5, y);
+      ctx.quadraticCurveTo(x, y + bend, x + length * 0.5, y);
+      ctx.stroke();
+    }
+  }, { colorSpace: false });
+
+  const glints = makeTexture(512, (ctx, size) => {
+    ctx.clearRect(0, 0, size, size);
+    for (let i = 0; i < 110; i++) {
+      const x = seededNoise(i, 91) * size;
+      const y = seededNoise(i, 92) * size;
+      const length = 8 + seededNoise(i, 93) * 44;
+      ctx.strokeStyle = `rgba(194,222,219,${0.08 + seededNoise(i, 94) * 0.16})`;
+      ctx.lineWidth = 0.55 + seededNoise(i, 95) * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x - length * 0.5, y);
+      ctx.quadraticCurveTo(
+        x,
+        y + (seededNoise(i, 96) - 0.5) * 7,
+        x + length * 0.5,
+        y
+      );
+      ctx.stroke();
+    }
+  });
+
+  color.repeat.set(1.7, 9.5);
+  bump.repeat.set(2.4, 13);
+  glints.repeat.set(2.1, 11);
+  color.anisotropy = bump.anisotropy = glints.anisotropy = 4;
+  canalWaterTextures = { color, bump, glints };
+  return canalWaterTextures;
 }
 
 function getDetailTextures() {
@@ -1737,13 +1827,17 @@ function addUrbanCanal(mapDef, scene, layout, random) {
   const group = new THREE.Group();
   group.name = 'urbanCanalDistrict';
 
+  const waterTextures = getCanalWaterTextures();
   const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x2d4a4d,
-    roughness: 0.34,
-    metalness: 0.08,
+    color: 0x87a5a3,
+    map: waterTextures.color,
+    bumpMap: waterTextures.bump,
+    bumpScale: 0.095,
+    roughness: 0.27,
+    metalness: 0.12,
     transparent: true,
-    opacity: 0.88,
-    envMapIntensity: 0.72,
+    opacity: 0.94,
+    envMapIntensity: 0.86,
     depthWrite: true,
   });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(canalWidth, length), waterMat);
@@ -1752,6 +1846,29 @@ function addUrbanCanal(mapDef, scene, layout, random) {
   water.name = 'urbanCanalWater';
   water.receiveShadow = true;
   group.add(water);
+
+  const glintMat = new THREE.MeshBasicMaterial({
+    color: 0xbad4d1,
+    map: waterTextures.glints,
+    transparent: true,
+    opacity: 0.19,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: true,
+  });
+  const glints = new THREE.Mesh(new THREE.PlaneGeometry(canalWidth - 0.1, length), glintMat);
+  glints.rotation.x = -Math.PI * 0.5;
+  glints.position.set(canalX, 0.073, 0);
+  glints.name = 'urbanCanalRipples';
+  glints.renderOrder = 1;
+  group.add(glints);
+
+  water.onBeforeRender = () => {
+    const time = performance.now() * 0.001;
+    waterTextures.color.offset.set((time * 0.007) % 1, (time * 0.013) % 1);
+    waterTextures.bump.offset.set((-time * 0.011) % 1, (time * 0.019) % 1);
+    waterTextures.glints.offset.set((time * 0.016) % 1, (-time * 0.024) % 1);
+  };
 
   const quayMat = material(0x615e56, {
     map: getDetailTextures().pavement,

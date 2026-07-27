@@ -23,6 +23,7 @@ const SAMPLE_URLS = {
   explosion: publicUrl('sounds/explosion.wav'),
   engine_tank: publicUrl('sounds/engine-tank.wav'),
   engine_tank_exhaust: publicUrl('sounds/engine-tank-exhaust.wav'),
+  engine_tank_pivot_tracks: publicUrl('sounds/engine-tank-pivot-tracks.wav'),
   engine_tank_destroyer_germany: publicUrl('sounds/engine-tank-destroyer-germany.wav'),
   engine_tank_destroyer_usa: publicUrl('sounds/engine-tank-destroyer-usa.wav'),
   engine_tank_destroyer_uk: publicUrl('sounds/engine-tank-destroyer-uk.wav'),
@@ -109,6 +110,8 @@ const UNIT_UNDERFIRE_COUNT = 12;
 const UNIT_UNDERFIRE_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
 const UNIT_RETREAT_COUNT = 6;
 const UNIT_RETREAT_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_ATTACK_COUNT = 4;
+const UNIT_ATTACK_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
 /** Fire-support + general-order commander radio lines (baked edge-tts). */
 const COMMANDER_ORDER_KINDS = [
   'strafe',
@@ -212,6 +215,8 @@ export class SoundManager {
     this.unitUnderFireBuffers = { usa: [], uk: [], germany: [], russia: [] };
     /** @type {Record<string, AudioBuffer[]>} */
     this.unitRetreatBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    /** @type {Record<string, AudioBuffer[]>} */
+    this.unitAttackBuffers = { usa: [], uk: [], germany: [], russia: [] };
     /**
      * Commander order lines: buffers[faction][kind] = AudioBuffer
      * @type {Record<string, Record<string, AudioBuffer>>}
@@ -480,6 +485,27 @@ export class SoundManager {
       }
     }
     await Promise.all(retreatLoads);
+
+    const attackLoads = [];
+    for (const faction of UNIT_ATTACK_FACTIONS) {
+      for (let i = 1; i <= UNIT_ATTACK_COUNT; i++) {
+        const num = String(i).padStart(2, '0');
+        attackLoads.push(
+          (async () => {
+            try {
+              const res = await fetch(publicUrl(`sounds/unit-attack-${faction}-${num}.wav`));
+              if (!res.ok) return;
+              const ab = await res.arrayBuffer();
+              const buf = await this.ctx.decodeAudioData(ab);
+              this.unitAttackBuffers[faction].push(buf);
+            } catch {
+              /* missing */
+            }
+          })()
+        );
+      }
+    }
+    await Promise.all(attackLoads);
 
     const commanderLoads = [];
     for (const faction of COMMANDER_ORDER_FACTIONS) {
@@ -911,6 +937,41 @@ export class SoundManager {
           wet: 0.04,
         });
       }
+    });
+  }
+
+  /** Faction radio acknowledgement after a player attack order is accepted. */
+  playAttackOrder(factionId = null, worldPos = null, opts = {}) {
+    this._runWhenReady(() => {
+      const key = unitUnderFireVoiceKey(factionId);
+      const bufs = this.unitAttackBuffers[key];
+      if (!bufs?.length) return;
+
+      const now = performance.now();
+      if (now < (this._attackVoiceBusyUntil ?? 0)) return;
+      const buf = this._pickFromPool(bufs, '_lastAttackVoice');
+      if (!buf) return;
+
+      const delay =
+        now - (this._lastByType._unitSelect ?? 0) < 900
+          ? 0.28
+          : 0.04;
+      const rate = 0.98 + Math.random() * 0.035;
+      this._attackVoiceBusyUntil =
+        now + delay * 1000 + (buf.duration / rate) * 1000 + 420;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const vol = Math.min(1.16, this._distanceGain(dist) * 1.02);
+      this._playRadioVoice(buf, {
+        pan,
+        vol,
+        rate,
+        staticLevel: 0.21,
+        presence: 1.02,
+        delay,
+        ...opts,
+      });
     });
   }
 

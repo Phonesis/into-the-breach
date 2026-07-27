@@ -36,6 +36,7 @@ import {
   isSmokeShellTarget,
   SMOKE_SHELL_COOLDOWN_SEC,
   isHqTarget,
+  WEAPON_RANGE_SLACK,
 } from './Targeting.js';
 import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
@@ -105,6 +106,12 @@ const CREW_SERVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 const INDIRECT_FIRE_TYPES = new Set(['artillery', 'mortar']);
+const AUTHORITATIVE_SHELL_LOS_TYPES = new Set([
+  'antiTankGun',
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
+]);
 export const HAND_GRENADE_RANGE = 8;
 export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
 const HAND_GRENADE_DAMAGE = 12;
@@ -176,10 +183,27 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
   });
 }
 
-function getDirectFireBlocker(attacker, target, scenery) {
+function getDirectFireBlocker(attacker, target, scenery, options = {}) {
   if (!scenery?.getLineOfFireBlocker || !attacker || !target) return null;
   if (INDIRECT_FIRE_TYPES.has(attacker.def?.type)) return null;
-  return scenery.getLineOfFireBlocker(attacker, target);
+  return scenery.getLineOfFireBlocker(attacker, target, options);
+}
+
+function shouldAdvanceBlockedPursuit(attacker, target) {
+  return (
+    attacker?.attackOrder === target &&
+    target?.def !== undefined &&
+    attacker.engagementStance === 'pursue' &&
+    (attacker._stanceBoundAttackOrder || attacker._stancePursuitOrder)
+  );
+}
+
+function shouldRetainBlockedOrder(attacker, target) {
+  return (
+    attacker?.attackOrder === target &&
+    target?.def !== undefined &&
+    (attacker._stanceBoundAttackOrder || attacker._stancePursuitOrder)
+  );
 }
 
 export function canThrowHandGrenadeAt(attacker, target) {
@@ -368,8 +392,10 @@ export function updateCombat(
     if (getDirectFireBlocker(attacker, target, scenery)) {
       attacker.target = null;
       if (attacker.attackOrder === target) {
-        attacker.clearAttackOrder();
-        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+        if (!shouldRetainBlockedOrder(attacker, target)) {
+          attacker.clearAttackOrder();
+          if (!attacker._userMoveOrder) attacker.moveTarget = null;
+        }
       }
       continue;
     }
@@ -561,6 +587,11 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
         return null;
       }
       if (getDirectFireBlocker(attacker, attacker.attackOrder, scenery)) {
+        if (shouldRetainBlockedOrder(attacker, attacker.attackOrder)) {
+          // Keep a direct player order selected while masonry obscures it.
+          // Pursue routes around the obstruction; Hold waits for a clear shot.
+          return null;
+        }
         // A direct-fire order does not remain locked through solid masonry.
         // Clearing it for both teams also removes misleading target lines and
         // lets normal acquisition select an actually exposed unit next tick.
@@ -577,16 +608,20 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
     attacker.def.type === 'sniper'
       ? acquireTargets.filter((target) => !target.def || !isTankType(target.def.type))
       : acquireTargets;
+  const directArmorRangeSlack =
+    isTankType(attacker.def.type) || attacker.def.type === 'antiTankGun'
+      ? WEAPON_RANGE_SLACK
+      : 1;
   const maxAcquireRange = Math.max(
     attacker.def.range,
     isTankType(attacker.def.type) ? attacker.def.coaxMG?.range ?? 0 : 0
-  );
+  ) * directArmorRangeSlack;
   const visibleAcquireTargets = validAcquireTargets.filter(
     (target) =>
       distanceBetween(attacker, target) <= maxAcquireRange &&
       !getDirectFireBlocker(attacker, target, scenery)
   );
-  return findNearestEnemyInRange(attacker, visibleAcquireTargets, 1);
+  return findNearestEnemyInRange(attacker, visibleAcquireTargets, directArmorRangeSlack);
 }
 
 const _muzzleFrom = new THREE.Vector3();
@@ -671,10 +706,28 @@ function fire(
         z: target.position?.z ?? target.mesh.position.z,
       };
 
-  // Last-moment interception guard: target acquisition and aiming already
-  // reject blocked shots, but no direct projectile may apply damage or emit a
-  // tracer if the target moved behind an intact building before fire resolves.
-  if (getDirectFireBlocker(attacker, target, scenery)) return false;
+  // Last-moment interception guard: use the authoritative scenery list rather
+  // than the Berlin spatial broad phase. Acquisition remains indexed for frame
+  // rate, but no direct shell may apply damage or emit VFX if a stale/missed
+  // bucket would let it cross intact masonry in a long-running or restored map.
+  const authoritativeShellLos =
+    !coax && AUTHORITATIVE_SHELL_LOS_TYPES.has(attacker.def?.type);
+  const dischargeBlocker = getDirectFireBlocker(
+    attacker,
+    target,
+    scenery,
+    authoritativeShellLos ? { fullScan: true } : undefined
+  );
+  if (dischargeBlocker) {
+    attacker.target = null;
+    if (attacker.attackOrder === target) {
+      if (!shouldRetainBlockedOrder(attacker, target)) {
+        attacker.clearAttackOrder();
+        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+      }
+    }
+    return false;
+  }
 
   const dist = isGroundShot
     ? distanceToPoint(attacker, impact)
@@ -1073,22 +1126,40 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     ) {
       unit.clearAttackOrder();
     } else if (
+      unit._stanceBoundAttackOrder &&
+      unit.engagementStance !== 'pursue' &&
+      unit.attackOrder &&
+      !unit.attackOrder.dead &&
+      !canEngageManualOrder(unit, unit.attackOrder)
+    ) {
+      // Hold Ground accepts a direct attack only while the target is already
+      // in weapon range. If that target withdraws, drop the order rather than
+      // converting it into movement.
+      unit.clearAttackOrder();
+      unit.moveTarget = null;
+      unit._movePath = null;
+      unit._finalMoveGoal = null;
+    } else if (
       !unit._userMoveOrder &&
       !unit.retreating &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
-      canEngageManualOrder(unit, unit.attackOrder)
+      canEngageManualOrder(unit, unit.attackOrder) &&
+      !getDirectFireBlocker(unit, unit.attackOrder, options.scenery)
     ) {
       unit.moveTarget = null;
       unit._chasingAttack = false;
     }
 
+    const blockedPursuit =
+      shouldAdvanceBlockedPursuit(unit, unit.attackOrder) &&
+      !!getDirectFireBlocker(unit, unit.attackOrder, options.scenery);
     if (
       !unit._userMoveOrder &&
       !unit.retreating &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
-      !canEngageManualOrder(unit, unit.attackOrder)
+      (!canEngageManualOrder(unit, unit.attackOrder) || blockedPursuit)
     ) {
       if (unit.attackOrder.isGround || unit.attackOrder.isSmokeShell) {
         const dest = getGroundFireMoveDest(unit, unit.attackOrder.position);
@@ -1105,7 +1176,15 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
           ? unit.def.coaxMG.range * rangeSlack
           : unit.def.range * rangeSlack;
-        if (dist > chaseRange) {
+        if (blockedPursuit) {
+          // A straight-line standoff point may lie inside a Berlin block.
+          // Route toward the target's street and stop as soon as both weapon
+          // range and an unobstructed firing line are available.
+          unit.moveTarget = {
+            x: unit.attackOrder.position.x,
+            z: unit.attackOrder.position.z,
+          };
+        } else if (dist > chaseRange) {
           unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
         }
       }
@@ -1129,6 +1208,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         unit.attackOrder &&
         !unit.attackOrder.dead &&
         canEngageManualOrder(unit, unit.attackOrder) &&
+        !getDirectFireBlocker(unit, unit.attackOrder, options.scenery) &&
         holdWhenFiring.includes(unit.def.type)
       ) {
         unit.moveTarget = null;
@@ -1274,7 +1354,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
                   radius: unitPathPlanRadius(unit.def?.type, mapDef),
                   avoidBuildings: true,
                   allowBuildingId,
-                  preferUrbanRoads: isVehicleUnit(unit.def?.type),
+                  preferUrbanRoads:
+                    isVehicleUnit(unit.def?.type) || mapDef?.terrain === 'urban',
                   allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type),
                 }
               );
@@ -1315,7 +1396,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
                     radius: unitPathPlanRadius(unit.def?.type, mapDef),
                     avoidBuildings: true,
                     allowBuildingId: unit._bunkerEntryId,
-                    preferUrbanRoads: isVehicleUnit(unit.def?.type),
+                    preferUrbanRoads:
+                      isVehicleUnit(unit.def?.type) || mapDef?.terrain === 'urban',
                     allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(
                       unit.def?.type
                     ),

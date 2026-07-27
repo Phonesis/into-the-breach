@@ -528,6 +528,14 @@ export class Game {
       },
       onOrder: (type, selected) => {
         sounds.play('order');
+        if (type === 'attack' && selected?.length) {
+          const sample = selected[Math.floor(Math.random() * selected.length)];
+          const factionId = sample?.faction?.id ?? this.playerFaction?.id;
+          const pos = sample?.position
+            ? { x: sample.position.x, z: sample.position.z }
+            : null;
+          sounds.playAttackOrder(factionId, pos, { radio: true });
+        }
         if ((type === 'attack' || type === 'fire') && selected?.length) {
           this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq, this);
         }
@@ -1579,6 +1587,10 @@ export class Game {
     if (!target) return;
     for (const u of units) {
       if (u.dead) continue;
+      if (Number.isFinite(u._clearanceDeploymentYaw)) {
+        snapUnitYaw(u, u._clearanceDeploymentYaw);
+        continue;
+      }
       const dx = target.x - u.position.x;
       const dz = target.z - u.position.z;
       if (dx * dx + dz * dz > 0.04) {

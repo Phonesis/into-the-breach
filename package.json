@@ -25,6 +25,7 @@
     "bake-elevenlabs-artillery": "node scripts/bake-elevenlabs-artillery.mjs",
     "bake-elevenlabs-tank-cannons": "node scripts/bake-elevenlabs-tank-cannons.mjs",
     "bake-elevenlabs-engines": "node scripts/bake-elevenlabs-engines.mjs",
+    "bake-elevenlabs-attack-orders": "node scripts/bake-elevenlabs-attack-orders.mjs",
     "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
     "bake-elevenlabs-building-collapse": "node scripts/bake-elevenlabs-building-collapse.mjs",
     "bake-engines": "node scripts/bake-engine-sounds.mjs",

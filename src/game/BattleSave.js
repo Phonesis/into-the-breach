@@ -288,6 +288,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       _chasingAttack: !!u._chasingAttack,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
       stancePursuitOrder: !!u._stancePursuitOrder,
+      stanceBoundAttackOrder: !!u._stanceBoundAttackOrder,
       manualFireMission: !!u._manualFireMission,
       attackOrderRef: serializeTargetRef(u.attackOrder),
       targetRef: serializeTargetRef(u.target),
@@ -1199,6 +1200,7 @@ export function applyBattleSave(game, snapshot) {
     unit._chasingAttack = !!uData._chasingAttack;
     unit.engagementStance = uData.engagementStance === 'pursue' ? 'pursue' : 'hold';
     unit._stancePursuitOrder = !!uData.stancePursuitOrder;
+    unit._stanceBoundAttackOrder = !!uData.stanceBoundAttackOrder;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;
     unit.lastStandRole = uData.lastStandRole ?? null;
     unit.lastStandEchelon = uData.lastStandEchelon ?? null;
@@ -1243,6 +1245,7 @@ export function applyBattleSave(game, snapshot) {
       unit._manualFireMission = !!uData.manualFireMission;
     } else {
       unit._stancePursuitOrder = false;
+      unit._stanceBoundAttackOrder = false;
     }
     if (uData.moveTarget) {
       unit.moveTarget = { x: uData.moveTarget.x, z: uData.moveTarget.z };

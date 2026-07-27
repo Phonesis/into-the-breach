@@ -3779,9 +3779,9 @@ export class UIManager {
     pursue.setAttribute('aria-pressed', String(allPursue));
     if (hint) {
       hint.textContent = allPursue
-        ? 'Auto-fire in range and chase enemies that begin fleeing.'
+        ? 'Attack orders close to weapon range and keep pursuing retreating targets.'
         : allHold
-          ? 'Auto-fire at enemies in range without chasing.'
+          ? 'Enemy-unit orders require targets in range; explicit building attacks still advance.'
           : `Mixed stance — ${holdCount} holding, ${pursueCount} pursuing.`;
     }
   }

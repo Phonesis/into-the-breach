@@ -278,9 +278,10 @@ function applyCarriagewayLaneOffset(points, fromX, fromZ, toX, toZ, mapDef) {
 }
 
 /**
- * Route a mechanical unit over Berlin's connected street graph. Graph search
- * still uses rendered road centrelines; emitted waypoints are then shifted into
- * the caller's carriageway lane so vehicles are not forced mid-road.
+ * Route a ground unit over Berlin's connected street graph. Graph search uses
+ * rendered road centrelines; emitted waypoints are then shifted into the
+ * caller's lane so vehicles are not forced mid-road and infantry can follow
+ * the same reliable street connectivity.
  * Returns null when the requested destination is deliberately off-road or no
  * connected street route exists.
  */

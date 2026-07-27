@@ -16,6 +16,7 @@ import { removeDamageSmoke } from '../visual/DamageSmoke.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import {
   createSmokeShellTarget,
+  canEngageManualOrder,
   distanceBetween,
   getStandoffPosition,
 } from '../game/Targeting.js';
@@ -74,6 +75,7 @@ export class Unit {
     this._chasingAttack = false;
     this.engagementStance = 'hold';
     this._stancePursuitOrder = false;
+    this._stanceBoundAttackOrder = false;
     this._mgVolley = 0;
     this.retreating = false;
     this.retreatMarker = null;
@@ -121,19 +123,31 @@ export class Unit {
     setSelectionRing(this.mesh, on);
   }
 
-  setAttackOrder(target, { manualFire = false } = {}) {
+  setAttackOrder(target, { manualFire = false, respectStance = false } = {}) {
     if (this.surrendered || this._captureExit) return;
+    const stanceBoundTarget = respectStance && target?.def !== undefined;
+    if (
+      stanceBoundTarget &&
+      this.engagementStance !== 'pursue' &&
+      !canEngageManualOrder(this, target)
+    ) {
+      return false;
+    }
     clearRetreat(this);
     this.attackOrder = target;
     this.target = target;
     this._manualFireMission = manualFire;
-    this._chasingAttack = true;
+    this._stanceBoundAttackOrder = stanceBoundTarget;
+    this._chasingAttack = !stanceBoundTarget || this.engagementStance === 'pursue';
     this._stancePursuitOrder = false;
     this._userMoveOrder = false;
     this._movePath = null;
-    if (target && !target.dead) {
+    if (target && !target.dead && this._chasingAttack) {
       this.moveTarget = getStandoffPosition(this, target);
+    } else {
+      this.moveTarget = null;
     }
+    return true;
   }
 
   clearAttackOrder() {
@@ -141,22 +155,39 @@ export class Unit {
     this.target = null;
     this._chasingAttack = false;
     this._stancePursuitOrder = false;
+    this._stanceBoundAttackOrder = false;
     this._manualFireMission = false;
     this._bunkerEntryId = null;
   }
 
   setEngagementStance(stance) {
     const next = stance === 'pursue' ? 'pursue' : 'hold';
-    if (this.engagementStance === next) return false;
+    const changed = this.engagementStance !== next;
     this.engagementStance = next;
-    if (next === 'hold' && this._stancePursuitOrder) {
-      this.clearAttackOrder();
-      if (!this._userMoveOrder) {
+    if (next === 'hold') {
+      const orderedUnit = this.attackOrder?.def !== undefined;
+      const pursuingUnit =
+        orderedUnit || (this.target?.def !== undefined && this._chasingAttack);
+      if (orderedUnit && !canEngageManualOrder(this, this.attackOrder)) {
+        this.clearAttackOrder();
+      } else if (orderedUnit) {
+        // Retain an already-in-range target, but convert it to a strict
+        // hold-position engagement which can never restart a chase.
+        this._stancePursuitOrder = false;
+        this._stanceBoundAttackOrder = true;
+      }
+      if (pursuingUnit || this._stancePursuitOrder) {
         this.moveTarget = null;
         this._movePath = null;
+        this._finalMoveGoal = null;
+        this._chasingAttack = false;
       }
+    } else if (this._stanceBoundAttackOrder && this.attackOrder?.def !== undefined) {
+      // A held in-range order becomes a live pursuit order. It remains still
+      // while the target is in range and resumes movement if the target pulls away.
+      this._chasingAttack = true;
     }
-    return true;
+    return changed;
   }
 
   cancelManualFireMission() {
@@ -183,6 +214,7 @@ export class Unit {
     clearRetreat(this);
     this.attackOrder = groundTarget;
     this.target = groundTarget;
+    this._stanceBoundAttackOrder = false;
     this._chasingAttack = false;
     this._userMoveOrder = false;
     this._movePath = null;
@@ -196,6 +228,7 @@ export class Unit {
     const target = createSmokeShellTarget(x, z);
     this.attackOrder = target;
     this.target = target;
+    this._stanceBoundAttackOrder = false;
     this._manualFireMission = true;
     this._chasingAttack = false;
     this._userMoveOrder = false;
@@ -272,7 +305,8 @@ export class Unit {
           radius,
           avoidBuildings: !!scenery,
           allowBuildingId,
-          preferUrbanRoads: isVehicleUnit(this.def.type),
+          preferUrbanRoads:
+            isVehicleUnit(this.def.type) || mapDef?.terrain === 'urban',
           allowTrackedBuildingCrush: TANK_TYPES.has(this.def.type),
         }
       );

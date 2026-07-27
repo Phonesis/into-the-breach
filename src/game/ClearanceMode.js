@@ -1,5 +1,10 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import {
+  getUrbanRoadExtent,
+  getUrbanStreetSpacing,
+  nearestUrbanRoadCenter,
+} from '../world/UrbanLayout.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
 
 /** Defender layout scaled by difficulty.enemyArmyMult in spawn. */
@@ -95,6 +100,162 @@ function axisFromPlayerToEnemy(mapDef) {
   const az = eb.z - pb.z;
   const len = Math.hypot(ax, az) || 1;
   return { ax: ax / len, az: az / len, pb, eb };
+}
+
+const BERLIN_AT_MIN_LANE = 28;
+const BERLIN_AT_SEPARATION = 11;
+
+/**
+ * Place a Berlin AT gun just off an intersection with an unobstructed shot
+ * along a street. The selected direction points broadly toward the player's
+ * approach, making the gun an ambush threat instead of a carriage aimed into a
+ * tenement wall.
+ */
+function findBerlinAtAmbushPosition({
+  anchor,
+  def,
+  mapDef,
+  scenery,
+  attackerUnits,
+  reservedPositions,
+}) {
+  if (
+    mapDef?.terrain !== 'urban' ||
+    !scenery?.getLineOfFireBlocker ||
+    !scenery?.isVehiclePlacementBlocked
+  ) {
+    return null;
+  }
+
+  const spacing = getUrbanStreetSpacing(mapDef);
+  const extent = getUrbanRoadExtent(mapDef);
+  const half = Math.max(8, (mapDef.size ?? 120) * 0.5 - 3);
+  const baseRoadX = nearestUrbanRoadCenter(anchor.x, mapDef);
+  const baseRoadZ = nearestUrbanRoadCenter(anchor.z, mapDef);
+  const { ax, az } = axisFromPlayerToEnemy(mapDef);
+  const towardPlayerX = -ax;
+  const towardPlayerZ = -az;
+  const desiredLane = Math.min(Math.max(BERLIN_AT_MIN_LANE, (def.range ?? 60) * 0.78), 52);
+  const safeRange = (def.range ?? 0) + 5;
+  const cornerOffset = spacing * 0.3;
+  const candidates = [];
+
+  const consider = (x, z, directionX, directionZ) => {
+    if (
+      Math.abs(x) > half ||
+      Math.abs(z) > half ||
+      Math.abs(x) > extent + 0.5 ||
+      Math.abs(z) > extent + 0.5 ||
+      !isEnemyHalfPosition(x, z, mapDef) ||
+      scenery.isVehiclePlacementBlocked(x, z, 1.65)
+    ) {
+      return;
+    }
+    for (const other of reservedPositions) {
+      if (Math.hypot(x - other.x, z - other.z) < BERLIN_AT_SEPARATION) return;
+    }
+    for (const attacker of attackerUnits) {
+      if (
+        !attacker.dead &&
+        safeRange > 5 &&
+        Math.hypot(x - attacker.position.x, z - attacker.position.z) < safeRange
+      ) {
+        return;
+      }
+    }
+
+    const maxToEdge =
+      directionX > 0
+        ? half - x
+        : directionX < 0
+          ? x + half
+          : directionZ > 0
+            ? half - z
+            : z + half;
+    const laneLength = Math.min(desiredLane, maxToEdge - 1);
+    if (laneLength < BERLIN_AT_MIN_LANE) return;
+
+    const gunProbe = {
+      def: { type: 'antiTankGun' },
+      position: { x, z },
+    };
+    const approachProbe = {
+      position: {
+        x: x + directionX * laneLength,
+        z: z + directionZ * laneLength,
+      },
+    };
+    if (scenery.getLineOfFireBlocker(gunProbe, approachProbe)) return;
+
+    const approachAlignment =
+      directionX * towardPlayerX + directionZ * towardPlayerZ;
+    if (approachAlignment < -0.05) return;
+    const anchorDistance = Math.hypot(x - anchor.x, z - anchor.z);
+    const score =
+      laneLength +
+      approachAlignment * 24 -
+      anchorDistance * 0.72 +
+      Math.random() * 1.5;
+    candidates.push({
+      x,
+      z,
+      directionX,
+      directionZ,
+      yaw: Math.atan2(directionX, directionZ),
+      laneLength,
+      score,
+    });
+  };
+
+  const considerIntersection = (roadX, roadZ) => {
+    for (const offset of [-cornerOffset, cornerOffset]) {
+      consider(roadX, roadZ + offset, 0, -1);
+      consider(roadX, roadZ + offset, 0, 1);
+      consider(roadX + offset, roadZ, -1, 0);
+      consider(roadX + offset, roadZ, 1, 0);
+    }
+  };
+
+  // Search nearby intersections first. Guns sit a little beyond the corner
+  // rather than dead-centre in the crossroads, and can cover either direction.
+  for (let gx = -2; gx <= 2; gx++) {
+    const roadX = baseRoadX + gx * spacing;
+    if (Math.abs(roadX) > extent + 0.5) continue;
+    for (let gz = -2; gz <= 2; gz++) {
+      const roadZ = baseRoadZ + gz * spacing;
+      if (Math.abs(roadZ) > extent + 0.5) continue;
+      considerIntersection(roadX, roadZ);
+    }
+  }
+
+  // Dense rubble or a front-edge anchor can invalidate every nearby site.
+  // Only then scan the full street lattice so an AT gun is never left facing
+  // the nearest building merely because its original random anchor was poor.
+  if (!candidates.length) {
+    for (let roadX = -extent; roadX <= extent + 0.5; roadX += spacing) {
+      for (let roadZ = -extent; roadZ <= extent + 0.5; roadZ += spacing) {
+        considerIntersection(roadX, roadZ);
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  for (const candidate of candidates) {
+    const gunProbe = {
+      def: { type: 'antiTankGun' },
+      position: candidate,
+    };
+    const approachProbe = {
+      position: {
+        x: candidate.x + candidate.directionX * candidate.laneLength,
+        z: candidate.z + candidate.directionZ * candidate.laneLength,
+      },
+    };
+    if (!scenery.getLineOfFireBlocker(gunProbe, approachProbe, { fullScan: true })) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 /** True if (x,z) lies on the enemy side of the map midpoint. */
@@ -359,6 +520,7 @@ export function spawnClearanceDefenders({
   if (!positions.length) return [];
 
   const units = [];
+  const reservedAtPositions = [];
   let posIdx = 0;
 
   for (const slot of layout) {
@@ -402,7 +564,21 @@ export function spawnClearanceDefenders({
         }
       }
 
-      position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef);
+      const berlinAtAmbush = slot.type === 'antiTankGun'
+        ? findBerlinAtAmbushPosition({
+            anchor: position,
+            def,
+            mapDef,
+            scenery,
+            attackerUnits,
+            reservedPositions: reservedAtPositions,
+          })
+        : null;
+      if (berlinAtAmbush) {
+        position = { x: berlinAtAmbush.x, z: berlinAtAmbush.z };
+      } else {
+        position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef);
+      }
       if (!position) continue;
 
       const unit = new Unit({ def, faction, team, position, scene });
@@ -412,6 +588,11 @@ export function spawnClearanceDefenders({
         radius: anchor.holdRadius ?? 12,
       };
       unit.position.y = sampleTerrainHeight(position.x, position.z, mapDef);
+      if (berlinAtAmbush) {
+        unit._clearanceDeploymentYaw = berlinAtAmbush.yaw;
+        unit.mesh.rotation.y = berlinAtAmbush.yaw;
+        reservedAtPositions.push({ x: position.x, z: position.z });
+      }
       units.push(unit);
     }
   }

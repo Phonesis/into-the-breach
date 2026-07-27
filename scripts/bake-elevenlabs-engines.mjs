@@ -18,12 +18,10 @@ const TMP = join(__dir, '../.tmp-elevenlabs-engines');
 const API = 'https://api.elevenlabs.io/v1/sound-generation';
 
 const API_KEY = process.env.ELEVENLABS_API_KEY?.trim();
-if (!API_KEY) {
-  console.error('Missing ELEVENLABS_API_KEY');
-  process.exit(1);
-}
-
 const force = process.argv.includes('--force');
+const validateOnly = process.argv.includes('--validate');
+const only = process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) ?? null;
+const promptLimit = 450;
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TMP, { recursive: true });
 
@@ -46,6 +44,15 @@ const CATALOG = [
     kind: 'exhaust',
     text:
       'Seamless loop of World War Two tank exhaust rumble only, low frequency growling pulses from muffler stacks, dark continuous engine exhaust bed, outdoor, no music, no voices, not synthetic',
+  },
+  {
+    file: 'engine-tank-pivot-tracks.wav',
+    duration: 4.5,
+    influence: 0.62,
+    loop: true,
+    kind: 'pivot',
+    text:
+      'Seamless loop of a stationary World War Two tracked tank pivoting on the spot, heavy steel tracks grinding and clanking over gritty cobbles and packed earth, sprocket and suspension strain, short metallic track slaps, realistic close outdoor field recording, no cannon, no voices, no music, no cinematic effects',
   },
 
   // —— Armored car / wheeled recon ——
@@ -122,7 +129,16 @@ async function generateSfx(job) {
 function convert(srcPath, destName, kind) {
   const dest = join(OUT, destName);
   const eq =
-    kind === 'exhaust'
+    kind === 'pivot'
+      ? [
+          'highpass=f=90',
+          'lowpass=f=6200',
+          'equalizer=f=180:t=q:w=0.8:g=2.5',
+          'equalizer=f=850:t=q:w=0.9:g=3',
+          'equalizer=f=2100:t=q:w=1.0:g=2',
+          'equalizer=f=4800:t=q:w=1.0:g=-2',
+        ]
+      : kind === 'exhaust'
       ? [
           'highpass=f=40',
           'lowpass=f=800',
@@ -140,11 +156,18 @@ function convert(srcPath, destName, kind) {
           'equalizer=f=4000:t=q:w=1.0:g=-4',
         ];
 
-  // Crossfade loop: reverse fade technique on both ends
+  // ElevenLabs loop:true supplies matched pivot-loop boundaries; keep those
+  // intact so an on-the-spot turn has no periodic dip in its track grind.
+  const edgeFades =
+    kind === 'pivot'
+      ? []
+      : [
+          'afade=t=in:st=0:d=0.08',
+          'areverse,afade=t=in:st=0:d=0.08,areverse',
+        ];
   const af = [
     ...eq,
-    'afade=t=in:st=0:d=0.08',
-    'areverse,afade=t=in:st=0:d=0.08,areverse',
+    ...edgeFades,
     'loudnorm=I=-16:TP=-1.5:LRA=8',
     'alimiter=limit=0.94',
   ].join(',');
@@ -161,15 +184,33 @@ function convert(srcPath, destName, kind) {
 }
 
 async function main() {
-  console.log(`ElevenLabs vehicle engines — ${CATALOG.length} loops`);
+  const jobs = only ? CATALOG.filter((job) => job.file === only) : CATALOG;
+  if (!jobs.length) throw new Error(`No engine job matches --only=${only}`);
+  let invalid = false;
+  for (const job of jobs) {
+    const promptLength = [...job.text].length;
+    const valid = promptLength <= promptLimit && job.duration >= 0.5 && job.duration <= 30;
+    console.log(
+      `${valid ? 'ok' : 'INVALID'} ${job.file}: prompt ${promptLength}/${promptLimit}, ${job.duration}s`
+    );
+    invalid ||= !valid;
+  }
+  if (invalid) process.exit(1);
+  if (validateOnly) return;
+  if (!API_KEY) {
+    console.error('Missing ELEVENLABS_API_KEY');
+    process.exit(1);
+  }
+
+  console.log(`ElevenLabs vehicle engines — ${jobs.length} loops`);
   let ok = 0;
   let skipped = 0;
   let failed = 0;
 
-  for (let i = 0; i < CATALOG.length; i++) {
-    const job = CATALOG[i];
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
     const dest = join(OUT, job.file);
-    const label = `[${i + 1}/${CATALOG.length}] ${job.file}`;
+    const label = `[${i + 1}/${jobs.length}] ${job.file}`;
     if (!force && existsSync(dest)) {
       console.log(`${label} — skip`);
       skipped += 1;

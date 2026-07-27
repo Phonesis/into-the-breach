@@ -149,7 +149,8 @@ function lineBlocked(
 
 /**
  * Grid A* around intact buildings.
- * Returns waypoints including the final destination, or null if unreachable.
+ * Returns waypoints including the final destination, null when the direct line
+ * is already clear, or false when the blocked destination is unreachable.
  * @param {{ allowBuildingId?: string|null }} [options] — building id that may be entered (garrison)
  */
 export function buildBuildingAvoidPath(
@@ -184,6 +185,13 @@ export function buildBuildingAvoidPath(
 
   const { half, cell } = pathGridConfig(mapDef);
   const dims = Math.max(8, Math.ceil((half * 2) / cell));
+  const urbanSearch = mapDef.terrain === 'urban';
+  const maxPathNodes = urbanSearch
+    ? Math.min(dims * dims, 4096)
+    : MAX_PATH_NODES;
+  const maxPathExpansions = urbanSearch
+    ? Math.min(dims * dims * 2, 8192)
+    : MAX_PATH_EXPANSIONS;
   const start = worldToCell(fromX, fromZ, half, cell);
   let goal = worldToCell(toX, toZ, half, cell);
 
@@ -221,7 +229,7 @@ export function buildBuildingAvoidPath(
         }
       }
     }
-    if (!best) return null;
+    if (!best) return false;
     goal = best;
   }
 
@@ -246,7 +254,7 @@ export function buildBuildingAvoidPath(
         }
       }
     }
-    if (!best) return null;
+    if (!best) return false;
     startNode = best;
   }
 
@@ -278,14 +286,14 @@ export function buildBuildingAvoidPath(
 
   let expansions = 0;
   let found = null;
-  while (open.length && expansions < MAX_PATH_EXPANSIONS) {
+  while (open.length && expansions < maxPathExpansions) {
     expansions++;
     open.sort((a, b) => a.f - b.f);
     const current = open.shift();
     const ck = key(current.ix, current.iz);
     if (closed.has(ck)) continue;
     closed.add(ck);
-    if (closed.size > MAX_PATH_NODES) break;
+    if (closed.size > maxPathNodes) break;
 
     if (current.ix === goal.ix && current.iz === goal.iz) {
       found = current;
@@ -315,13 +323,13 @@ export function buildBuildingAvoidPath(
     }
   }
 
-  if (!found) return null;
+  if (!found) return false;
 
   // Reconstruct cell path.
   const cells = [{ ix: found.ix, iz: found.iz }];
   let cur = found;
   let guard = 0;
-  while (guard++ < MAX_PATH_NODES) {
+  while (guard++ < maxPathNodes) {
     const prev = cameFrom.get(key(cur.ix, cur.iz));
     if (!prev) break;
     cells.push(prev);
@@ -461,6 +469,11 @@ export function buildMovePath(
       allowBuildingId,
       allowTrackedBuildingCrush,
     });
+    if (detour === false) {
+      // Never turn an exhausted/blocked search into a direct route through a
+      // façade. Remaining in place lets collision recovery retry later.
+      return [{ x: fromX, z: fromZ }];
+    }
     if (detour?.length) {
       // Merge terrain ridge breaks onto the detour segments.
       return refineWaypoints(detour);
@@ -624,7 +637,8 @@ export function applyObstaclePath(unit, destX, destZ, mapDef, scenery) {
     radius,
     avoidBuildings: true,
     allowBuildingId,
-    preferUrbanRoads: isVehicleUnit(unit.def?.type),
+    preferUrbanRoads:
+      isVehicleUnit(unit.def?.type) || mapDef?.terrain === 'urban',
     allowTrackedBuildingCrush: TANK_TYPES.has(unit.def?.type),
   });
   if (!path?.length) return false;

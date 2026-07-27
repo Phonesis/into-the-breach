@@ -6,7 +6,11 @@ import {
   issueMountOrder,
 } from '../game/TankRiders.js';
 import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
-import { createGroundTarget, isInRange } from '../game/Targeting.js';
+import {
+  canEngageManualOrder,
+  createGroundTarget,
+  isInRange,
+} from '../game/Targeting.js';
 import {
   canGarrisonType,
   getGarrisonBunkerSources,
@@ -552,7 +556,15 @@ export class RTSController {
       if (inRangeOnly) {
         if (!canManualFireOrder(u) || !isInRange(u, target)) continue;
       }
-      u.setAttackOrder(target);
+      const stanceBoundTarget = target.def !== undefined;
+      if (
+        stanceBoundTarget &&
+        u.engagementStance !== 'pursue' &&
+        !canEngageManualOrder(u, target)
+      ) {
+        continue;
+      }
+      if (u.setAttackOrder(target, { respectStance: stanceBoundTarget }) === false) continue;
       fireUnits.push(u);
     }
     if (fireUnits.length === 0) return false;

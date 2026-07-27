@@ -2,6 +2,9 @@
 
 import { isTankType } from '../units/VehicleTypes.js';
 
+/** Small boundary tolerance used by weapon checks to prevent range-edge flicker. */
+export const WEAPON_RANGE_SLACK = 1.02;
+
 /** Enemy or friendly headquarters (not a unit def, not ground fire). */
 export function isHqTarget(target) {
   return !!(target && !target.dead && target.mesh?.userData?.hq === target);
@@ -39,16 +42,16 @@ export function distanceToPoint(unit, point) {
   return Math.sqrt(dx * dx + dz * dz);
 }
 
-export function isInRange(attacker, target, slack = 1.02) {
+export function isInRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   if (!target || target.dead) return false;
   return distanceBetween(attacker, target) <= attacker.def.range * slack;
 }
 
-export function isPointInRange(unit, point, slack = 1.02) {
+export function isPointInRange(unit, point, slack = WEAPON_RANGE_SLACK) {
   return distanceToPoint(unit, point) <= unit.def.range * slack;
 }
 
-export function isInCoaxRange(attacker, target, slack = 1.02) {
+export function isInCoaxRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   const mg = attacker.def?.coaxMG;
   if (!mg || !target || target.dead || target.isGround) return false;
   return distanceBetween(attacker, target) <= mg.range * slack;
