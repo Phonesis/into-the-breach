@@ -44,17 +44,45 @@ export function distanceToPoint(unit, point) {
 
 export function isInRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   if (!target || target.dead) return false;
-  return distanceBetween(attacker, target) <= attacker.def.range * slack;
+  const distance = distanceBetween(attacker, target);
+  const minRange = attacker.def?.minRange ?? 0;
+  return distance <= attacker.def.range * slack && distance >= minRange / slack;
 }
 
 export function isPointInRange(unit, point, slack = WEAPON_RANGE_SLACK) {
-  return distanceToPoint(unit, point) <= unit.def.range * slack;
+  const distance = distanceToPoint(unit, point);
+  const minRange = unit.def?.minRange ?? 0;
+  return distance <= unit.def.range * slack && distance >= minRange / slack;
 }
 
 export function isInCoaxRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   const mg = attacker.def?.coaxMG;
   if (!mg || !target || target.dead || target.isGround) return false;
   return distanceBetween(attacker, target) <= mg.range * slack;
+}
+
+export function isInsideMinimumRange(attacker, target) {
+  const minRange = attacker?.def?.minRange ?? 0;
+  if (minRange <= 0 || !target || target.dead) return false;
+  return distanceBetween(attacker, target) < minRange;
+}
+
+export function isInArtilleryCrewSmallArmsRange(
+  attacker,
+  target,
+  slack = WEAPON_RANGE_SLACK
+) {
+  const weapon = attacker?.def?.crewSmallArms;
+  if (
+    attacker?.def?.type !== 'artillery' ||
+    !weapon ||
+    !target?.def ||
+    target.dead ||
+    target.isGround
+  ) {
+    return false;
+  }
+  return distanceBetween(attacker, target) <= weapon.range * slack;
 }
 
 /** Standoff distance when closing on a target (game meters). */
@@ -100,6 +128,7 @@ export function isSmokeShellReady(unit) {
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;
   if (target.isGround || target.isSmokeShell) return isPointInRange(unit, target.position);
+  if (isInArtilleryCrewSmallArmsRange(unit, target)) return true;
   if (isHqTarget(target)) {
     if (isInRange(unit, target)) return true;
     return isTankType(unit.def?.type) && !!unit.def?.coaxMG && isInCoaxRange(unit, target);

@@ -69,7 +69,13 @@ export function getArmorDamageMultiplier(attackerType, target) {
       return 0;
     }
     if (attackerType === 'sniper') return 0;
-    if (attackerType === 'mortar') return isSuper ? 1.05 : 1.15;
+    // Mortars are high-angle HE — poor vs top armour and largely wasteful vs
+    // dedicated AFVs. Super-heavies shrug them off hardest.
+    if (attackerType === 'mortar') {
+      if (isSuper) return 0.28;
+      if (t === 'tankDestroyer') return 0.36;
+      return 0.4;
+    }
     if (attackerType === 'antiTankGun') return isSuper ? 1.08 : 1.12;
     if (ANTI_ARMOR.has(attackerType)) return isSuper ? 1.25 : 1.4;
     return 1;
@@ -326,7 +332,8 @@ function spawnReinforcementPackage(game, team, types, wave) {
       requestedPosition.x,
       requestedPosition.z,
       game.scenery,
-      game.mapDef
+      game.mapDef,
+      { team, forceAssemblyRear: true }
     );
     if (!position) continue;
     const unit = new Unit({ def, faction, team, position, scene: game.scene });
@@ -577,7 +584,10 @@ export function spawnClearanceDefenders({
       if (berlinAtAmbush) {
         position = { x: berlinAtAmbush.x, z: berlinAtAmbush.z };
       } else {
-        position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef);
+        position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef, {
+          team,
+          forceAssemblyRear: def?.type === 'artillery',
+        });
       }
       if (!position) continue;
 

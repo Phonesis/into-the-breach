@@ -24,6 +24,8 @@ import {
   distanceBetween,
   distanceToPoint,
   isInRange,
+  isInsideMinimumRange,
+  isInArtilleryCrewSmallArmsRange,
   isInCoaxRange,
   isPointInRange,
   isCoaxSoftTarget,
@@ -44,7 +46,7 @@ import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
 import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
 import { getRankDamageMultiplier, recordEnemyKill } from './EliteBehavior.js';
-import { isSceneryTarget } from './SceneryTarget.js';
+import { isSceneryTarget, wrapSceneryTarget } from './SceneryTarget.js';
 import { isDefenseTarget } from './DefenseTarget.js';
 import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
@@ -92,6 +94,134 @@ const SMALL_ARMS_TYPES = new Set([
   'paratrooper',
   'vehicleCrew',
 ]);
+
+/**
+ * In-flight mortar / artillery shells. Aim point is locked at fire time so a
+ * unit that walks away is only hit if still inside the splash when the round lands.
+ * @type {Array<object>}
+ */
+const pendingIndirectImpacts = [];
+/** Bumped on every clear so in-flight shells from a prior match never detonate. */
+let indirectImpactEpoch = 0;
+
+/** Flight time (s) from range — long enough that moving targets can clear the aim point. */
+export function mortarFlightTimeSec(dist) {
+  const d = Number.isFinite(dist) ? dist : 40;
+  return Math.min(2.85, Math.max(1.05, 0.75 + d / 38));
+}
+
+/** Howitzer time-of-flight — slightly longer than mortars at the same distance. */
+export function artilleryFlightTimeSec(dist) {
+  const d = Number.isFinite(dist) ? dist : 60;
+  return Math.min(3.5, Math.max(1.35, 0.95 + d / 40));
+}
+
+/** @deprecated use clearPendingIndirectImpacts — kept for existing Game imports */
+export function clearPendingMortarImpacts() {
+  clearPendingIndirectImpacts();
+}
+
+export function clearPendingIndirectImpacts() {
+  pendingIndirectImpacts.length = 0;
+  indirectImpactEpoch += 1;
+}
+
+/**
+ * Advance in-flight mortar / artillery shells. Call each combat tick.
+ */
+export function updatePendingMortarImpacts(dt) {
+  updatePendingIndirectImpacts(dt);
+}
+
+export function updatePendingIndirectImpacts(dt) {
+  if (!pendingIndirectImpacts.length) return;
+  // Cap so a hitch cannot force every in-flight shell to land in one frame.
+  const step = Math.min(Math.max(0, dt), 0.35);
+  for (let i = pendingIndirectImpacts.length - 1; i >= 0; i--) {
+    const shell = pendingIndirectImpacts[i];
+    if (shell.epoch !== indirectImpactEpoch) {
+      pendingIndirectImpacts.splice(i, 1);
+      continue;
+    }
+    shell.timeLeft -= step;
+    if (shell.timeLeft > 0) continue;
+    pendingIndirectImpacts.splice(i, 1);
+    resolveIndirectShellImpact(shell);
+  }
+}
+
+function resolveIndirectShellImpact(shell) {
+  if (shell.epoch !== indirectImpactEpoch) return;
+  if (!Number.isFinite(shell.x) || !Number.isFinite(shell.z)) return;
+  if (!shell.attacker?.def || shell.attacker.dead) return;
+  // Scenery was torn down with the previous battle.
+  if (shell.scenery && !Array.isArray(shell.scenery.objects)) return;
+
+  const point = { x: shell.x, z: shell.z };
+  const kind = shell.kind === 'artillery' ? 'artillery' : 'mortar';
+  let hitScenery = false;
+
+  // Deliberate building fire: detonate on that structure when the shell arrives.
+  if (shell.sceneryEntry && shell.scenery && !shell.sceneryEntry.destroyed) {
+    const structureDamage =
+      shell.damage * getStructureDamageMultiplier(shell.attacker.def.type);
+    shell.scenery.damageObject(shell.sceneryEntry, structureDamage, {
+      weaponType: shell.attacker.def.type,
+      impact: { x: point.x, z: point.z },
+      impactFrom: shell.from ?? {
+        x: shell.attacker.position.x,
+        z: shell.attacker.position.z,
+      },
+      explosive: true,
+    });
+    hitScenery = true;
+  }
+
+  // Area HE only at the locked aim point — never re-tracks a moved unit.
+  applySplashDamage(
+    shell.attacker,
+    point,
+    shell.damage,
+    shell.allTargets ?? [],
+    shell.coverSystem,
+    shell.scenery,
+    shell.hqs ?? [],
+    shell.options ?? {},
+    shell.livingUnits ?? []
+  );
+
+  const map = shell.attacker?._mapDef || shell.mapDef;
+  const toY = map ? sampleTerrainHeight(point.x, point.z, map) + 1 : 1;
+  const to = { x: point.x, y: toY, z: point.z };
+
+  shell.onFire?.({
+    attacker: shell.attacker,
+    target: null,
+    def: shell.attacker?.def,
+    dist: distanceToPoint(shell.attacker, point),
+    coaxFire: false,
+    paratrooperAtFire: false,
+    killed: hitScenery && !!shell.sceneryEntry?.destroyed,
+    targetIsHQ: false,
+    targetIsScenery: hitScenery,
+    groundImpact: !hitScenery,
+    mortarImpact: kind === 'mortar',
+    artilleryImpact: kind === 'artillery',
+    from: shell.from ?? { x: shell.attacker.position.x, z: shell.attacker.position.z },
+    to,
+  });
+}
+
+function scheduleIndirectImpact(payload) {
+  if (!Number.isFinite(payload?.x) || !Number.isFinite(payload?.z)) return;
+  if (!Number.isFinite(payload?.timeLeft) || payload.timeLeft <= 0) return;
+  pendingIndirectImpacts.push({ ...payload, epoch: indirectImpactEpoch });
+}
+
+/** @deprecated */
+function scheduleMortarImpact(payload) {
+  scheduleIndirectImpact({ ...payload, kind: 'mortar' });
+}
 const CRUSHING_VEHICLE_TYPES = new Set([
   'tank',
   'tankDestroyer',
@@ -105,7 +235,8 @@ const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']
 const CREW_SERVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
-const INDIRECT_FIRE_TYPES = new Set(['artillery', 'mortar']);
+/** High-angle weapons that ignore building LOS for acquire and discharge. */
+const MORTAR_INDIRECT_TYPES = new Set(['mortar']);
 const AUTHORITATIVE_SHELL_LOS_TYPES = new Set([
   'antiTankGun',
   'tank',
@@ -185,24 +316,122 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
 
 function getDirectFireBlocker(attacker, target, scenery, options = {}) {
   if (!scenery?.getLineOfFireBlocker || !attacker || !target) return null;
-  if (INDIRECT_FIRE_TYPES.has(attacker.def?.type)) return null;
+  // Mortars lob over roofs — no building LOS for auto-acquire or fire.
+  if (MORTAR_INDIRECT_TYPES.has(attacker.def?.type)) return null;
+  // Howitzers lob over buildings beyond min-range. Only large obstacles inside
+  // the dead-zone ring can block auto-acquire or force a façade intercept.
+  if (attacker.def?.type === 'artillery') {
+    // Inside the howitzer dead zone the crew uses personal weapons, whose
+    // direct line of fire obeys the normal infantry obstruction test.
+    if (target?.def && isInsideMinimumRange(attacker, target)) {
+      const crewProbe = {
+        position: attacker.position,
+        def: { type: 'machineGun' },
+        _garrisonBunkerId: attacker._garrisonBunkerId,
+      };
+      return scenery.getLineOfFireBlocker(crewProbe, target, options);
+    }
+    if (
+      target.isGround ||
+      isSmokeShellTarget(target) ||
+      isSceneryTarget(target)
+    ) {
+      return null;
+    }
+    return getArtilleryTrajectoryBlocker(attacker, target, scenery);
+  }
   return scenery.getLineOfFireBlocker(attacker, target, options);
 }
 
+/**
+ * First large obstacle an artillery shell cannot clear: only buildings within
+ * the gun's minimum-range radius. Farther masonry is lobbed over (high angle).
+ * Point-blank façades inside that ring still absorb the round immediately.
+ */
+function getArtilleryTrajectoryBlocker(attacker, target, scenery) {
+  if (attacker?.def?.type !== 'artillery' || !scenery) return null;
+  if (!attacker || !target) return null;
+  if (isSmokeShellTarget(target)) return null;
+
+  const minRange = Math.max(0, attacker.def?.minRange ?? 0);
+  const ax = attacker.position.x;
+  const az = attacker.position.z;
+
+  if (typeof scenery.findArtilleryShellBuildingHit !== 'function') {
+    // Fallback: only treat very near buildings as blockers.
+    if (!scenery.getLineOfFireBlocker || minRange <= 0) return null;
+    const probe = {
+      position: attacker.position,
+      def: { type: 'machineGun' },
+      _garrisonBunkerId: attacker._garrisonBunkerId,
+    };
+    const blocker = scenery.getLineOfFireBlocker(probe, target, { fullScan: true });
+    if (!blocker) return null;
+    const d = Math.hypot(blocker.x - ax, blocker.z - az);
+    return d < minRange ? blocker : null;
+  }
+
+  let bx;
+  let bz;
+
+  if (isSceneryTarget(target) && target.entry) {
+    // Ordered building fire: only earlier walls inside min-range intercept.
+    // The ordered building itself is hit immediately if inside min-range;
+    // beyond that, delayed high-arc flight lands on the façade.
+    const aim =
+      scenery.getBuildingSurfaceAimPoint?.(target.entry, ax, az) ?? {
+        x: target.entry.x,
+        z: target.entry.z,
+      };
+    bx = aim.x;
+    bz = aim.z;
+    const earlier = scenery.findArtilleryShellBuildingHit(ax, az, bx, bz, {
+      fullScan: true,
+      skipEntry: target.entry,
+      maxDistanceFromMuzzle: minRange,
+    });
+    if (earlier) return earlier;
+    if (!target.entry.destroyed) {
+      const distToTarget = Math.hypot(bx - ax, bz - az);
+      if (distToTarget < minRange) return target.entry;
+    }
+    return null;
+  }
+
+  bx = target.position?.x ?? target.mesh?.position?.x;
+  bz = target.position?.z ?? target.mesh?.position?.z;
+  if (!Number.isFinite(bx) || !Number.isFinite(bz)) return null;
+
+  return scenery.findArtilleryShellBuildingHit(ax, az, bx, bz, {
+    fullScan: true,
+    maxDistanceFromMuzzle: minRange,
+  });
+}
+
 function shouldAdvanceBlockedPursuit(attacker, target) {
+  // Hard / chasing orders must path around masonry when the aim-line is blocked.
+  // _chasingAttack alone is not enough: it is cleared while the unit stands and
+  // fires, but the player order (_hardAttackOrder) must still repath if the
+  // target slips behind a building.
   return (
     attacker?.attackOrder === target &&
     target?.def !== undefined &&
-    attacker.engagementStance === 'pursue' &&
-    (attacker._stanceBoundAttackOrder || attacker._stancePursuitOrder)
+    (!!attacker._chasingAttack || !!attacker._hardAttackOrder)
   );
 }
 
 function shouldRetainBlockedOrder(attacker, target) {
+  // Keep the ordered target selected while LOS is blocked: stance-bound Hold
+  // waits for a clear shot; hard player/AI click-attacks keep the order and
+  // repath. Without this, attacks were wiped the moment a building sat between
+  // gun and target (common for landed paratroopers on Berlin).
   return (
     attacker?.attackOrder === target &&
     target?.def !== undefined &&
-    (attacker._stanceBoundAttackOrder || attacker._stancePursuitOrder)
+    (attacker._stanceBoundAttackOrder ||
+      attacker._stancePursuitOrder ||
+      attacker._chasingAttack ||
+      attacker._hardAttackOrder)
   );
 }
 
@@ -307,6 +536,9 @@ export function updateCombat(
   scenery = null,
   options = {}
 ) {
+  // Advance bombs already in the air before new shots this tick.
+  updatePendingMortarImpacts(dt);
+
   // Retreat / panic paths need mapDef for Clear Defenses staging rally
   options = { ...options, mapDef };
   const protectPlayerHq = options.protectPlayerHq === true;
@@ -389,7 +621,11 @@ export function updateCombat(
 
     // Validate again immediately before aiming. This prevents a moving target
     // slipping behind a building after an AI order was assigned.
-    if (getDirectFireBlocker(attacker, target, scenery)) {
+    // Artillery is special: masonry on the aim-line still allows discharge so
+    // the shell can detonate on the building (until it falls) rather than
+    // silently refusing to fire.
+    const losBlocker = getDirectFireBlocker(attacker, target, scenery);
+    if (losBlocker && attacker.def?.type !== 'artillery') {
       attacker.target = null;
       if (attacker.attackOrder === target) {
         if (!shouldRetainBlockedOrder(attacker, target)) {
@@ -428,9 +664,15 @@ export function updateCombat(
       : structureTarget
         ? isInRange(attacker, target, 1.05)
         : isInRange(attacker, target);
-    const mainGunCanAim =
-      inMainGunRange &&
-      (!STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget);
+    // AT guns, howitzers, and mortars only aim/fire when not repositioning.
+    const mainGunStationary =
+      !STATIONARY_MAIN_GUN_TYPES.has(attacker.def.type) || !attacker.moveTarget;
+    const mainGunCanAim = inMainGunRange && mainGunStationary;
+    const crewSmallArms = attacker.def?.crewSmallArms;
+    const crewSmallArmsInRange =
+      mainGunStationary &&
+      !inMainGunRange &&
+      isInArtilleryCrewSmallArmsRange(attacker, target);
     const coaxInRange =
       !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
     const independentMg = coaxInRange && hasIndependentMgPivot(attacker.mesh);
@@ -448,7 +690,10 @@ export function updateCombat(
 
     // Reaching weapon range stops an attack advance even while the turret is
     // still traversing; otherwise a slow turret can make the hull overshoot.
-    if (!attacker._userMoveOrder && (mainGunCanAim || coaxInRange)) {
+    if (
+      !attacker._userMoveOrder &&
+      (mainGunCanAim || coaxInRange || crewSmallArmsInRange)
+    ) {
       if (attacker.moveTarget && attacker.attackOrder && !target.isGround) {
         const standoff = getStandoffPosition(attacker, target);
         const reach = getMoveReachConfig(attacker.def.type);
@@ -476,10 +721,34 @@ export function updateCombat(
       ? canIndependentMgBearOnTarget(attacker, target)
       : weaponOnBearing;
     const canFireCoax = coaxInRange && mgOnBearing;
+    const canFireCrewSmallArms = crewSmallArmsInRange;
     const coaxHandlesSoft =
       coaxInRange && isCoaxSoftTarget(target) && attacker.def.coaxMG;
 
-    if (!canFireMain && !canFireCoax) continue;
+    if (!canFireMain && !canFireCoax && !canFireCrewSmallArms) continue;
+
+    if (canFireCrewSmallArms && crewSmallArms && attacker.mgCooldown <= 0) {
+      const firedCrewWeapon = fire(
+        attacker,
+        target,
+        targets,
+        aliveUnits,
+        scene,
+        mapDef,
+        onFire,
+        lx,
+        lz,
+        coverSystem,
+        enemyDamageMult,
+        scenery,
+        hqs,
+        options,
+        { crewSmallArms: true }
+      );
+      if (firedCrewWeapon !== false) {
+        attacker.mgCooldown = 1 / crewSmallArms.attackSpeed;
+      }
+    }
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
       const firedCoax = fire(
@@ -544,6 +813,13 @@ function scalePracticeHqDamage(target, damage, options) {
   return damage * mult;
 }
 
+/** Player howitzers need Auto-fire On; enemy batteries always search. */
+function mayArtilleryAutoAcquire(attacker) {
+  if (attacker?.def?.type !== 'artillery') return true;
+  if (attacker.team !== 'player') return true;
+  return !!attacker.autoFire;
+}
+
 function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
   if (attacker.attackOrder) {
     if (
@@ -587,6 +863,11 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
         return null;
       }
       if (getDirectFireBlocker(attacker, attacker.attackOrder, scenery)) {
+        // Howitzers keep the order and fire into the wall until it collapses;
+        // only then can shells reach the ordered unit beyond.
+        if (attacker.def?.type === 'artillery') {
+          return attacker.attackOrder;
+        }
         if (shouldRetainBlockedOrder(attacker, attacker.attackOrder)) {
           // Keep a direct player order selected while masonry obscures it.
           // Pursue routes around the obstruction; Hold waits for a clear shot.
@@ -602,6 +883,18 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
       return attacker.attackOrder;
     }
     attacker.clearAttackOrder();
+  }
+
+  // Player artillery with Auto-fire Off still lets its exposed crew defend
+  // themselves inside the howitzer's dead zone.
+  if (!mayArtilleryAutoAcquire(attacker)) {
+    const closeCrewThreats = acquireTargets.filter(
+      (target) =>
+        isInsideMinimumRange(attacker, target) &&
+        isInArtilleryCrewSmallArmsRange(attacker, target) &&
+        !getDirectFireBlocker(attacker, target, scenery)
+    );
+    return findNearestEnemyInRange(attacker, closeCrewThreats);
   }
 
   const validAcquireTargets =
@@ -662,8 +955,15 @@ function fire(
   options = {},
   fireOpts = {}
 ) {
-  const coax = fireOpts.coax === true && attacker.def.coaxMG;
-  const mg = attacker.def.coaxMG;
+  const crewSmallArms =
+    fireOpts.crewSmallArms === true ? attacker.def.crewSmallArms : null;
+  // Crew rifles share the auxiliary-small-arms hit path: no shell splash,
+  // shell casing, or howitzer report.
+  const coax = !!crewSmallArms || (fireOpts.coax === true && attacker.def.coaxMG);
+  const mg = crewSmallArms ?? attacker.def.coaxMG;
+  const eventDef = crewSmallArms
+    ? { ...attacker.def, mgWeaponSound: crewSmallArms.weaponSound }
+    : attacker.def;
   const isParatrooper = attacker.def.type === 'paratrooper';
   const paratrooperAt = isParatrooper && isParatrooperAtShot(attacker, target, fireOpts);
   let paratrooperUseMg = false;
@@ -710,23 +1010,27 @@ function fire(
   // than the Berlin spatial broad phase. Acquisition remains indexed for frame
   // rate, but no direct shell may apply damage or emit VFX if a stale/missed
   // bucket would let it cross intact masonry in a long-running or restored map.
+  // Artillery skips this abort — its trajectory intercept detonates on the
+  // first building instead of refusing the shot.
   const authoritativeShellLos =
     !coax && AUTHORITATIVE_SHELL_LOS_TYPES.has(attacker.def?.type);
-  const dischargeBlocker = getDirectFireBlocker(
-    attacker,
-    target,
-    scenery,
-    authoritativeShellLos ? { fullScan: true } : undefined
-  );
-  if (dischargeBlocker) {
-    attacker.target = null;
-    if (attacker.attackOrder === target) {
-      if (!shouldRetainBlockedOrder(attacker, target)) {
-        attacker.clearAttackOrder();
-        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+  if (attacker.def?.type !== 'artillery') {
+    const dischargeBlocker = getDirectFireBlocker(
+      attacker,
+      target,
+      scenery,
+      authoritativeShellLos ? { fullScan: true } : undefined
+    );
+    if (dischargeBlocker) {
+      attacker.target = null;
+      if (attacker.attackOrder === target) {
+        if (!shouldRetainBlockedOrder(attacker, target)) {
+          attacker.clearAttackOrder();
+          if (!attacker._userMoveOrder) attacker.moveTarget = null;
+        }
       }
+      return false;
     }
-    return false;
   }
 
   const dist = isGroundShot
@@ -761,7 +1065,7 @@ function fire(
         onFire({
           attacker,
           target,
-          def: attacker.def,
+          def: eventDef,
           dist,
           coaxFire: coax,
           paratrooperAtFire: paratrooperAt,
@@ -783,13 +1087,76 @@ function fire(
       ? Math.max(0.4, 1 - (dist / weaponRange) * 0.62)
       : Math.max(0.55, 1 - (dist / weaponRange) * 0.35);
   const paceMult = options.paceDamageMult ?? 1;
-  let damage = weaponDamage * falloff * (0.88 + Math.random() * 0.24) * paceMult;
+  const shotScatter = 0.88 + Math.random() * 0.24;
+  let damage = weaponDamage * falloff * shotScatter * paceMult;
   if (!coax && attacker.def.type === 'sniper' && !target.isGround) {
     const rangeRatio = dist / Math.max(attacker.def.range, 1);
     if (rangeRatio > 0.45) damage *= 1.12 + (rangeRatio - 0.45) * 0.35;
   }
   if (attacker.team === 'enemy') damage *= enemyDamageMult;
   damage *= getRankDamageMultiplier(attacker);
+
+  // Artillery: only large obstacles inside min-range absorb the shell
+  // immediately (cannot clear the arc). Buildings farther out are lobbed over.
+  const artilleryBlocker = !coax
+    ? getArtilleryTrajectoryBlocker(attacker, target, scenery)
+    : null;
+  if (artilleryBlocker && scenery) {
+    const aim =
+      scenery.getBuildingSurfaceAimPoint?.(
+        artilleryBlocker,
+        attacker.position.x,
+        attacker.position.z
+      ) ?? { x: artilleryBlocker.x, z: artilleryBlocker.z };
+    impact.x = aim.x;
+    impact.z = aim.z;
+    const interceptDist = distanceToPoint(attacker, impact);
+    let structureDamage = weaponDamage * falloff * shotScatter * paceMult;
+    if (attacker.team === 'enemy') structureDamage *= enemyDamageMult;
+    structureDamage *= getRankDamageMultiplier(attacker);
+    structureDamage *= getStructureDamageMultiplier('artillery');
+    scenery.damageObject(artilleryBlocker, structureDamage, {
+      weaponType: 'artillery',
+      impact: { x: impact.x, z: impact.z },
+      impactFrom: { x: attacker.position.x, z: attacker.position.z },
+      explosive: true,
+    });
+    // Nearby masonry only — no unit splash past the intercept.
+    scenery.damageAt(impact.x, impact.z, 6, structureDamage * 0.4, {
+      weaponType: 'artillery',
+      impact: { x: impact.x, z: impact.z },
+      impactFrom: { x: attacker.position.x, z: attacker.position.z },
+      explosive: true,
+    });
+
+    const showVfx =
+      attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+    if (showVfx && scene) {
+      const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
+      const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
+      const to = { x: impact.x, y: toY, z: impact.z };
+      spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
+    }
+    if (onFire) {
+      onFire({
+        attacker,
+        target: wrapSceneryTarget(artilleryBlocker, scenery) ?? target,
+        def: attacker.def,
+        dist: interceptDist,
+        coaxFire: false,
+        paratrooperAtFire: false,
+        killed: !!artilleryBlocker.destroyed,
+        targetIsHQ: false,
+        targetIsScenery: true,
+        groundImpact: false,
+        // Immediate masonry detonation (including point-blank façade).
+        buildingIntercept: true,
+        from: attacker.position,
+        to: impact,
+      });
+    }
+    return;
+  }
 
   if (attacker.def.antiArmor && !target.isGround && target.def) {
     const useAntiArmorScaling = !isParatrooper || paratrooperAt;
@@ -800,7 +1167,11 @@ function fire(
   }
 
   if (!target.isGround && !isSceneryTarget(target)) {
-    damage *= getIncomingDamageMultiplier(target, coverSystem, attacker);
+    damage *= getIncomingDamageMultiplier(
+      target,
+      coverSystem,
+      coax ? attackerType : attacker
+    );
     damage *= getArmorDamageMultiplier(attackerType, target);
   }
   if (isSceneryTarget(target)) {
@@ -861,6 +1232,87 @@ function fire(
         to: impact,
       });
     }
+    return;
+  }
+
+  // Mortar / artillery: high-arc shells lock the aim point at fire time.
+  // Moving targets only take damage if still inside splash when the round lands.
+  if (!coax && (attacker.def.type === 'mortar' || attacker.def.type === 'artillery')) {
+    const kind = attacker.def.type;
+    let lockX = impact.x;
+    let lockZ = impact.z;
+    // Ordered fire on a building aims at the facing façade so the delayed shell
+    // lands on/near the structure rather than its footprint centre.
+    let sceneryEntry = null;
+    if (isSceneryTarget(target) && target.entry && scenery) {
+      sceneryEntry = target.entry;
+      const aim =
+        scenery.getBuildingSurfaceAimPoint?.(
+          sceneryEntry,
+          attacker.position.x,
+          attacker.position.z
+        ) ?? null;
+      if (aim && Number.isFinite(aim.x) && Number.isFinite(aim.z)) {
+        lockX = aim.x;
+        lockZ = aim.z;
+      }
+    }
+    if (!Number.isFinite(lockX) || !Number.isFinite(lockZ)) return false;
+    const flight =
+      kind === 'artillery' ? artilleryFlightTimeSec(dist) : mortarFlightTimeSec(dist);
+    const muzzle = resolveMuzzleFrom(attacker, map, vfxType, coax);
+    const showVfx =
+      attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+    if (showVfx && scene) {
+      const toY = map ? sampleTerrainHeight(lockX, lockZ, map) + 1 : 1;
+      spawnMuzzleFlash(
+        scene,
+        muzzle.from,
+        { x: lockX, y: toY, z: lockZ },
+        vfxType,
+        { exactOrigin: muzzle.exactOrigin }
+      );
+    }
+    if (onFire) {
+      onFire({
+        attacker,
+        target,
+        def: attacker.def,
+        dist,
+        coaxFire: false,
+        paratrooperAtFire: false,
+        killed: false,
+        targetIsHQ: false,
+        targetIsScenery: !!sceneryEntry,
+        groundImpact: false,
+        mortarLoft: kind === 'mortar',
+        artilleryLoft: kind === 'artillery',
+        from: { x: attacker.position.x, z: attacker.position.z },
+        to: { x: lockX, z: lockZ },
+      });
+    }
+    // Snapshot unit list so a later battle cannot splash into a new roster.
+    scheduleIndirectImpact({
+      kind,
+      timeLeft: flight,
+      x: lockX,
+      z: lockZ,
+      damage,
+      attacker,
+      allTargets: allTargets.slice(),
+      livingUnits: livingUnits.slice(),
+      coverSystem,
+      scenery,
+      sceneryEntry,
+      hqs: hqs.slice(),
+      options: { ...options },
+      mapDef: map,
+      scene,
+      listenerX,
+      listenerZ,
+      onFire,
+      from: { x: attacker.position.x, z: attacker.position.z },
+    });
     return;
   }
 
@@ -984,7 +1436,7 @@ function fire(
     onFire({
       attacker,
       target,
-      def: attacker.def,
+      def: eventDef,
       dist,
       coaxFire: coax,
       paratrooperAtFire: paratrooperAt,
@@ -1127,14 +1579,14 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit.clearAttackOrder();
     } else if (
       unit._stanceBoundAttackOrder &&
+      !unit._hardAttackOrder &&
       unit.engagementStance !== 'pursue' &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
       !canEngageManualOrder(unit, unit.attackOrder)
     ) {
-      // Hold Ground accepts a direct attack only while the target is already
-      // in weapon range. If that target withdraws, drop the order rather than
-      // converting it into movement.
+      // Soft Hold binds only last while the target stays in weapon range.
+      // Hard player click-attacks never take this path.
       unit.clearAttackOrder();
       unit.moveTarget = null;
       unit._movePath = null;
@@ -1148,6 +1600,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !getDirectFireBlocker(unit, unit.attackOrder, options.scenery)
     ) {
       unit.moveTarget = null;
+      // Keep _hardAttackOrder; only the active "currently closing" flag drops
+      // so the unit stands and fires without path thrash.
       unit._chasingAttack = false;
     }
 
@@ -1161,6 +1615,8 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !unit.attackOrder.dead &&
       (!canEngageManualOrder(unit, unit.attackOrder) || blockedPursuit)
     ) {
+      // Resume closing whenever a hard order needs range or a clear lane again.
+      if (unit._hardAttackOrder) unit._chasingAttack = true;
       if (unit.attackOrder.isGround || unit.attackOrder.isSmokeShell) {
         const dest = getGroundFireMoveDest(unit, unit.attackOrder.position);
         if (dest) unit.moveTarget = dest;

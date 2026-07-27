@@ -192,7 +192,8 @@ export class ProductionManager {
       requestedPosition.x,
       requestedPosition.z,
       this.getScenery?.(),
-      mapDef
+      mapDef,
+      { team, forceAssemblyRear: def?.type === 'artillery' }
     );
     if (!position) {
       console.warn('Production spawn skipped: no building-free vehicle position', { team, unitType });

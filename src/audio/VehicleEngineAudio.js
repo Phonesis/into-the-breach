@@ -1,6 +1,7 @@
-/** Looping baked engine and track audio for moving or pivoting vehicles. */
+/** Looping baked engine and track audio for moving or pivoting powered vehicles. */
 
-const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery']);
+const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
+const CREW_MOVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const TRACKED_PIVOT_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
 const BUFFER_KEYS = {
@@ -8,7 +9,6 @@ const BUFFER_KEYS = {
   tankDestroyer: 'engine_tank_destroyer',
   superHeavyTank: 'engine_tank',
   armoredCar: 'engine_armored_car',
-  artillery: 'engine_artillery',
 };
 
 const PROFILES = {
@@ -43,14 +43,6 @@ const PROFILES = {
     filterMin: 420,
     filterMax: 2200,
     exhaustGain: 0.28,
-  },
-  artillery: {
-    rateMin: 0.78,
-    rateMax: 1.12,
-    vol: 0.32,
-    filterMin: 220,
-    filterMax: 900,
-    exhaustGain: 0.3,
   },
 };
 
@@ -277,8 +269,9 @@ export class VehicleEngineAudio {
     const active = [];
 
     for (const u of units) {
-      if (!ENGINE_TYPES.has(u.def?.type) || u.dead) continue;
-      if (!this._buffersFor(u.def.type, u.faction?.id)) continue;
+      const type = u.def?.type;
+      if (CREW_MOVED_GUN_TYPES.has(type) || !ENGINE_TYPES.has(type) || u.dead) continue;
+      if (!this._buffersFor(type, u.faction?.id)) continue;
 
       const { speed, turnRate } = this._measureMotion(u, dt);
       const throttle = Math.min(1, speed / Math.max(u.def.speed * 0.85, 2));
@@ -335,4 +328,4 @@ export class VehicleEngineAudio {
   }
 }
 
-export { ENGINE_TYPES };
+export { CREW_MOVED_GUN_TYPES, ENGINE_TYPES };

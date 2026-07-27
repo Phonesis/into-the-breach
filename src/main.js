@@ -118,6 +118,9 @@ const ui = new UIManager(uiRoot, {
   onArmSmokeShell() {
     game?.armSmokeShell();
   },
+  onToggleArtilleryAutoFire() {
+    game?.toggleSelectedArtilleryAutoFire();
+  },
   onArmSandbags() {
     game?.armSandbagBuild();
   },

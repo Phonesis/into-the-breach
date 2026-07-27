@@ -287,6 +287,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       _reverseMoveOrder: !!u._reverseMoveOrder,
       _chasingAttack: !!u._chasingAttack,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
+      autoFire: !!u.autoFire,
       stancePursuitOrder: !!u._stancePursuitOrder,
       stanceBoundAttackOrder: !!u._stanceBoundAttackOrder,
       manualFireMission: !!u._manualFireMission,
@@ -1199,6 +1200,7 @@ export function applyBattleSave(game, snapshot) {
     unit._reverseMoveOrder = !!uData._reverseMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
     unit.engagementStance = uData.engagementStance === 'pursue' ? 'pursue' : 'hold';
+    unit.autoFire = !!uData.autoFire;
     unit._stancePursuitOrder = !!uData.stancePursuitOrder;
     unit._stanceBoundAttackOrder = !!uData.stanceBoundAttackOrder;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;

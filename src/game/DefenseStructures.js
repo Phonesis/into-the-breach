@@ -562,7 +562,13 @@ export class DefenseStructureManager {
     if (def.antiArmor) {
       damage *= isArmor ? (def.antiArmorMult ?? 1.2) : (def.softMult ?? 0.35);
     } else if (def.weaponType === 'mortar' && ARMOR_TYPES.has(target.def.type)) {
-      damage *= 0.55;
+      // Match unit mortars: weak vs AFVs, weaker still vs super-heavies.
+      if (target.def.type === 'superHeavyTank') damage *= 0.28;
+      else if (target.def.type === 'tank' || target.def.type === 'tankDestroyer') {
+        damage *= target.def.type === 'tankDestroyer' ? 0.36 : 0.4;
+      } else {
+        damage *= 0.55; // armored cars still take meaningful HE
+      }
     } else if (def.softMult && !ARMOR_TYPES.has(target.def.type)) {
       damage *= def.softMult;
     }

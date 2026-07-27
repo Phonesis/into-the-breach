@@ -4,11 +4,13 @@ import {
   isInRange,
   isSmokeShellReady,
 } from './Targeting.js';
-import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
+import { isTankType, isVehicleUnit, isFootSoldier } from '../units/VehicleTypes.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { canSeekCover, resolveSeekCoverDestination } from './CoverSeek.js';
 import { canGarrisonType, getBunkerEnterRange, getGarrisonBunkerSources, isUnitGarrisoned } from './BunkerGarrison.js';
 import { getCoverStatus } from './CoverSystem.js';
+import { MEDIC_AURA_RANGE } from './MedicBehavior.js';
+import { ENGINEER_AURA_RANGE, ENGINEER_HQ_REPAIR_RANGE } from './EngineerBehavior.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
@@ -22,15 +24,38 @@ const AI_PROD_MAX = 13;
 
 /** Prefer sending these types to flip neutral / enemy-held capture zones. */
 const CAPTURE_UNIT_TYPES = new Set(['infantry', 'machineGun', 'armoredCar']);
-const INDIRECT_FIRE_TYPES = new Set(['artillery', 'mortar']);
+/** Mortars (and howitzers beyond min-range) lob over buildings. */
+const MORTAR_INDIRECT_TYPES = new Set(['mortar']);
+/** How far a medic/engineer will travel for a care job (game meters). */
+const SUPPORT_CARE_SEEK_RANGE = 78;
+/** Stand roughly this fraction of the aura from the patient/job. */
+const SUPPORT_CARE_STANDOFF_FRAC = 0.42;
 
 function isVisibleAttackTarget(unit, target, scenery) {
-  if (!target || INDIRECT_FIRE_TYPES.has(unit.def?.type)) return !!target;
+  if (!target) return false;
+  if (MORTAR_INDIRECT_TYPES.has(unit.def?.type)) return true;
+  // Artillery: shells clear buildings outside the min-range ring; only large
+  // obstacles inside that dead zone can block the shot.
+  if (unit.def?.type === 'artillery') {
+    if (typeof scenery?.findArtilleryShellBuildingHit === 'function') {
+      const ax = unit.position.x;
+      const az = unit.position.z;
+      const bx = target.position?.x ?? target.mesh?.position?.x;
+      const bz = target.position?.z ?? target.mesh?.position?.z;
+      if (!Number.isFinite(bx) || !Number.isFinite(bz)) return false;
+      const minRange = Math.max(0, unit.def?.minRange ?? 0);
+      return !scenery.findArtilleryShellBuildingHit(ax, az, bx, bz, {
+        fullScan: true,
+        maxDistanceFromMuzzle: minRange,
+      });
+    }
+    return true;
+  }
   return !scenery?.isLineOfFireBlocked?.(unit, target);
 }
 
 function findNearestVisibleEnemy(unit, targets, scenery) {
-  if (!scenery || INDIRECT_FIRE_TYPES.has(unit.def?.type)) {
+  if (!scenery || MORTAR_INDIRECT_TYPES.has(unit.def?.type)) {
     return findNearestEnemy(unit, targets);
   }
   return findNearestEnemy(
@@ -117,6 +142,8 @@ export function updateAI({
   const frontlinePushChance = 0.35 * d.attackAggressionMult;
   const defenderEngageChance = 0.5 * d.attackAggressionMult;
   const idleAdvanceChance = 0.45 + 0.25 * (d.attackAggressionMult - 1);
+  /** One care job per patient/wreck/HQ this tick so medics/engineers spread out. */
+  const careClaims = new Set();
 
   for (const unit of aliveEnemies) {
     if (
@@ -126,17 +153,21 @@ export function updateAI({
       unit._sandbagSite ||
       unit._trenchDigSite ||
       unit._diggingTrench ||
+      unit._medicTentSite ||
       isUnitGarrisoned(unit)
     ) continue;
 
     if (unit.attackOrder?.isSmokeShell) continue;
 
     if (clearance) {
+      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
       updateClearanceDefender(unit, alivePlayers, game);
       continue;
     }
 
     if (lastStand) {
+      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
+      if (tryAssignMedicFollow(unit, aliveEnemies, mapDef)) continue;
       const coverMove = chooseCoverMove(unit, alivePlayers, game, assault);
       if (coverMove) {
         unit.clearAttackOrder();
@@ -163,6 +194,16 @@ export function updateAI({
     if (enemyStagingPhase) {
       unit.clearAttackOrder();
       unit.moveTarget = null;
+      continue;
+    }
+
+    // Medics and engineers seek wounded / damaged friendlies before combat,
+    // capture, or cover logic pulls them away from aura work.
+    if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) {
+      continue;
+    }
+    // Idle medics (non-combat) shadow their own force instead of charging the enemy.
+    if (tryAssignMedicFollow(unit, aliveEnemies, mapDef)) {
       continue;
     }
 
@@ -268,6 +309,263 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+}
+
+/**
+ * Move medics onto wounded foot troops and engineers onto damaged vehicles,
+ * recoverable wrecks, or a damaged friendly HQ. Healing/repair is aura-based,
+ * so without this the AI only benefits when support units happen to be nearby.
+ * @returns {boolean} true if a care order was issued
+ */
+function tryAssignSupportCare(unit, allies, game, mapDef, careClaims) {
+  const type = unit?.def?.type;
+  if (type !== 'medic' && type !== 'engineer') return false;
+  if (!unit || unit.dead || unit.retreating || unit.surrendered) return false;
+  if (unit._sandbagSite || unit._medicTentSite || unit._trenchDigSite || unit._diggingTrench) {
+    return false;
+  }
+
+  const job =
+    type === 'medic'
+      ? findMedicCareJob(unit, allies, careClaims)
+      : findEngineerCareJob(unit, allies, game, careClaims);
+  if (!job) return false;
+
+  careClaims.add(job.claimKey);
+  unit.clearAttackOrder();
+  unit._chasingAttack = false;
+  unit._hardAttackOrder = false;
+
+  const dist = Math.hypot(unit.position.x - job.x, unit.position.z - job.z);
+  const stayRange = job.stayRange;
+  if (dist <= stayRange) {
+    // Inside the heal/repair aura — hold so the passive tick can work.
+    unit.moveTarget = null;
+    unit._userMoveOrder = false;
+    return true;
+  }
+
+  // Approach the patient/job; small jitter avoids stacking on the same point.
+  const half = (mapDef?.size ?? 120) / 2 - 8;
+  const jitter = 1.4;
+  unit.moveTarget = {
+    x: clamp(job.x + (Math.random() - 0.5) * jitter, -half, half),
+    z: clamp(job.z + (Math.random() - 0.5) * jitter, -half, half),
+  };
+  unit._userMoveOrder = false;
+  return true;
+}
+
+function isMedicHealableAlly(ally, medic) {
+  if (!ally || ally.dead || ally.id === medic.id) return false;
+  if (ally.team !== medic.team) return false;
+  if (ally.surrendered || ally._captureExit) return false;
+  if (!isFootSoldier(ally.def?.type)) return false;
+  // Matches MedicBehavior: medics and engineers are not treated.
+  if (ally.def?.type === 'medic' || ally.def?.type === 'engineer') return false;
+  return ally.hp < ally.maxHp - 0.35;
+}
+
+function findMedicCareJob(medic, allies, careClaims) {
+  let best = null;
+  let bestScore = -Infinity;
+  const stayRange = MEDIC_AURA_RANGE * SUPPORT_CARE_STANDOFF_FRAC;
+
+  for (const ally of allies) {
+    if (!isMedicHealableAlly(ally, medic)) continue;
+    const claimKey = `unit:${ally.id}`;
+    if (careClaims.has(claimKey)) continue;
+
+    const dist = medic.distanceTo(ally);
+    if (dist > SUPPORT_CARE_SEEK_RANGE) continue;
+
+    // Prefer critical casualties and troops already in panic retreat.
+    const wound = 1 - ally.hp / Math.max(1, ally.maxHp);
+    let score = wound * 140 - dist * 0.55;
+    if (ally.retreating) score += 28;
+    if (dist <= MEDIC_AURA_RANGE) score += 18;
+
+    // Soft-avoid patients already covered by another medic in aura.
+    let covered = false;
+    for (const other of allies) {
+      if (other.dead || other.id === medic.id || other.def?.type !== 'medic') continue;
+      if (other.distanceTo(ally) <= MEDIC_AURA_RANGE * 0.9) {
+        covered = true;
+        break;
+      }
+    }
+    if (covered && dist > MEDIC_AURA_RANGE * 0.55) score -= 55;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = {
+        claimKey,
+        x: ally.position.x,
+        z: ally.position.z,
+        stayRange,
+      };
+    }
+  }
+  return best;
+}
+
+function findEngineerCareJob(engineer, allies, game, careClaims) {
+  let best = null;
+  let bestScore = -Infinity;
+  const stayRange = ENGINEER_AURA_RANGE * SUPPORT_CARE_STANDOFF_FRAC;
+
+  for (const ally of allies) {
+    if (!ally || ally.id === engineer.id || ally.team !== engineer.team) continue;
+    if (ally.surrendered || ally._captureExit) continue;
+    if (!isVehicleUnit(ally.def?.type)) continue;
+    if (ally.hp >= ally.maxHp - 0.35 && !ally._mobilityDamaged) continue;
+
+    const claimKey = `unit:${ally.id}`;
+    if (careClaims.has(claimKey)) continue;
+
+    const dist = engineer.distanceTo(ally);
+    if (dist > SUPPORT_CARE_SEEK_RANGE) continue;
+
+    const wound = 1 - ally.hp / Math.max(1, ally.maxHp);
+    let score = wound * 110 - dist * 0.5;
+    if (ally._mobilityDamaged) score += 95;
+    if (isTankType(ally.def?.type)) score += 22;
+    if (ally.def?.type === 'superHeavyTank') score += 12;
+    if (dist <= ENGINEER_AURA_RANGE) score += 16;
+
+    let covered = false;
+    for (const other of allies) {
+      if (other.dead || other.id === engineer.id || other.def?.type !== 'engineer') continue;
+      if (other.distanceTo(ally) <= ENGINEER_AURA_RANGE * 0.9) {
+        covered = true;
+        break;
+      }
+    }
+    if (covered && dist > ENGINEER_AURA_RANGE * 0.55) score -= 50;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = {
+        claimKey,
+        x: ally.position.x,
+        z: ally.position.z,
+        stayRange,
+      };
+    }
+  }
+
+  // Recoverable wrecks live on the full roster (dead, so not in _enemyAlive).
+  const roster = game?.units;
+  if (roster?.length) {
+    for (const wreck of roster) {
+      if (!wreck?._recoverableWreck || wreck.team !== engineer.team) continue;
+      const claimKey = `wreck:${wreck.id}`;
+      if (careClaims.has(claimKey)) continue;
+      const dist = engineer.distanceTo(wreck);
+      if (dist > SUPPORT_CARE_SEEK_RANGE) continue;
+
+      // High priority — hull restarts are scarce and decisive.
+      let score = 210 - dist * 0.45 + (wreck._wreckRepairProgress ?? 0) * 40;
+      if (isTankType(wreck.def?.type)) score += 18;
+      if (dist <= ENGINEER_AURA_RANGE) score += 20;
+
+      let covered = false;
+      for (const other of allies) {
+        if (other.dead || other.id === engineer.id || other.def?.type !== 'engineer') continue;
+        if (other.distanceTo(wreck) <= ENGINEER_AURA_RANGE * 0.9) {
+          covered = true;
+          break;
+        }
+      }
+      if (covered && dist > ENGINEER_AURA_RANGE * 0.55) score -= 45;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = {
+          claimKey,
+          x: wreck.position.x,
+          z: wreck.position.z,
+          stayRange,
+        };
+      }
+    }
+  }
+
+  const hq = game?.hqs?.find((h) => h.team === engineer.team && !h.dead && h.hp < h.maxHp - 0.5);
+  if (hq) {
+    const claimKey = `hq:${hq.team ?? 'enemy'}`;
+    if (!careClaims.has(claimKey)) {
+      const dist = Math.hypot(engineer.position.x - hq.position.x, engineer.position.z - hq.position.z);
+      if (dist <= SUPPORT_CARE_SEEK_RANGE * 1.15) {
+        const wound = 1 - hq.hp / Math.max(1, hq.maxHp);
+        const score = wound * 150 - dist * 0.4 + 40;
+        if (score > bestScore) {
+          bestScore = score;
+          best = {
+            claimKey,
+            x: hq.position.x,
+            z: hq.position.z,
+            stayRange: ENGINEER_HQ_REPAIR_RANGE * SUPPORT_CARE_STANDOFF_FRAC,
+          };
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Keep spare medics with the main body so the next casualty is already nearby.
+ * They do not fight (nonCombat) so advancing on the player is wasted.
+ */
+function tryAssignMedicFollow(unit, allies, mapDef) {
+  if (unit?.def?.type !== 'medic') return false;
+
+  const combatAllies = allies.filter(
+    (a) =>
+      !a.dead &&
+      a.id !== unit.id &&
+      a.team === unit.team &&
+      a.def?.type !== 'medic' &&
+      !a.surrendered &&
+      !a._captureExit
+  );
+  if (!combatAllies.length) return false;
+
+  // Prefer the nearest cluster of non-medic friendlies.
+  let anchor = null;
+  let bestNear = -1;
+  for (const candidate of combatAllies) {
+    let near = 0;
+    for (const other of combatAllies) {
+      if (candidate.distanceTo(other) <= 22) near++;
+    }
+    if (near > bestNear) {
+      bestNear = near;
+      anchor = candidate;
+    }
+  }
+  if (!anchor) anchor = combatAllies[0];
+
+  // Bias slightly behind the ally relative to map center (enemy side of map is
+  // usually positive Z or based on bases — keep it simple: stick close to ally).
+  const dist = unit.distanceTo(anchor);
+  unit.clearAttackOrder();
+  unit._chasingAttack = false;
+  if (dist <= MEDIC_AURA_RANGE * 0.75) {
+    unit.moveTarget = null;
+    unit._userMoveOrder = false;
+    return true;
+  }
+
+  const half = (mapDef?.size ?? 120) / 2 - 8;
+  unit.moveTarget = {
+    x: clamp(anchor.position.x + (Math.random() - 0.5) * 6, -half, half),
+    z: clamp(anchor.position.z + (Math.random() - 0.5) * 6, -half, half),
+  };
+  unit._userMoveOrder = false;
+  return true;
 }
 
 function tryAiSmokeScreen(enemyUnits, playerUnits, game, difficulty) {

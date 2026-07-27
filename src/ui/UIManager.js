@@ -596,6 +596,14 @@ export class UIManager {
                 Cancel fire missions
               </button>
             </div>
+            <div class="arty-autofire-actions hidden" id="arty-autofire-actions">
+              <button type="button" class="btn btn-secondary interactive" id="btn-arty-autofire">
+                Auto-fire: Off
+              </button>
+              <p class="arty-autofire-hint" id="arty-autofire-hint">
+                Off by default — howitzers only fire on ordered missions. Enable to auto-engage enemies in range (shells lob over distant buildings).
+              </p>
+            </div>
             <div class="smoke-shell-actions hidden" id="smoke-shell-actions">
               <button type="button" class="btn btn-secondary interactive" id="btn-smoke-shell">
                 Smoke shell
@@ -1386,6 +1394,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-stance-pursue')?.addEventListener('click', () => {
       this.callbacks.onSetEngagementStance?.('pursue');
+    });
+    this.root.querySelector('#btn-arty-autofire')?.addEventListener('click', () => {
+      this.callbacks.onToggleArtilleryAutoFire?.();
     });
 
     this.root.querySelector('#btn-build-sandbags')?.addEventListener('click', () => {
@@ -3509,6 +3520,39 @@ export class UIManager {
     btn.textContent = n === 1 ? 'Cancel fire mission' : `Cancel fire missions (${n})`;
   }
 
+  updateArtilleryAutoFire(game = null) {
+    const wrap = this.root.querySelector('#arty-autofire-actions');
+    const btn = this.root.querySelector('#btn-arty-autofire');
+    const hint = this.root.querySelector('#arty-autofire-hint');
+    if (!wrap || !btn) return;
+
+    const selected =
+      game?._playerAlive?.filter(
+        (u) => u.selected && !u.dead && u.def?.type === 'artillery'
+      ) ?? [];
+    const hasArtillery = selected.length > 0;
+    wrap.classList.toggle('hidden', !hasArtillery);
+    if (!hasArtillery) return;
+
+    const onCount = selected.filter((u) => u.autoFire).length;
+    const allOn = onCount === selected.length;
+    const allOff = onCount === 0;
+    btn.classList.toggle('armed', allOn);
+    btn.setAttribute('aria-pressed', String(allOn));
+    btn.textContent = allOn
+      ? 'Auto-fire: On'
+      : allOff
+        ? 'Auto-fire: Off'
+        : `Auto-fire: Mixed (${onCount}/${selected.length})`;
+    if (hint) {
+      hint.textContent = allOn
+        ? 'Howitzers auto-engage enemies in range (shells lob over buildings beyond min range). Click to disable.'
+        : allOff
+          ? 'Off by default — only ordered fire missions (attack unit, ground, building, or smoke). Click to enable auto-fire.'
+          : 'Selection has mixed auto-fire settings. Click to turn all selected howitzers on.';
+    }
+  }
+
   updateSmokeShell(game = null) {
     const wrap = this.root.querySelector('#smoke-shell-actions');
     const btn = this.root.querySelector('#btn-smoke-shell');
@@ -3596,6 +3640,7 @@ export class UIManager {
         ${trainHint}
       `;
       this.updateEngineerBuild(game);
+      this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions([]);
       return;
@@ -3623,6 +3668,7 @@ export class UIManager {
         <p class="hq-selected-hint">${detail}</p>
       `;
       this.updateEngineerBuild(game);
+      this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions(units);
       return;
@@ -3635,6 +3681,7 @@ export class UIManager {
       body.innerHTML = `<h3>No selection</h3><p>${emptyHint}</p>`;
       this._renderCoverBanner([]);
       this.updateEngineerBuild(game);
+      this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions(units);
       return;
@@ -3644,9 +3691,15 @@ export class UIManager {
 
     if (units.length === 1) {
       const u = units[0];
-      const rangeLabel = u.def.rangeMeters ? `${u.def.rangeMeters} m` : `${u.def.range * 10} m`;
+      const maxRangeMeters = u.def.rangeMeters ?? u.def.range * 10;
+      const rangeLabel = u.def.minRange
+        ? `${u.def.minRangeMeters ?? u.def.minRange * 10}–${maxRangeMeters} m`
+        : `${maxRangeMeters} m`;
       const coaxLine = u.def.coaxMG
         ? ` · Coax ${u.def.coaxMG.rangeMeters ?? u.def.coaxMG.range * 10} m / ${u.def.coaxMG.damage} dmg`
+        : '';
+      const crewSmallArmsLine = u.def.crewSmallArms
+        ? ` · Crew rifles ${u.def.crewSmallArms.rangeMeters ?? u.def.crewSmallArms.range * 10} m`
         : '';
       const orderLine = u.attackOrder
         ? u.attackOrder.isSmokeShell
@@ -3717,19 +3770,21 @@ export class UIManager {
               : ''
         }${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
-        <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${orderLine}</p>
+        <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${orderLine}</p>
         ${surrenderBlock}
         ${mobilityBlock}
         ${riderBlock}
         ${coverBlock}
       `;
       this.updateEngineerBuild(game);
+      this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions([u]);
       return;
     }
 
     this.updateEngineerBuild(game);
+    this.updateArtilleryAutoFire(game);
     this.updateSmokeShell(game);
     this.updateTankRiderActions(units);
 

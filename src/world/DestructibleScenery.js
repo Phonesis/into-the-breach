@@ -717,6 +717,87 @@ export class DestructibleScenery {
   }
 
   /**
+   * First intact masonry building a howitzer shell would strike on the aim-line
+   * from (ax,az) to (bx,bz). High-angle fire clears distant buildings; only
+   * obstacles within maxDistanceFromMuzzle (typically the gun min-range) count.
+   * Near-muzzle hits still count so a gun parked against a façade cannot "fire
+   * through" that wall.
+   *
+   * @param {number} ax
+   * @param {number} az
+   * @param {number} bx
+   * @param {number} bz
+   * @param {{ skipEntry?: object|null, fullScan?: boolean, maxDistanceFromMuzzle?: number|null }} [options]
+   * @returns {object|null} scenery object, or null if the lane is clear
+   */
+  findArtilleryShellBuildingHit(ax, az, bx, bz, options = {}) {
+    if (!Number.isFinite(ax) || !Number.isFinite(az) || !Number.isFinite(bx) || !Number.isFinite(bz)) {
+      return null;
+    }
+    const skipEntry = options.skipEntry ?? null;
+    const maxDist =
+      options.maxDistanceFromMuzzle != null && Number.isFinite(options.maxDistanceFromMuzzle)
+        ? Math.max(0, options.maxDistanceFromMuzzle)
+        : null;
+    // No dead-zone radius → high-angle shells clear all mid-path masonry.
+    if (maxDist === 0) return null;
+
+    const footprintMargin = 0.5;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const shotLen = Math.hypot(dx, dz);
+    if (shotLen < 0.05) return null;
+
+    // Only need candidates near the muzzle when a max distance is set.
+    const searchRadius = maxDist != null ? maxDist + footprintMargin + 2 : null;
+    const minX = searchRadius != null ? ax - searchRadius : Math.min(ax, bx) - footprintMargin;
+    const maxX = searchRadius != null ? ax + searchRadius : Math.max(ax, bx) + footprintMargin;
+    const minZ = searchRadius != null ? az - searchRadius : Math.min(az, bz) - footprintMargin;
+    const maxZ = searchRadius != null ? az + searchRadius : Math.max(az, bz) + footprintMargin;
+    const candidates =
+      options.fullScan === false || searchRadius != null
+        ? this._objectsInBounds(minX, minZ, maxX, maxZ)
+        : this.objects;
+
+    let nearest = null;
+    let nearestT = Infinity;
+    for (const obj of candidates) {
+      if (!obj || obj === skipEntry) continue;
+      if (!LINE_OF_FIRE_BLOCKING_BUILDING_KINDS.has(obj.kind)) continue;
+      if (obj.lineOfFireReleased) continue;
+      if (obj.destroyed && !obj.group?.parent) continue;
+
+      const entryT = this._segmentBuildingEntryT(ax, az, bx, bz, obj, footprintMargin);
+      if (entryT == null) continue;
+      // Count façade-point-blank hits (entryT ≈ 0). Only skip hits at the far
+      // endpoint so an aim point on a distant open yard does not self-block.
+      if (entryT >= 0.995) continue;
+
+      const hitDist = entryT * shotLen;
+      // Howitzers lob over buildings beyond the minimum-range / dead-zone ring.
+      if (maxDist != null && hitDist >= maxDist) continue;
+
+      // Lateral safety: a building beside the muzzle but not in the shot cone
+      // (spawn-yard neighbour) must not eat every first round.
+      if (entryT <= 0.04) {
+        const aim =
+          this.getBuildingSurfaceAimPoint(obj, ax, az) ?? { x: obj.x, z: obj.z };
+        const toX = aim.x - ax;
+        const toZ = aim.z - az;
+        const toLen = Math.hypot(toX, toZ) || 1;
+        const forward = (toX * dx + toZ * dz) / (toLen * shotLen);
+        if (forward < 0.2) continue;
+      }
+
+      if (entryT < nearestT) {
+        nearestT = entryT;
+        nearest = obj;
+      }
+    }
+    return nearest;
+  }
+
+  /**
    * True if the XZ segment intersects any intact building footprint
    * (expanded by radius). Used by pathfinding for all ground units.
    * @param {{ allowBuildingId?: string|null }} [options]

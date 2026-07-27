@@ -1,8 +1,11 @@
 /**
- * Dedicated ElevenLabs artillery audio for fire-support salvos and shell impacts.
+ * Dedicated ElevenLabs artillery audio for on-map guns, fire-support salvos,
+ * and shell impacts.
  * Writes mono 44.1 kHz WAVs into public/sounds.
  *
  *   npm run bake-elevenlabs-artillery -- --validate
+ *   ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-artillery -- --guns-only --force
+ *   ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-artillery -- --firing-only --force
  *   ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-artillery
  *   ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-artillery -- --force
  */
@@ -18,11 +21,43 @@ const API = 'https://api.elevenlabs.io/v1/sound-generation';
 const PROMPT_LIMIT = 450;
 const force = process.argv.includes('--force');
 const validateOnly = process.argv.includes('--validate');
+const gunsOnly = process.argv.includes('--guns-only');
+const firingOnly = process.argv.includes('--firing-only');
 
 const REAL =
   'authentic World War Two battlefield field recording, outdoor open terrain, powerful natural low end, realistic pressure and distance, no music, no voices, no synthetic sound, no trailer sound design';
+const GUN_REAL =
+  'authentic World War Two outdoor field recording, natural low end, no music, voices, synthetic sound, or trailer design';
 
 const CATALOG = [
+  {
+    file: 'howitzer-105-germany.wav',
+    duration: 2.7,
+    kind: 'gun',
+    influence: 0.72,
+    text: `Close German 10.5 cm leFH 18 howitzer firing one full-charge round, hard muzzle crack and enormous pressure punch, deep cannon body, carriage recoil and brief breech rattle, powerful open-field thunder decay, no shell impact, ${GUN_REAL}`,
+  },
+  {
+    file: 'howitzer-105-usa.wav',
+    duration: 2.7,
+    kind: 'gun',
+    influence: 0.72,
+    text: `Close American 105 mm M2A1 howitzer firing one full-charge round, violent dry muzzle blast and chest-hitting pressure wave, deep cannon boom, recoil and carriage clank, broad outdoor thunder tail, no shell impact, ${GUN_REAL}`,
+  },
+  {
+    file: 'howitzer-25pdr-uk.wav',
+    duration: 2.45,
+    kind: 'gun',
+    influence: 0.74,
+    text: `Close British QF 25-pounder firing one service round, extremely sharp muzzle crack and dense concussive boom, heavy powder blast, recoil and breech clatter, open-country echo and low thunder decay, no shell impact, ${GUN_REAL}`,
+  },
+  {
+    file: 'howitzer-122-russia.wav',
+    duration: 3,
+    kind: 'gun',
+    influence: 0.74,
+    text: `Close Soviet 122 mm M-30 howitzer firing one full-charge round, massive brutal muzzle crack, body-felt pressure blast and very deep cannon roar, heavy carriage recoil and short clank, long natural battlefield thunder, no shell impact, ${GUN_REAL}`,
+  },
   {
     file: 'barrage-salvo-el-01.wav',
     duration: 5.5,
@@ -103,7 +138,7 @@ function validateCatalog() {
       length <= PROMPT_LIMIT &&
       job.duration >= 0.5 &&
       job.duration <= 30 &&
-      ['impact', 'salvo'].includes(job.kind);
+      ['gun', 'impact', 'salvo'].includes(job.kind);
     console.log(
       `${valid ? 'ok' : 'INVALID'} ${job.file}: prompt ${length}/${PROMPT_LIMIT}, ${job.duration}s`
     );
@@ -135,7 +170,26 @@ async function generate(job, apiKey) {
 
 function convert(src, dest, kind) {
   const filter =
-    kind === 'salvo'
+    kind === 'gun'
+      ? [
+          'highpass=f=22',
+          'lowpass=f=12500',
+          'equalizer=f=52:t=q:w=0.7:g=5',
+          'equalizer=f=105:t=q:w=0.85:g=3.5',
+          'equalizer=f=220:t=q:w=0.9:g=1.5',
+          'equalizer=f=2600:t=q:w=1.0:g=1.2',
+          'silenceremove=start_periods=1:start_silence=0.01:start_threshold=-48dB:detection=peak',
+          'areverse',
+          'silenceremove=start_periods=1:start_silence=0.08:start_threshold=-46dB:detection=peak',
+          'areverse',
+          'apad=pad_dur=0.05',
+          'afade=t=in:st=0:d=0.0015',
+          'areverse,afade=t=in:st=0:d=0.1,areverse',
+          'acompressor=threshold=0.12:ratio=2.2:attack=5:release=180:makeup=1.35',
+          'loudnorm=I=-10:TP=-0.35:LRA=8',
+          'alimiter=limit=0.98',
+        ].join(',')
+      : kind === 'salvo'
       ? [
           'highpass=f=28',
           'lowpass=f=10500',
@@ -180,6 +234,31 @@ function convert(src, dest, kind) {
   }
 }
 
+function convertGunVariants(masterPath) {
+  for (const variant of [
+    { suffix: '-c.wav', pitch: 0.99, body: 1.1 },
+    { suffix: '-d.wav', pitch: 1.01, body: 0.55 },
+  ]) {
+    const dest = masterPath.replace(/\.wav$/i, variant.suffix);
+    const tempo = Math.max(0.5, Math.min(2, 1 / variant.pitch));
+    const filter = [
+      `asetrate=44100*${variant.pitch}`,
+      'aresample=44100',
+      `atempo=${tempo.toFixed(5)}`,
+      `equalizer=f=125:t=q:w=0.9:g=${variant.body}`,
+      'alimiter=limit=0.98',
+    ].join(',');
+    const result = spawnSync(
+      'ffmpeg',
+      ['-y', '-i', masterPath, '-ac', '1', '-ar', '44100', '-sample_fmt', 's16', '-af', filter, dest],
+      { encoding: 'utf8' }
+    );
+    if (result.status !== 0) {
+      throw new Error(`ffmpeg variant failed for ${dest}`);
+    }
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -200,10 +279,16 @@ async function main() {
   let skipped = 0;
   let failed = 0;
 
-  for (let i = 0; i < CATALOG.length; i++) {
-    const job = CATALOG[i];
+  const jobs = CATALOG.filter((job) => {
+    if (gunsOnly) return job.kind === 'gun';
+    if (firingOnly) return job.kind === 'gun' || job.kind === 'salvo';
+    return true;
+  });
+
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
     const dest = join(OUT, job.file);
-    const label = `[${i + 1}/${CATALOG.length}] ${job.file}`;
+    const label = `[${i + 1}/${jobs.length}] ${job.file}`;
     if (!force && existsSync(dest)) {
       console.log(`${label} — skip`);
       skipped += 1;
@@ -216,6 +301,7 @@ async function main() {
       const temp = join(TMP, `${job.file}.mp3`);
       writeFileSync(temp, encoded);
       convert(temp, dest, job.kind);
+      if (job.kind === 'gun') convertGunVariants(dest);
       console.log('ok');
       written += 1;
       await sleep(400);

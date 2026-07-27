@@ -30,8 +30,6 @@ const SAMPLE_URLS = {
   engine_tank_destroyer_russia: publicUrl('sounds/engine-tank-destroyer-russia.wav'),
   engine_armored_car: publicUrl('sounds/engine-armored-car.wav'),
   engine_armored_car_exhaust: publicUrl('sounds/engine-armored-car-exhaust.wav'),
-  engine_artillery: publicUrl('sounds/engine-artillery.wav'),
-  engine_artillery_exhaust: publicUrl('sounds/engine-artillery-exhaust.wav'),
   aircraft_flyby: publicUrl('sounds/aircraft-flyby.wav'),
   aircraft_flyby_exhaust: publicUrl('sounds/aircraft-flyby-exhaust.wav'),
   aircraft_flyby_prop: publicUrl('sounds/aircraft-flyby-prop.wav'),
@@ -715,7 +713,7 @@ export class SoundManager {
     // Extra punch on small arms / MG so baked samples read as loud combat fire
     let typeBoost = 1.35;
     if (profile.startsWith('mortar')) typeBoost = 1.2;
-    else if (profile.startsWith('howitzer')) typeBoost = 1.25;
+    else if (profile.startsWith('howitzer')) typeBoost = 1.42;
     else if (profile.startsWith('tank') || profile.startsWith('at')) typeBoost = 1.4;
     else if (profile === 'mg' || profile.startsWith('mg_')) typeBoost = 1.38;
     else if (profile === 'smg' || profile.startsWith('smg_')) typeBoost = 1.36;

@@ -490,7 +490,8 @@ function spawnWaveUnit(game, type) {
     spawn.x,
     spawn.z,
     game.scenery,
-    game.mapDef
+    game.mapDef,
+    { team: ENEMY }
   );
   if (!position) return;
 

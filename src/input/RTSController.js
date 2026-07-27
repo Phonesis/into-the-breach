@@ -24,6 +24,12 @@ const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _groundHit = new THREE.Vector3();
 /** Ground click within this radius of an enemy HQ counts as targeting the HQ. */
 const HQ_ATTACK_PROXIMITY = 18;
+/**
+ * When a mesh pick misses (click on the pavement under a tank, low camera angle,
+ * etc.), ground clicks this close still count as targeting that unit so the
+ * order tracks the living unit instead of becoming a fixed ground-fire mission.
+ */
+const UNIT_ATTACK_PROXIMITY_PAD = 3.8;
 
 export class RTSController {
   constructor({
@@ -278,12 +284,52 @@ export class RTSController {
     return best;
   }
 
+  _unitAttackProximity(unit) {
+    const hitR =
+      unit?.mesh?.userData?.hitRadius ??
+      unit?.def?.hitRadius ??
+      (unit?.def?.type === 'superHeavyTank'
+        ? 3.5
+        : unit?.def?.type === 'tank' || unit?.def?.type === 'tankDestroyer'
+          ? 3.2
+          : unit?.def?.type === 'armoredCar'
+            ? 2.6
+            : 2.2);
+    return hitR + UNIT_ATTACK_PROXIMITY_PAD;
+  }
+
+  /** Nearest living enemy within ground-proximity of (x,z). */
+  _findEnemyUnitNearPoint(x, z) {
+    const player = this.getPlayerTeam();
+    let best = null;
+    let bestScore = Infinity;
+    for (const u of this.getUnits()) {
+      if (u.dead || u.team === player || u.surrendered || u._captureExit || u._dropping) {
+        continue;
+      }
+      const d = Math.hypot(x - u.position.x, z - u.position.z);
+      const reach = this._unitAttackProximity(u);
+      if (d > reach) continue;
+      // Prefer the unit whose ground footprint is closest under the click.
+      if (d < bestScore) {
+        bestScore = d;
+        best = u;
+      }
+    }
+    return best;
+  }
+
+  _pickEnemyUnitNearCursor() {
+    const ground = this._raycastGroundHit();
+    if (!ground) return null;
+    return this._findEnemyUnitNearPoint(ground.point.x, ground.point.z);
+  }
+
   raycastEnemyUnit() {
     const player = this.getPlayerTeam();
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const meshes = this._collectUnitPickMeshes({ enemyOnly: true });
     const hits = this.raycaster.intersectObjects(meshes, false);
-    if (hits.length === 0) return null;
 
     let best = null;
     let bestDist = Infinity;
@@ -297,7 +343,10 @@ export class RTSController {
         best = unit;
       }
     }
-    return best;
+    // Mesh pick can miss when the cursor is on the pavement under a tall
+    // vehicle or slightly beside a foot squad — fall back to ground proximity
+    // so attack orders bind to the unit and follow it when it moves.
+    return best ?? this._pickEnemyUnitNearCursor();
   }
 
   raycastPlayerHQ() {
@@ -469,9 +518,21 @@ export class RTSController {
     const unit = this.raycastEnemyUnit();
     const hq = this.raycastEnemyHQ();
     const structure = this.raycastEnemyBaseBuilding();
+    const groundHit = this._raycastGroundHit();
 
     const combat = [];
-    if (unit) combat.push({ target: unit, dist: this._raycastHitDistance(this._unitPickMesh(unit)) });
+    if (unit) {
+      // Prefer true mesh hit distance; proximity-only picks use ground range so
+      // they still compete fairly with HQ / base-building picks.
+      let dist = this._raycastHitDistance(this._unitPickMesh(unit));
+      if (!Number.isFinite(dist) || dist === Infinity) {
+        dist = groundHit?.distance ?? Math.hypot(
+          (unit.position?.x ?? 0) - (groundHit?.point?.x ?? 0),
+          (unit.position?.z ?? 0) - (groundHit?.point?.z ?? 0)
+        );
+      }
+      combat.push({ target: unit, dist });
+    }
     if (hq) combat.push({ target: hq, dist: this._raycastHitDistance(this._hqPickMesh(hq)) });
     if (structure) {
       combat.push({ target: structure, dist: this._baseBuildingPickDist ?? Infinity });
@@ -479,7 +540,6 @@ export class RTSController {
 
     const nearHq = this._pickEnemyHQNearCursor();
     if (nearHq && !combat.some((c) => c.target === nearHq)) {
-      const groundHit = this._raycastGroundHit();
       combat.push({ target: nearHq, dist: groundHit?.distance ?? Infinity });
     }
 
@@ -556,15 +616,9 @@ export class RTSController {
       if (inRangeOnly) {
         if (!canManualFireOrder(u) || !isInRange(u, target)) continue;
       }
-      const stanceBoundTarget = target.def !== undefined;
-      if (
-        stanceBoundTarget &&
-        u.engagementStance !== 'pursue' &&
-        !canEngageManualOrder(u, target)
-      ) {
-        continue;
-      }
-      if (u.setAttackOrder(target, { respectStance: stanceBoundTarget }) === false) continue;
+      // Explicit player attack orders always bind and close with the target.
+      // Engagement stance only gates idle auto-acquire — never rejects a click.
+      if (u.setAttackOrder(target) === false) continue;
       fireUnits.push(u);
     }
     if (fireUnits.length === 0) return false;
@@ -582,11 +636,15 @@ export class RTSController {
     const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
     if (selected.length === 0) return false;
 
-    this._lastOrderAt = Date.now();
+    const firingUnits = [];
     for (const u of selected) {
-      u.setGroundAttack(createGroundTarget(point.x, point.z));
+      if (u.setGroundAttack(createGroundTarget(point.x, point.z)) !== false) {
+        firingUnits.push(u);
+      }
     }
-    if (this.onOrder) this.onOrder('fire', selected);
+    if (firingUnits.length === 0) return false;
+    this._lastOrderAt = Date.now();
+    if (this.onOrder) this.onOrder('fire', firingUnits);
     return true;
   }
 
@@ -600,14 +658,16 @@ export class RTSController {
     const pick = this._pickShiftFireTarget();
     if (!pick || pick.kind !== 'ground') return false;
 
-    this._lastOrderAt = Date.now();
     selected.sort(
       (a, b) =>
         Math.hypot(a.position.x - pick.point.x, a.position.z - pick.point.z) -
         Math.hypot(b.position.x - pick.point.x, b.position.z - pick.point.z)
     );
-    const firingGun = selected[0];
-    firingGun.setSmokeShellOrder(pick.point.x, pick.point.z);
+    const firingGun = selected.find(
+      (unit) => unit.setSmokeShellOrder(pick.point.x, pick.point.z) !== false
+    );
+    if (!firingGun) return false;
+    this._lastOrderAt = Date.now();
     if (this.onOrder) this.onOrder('smoke', [firingGun]);
     return true;
   }
@@ -619,22 +679,40 @@ export class RTSController {
     const selected = this.getSelectedPlayerUnits().filter((u) => canManualFireOrder(u));
     if (selected.length === 0) return false;
 
+    // Prefer a living combat target (unit / HQ / base) so Shift+fire on an
+    // enemy under the reticle tracks that unit. Without this, a click on the
+    // pavement at their feet becomes a fixed ground mission that keeps
+    // shelling empty dirt after they move. Tablet fire mode uses this path too.
+    const combatTarget = this.raycastAttackTarget();
+    if (combatTarget) {
+      return this.issueAttackOn(combatTarget);
+    }
+
     const pick = this._pickShiftFireTarget();
     if (!pick) return false;
 
-    this._lastOrderAt = Date.now();
     if (pick.kind === 'scenery') {
+      const firingUnits = [];
       for (const u of selected) {
-        u.setAttackOrder(pick.target, { manualFire: true });
+        if (u.setAttackOrder(pick.target, { manualFire: true }) !== false) {
+          firingUnits.push(u);
+        }
       }
-      if (this.onOrder) this.onOrder('attack', selected);
+      if (firingUnits.length === 0) return false;
+      this._lastOrderAt = Date.now();
+      if (this.onOrder) this.onOrder('attack', firingUnits);
       return true;
     }
 
+    const firingUnits = [];
     for (const u of selected) {
-      u.setGroundAttack(createGroundTarget(pick.point.x, pick.point.z));
+      if (u.setGroundAttack(createGroundTarget(pick.point.x, pick.point.z)) !== false) {
+        firingUnits.push(u);
+      }
     }
-    if (this.onOrder) this.onOrder('fire', selected);
+    if (firingUnits.length === 0) return false;
+    this._lastOrderAt = Date.now();
+    if (this.onOrder) this.onOrder('fire', firingUnits);
     return true;
   }
 

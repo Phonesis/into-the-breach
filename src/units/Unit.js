@@ -73,7 +73,14 @@ export class Unit {
     this.corpseTimeLeft = 0;
     this.wreckFire = null;
     this._chasingAttack = false;
+    /** Player/AI click-attack that must not be discarded by Hold stance or brief LOS breaks. */
+    this._hardAttackOrder = false;
     this.engagementStance = 'hold';
+    /**
+     * Player artillery only: when false (default), howitzers do not auto-acquire.
+     * Ordered fire missions still work. Enemy artillery ignores this and always auto-fires.
+     */
+    this.autoFire = false;
     this._stancePursuitOrder = false;
     this._stanceBoundAttackOrder = false;
     this._mgVolley = 0;
@@ -124,7 +131,18 @@ export class Unit {
   }
 
   setAttackOrder(target, { manualFire = false, respectStance = false } = {}) {
-    if (this.surrendered || this._captureExit) return;
+    if (this.surrendered || this._captureExit) return false;
+    if (
+      this.def?.type === 'artillery' &&
+      target?.def === undefined &&
+      (this.def.minRange ?? 0) > 0 &&
+      distanceBetween(this, target) < this.def.minRange
+    ) {
+      return false;
+    }
+    // respectStance is only for rare callers that want Hold Ground to refuse
+    // out-of-range unit orders. Player click-attacks never pass it — they must
+    // always bind and close with the chosen target.
     const stanceBoundTarget = respectStance && target?.def !== undefined;
     if (
       stanceBoundTarget &&
@@ -138,10 +156,15 @@ export class Unit {
     this.target = target;
     this._manualFireMission = manualFire;
     this._stanceBoundAttackOrder = stanceBoundTarget;
+    // Hard orders survive Hold stance and brief LOS blocks until the target
+    // dies or the player cancels. Soft (stance-bound) orders do not.
+    this._hardAttackOrder = !stanceBoundTarget;
+    // Close with the target unless this is a pure Hold-only bind (in-range only).
     this._chasingAttack = !stanceBoundTarget || this.engagementStance === 'pursue';
     this._stancePursuitOrder = false;
     this._userMoveOrder = false;
     this._movePath = null;
+    this._finalMoveGoal = null;
     if (target && !target.dead && this._chasingAttack) {
       this.moveTarget = getStandoffPosition(this, target);
     } else {
@@ -154,10 +177,19 @@ export class Unit {
     this.attackOrder = null;
     this.target = null;
     this._chasingAttack = false;
+    this._hardAttackOrder = false;
     this._stancePursuitOrder = false;
     this._stanceBoundAttackOrder = false;
     this._manualFireMission = false;
     this._bunkerEntryId = null;
+  }
+
+  setAutoFire(on) {
+    if (this.def?.type !== 'artillery') return false;
+    const next = !!on;
+    const changed = this.autoFire !== next;
+    this.autoFire = next;
+    return changed;
   }
 
   setEngagementStance(stance) {
@@ -165,14 +197,27 @@ export class Unit {
     const changed = this.engagementStance !== next;
     this.engagementStance = next;
     if (next === 'hold') {
+      // Hard player/AI click-attacks keep their target regardless of stance —
+      // only idle auto-behaviour is stance-gated.
+      if (this._hardAttackOrder && this.attackOrder && !this.attackOrder.dead) {
+        if (!canEngageManualOrder(this, this.attackOrder)) {
+          this._chasingAttack = true;
+          this.moveTarget = getStandoffPosition(this, this.attackOrder);
+        } else {
+          this._chasingAttack = false;
+          this.moveTarget = null;
+          this._movePath = null;
+          this._finalMoveGoal = null;
+        }
+        return changed;
+      }
       const orderedUnit = this.attackOrder?.def !== undefined;
       const pursuingUnit =
         orderedUnit || (this.target?.def !== undefined && this._chasingAttack);
       if (orderedUnit && !canEngageManualOrder(this, this.attackOrder)) {
         this.clearAttackOrder();
       } else if (orderedUnit) {
-        // Retain an already-in-range target, but convert it to a strict
-        // hold-position engagement which can never restart a chase.
+        // Soft auto-bind: hold position, drop if the target later leaves range.
         this._stancePursuitOrder = false;
         this._stanceBoundAttackOrder = true;
       }
@@ -182,6 +227,8 @@ export class Unit {
         this._finalMoveGoal = null;
         this._chasingAttack = false;
       }
+    } else if (this._hardAttackOrder && this.attackOrder?.def !== undefined) {
+      this._chasingAttack = true;
     } else if (this._stanceBoundAttackOrder && this.attackOrder?.def !== undefined) {
       // A held in-range order becomes a live pursuit order. It remains still
       // while the target is in range and resumes movement if the target pulls away.
@@ -210,30 +257,46 @@ export class Unit {
   }
 
   setGroundAttack(groundTarget) {
-    if (this.surrendered || this._captureExit) return;
+    if (this.surrendered || this._captureExit) return false;
+    if (
+      (this.def?.minRange ?? 0) > 0 &&
+      distanceBetween(this, groundTarget) < this.def.minRange
+    ) {
+      return false;
+    }
     clearRetreat(this);
     this.attackOrder = groundTarget;
     this.target = groundTarget;
     this._stanceBoundAttackOrder = false;
+    this._hardAttackOrder = false;
     this._chasingAttack = false;
     this._userMoveOrder = false;
     this._movePath = null;
     this.moveTarget = null;
+    return true;
   }
 
   setSmokeShellOrder(x, z) {
-    if (this.surrendered || this._captureExit) return;
-    if (this.def?.type !== 'artillery') return;
-    clearRetreat(this);
+    if (this.surrendered || this._captureExit) return false;
+    if (this.def?.type !== 'artillery') return false;
     const target = createSmokeShellTarget(x, z);
+    if (
+      (this.def.minRange ?? 0) > 0 &&
+      distanceBetween(this, target) < this.def.minRange
+    ) {
+      return false;
+    }
+    clearRetreat(this);
     this.attackOrder = target;
     this.target = target;
     this._stanceBoundAttackOrder = false;
+    this._hardAttackOrder = false;
     this._manualFireMission = true;
     this._chasingAttack = false;
     this._userMoveOrder = false;
     this._movePath = null;
     this.moveTarget = null;
+    return true;
   }
 
   /**

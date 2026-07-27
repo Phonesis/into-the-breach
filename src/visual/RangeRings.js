@@ -8,6 +8,7 @@ export class RangeRingManager {
   constructor(scene) {
     this.scene = scene;
     this.rings = new Map();
+    this.minimumRings = new Map();
   }
 
   updateForUnits(units) {
@@ -35,6 +36,26 @@ export class RangeRingManager {
       const y = (unit.position.y ?? 0) + RING_Y_OFFSET;
       ring.position.set(unit.position.x, y, unit.position.z);
       ring.visible = true;
+
+      const minRange = unit.def?.minRange ?? 0;
+      let minimumRing = this.minimumRings.get(unit.id);
+      if (minRange > 0) {
+        if (!minimumRing) {
+          minimumRing = this._createRing(minRange, 0xf59e0b, 'minimumRangeRing');
+          this.scene.add(minimumRing);
+          this.minimumRings.set(unit.id, minimumRing);
+        } else if (Math.abs((minimumRing.userData.range ?? 0) - minRange) > 0.01) {
+          this._removeRing(minimumRing);
+          minimumRing = this._createRing(minRange, 0xf59e0b, 'minimumRangeRing');
+          this.scene.add(minimumRing);
+          this.minimumRings.set(unit.id, minimumRing);
+        }
+        minimumRing.position.set(unit.position.x, y + 0.01, unit.position.z);
+        minimumRing.visible = true;
+      } else if (minimumRing) {
+        this._removeRing(minimumRing);
+        this.minimumRings.delete(unit.id);
+      }
     }
 
     for (const [id, ring] of this.rings) {
@@ -45,13 +66,19 @@ export class RangeRingManager {
         this.rings.delete(id);
       }
     }
+    for (const [id, ring] of this.minimumRings) {
+      if (!activeIds.has(id)) {
+        this._removeRing(ring);
+        this.minimumRings.delete(id);
+      }
+    }
   }
 
-  _createRing(radius) {
+  _createRing(radius, color = 0x4ade80, name = 'rangeRing') {
     const geo = new THREE.RingGeometry(radius * 0.98, radius, SEGMENTS);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
-      color: 0x4ade80,
+      color,
       transparent: true,
       opacity: 0.38,
       side: THREE.DoubleSide,
@@ -59,7 +86,7 @@ export class RangeRingManager {
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = 'rangeRing';
+    mesh.name = name;
     mesh.renderOrder = 20;
     mesh.userData.range = radius;
     // Don't cast/receive shadows that would hide it
@@ -68,12 +95,20 @@ export class RangeRingManager {
     return mesh;
   }
 
+  _removeRing(ring) {
+    this.scene.remove(ring);
+    ring.geometry.dispose();
+    ring.material.dispose();
+  }
+
   clear() {
     for (const [, ring] of this.rings) {
-      this.scene.remove(ring);
-      ring.geometry.dispose();
-      ring.material.dispose();
+      this._removeRing(ring);
     }
     this.rings.clear();
+    for (const [, ring] of this.minimumRings) {
+      this._removeRing(ring);
+    }
+    this.minimumRings.clear();
   }
 }

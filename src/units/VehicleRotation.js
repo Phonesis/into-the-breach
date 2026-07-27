@@ -47,6 +47,28 @@ const MOVING_HULL_TRAVERSE_DEG = {
   tankDestroyer: 24,
   superHeavyTank: 18,
 };
+/**
+ * Hand-cranked carriage traverse for towed AT guns and howitzers (deg/s).
+ * Slow enough that a large swing takes several seconds before the gun can fire.
+ */
+const CREW_CRANK_TRAVERSE_DEG = {
+  antiTankGun: 14,
+  artillery: 9,
+};
+/** Fire only when the barrel is within this arc of the target (radians). */
+const CREW_CRANK_BEARING_TOLERANCE = 0.055; // ~3.1°
+
+export function isCrewCrankedGun(unit) {
+  const type = unit?.def?.type;
+  return type === 'antiTankGun' || type === 'artillery';
+}
+
+function getCrewCrankTraverseRate(unit) {
+  const type = unit?.def?.type;
+  const degreesPerSecond =
+    unit?.def?.gunTraverseDeg ?? CREW_CRANK_TRAVERSE_DEG[type] ?? 12;
+  return Math.max(2, degreesPerSecond) * DEG_TO_RAD;
+}
 
 function getTurretTraverseRate(unit) {
   const degreesPerSecond =
@@ -153,6 +175,16 @@ export function faceUnitTowardTarget(unit, target, dt) {
   // Towed guns / foot teams: hull faces travel direction while repositioning.
   if (unit.moveTarget) return;
 
+  // AT guns and howitzers: crew crank the trail at a constant, deliberate rate.
+  if (isCrewCrankedGun(unit)) {
+    unit.mesh.rotation.y = moveAngleToward(
+      unit.mesh.rotation.y ?? 0,
+      worldYaw,
+      getCrewCrankTraverseRate(unit) * Math.max(0, dt)
+    );
+    return;
+  }
+
   slewHullYaw(unit.mesh, worldYaw, dt, FIXED_WEAPON_SLEW_RATE);
 }
 
@@ -164,6 +196,13 @@ export function canWeaponBearOnTarget(unit, target, maxFixedArc = 0.3) {
     const currentLocalYaw = unit.mesh.userData.turretPivot.rotation.y;
     const tolerance = unit.def?.type === 'armoredCar' ? 0.1 : 0.065;
     return Math.abs(normalizeAngle(desiredLocalYaw - currentLocalYaw)) <= tolerance;
+  }
+  // Towed AT / artillery must face the target — no snap-fire while cranking.
+  if (isCrewCrankedGun(unit)) {
+    return (
+      Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <=
+      CREW_CRANK_BEARING_TOLERANCE
+    );
   }
   if (!unit?._mobilityDamaged) return true;
   return Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <= maxFixedArc;

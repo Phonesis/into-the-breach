@@ -198,7 +198,12 @@ import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
 import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
-import { updateCombat, updateMovement, tickUnitCooldowns } from './Combat.js';
+import {
+  updateCombat,
+  updateMovement,
+  tickUnitCooldowns,
+  clearPendingMortarImpacts,
+} from './Combat.js';
 import { updateAI, resetAI } from './AI.js';
 import {
   containTeamsToDeployZone,
@@ -822,6 +827,9 @@ export class Game {
   }
 
   startGame(factionId, mapId, gameMode = 'campaign', options = {}) {
+    // Drop any in-flight mortar bombs before teardown/rebuild so a delayed
+    // detonation cannot land in the new match's spawn area.
+    clearPendingMortarImpacts();
     sounds.enterBattle();
     sounds.unlock();
     void sounds.primeForCombat();
@@ -1209,6 +1217,7 @@ export class Game {
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._pendingCookOffs = [];
+    clearPendingMortarImpacts();
     this._teardownPending = false;
     this.viewingBattlefield = false;
     this._hudUiAccum = 0;
@@ -1383,7 +1392,10 @@ export class Game {
       ? `${hover.id ?? ''}:${hover.team ?? ''}:${hover.dead ? 1 : 0}`
       : '';
     const unitKey = selected
-      .map((u) => `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}:${u.engagementStance ?? 'hold'}`)
+      .map(
+        (u) =>
+          `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}:${u.engagementStance ?? 'hold'}:${u.def?.type === 'artillery' && u.autoFire ? 'af' : '-'}`
+      )
       .join(',');
     return `${unitKey}|${hoverKey}|${this.selectedHq?.id ?? ''}`;
   }
@@ -1398,6 +1410,22 @@ export class Game {
     sounds.play('order');
     this._selectionUiKey = '';
     this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    return true;
+  }
+
+  /** Toggle Auto-fire on selected player howitzers (off by default). */
+  toggleSelectedArtilleryAutoFire() {
+    const selected = this._playerAlive.filter(
+      (u) => u.selected && !u.dead && !u.surrendered && u.def?.type === 'artillery'
+    );
+    if (!selected.length) return false;
+    const allOn = selected.every((u) => u.autoFire);
+    const next = !allOn;
+    for (const unit of selected) unit.setAutoFire(next);
+    sounds.play('order');
+    this._selectionUiKey = '';
+    this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    this.ui?.updateArtilleryAutoFire?.(this);
     return true;
   }
 
@@ -1613,7 +1641,8 @@ export class Game {
         unit.position.x,
         unit.position.z,
         this.scenery,
-        this.mapDef
+        this.mapDef,
+        { team: unit.team, forceAssemblyRear: unit.def?.type === 'artillery' }
       );
       if (!position) continue;
       unit.position.x = position.x;
@@ -1951,6 +1980,7 @@ export class Game {
     this._endOverlayShown = false;
     this._battleStatsFinalized = false;
     this._pendingEnd = null;
+    clearPendingMortarImpacts();
     this._teardownPending = false;
     this.viewingBattlefield = false;
     this.ui?.hideEndOverlay();
@@ -2981,6 +3011,7 @@ export class Game {
   }
 
   _purgeBattlefieldEffects() {
+    clearPendingMortarImpacts();
     clearHqBurnEffects();
     clearCombatEffects();
     clearWreckEffects();
@@ -3101,6 +3132,11 @@ export class Game {
     paratrooperAtFire,
     handGrenade,
     armorHit,
+    mortarLoft,
+    mortarImpact,
+    artilleryLoft,
+    artilleryImpact,
+    buildingIntercept,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
     if (
@@ -3111,12 +3147,36 @@ export class Game {
       spawnShellCasing(this.scene, attacker);
     }
     const pos = { x: from.x, z: from.z };
-    const factionId = attacker.faction?.id;
+    const factionId = attacker?.faction?.id;
 
     if (handGrenade) {
       sounds.playImpact('explosion', { x: to.x, z: to.z }, 0);
       if (killed && target?.def && isArmoredCombatVehicle(target.def.type)) {
         triggerVehicleKillFx(this, target, to);
+      }
+      return;
+    }
+
+    // Delayed HE detonation (mortar / artillery) at the locked aim point.
+    if (mortarImpact || artilleryImpact) {
+      if (!Number.isFinite(to?.x) || !Number.isFinite(to?.z) || !this.scene || !this.mapDef) {
+        return;
+      }
+      const waterShellImpact = isUrbanCanalWater(to.x, to.z, this.mapDef);
+      if (waterShellImpact) {
+        const calibreScale = THREE.MathUtils.clamp((def?.caliber ?? 81) / 88, 0.68, 1.85);
+        spawnWaterImpact(this.scene, { x: to.x, y: 0.09, z: to.z }, calibreScale);
+      } else if (artilleryImpact) {
+        spawnArtilleryExplosion(this.scene, to, 'artillery', def?.caliber);
+        this._spawnExplosionCrater(to.x, to.z, 'heavy');
+      } else {
+        spawnShellExplosion(this.scene, to, 'medium', def?.caliber);
+        this._spawnExplosionCrater(to.x, to.z, shellCraterTier(def));
+      }
+      if (artilleryImpact) {
+        sounds.playArtilleryImpact({ x: to.x, z: to.z }, { kind: 'artillery', delaySec: 0 });
+      } else {
+        sounds.playImpact('shell', { x: to.x, z: to.z }, 0);
       }
       return;
     }
@@ -3162,24 +3222,26 @@ export class Game {
     } else if (def.type === 'mortar') {
       rate = 0.985 + Math.random() * 0.03;
       volume = 1.05;
-    } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
+    } else if (
+      isTankType(def.type) ||
+      def.type === 'antiTankGun' ||
+      def.type === 'artillery' ||
+      (def.type === 'paratrooper' && paratrooperAtFire)
+    ) {
       rate = 0.99 + Math.random() * 0.02;
       volume = def.type === 'paratrooper' ? 0.92 : volume;
     }
 
     sounds.playWeapon(profile, pos, { rate, volume });
 
-    if (def.type === 'artillery' || def.type === 'mortar') {
-      const delay = Math.min(1.1, 0.25 + dist / (def.type === 'mortar' ? 90 : 100));
-      if (def.type === 'artillery') {
-        sounds.playArtilleryImpact(
-          { x: to.x, z: to.z },
-          { kind: 'artillery', delaySec: delay }
-        );
-      } else {
-        sounds.playImpact('shell', { x: to.x, z: to.z }, delay);
-      }
-    } else if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
+    // Mortar / artillery loft: muzzle report only. Detonation VFX/audio wait for
+    // flight and land at the aim point locked when the shell left the tube.
+    // Building intercepts still resolve impact VFX below (no loft flag).
+    if (mortarLoft || artilleryLoft) {
+      return;
+    }
+
+    if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
       sounds.playImpact(armorHit?.deflected ? 'bullet' : 'tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
