@@ -256,6 +256,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **Mouse wheel / trackpad** | Zoom |
 | **Forces panel** | Click to select; Shift-click to add; each row shows an HP bar |
 | **Field icons** | Toggle (Forces header) — show/hide unit-type icons and **world health bars** above your troops; preference saved in browser |
+| **Capture circles** | Top-left toggle — show/hide capture-zone rings without affecting capture progress; preference saved |
 | **Engage target** | Confirm attack on highlighted enemy (selection panel) |
 | **Launch Battle Now** | Skip quiet-sector staging (countdown banner) |
 | **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
@@ -281,6 +282,8 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 
 Each map has **three** capture points (Assault: frontline pre-held by defender, flanks neutral). **Battle Simulation** and **Tower Defence** have no capture income. Stand friendly units in a zone to flip ownership; income stacks per point held.
 
+The top-left **Capture circles** toggle hides the large world-space rings when they obstruct the view. This is visual only; hidden sectors continue capturing and generating income.
+
 **Quiet sector:** ~**32 s** in Standard / Assault — no combat fire; units must stay inside the HQ staging ring. **Launch Battle Now** on the banner skips the wait. Clear Defenses: **10 s** ceasefire for your staged forces.
 
 **Production:** Up to **4** queued items per HQ. New units spawn in a ring around your HQ. Reinforcements spawned mid-battle receive bonus HP scaling in Standard mode.
@@ -292,6 +295,8 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 ## Combat
 
 - **Explicit attack orders:** RMB on an enemy unit or HQ; or **Engage target** when hovering a highlighted enemy.
+- **Engagement stance:** **Hold Ground** accepts enemy-unit orders only while the target is in range and never chases; **Pursue** accepts out-of-range targets, closes to range, follows withdrawals, and routes around blocking buildings. Switching stance applies immediately. Building attacks may advance in either stance.
+- **Line of sight:** Intact buildings block direct fire. Ordered targets remain selected while obscured; Pursue units maneuver for a clear firing lane, while Hold units wait in place. Mortars, artillery, and barrages fire indirectly over buildings.
 - **Move:** RMB on open ground (clears attack order and fire missions).
 - **Fire mission:** **Shift + LMB** on open ground for bombardment-capable units (see controls).
 - **Defensive fire:** Units engage enemies in range when idle or while executing orders in range.
@@ -299,6 +304,8 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 - **Difficulty:** Enemy damage multiplier varies by Easy / Medium / Hard; Standard also applies a global damage multiplier (~0.58).
 - **Tank coax MG:** Medium and super-heavy tanks fire a **coax/bow machine gun** on a separate cooldown (~520 m) alongside the main gun — effective vs infantry while the cannon reloads.
 - **Anti-tank guns:** Bonus damage vs tanks, super heavies, and armored cars; weak vs infantry. Tank-gun VFX and sounds.
+- **Tracked turning:** Tanks pivot at a deliberate hull-traverse speed and play track/engine audio while turning in place.
+- **Gun feedback:** Accepted attacks use faction radio acknowledgements. Tank cannons have heavier reports; AT and artillery guns eject persistent brass cases beside the weapon.
 - **Armor:** **Rifles and MGs cannot damage tanks or super heavies** (0% — use AT guns, mortars, tank guns, or artillery). **Armored cars** take partial small-arms damage (~32%). Snipers chip armor slightly; mortars and dedicated AT weapons are effective.
 - **Medics & engineers:** Medics heal nearby infantry/MG/mortar/sniper teams and show a **green cross** while healing. Engineers repair nearby vehicles and show a **spanner** while repairing. Both reduce retreat chance for allies in range.
 - **Vehicle damage smoke:** Tanks, armored cars, artillery, and towed guns below **50% HP** trail **black engine smoke** from the rear until repaired or destroyed.
@@ -306,7 +313,7 @@ Each map has **three** capture points (Assault: frontline pre-held by defender, 
 - **Retreat:** Damaged units may fall back to their HQ (**RETREAT** marker) and stop attacking until safe. Clear Defenses defenders do not retreat.
 - **Surrender & prisoners:** Isolated infantry teams (rifles, MG, sniper, mortar, medic, engineer, towed AT crews) under fire may **surrender** (**SURRENDER** banner). They stop fighting and are not fired upon. An **enemy within ~11 m** captures them — they march off the map and count as a loss. A **friendly within ~11 m** **liberates** them back into the fight. Tanks and artillery do not surrender; Clear Defenses dug-in defenders never surrender.
 - **Casualties:** Destroyed units leave **wrecks** — burning tanks, fallen infantry, knocked-out vehicles. Cover and retreat markers are cleared on death.
-- **Tracers:** Short streaks for infantry/MG only; tanks, AT guns, and artillery use impact VFX without bullet tracers.
+- **Tracers:** Short streaks for infantry/MG only; tanks, AT guns, and artillery use calibre-weighted impact VFX without bullet tracers. Barrages and creeping barrages include distant battery reports and heavier explosions.
 
 Heavy hits leave **terrain craters** (capped for performance). Muzzle flashes and impacts are pooled/throttled.
 
@@ -382,7 +389,8 @@ The manual includes a section nav, control reference table, illustrated **unit c
 ## Audio
 
 - `SoundManager` plays **faction-specific** weapon samples from `public/sounds/` when available (`WeaponSounds.js` — rifles, MGs, tank guns, mortars, howitzers per nation).
-- Looping **vehicle engine** audio (main + exhaust layers) for tanks, super heavies, armored cars, and artillery while moving (`VehicleEngineAudio.js`).
+- Looping **vehicle engine** audio (main + exhaust layers) for tanks, super heavies, armored cars, and artillery while moving, plus dedicated track audio for stationary tank pivots (`VehicleEngineAudio.js`).
+- Faction-specific radio acknowledgements confirm accepted attack orders.
 - **Strafe fly-by** spatial audio when a fighter passes overhead (`StrafeAircraftAudio.js`).
 - **Infantry death** one-shots (baked pool under `public/sounds/infantry-death-*.wav`).
 - **Menu music** (`MenuMusic.js`) on title/menu screens; stops on battle deploy.
