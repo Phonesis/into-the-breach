@@ -562,6 +562,46 @@ const mgMortarUK = {
   },
 };
 
+function commanderDef(factionId) {
+  const identity = {
+    germany: {
+      name: 'Kommandeur',
+      designation: 'Wehrmacht Gefechtsstand',
+      description: 'Field commander with four-man close-protection detail.',
+    },
+    usa: {
+      name: 'Commanding Officer',
+      designation: 'U.S. Battalion Command Group',
+      description: 'Battalion commander with four-man headquarters guard.',
+    },
+    uk: {
+      name: 'Commanding Officer',
+      designation: 'British Battalion Headquarters',
+      description: 'Battalion commander with four-man close-protection group.',
+    },
+    russia: {
+      name: 'Komandir',
+      designation: 'Red Army Command Group',
+      description: 'Field commander with four-man headquarters guard.',
+    },
+  }[factionId];
+  return {
+    type: 'commander',
+    ...identity,
+    hp: 92,
+    damage: 10,
+    range: 39,
+    rangeMeters: 400,
+    speed: 4.1,
+    attackSpeed: 1.25,
+    cost: 0,
+    buildTime: 0,
+    hidden: true,
+    strategicSupportUnit: true,
+    weaponSound: `rifle_${factionId}`,
+  };
+}
+
 export const FACTIONS = {
   germany: {
     id: 'germany',
@@ -572,6 +612,7 @@ export const FACTIONS = {
     accent: 0xc8102e,
     enemyDefault: 'usa',
     units: {
+      commander: commanderDef('germany'),
       vehicleCrew: vehicleCrewDef('germany'),
       infantry: {
         type: 'infantry',
@@ -687,6 +728,7 @@ export const FACTIONS = {
     accent: 0xb22234,
     enemyDefault: 'germany',
     units: {
+      commander: commanderDef('usa'),
       vehicleCrew: vehicleCrewDef('usa'),
       infantry: {
         type: 'infantry',
@@ -801,6 +843,7 @@ export const FACTIONS = {
     accent: 0xc8102e,
     enemyDefault: 'germany',
     units: {
+      commander: commanderDef('uk'),
       vehicleCrew: vehicleCrewDef('uk'),
       infantry: {
         type: 'infantry',
@@ -916,6 +959,7 @@ export const FACTIONS = {
     accent: 0xcc0000,
     enemyDefault: 'germany',
     units: {
+      commander: commanderDef('russia'),
       vehicleCrew: vehicleCrewDef('russia'),
       infantry: {
         type: 'infantry',

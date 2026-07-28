@@ -14,6 +14,7 @@ const INFANTRY_WALK_TYPES = new Set([
   'mortar',
   'sniper',
   'vehicleCrew',
+  'commander',
 ]);
 
 const WEAPON_POSE_TYPES = new Set([
@@ -22,6 +23,7 @@ const WEAPON_POSE_TYPES = new Set([
   'sniper',
   'engineer',
   'vehicleCrew',
+  'commander',
 ]);
 const PRONE_FIRE_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
 
@@ -36,7 +38,7 @@ export function isUnitVisuallyProne(unit) {
   });
   return maxBlend >= 0.45;
 }
-const TACTICAL_FORMATION_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
+const TACTICAL_FORMATION_TYPES = new Set(['infantry', 'paratrooper', 'engineer', 'commander']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'infantry',
@@ -46,6 +48,7 @@ const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'machineGun',
   'mortar',
   'vehicleCrew',
+  'commander',
 ]);
 
 const _muzzleTip = new THREE.Vector3();

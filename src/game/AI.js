@@ -115,8 +115,11 @@ export function updateAI({
     tryProduce(production, enemyResources, spendEnemy, assault, d);
   }
 
-  if (!clearance && !enemyStagingPhase) {
-    updateAISupport(enemyFireSupport, playerUnits, dt, d);
+  // Off-map support (including Clear Defenses — same toolkit as the player).
+  if (!enemyStagingPhase) {
+    updateAISupport(enemyFireSupport, playerUnits, dt, d, {
+      clearance: !!clearance,
+    });
   }
 
   if (game && !enemyStagingPhase) {
@@ -146,6 +149,7 @@ export function updateAI({
   const careClaims = new Set();
 
   for (const unit of aliveEnemies) {
+    if (unit.def?.type === 'commander') continue;
     if (
       unit.retreating ||
       unit.surrendered ||
@@ -161,7 +165,12 @@ export function updateAI({
 
     if (clearance) {
       if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
-      updateClearanceDefender(unit, alivePlayers, game);
+      // Enemy may be the garrison or the assault force depending on player role.
+      if (game?.clearanceRole === 'defend') {
+        updateClearanceAttacker(unit, alivePlayers, aliveEnemies, mapDef, d, game);
+      } else {
+        updateClearanceDefender(unit, alivePlayers, game);
+      }
       continue;
     }
 
@@ -717,27 +726,53 @@ function pickFriendlyBunker(unit, sources) {
   return best;
 }
 
-function updateAISupport(support, players, dt, difficulty) {
+function updateAISupport(support, players, dt, difficulty, options = {}) {
   if (!support || players.length < 2) return;
   aiSupportTimer -= dt;
   if (aiSupportTimer > 0) return;
-  aiSupportTimer = 24 + Math.random() * 18;
+  // Slightly snappier on Clear Defenses so AI uses the same tools as the player.
+  aiSupportTimer = options.clearance
+    ? 18 + Math.random() * 14
+    : 24 + Math.random() * 18;
 
   const target = findSupportTarget(players);
   if (!target) return;
 
-  const barrageChance = Math.min(0.78, 0.48 * (difficulty.attackAggressionMult ?? 1));
-  if (support.isReady('barrage') && target.count >= 3 && Math.random() < barrageChance) {
+  const aggression = difficulty.attackAggressionMult ?? 1;
+  const barrageChance = Math.min(0.78, 0.48 * aggression);
+  const minCluster = options.clearance ? 2 : 3;
+
+  if (
+    support.isReady('strafe') &&
+    target.count >= minCluster &&
+    Math.random() < Math.min(0.55, 0.32 * aggression)
+  ) {
+    support.tryAiStrike('strafe', target.x, target.z);
+    return;
+  }
+
+  if (support.isReady('barrage') && target.count >= minCluster && Math.random() < barrageChance) {
     support.tryAiStrike('barrage', target.x, target.z);
     return;
   }
 
-  if (support.isReady('creepingBarrage') && target.count >= 4 && Math.random() < barrageChance * 0.55) {
+  if (
+    support.isReady('creepingBarrage') &&
+    target.count >= (options.clearance ? 3 : 4) &&
+    Math.random() < barrageChance * 0.55
+  ) {
     support.tryAiStrike('creepingBarrage', target.x, target.z);
     return;
   }
 
-  if (support.isReady('airborneDrop') && players.length >= 4 && Math.random() < 0.42) {
+  // Airborne: once per side on Clear Defenses (isReady already enforces that).
+  const airborneMin = options.clearance ? 3 : 4;
+  const airborneChance = options.clearance ? 0.5 : 0.42;
+  if (
+    support.isReady('airborneDrop') &&
+    players.length >= airborneMin &&
+    Math.random() < airborneChance
+  ) {
     support.tryAiStrike('airborneDrop', target.x, target.z);
   }
 }
@@ -1093,6 +1128,127 @@ function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) 
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+}
+
+/**
+ * AI assault force for Clear Defenses when the player holds the line.
+ * Uses the battle plan on game.clearanceAttackPlan and per-unit roles.
+ */
+function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game = null) {
+  const d = difficulty ?? { attackAggressionMult: 1 };
+  const plan = game?.clearanceAttackPlan ?? {
+    infantryAdvance: 0.55,
+    armorFollow: 0.55,
+    supportHold: 0.5,
+    flankBias: 0,
+  };
+  const role = unit.clearanceAttackRole ?? roleFromUnitType(unit.def?.type);
+  const focus = pickAttackTarget(unit, players, game?.scenery);
+  const aggression = d.attackAggressionMult ?? 1;
+
+  // Support weapons (arty, mortar, AT): engage at range, stay slightly back.
+  if (role === 'support') {
+    if (focus) {
+      unit.setAttackOrder(focus);
+      if (!isInRange(unit, focus)) {
+        // Close only enough to enter range; do not charge the trenches.
+        if (Math.random() < plan.supportHold * 0.35) {
+          unit.moveTarget = getStandoffPosition(unit, focus);
+        }
+      } else {
+        unit.moveTarget = null;
+      }
+      return;
+    }
+    // Bound forward slowly toward the average enemy when idle.
+    if (players.length && Math.random() < 0.28 * aggression) {
+      const center = averagePosition(players);
+      const half = mapDef.size / 2 - 8;
+      unit.clearAttackOrder();
+      unit.moveTarget = {
+        x: clamp(center.x + (Math.random() - 0.5) * 18, -half, half),
+        z: clamp(center.z + (Math.random() - 0.5) * 18, -half, half),
+      };
+    }
+    return;
+  }
+
+  // Armor: spearhead or follow infantry depending on plan.
+  if (role === 'armor') {
+    if (focus) {
+      unit.setAttackOrder(focus);
+      if (!isInRange(unit, focus)) {
+        unit.moveTarget = getStandoffPosition(unit, focus);
+      }
+      return;
+    }
+    if (Math.random() < plan.armorFollow * 0.4 * aggression) {
+      unit.clearAttackOrder();
+      unit.moveTarget = getClearanceAssaultAdvancePoint(mapDef, players, plan, unit);
+    }
+    return;
+  }
+
+  // Line infantry / engineers: main advance.
+  if (focus) {
+    unit.setAttackOrder(focus);
+    if (!isInRange(unit, focus)) {
+      unit.moveTarget = getStandoffPosition(unit, focus);
+    }
+    return;
+  }
+
+  if (unit.attackOrder && !unit.attackOrder.dead) return;
+
+  const nearest = findNearestVisibleEnemy(unit, players, game?.scenery);
+  if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.6) {
+    unit.setAttackOrder(nearest);
+    unit.moveTarget = getStandoffPosition(unit, nearest);
+    return;
+  }
+
+  if (players.length && Math.random() < plan.infantryAdvance * 0.38 * aggression) {
+    unit.clearAttackOrder();
+    unit.moveTarget = getClearanceAssaultAdvancePoint(mapDef, players, plan, unit);
+  }
+}
+
+function roleFromUnitType(type) {
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') {
+    return 'armor';
+  }
+  if (
+    type === 'artillery' ||
+    type === 'mortar' ||
+    type === 'antiTankGun' ||
+    type === 'sniper' ||
+    type === 'machineGun'
+  ) {
+    return 'support';
+  }
+  return 'line';
+}
+
+function getClearanceAssaultAdvancePoint(mapDef, players, plan, unit) {
+  const center = players.length ? averagePosition(players) : { x: 0, z: 0 };
+  const half = mapDef.size / 2 - 8;
+  let flank = 0;
+  if (plan.flankBias) {
+    // Deterministic side per unit id so a hook stays coherent.
+    const id = unit?.id ?? 0;
+    flank = (id % 2 === 0 ? 1 : -1) * plan.flankBias * (14 + Math.random() * 10);
+  }
+  const pb = mapDef.playerBase;
+  const eb = mapDef.enemyBase ?? { x: -pb.x, z: -pb.z };
+  const ax = eb.x - pb.x;
+  const az = eb.z - pb.z;
+  const len = Math.hypot(ax, az) || 1;
+  const lx = -az / len;
+  const lz = ax / len;
+  return {
+    x: clamp(center.x + lx * flank + (Math.random() - 0.5) * 10, -half, half),
+    z: clamp(center.z + lz * flank + (Math.random() - 0.5) * 10, -half, half),
+  };
 }
 
 function updateClearanceDefender(unit, players, game = null) {

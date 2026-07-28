@@ -294,6 +294,7 @@ The top-left **Capture circles** toggle hides the large world-space rings when t
 
 ## Combat
 
+- **Field commanders:** Every side in every mode receives a faction-specific officer with four bodyguards at its rear map edge. Commanders have a permanent CMD/star marker; enemy AI keeps its commander behind the front. Killing a commander disables that side’s off-map fire support, and for the player also cancels/disables General Orders, with a faction-specific loss announcement. Commanders do not alter ordinary army-wipe or Tower Defence wave-clear conditions.
 - **Explicit attack orders:** RMB on an enemy unit or HQ; or **Engage target** when hovering a highlighted enemy.
 - **Engagement stance:** **Hold Ground** accepts enemy-unit orders only while the target is in range and never chases; **Pursue** accepts out-of-range targets, closes to range, follows withdrawals, and routes around blocking buildings. Switching stance applies immediately. Building attacks may advance in either stance.
 - **Line of sight:** Intact buildings block direct fire. Ordered targets remain selected while obscured; Pursue units maneuver for a clear firing lane, while Hold units wait in place. Mortars, artillery, and barrages fire indirectly over buildings.
@@ -338,6 +339,8 @@ Bonus applies only while the unit stays in the zone. **Shift + LMB** on scenery 
 ## Fire support
 
 One-use tactical strikes (HUD). **No friendly fire** on your own units/HQ.
+
+Fire support requires a living field commander. If the commander is killed, pending targeting is cancelled and no further strikes can be called; the same rule gates enemy AI support.
 
 | Strike | Cooldown | Effect |
 |--------|----------|--------|

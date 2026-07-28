@@ -160,6 +160,21 @@ export function slewTurretToward(
   );
 }
 
+/** Casemate SPGs (Jagdpanther, SU-100): main gun is fixed to the hull. */
+export function isCasemateGunVehicle(unit) {
+  const type = unit?.def?.type;
+  if (type !== 'tankDestroyer') return false;
+  return !hasTurretPivot(unit?.mesh);
+}
+
+function getTrackedHullCombatTraverseRate(unit) {
+  const type = unit?.def?.type;
+  // Prefer explicit combat hull rate; fall back to stationary track pivot table.
+  const degreesPerSecond =
+    unit?.def?.hullTraverseDeg ?? STATIONARY_HULL_TRAVERSE_DEG[type] ?? 14;
+  return Math.max(4, degreesPerSecond) * DEG_TO_RAD;
+}
+
 export function faceUnitTowardTarget(unit, target, dt) {
   const worldYaw = getTargetWorldYaw(unit, target);
   if (worldYaw == null) return;
@@ -185,6 +200,18 @@ export function faceUnitTowardTarget(unit, target, dt) {
     return;
   }
 
+  // Casemate tank destroyers: pivot the whole hull on tracks at a constant
+  // rate (same class of motion as stationary tank turns). Never use lerp hull
+  // slew — that finished a 180° swing in about a second and looked like a snap.
+  if (isCasemateGunVehicle(unit)) {
+    unit.mesh.rotation.y = moveAngleToward(
+      unit.mesh.rotation.y ?? 0,
+      worldYaw,
+      getTrackedHullCombatTraverseRate(unit) * Math.max(0, dt)
+    );
+    return;
+  }
+
   slewHullYaw(unit.mesh, worldYaw, dt, FIXED_WEAPON_SLEW_RATE);
 }
 
@@ -202,6 +229,12 @@ export function canWeaponBearOnTarget(unit, target, maxFixedArc = 0.3) {
     return (
       Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <=
       CREW_CRANK_BEARING_TOLERANCE
+    );
+  }
+  // Casemate TDs: gun is welded to the hull — no fire until tracks finish the swing.
+  if (isCasemateGunVehicle(unit)) {
+    return (
+      Math.abs(normalizeAngle(worldYaw - (unit.mesh.rotation.y ?? 0))) <= 0.065
     );
   }
   if (!unit?._mobilityDamaged) return true;

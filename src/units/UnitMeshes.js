@@ -3,6 +3,7 @@ import {
   mat,
   buildFactionVehicle,
   buildFactionInfantry,
+  buildFactionCommander,
   buildFactionVehicleCrew,
   buildFactionParatrooper,
   buildFactionMG,
@@ -36,11 +37,14 @@ const INFANTRY_TYPES = new Set([
   'medic',
   'engineer',
   'vehicleCrew',
+  'commander',
 ]);
 
 const CORPSE_FALL_SEC = 0.45;
 /** Chance a blast kill produces flying limbs (not every explosion death). */
 const EXPLOSION_GIB_CHANCE = 0.48;
+/** Gravity for ballistic corpse throws (world units / s²). */
+const CORPSE_THROW_GRAVITY = 16.5;
 /** @type {Set<THREE.Group>} */
 const activeCorpseAnchors = new Set();
 /** @type {Set<THREE.Object3D>} */
@@ -92,6 +96,9 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   } else if (type === 'infantry') {
     buildFactionInfantry(group, body, dark, factionId);
     built = true;
+  } else if (type === 'commander') {
+    buildFactionCommander(group, body, dark, factionId);
+    built = true;
   } else if (type === 'vehicleCrew') {
     buildFactionVehicleCrew(group, body, dark, factionId);
     built = true;
@@ -132,6 +139,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     mortar: 2.2,
     medic: 1.4,
     engineer: 2.25,
+    commander: 2.55,
     armoredCar: group.userData.hitRadius ?? 2.6,
     tankDestroyer: group.userData.hitRadius ?? 3.0,
     tank: group.userData.hitRadius ?? 3.2,
@@ -151,6 +159,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     armoredCar: 0.85,
     artillery: 0.95,
     antiTankGun: 0.85,
+    commander: 0.85,
     machineGun: 0.55,
     mortar: 0.65,
     medic: 0.52,
@@ -390,13 +399,20 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
   const scene = unit.mesh?.parent;
   if (!scene || !unit.mesh) return null;
   const crushed = unit._deathCause === 'crush';
+  const blastThrow =
+    animateFall && !crushed && unit._deathCause === 'explosion';
 
   const worldPos = new THREE.Vector3(localOffset.x, localOffset.y, localOffset.z);
   unit.mesh.localToWorld(worldPos);
 
   // Crushed bodies already lie flat under tracks — no pop-up fall animation.
+  // Blast throws re-sample ground on landing (body may travel horizontally).
   const groundY = sampleTerrainHeight(worldPos.x, worldPos.z, unit._mapDef) + (crushed ? 0.008 : 0.02);
-  const startY = animateFall && !crushed ? worldPos.y + 0.52 : groundY;
+  const startY = blastThrow
+    ? worldPos.y + 0.55 + Math.random() * 0.35
+    : animateFall && !crushed
+      ? worldPos.y + 0.52
+      : groundY;
 
   const anchor = new THREE.Group();
   anchor.name = 'detachedCorpse';
@@ -412,6 +428,7 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     0;
 
   let body;
+  let bloodPool = null;
   if (crushed) {
     body = buildCrushedSoldierBody(factionId, {
       ghillie: unitType === 'sniper',
@@ -424,7 +441,12 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     body = buildFallenSoldierBody(factionId, { ghillie: unitType === 'sniper' });
     body.rotation.y = rotY + (Math.random() - 0.5) * 1.2;
     body.rotation.z = (Math.random() - 0.5) * 0.15;
-    addBloodPoolAt(anchor, 0, 0, 0.3 + Math.random() * 0.16, squadIndex);
+    bloodPool = new THREE.Group();
+    bloodPool.name = 'bloodPool';
+    addBloodPoolAt(bloodPool, 0, 0, 0.3 + Math.random() * 0.16, squadIndex);
+    // Hide pool until the thrown body hits dirt so it does not float mid-air.
+    if (blastThrow) bloodPool.visible = false;
+    anchor.add(bloodPool);
   }
   anchor.add(body);
 
@@ -433,7 +455,49 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     ? trackYaw + (Math.random() - 0.5) * 0.35
     : rotY + (Math.random() - 0.5) * 0.4;
 
-  if (animateFall && !crushed) {
+  if (blastThrow) {
+    // Fling away from the blast origin (shell impact / HE epicentre).
+    let dx = 0;
+    let dz = 0;
+    const origin = unit._deathBlastOrigin;
+    if (origin && Number.isFinite(origin.x) && Number.isFinite(origin.z)) {
+      dx = worldPos.x - origin.x;
+      dz = worldPos.z - origin.z;
+    }
+    let len = Math.hypot(dx, dz);
+    if (len < 0.15) {
+      const ang = Math.random() * Math.PI * 2;
+      dx = Math.cos(ang);
+      dz = Math.sin(ang);
+      len = 1;
+    } else {
+      dx /= len;
+      dz /= len;
+    }
+    // Lateral scatter so squadmates don't all fly the same arc.
+    const perpX = -dz;
+    const perpZ = dx;
+    const side = (Math.random() - 0.5) * 1.15;
+    const outSpeed = 3.2 + Math.random() * 5.8;
+    const upSpeed = 5.5 + Math.random() * 7.5;
+
+    anchor.rotation.x = (Math.random() - 0.5) * Math.PI;
+    anchor.rotation.z = (Math.random() - 0.5) * Math.PI;
+    anchor.userData.blastFlight = {
+      vx: dx * outSpeed + perpX * side * outSpeed * 0.45,
+      vy: upSpeed,
+      vz: dz * outSpeed + perpZ * side * outSpeed * 0.45,
+      spinX: (Math.random() - 0.5) * 14,
+      spinY: (Math.random() - 0.5) * 11,
+      spinZ: (Math.random() - 0.5) * 14,
+      groundY,
+      mapDef: unit._mapDef,
+      settled: false,
+      bounceLeft: 1,
+      bloodPool,
+    };
+    activeCorpseAnchors.add(anchor);
+  } else if (animateFall && !crushed) {
     anchor.rotation.x = -1.05;
     anchor.userData.fall = {
       elapsed: 0,
@@ -709,13 +773,64 @@ export function updateInfantryGibs(dt) {
   }
 }
 
-/** Animate fallen bodies dropping to the ground at their death location. */
+/** Animate fallen bodies dropping / being thrown after death. */
 export function updateDetachedCorpseFalls(dt) {
   if (dt <= 0) return;
   updateInfantryGibs(dt);
+  const finished = [];
   for (const anchor of activeCorpseAnchors) {
+    const flight = anchor.userData.blastFlight;
+    if (flight && !flight.settled) {
+      flight.vy -= CORPSE_THROW_GRAVITY * dt;
+      anchor.position.x += flight.vx * dt;
+      anchor.position.y += flight.vy * dt;
+      anchor.position.z += flight.vz * dt;
+      anchor.rotation.x += (flight.spinX ?? 0) * dt;
+      anchor.rotation.y += (flight.spinY ?? 0) * dt;
+      anchor.rotation.z += (flight.spinZ ?? 0) * dt;
+      // Air drag — heavy body slows faster than gib limbs.
+      flight.vx *= 1 - 1.15 * dt;
+      flight.vz *= 1 - 1.15 * dt;
+
+      // Re-sample terrain under the travelling corpse.
+      const ground =
+        sampleTerrainHeight(anchor.position.x, anchor.position.z, flight.mapDef) + 0.02;
+      flight.groundY = ground;
+
+      if (anchor.position.y <= ground) {
+        anchor.position.y = ground;
+        if (flight.bounceLeft > 0 && Math.abs(flight.vy) > 3.2) {
+          flight.bounceLeft -= 1;
+          flight.vy = Math.abs(flight.vy) * 0.22;
+          flight.vx *= 0.5;
+          flight.vz *= 0.5;
+          flight.spinX *= 0.45;
+          flight.spinY *= 0.45;
+          flight.spinZ *= 0.45;
+        } else {
+          flight.settled = true;
+          flight.vx = 0;
+          flight.vy = 0;
+          flight.vz = 0;
+          // Settle as a prone corpse on the dirt.
+          anchor.rotation.x = (Math.random() - 0.5) * 0.14;
+          anchor.rotation.z = (Math.random() - 0.5) * 0.18;
+          if (flight.bloodPool) {
+            flight.bloodPool.visible = true;
+            flight.bloodPool.position.y = 0;
+          }
+          delete anchor.userData.blastFlight;
+          finished.push(anchor);
+        }
+      }
+      continue;
+    }
+
     const fall = anchor.userData.fall;
-    if (!fall) continue;
+    if (!fall) {
+      finished.push(anchor);
+      continue;
+    }
     fall.elapsed += dt;
     const t = Math.min(1, fall.elapsed / fall.dur);
     const eased = t * t * (3 - 2 * t);
@@ -725,8 +840,11 @@ export function updateDetachedCorpseFalls(dt) {
       anchor.position.y = fall.endY;
       anchor.rotation.x = fall.endRotX;
       delete anchor.userData.fall;
-      activeCorpseAnchors.delete(anchor);
+      finished.push(anchor);
     }
+  }
+  for (const anchor of finished) {
+    activeCorpseAnchors.delete(anchor);
   }
 }
 

@@ -1,6 +1,7 @@
 /** Foot squads/teams — each in-game unit represents this many soldiers on the field. */
 
 export const SQUAD_SIZES = {
+  commander: 5,
   infantry: 5,
   paratrooper: 4,
   machineGun: 2,

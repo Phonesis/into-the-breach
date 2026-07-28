@@ -469,7 +469,7 @@ export function updateTowerDefenseMode(game, dt) {
       td.spawnTimer += td.spawnInterval;
     }
 
-    const enemiesAlive = game._enemyAlive.length;
+    const enemiesAlive = game._enemyAlive.filter((u) => u.def?.type !== 'commander').length;
     if (td.spawnQueue.length === 0 && enemiesAlive === 0) {
       onWaveCleared(game, td);
     }
@@ -595,6 +595,7 @@ function computeTdEnemyMoveGoal(unit, game) {
 
 export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
   for (const unit of enemyUnits) {
+    if (unit.def?.type === 'commander') continue;
     if (unit.retreating || unit.surrendered || unit._captureExit) continue;
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
 

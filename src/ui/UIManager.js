@@ -10,7 +10,10 @@ import {
 import {
   GAME_MODE_LIST,
   ASSAULT_ROLE_LIST,
-  CLEARANCE_STYLE_LIST,
+  CLEARANCE_REINFORCEMENT_SIZE_LIST,
+  DEFAULT_CLEARANCE_REINFORCEMENT_SIZE,
+  CLEARANCE_ROLE_LIST,
+  DEFAULT_CLEARANCE_ROLE,
   STANDARD_UNIT_LIMIT,
   getProducibleUnits,
 } from '../data/gameModes.js';
@@ -68,11 +71,16 @@ import { BattleMinimap } from './Minimap.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
 import {
   LAST_STAND_DEPLOY_MODE_LIST,
-  LAST_STAND_PRESET_MIN_MAP_SIZE,
+  LAST_STAND_PRESET_SIZE_LIST,
+  DEFAULT_LAST_STAND_PRESET_SIZE,
+  canUseLastStandPresetSize,
+  resolveLastStandPresetSize,
+  countLastStandPresetUnits,
   isLastStandPresetDeployMode,
 } from '../data/lastStandForces.js';
 
 const PRODUCE_LABELS = {
+  commander: 'CMD',
   infantry: 'Inf',
   medic: 'Medic',
   engineer: 'Eng',
@@ -142,6 +150,7 @@ function loadAutoBuildPreference(campaignStyle = 'classic') {
 
 
 const FACTION_ROSTER_LABELS = {
+  commander: 'Field commander',
   infantry: 'Infantry',
   medic: 'Medic section',
   engineer: 'Engineer section',
@@ -165,12 +174,14 @@ export class UIManager {
     this.selectedMapSize = 'medium';
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
+    this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
-    this.selectedClearanceStyle = 'classic';
+    this.selectedClearanceReinforcementSize = DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
     this.selectedTdWaveMode = 'standard';
     this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
+    this.selectedLastStandPresetSize = DEFAULT_LAST_STAND_PRESET_SIZE;
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
     this._baseBuildUiKey = '';
@@ -264,11 +275,11 @@ export class UIManager {
 
       <div id="screen-assault-role" class="screen interactive hidden">
         <div class="title-block">
-          <h1>Your Mission</h1>
-          <p>Attackers must capture and hold the frontline. Defenders must hold until time expires.</p>
+          <h1 id="role-screen-title">Your Mission</h1>
+          <p id="role-screen-blurb">Attackers must capture and hold the frontline. Defenders must hold until time expires.</p>
         </div>
         <div class="panel">
-          <h2>Attack or Defend</h2>
+          <h2 id="role-screen-heading">Attack or Defend</h2>
           <div class="mode-grid" id="role-grid"></div>
           <div class="actions">
             <button class="btn btn-secondary interactive" id="btn-back-mode-role">Back</button>
@@ -314,7 +325,7 @@ export class UIManager {
             </p>
           </div>
           <div class="campaign-style-block hidden" id="clearance-style-block">
-            <h2>Clear Defenses Style</h2>
+            <h2>Reinforcement Size</h2>
             <div class="campaign-style-grid" id="clearance-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
@@ -328,9 +339,13 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="laststand-deploy-block">
             <h2>Deployment Style</h2>
             <div class="campaign-style-grid" id="laststand-deploy-grid"></div>
-            <p class="laststand-deploy-note hidden" id="laststand-deploy-note">
-              Preset battle groups require a <strong>Large</strong> map.
-            </p>
+            <div class="campaign-style-block hidden" id="laststand-preset-size-block">
+              <h2>Battle Group Size</h2>
+              <div class="campaign-style-grid" id="laststand-preset-size-grid"></div>
+              <p class="laststand-deploy-note hidden" id="laststand-deploy-note">
+                <strong>Large</strong> is not available on Berlin (performance).
+              </p>
+            </div>
           </div>
           <div class="actions">
             <button class="btn btn-secondary interactive" id="btn-back-faction">Back</button>
@@ -907,11 +922,11 @@ export class UIManager {
   renderClearanceStyles() {
     const grid = this.root.querySelector('#clearance-style-grid');
     if (!grid) return;
-    grid.innerHTML = CLEARANCE_STYLE_LIST.map(
-      (style) => `
-      <button type="button" class="card-btn interactive campaign-style-card clearance-style-card${style.id === this.selectedClearanceStyle ? ' selected' : ''}" data-id="${style.id}">
-        <span class="name">${style.name}</span>
-        <span class="meta">${style.subtitle}</span>
+    grid.innerHTML = CLEARANCE_REINFORCEMENT_SIZE_LIST.map(
+      (size) => `
+      <button type="button" class="card-btn interactive campaign-style-card clearance-style-card${size.id === this.selectedClearanceReinforcementSize ? ' selected' : ''}" data-id="${size.id}">
+        <span class="name">${size.name}</span>
+        <span class="meta">${size.subtitle}</span>
       </button>
     `
     ).join('');
@@ -967,15 +982,50 @@ export class UIManager {
       </button>
     `
     ).join('');
+    this.renderLastStandPresetSizes();
+  }
+
+  renderLastStandPresetSizes() {
+    const block = this.root.querySelector('#laststand-preset-size-block');
+    const grid = this.root.querySelector('#laststand-preset-size-grid');
+    const note = this.root.querySelector('#laststand-deploy-note');
+    if (!block || !grid) return;
+
+    const preset =
+      this.selectedGameMode === 'lastStand' &&
+      isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
+    block.classList.toggle('hidden', !preset);
+    if (!preset) return;
+
+    const mapId = this.selectedMap;
+    const mapDef = mapId ? MAPS[mapId] : null;
+    // Clamp selection if Large is blocked for this map.
+    this.selectedLastStandPresetSize = resolveLastStandPresetSize(
+      this.selectedLastStandPresetSize,
+      mapDef ?? mapId
+    );
+    const largeBlocked = !canUseLastStandPresetSize('large', mapDef ?? mapId);
+    if (note) note.classList.toggle('hidden', !largeBlocked);
+
+    grid.innerHTML = LAST_STAND_PRESET_SIZE_LIST.map((size) => {
+      const allowed = canUseLastStandPresetSize(size.id, mapDef ?? mapId);
+      const selected = size.id === this.selectedLastStandPresetSize;
+      const count = countLastStandPresetUnits(mapDef, size.id);
+      const meta = !allowed
+        ? 'Not available on Berlin / dense urban maps'
+        : `${size.subtitle} (~${count}/side)`;
+      return `
+      <button type="button" class="card-btn interactive campaign-style-card laststand-preset-size-card${selected ? ' selected' : ''}${!allowed ? ' map-size-card--disabled' : ''}" data-id="${size.id}"${!allowed ? ' disabled' : ''}>
+        <span class="name">${size.name}</span>
+        <span class="meta">${meta}</span>
+      </button>
+    `;
+    }).join('');
   }
 
   updateLastStandMapSizeLock() {
-    const preset = this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
-    const note = this.root.querySelector('#laststand-deploy-note');
-    if (note) note.classList.toggle('hidden', !preset);
-    if (preset && this.selectedMapSize !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
-      this.selectedMapSize = LAST_STAND_PRESET_MIN_MAP_SIZE;
-    }
+    // Preset no longer forces Large map size; only re-clamp preset force size.
+    this.renderLastStandPresetSizes();
     this.renderMapSizes();
   }
 
@@ -1018,14 +1068,31 @@ export class UIManager {
   renderAssaultRoles() {
     const grid = this.root.querySelector('#role-grid');
     if (!grid) return;
-    grid.innerHTML = ASSAULT_ROLE_LIST.map(
+    const clearance = this.selectedGameMode === 'clearance';
+    const roles = clearance ? CLEARANCE_ROLE_LIST : ASSAULT_ROLE_LIST;
+    const selectedId = clearance
+      ? this.selectedClearanceRole
+      : this.selectedAssaultRole;
+    const title = this.root.querySelector('#role-screen-title');
+    const blurb = this.root.querySelector('#role-screen-blurb');
+    const heading = this.root.querySelector('#role-screen-heading');
+    if (title) title.textContent = clearance ? 'Clear Defenses Mission' : 'Your Mission';
+    if (blurb) {
+      blurb.textContent = clearance
+        ? 'Choose whether you assault prepared defenses or hold them against the AI attack force. Units are auto-deployed for both roles.'
+        : 'Attackers must capture and hold the frontline. Defenders must hold until time expires.';
+    }
+    if (heading) heading.textContent = 'Attack or Defend';
+    grid.innerHTML = roles.map(
       (r) => `
-      <button class="card-btn interactive role-card" data-id="${r.id}">
+      <button class="card-btn interactive role-card${r.id === selectedId ? ' selected' : ''}" data-id="${r.id}">
         <span class="name">${r.name}</span>
         <span class="meta">${r.subtitle}</span>
       </button>
     `
     ).join('');
+    const continueBtn = this.root.querySelector('#btn-to-faction-role');
+    if (continueBtn) continueBtn.disabled = !selectedId;
   }
 
   renderModes() {
@@ -1078,8 +1145,6 @@ export class UIManager {
   renderMapSizes() {
     const grid = this.root.querySelector('#map-size-grid');
     if (!grid) return;
-    const lockPreset =
-      this.selectedGameMode === 'lastStand' && isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
     const lockBaseBuilding =
       this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
     const mapBase = this.selectedMap ? MAPS[this.selectedMap] : null;
@@ -1091,17 +1156,13 @@ export class UIManager {
       const selected = preset.id === this.selectedMapSize;
       const mapBlocks = !mapAllowed.includes(preset.id);
       const disabled =
-        mapBlocks ||
-        (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) ||
-        (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
+        mapBlocks || (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
       let meta = preset.subtitle;
       if (mapBlocks) {
         meta =
           mapAllowed.length === 1
             ? `${mapBase?.name ?? 'This map'} is fixed at ${MAP_SIZE_LIST.find((p) => p.id === mapAllowed[0])?.name ?? mapAllowed[0]}`
             : 'Not available on this map';
-      } else if (lockPreset && preset.id !== LAST_STAND_PRESET_MIN_MAP_SIZE) {
-        meta = 'Preset battle groups need a large theater';
       } else if (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE) {
         meta = 'Base Building needs a large theater';
       }
@@ -1184,24 +1245,33 @@ export class UIManager {
         if (btn.dataset.id !== 'assault') {
           this.selectedAssaultRole = null;
         }
+        if (btn.dataset.id !== 'clearance') {
+          this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
+        }
         this.root.querySelector('#btn-to-faction').disabled = false;
         this.updateDifficultyPanel();
       };
     });
 
     this.root.querySelector('#btn-to-faction').onclick = () => {
-      if (this.selectedGameMode === 'assault') show('assault-role');
-      else show('faction');
+      if (this.selectedGameMode === 'assault' || this.selectedGameMode === 'clearance') {
+        this.renderAssaultRoles();
+        show('assault-role');
+      } else show('faction');
     };
 
     this.root.querySelector('#btn-back-mode-role').onclick = () => show('mode');
-    this.root.querySelectorAll('.role-card').forEach((btn) => {
-      btn.onclick = () => {
-        this.root.querySelectorAll('.role-card').forEach((b) => b.classList.remove('selected'));
-        btn.classList.add('selected');
+    this.root.querySelector('#role-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.role-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.role-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      if (this.selectedGameMode === 'clearance') {
+        this.selectedClearanceRole = btn.dataset.id;
+      } else {
         this.selectedAssaultRole = btn.dataset.id;
-        this.root.querySelector('#btn-to-faction-role').disabled = false;
-      };
+      }
+      this.root.querySelector('#btn-to-faction-role').disabled = false;
     });
     this.root.querySelector('#btn-to-faction-role').onclick = () => show('faction');
     this.root.querySelector('#btn-back-mode').onclick = () => show('mode');
@@ -1256,7 +1326,7 @@ export class UIManager {
         b.classList.remove('selected');
       });
       btn.classList.add('selected');
-      this.selectedClearanceStyle = btn.dataset.id;
+      this.selectedClearanceReinforcementSize = btn.dataset.id;
     });
 
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
@@ -1307,6 +1377,16 @@ export class UIManager {
       this.updateLastStandMapSizeLock();
     });
 
+    this.root.querySelector('#laststand-preset-size-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.laststand-preset-size-card');
+      if (!btn || btn.disabled) return;
+      this.root
+        .querySelectorAll('.laststand-preset-size-card')
+        .forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedLastStandPresetSize = btn.dataset.id;
+    });
+
     this.root.querySelectorAll('.map-card').forEach((btn) => {
       btn.onclick = () => {
         this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
@@ -1315,6 +1395,7 @@ export class UIManager {
         const mapBase = MAPS[this.selectedMap];
         if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
         this.renderMapSizes();
+        this.renderLastStandPresetSizes();
         this.root.querySelector('#btn-launch').disabled = false;
       };
     });
@@ -1322,6 +1403,7 @@ export class UIManager {
     this.root.querySelector('#btn-launch').onclick = () => {
       if (!this.selectedFaction || !this.selectedMap || !this.selectedGameMode) return;
       if (this.selectedGameMode === 'assault' && !this.selectedAssaultRole) return;
+      if (this.selectedGameMode === 'clearance' && !this.selectedClearanceRole) return;
       if (this.callbacks.onStartGame) {
         const baseBuildingStyle =
           this.selectedGameMode === 'campaign' &&
@@ -1330,20 +1412,33 @@ export class UIManager {
         const mapSize = baseBuildingStyle
           ? BASE_BUILDING_MIN_MAP_SIZE
           : resolveMapSizeId(mapBase, this.selectedMapSize ?? 'medium');
+        const lastStandPreset =
+          this.selectedGameMode === 'lastStand' &&
+          isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
         this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
           assaultRole: this.selectedAssaultRole ?? 'defend',
           difficulty: this.selectedDifficulty,
           mapSize,
           campaignStyle:
             this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
-          clearanceStyle:
-            this.selectedGameMode === 'clearance' ? this.selectedClearanceStyle : undefined,
+          clearanceRole:
+            this.selectedGameMode === 'clearance' ? this.selectedClearanceRole : undefined,
+          clearanceReinforcementSize:
+            this.selectedGameMode === 'clearance'
+              ? this.selectedClearanceReinforcementSize
+              : undefined,
           tdWaveMode:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
           tdStyle:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdStyle : undefined,
           lastStandDeployMode:
             this.selectedGameMode === 'lastStand' ? this.selectedLastStandDeployMode : undefined,
+          lastStandPresetSize: lastStandPreset
+            ? resolveLastStandPresetSize(
+                this.selectedLastStandPresetSize,
+                mapBase ?? this.selectedMap
+              )
+            : undefined,
         });
       }
     };
@@ -1743,9 +1838,16 @@ export class UIManager {
     const clearanceBanner = this.root.querySelector('#clearance-banner');
     if (clearanceBanner) {
       clearanceBanner.classList.toggle('hidden', !clearance);
+      const sizeLabel =
+        options.clearanceReinforcementSize === 'large'
+          ? 'Large'
+          : options.clearanceReinforcementSize === 'medium'
+            ? 'Medium'
+            : 'Small';
+      const roleLabel = options.clearanceRole === 'defend' ? 'Defend' : 'Attack';
       clearanceBanner.textContent = clearanceReinforced
-        ? 'Clear all defenders — both sides reinforced every 3 minutes'
-        : 'Clear all dug-in defenders — fixed force, no reinforcements';
+        ? `Clear Defenses · ${roleLabel} · ${sizeLabel} reinforcements every 3 minutes`
+        : `Clear Defenses · ${roleLabel}`;
     }
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
@@ -1809,9 +1911,12 @@ export class UIManager {
         this._defaultHudHint =
           'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
-        this._defaultHudHint = clearanceReinforced
-          ? 'Clear Defenses — Reinforced: both sides reinforce every 3 minutes · expect frequent defender probing attacks'
-          : 'Clear Defenses: wipe all defenders · fixed force — no HQ, no reinforcements';
+        this._defaultHudHint =
+          options.clearanceRole === 'defend'
+            ? 'Clear Defenses (Defend): hold prepared positions · destroy the assault force · both sides reinforce every 3 minutes'
+            : clearanceReinforced
+              ? 'Clear Defenses (Attack): wipe all defenders · both sides reinforce every 3 minutes · expect defender probing attacks'
+              : 'Clear Defenses (Attack): wipe all defenders · no HQ or sector economy';
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
@@ -2757,26 +2862,37 @@ export class UIManager {
     }
 
     panel.classList.toggle('targeting', !!manager.pending);
+    const commandLink = manager.hasCommandLink?.() !== false;
 
     for (const fs of FIRE_SUPPORT_LIST) {
       const cdEl = panel.querySelector(`[data-cd="${fs.id}"]`);
       const btn = panel.querySelector(`[data-fs="${fs.id}"]`);
       const rem = manager.getCooldownRemaining(fs.id);
+      const airborneSpent =
+        fs.id === 'airborneDrop' && manager.isAirborneAvailable && !manager.isAirborneAvailable();
       const ready = manager.isReady(fs.id);
       const armed = manager.pending === fs.id;
 
       if (cdEl) {
-        cdEl.textContent = ready ? 'Ready' : `${Math.ceil(rem)}s`;
+        cdEl.textContent = !commandLink
+          ? 'No CMD'
+          : airborneSpent
+          ? 'Used'
+          : ready
+            ? 'Ready'
+            : `${Math.ceil(rem)}s`;
       }
       if (btn) {
-        btn.disabled = !ready && !armed;
+        btn.disabled = (!ready && !armed) || airborneSpent;
         btn.classList.toggle('armed', armed);
-        btn.classList.toggle('on-cooldown', !ready);
+        btn.classList.toggle('on-cooldown', !ready || airborneSpent);
       }
     }
 
     if (hint) {
-      if (manager.pending === 'strafe') {
+      if (!commandLink) {
+        hint.textContent = 'Commander lost — off-map support unavailable';
+      } else if (manager.pending === 'strafe') {
         hint.textContent = 'Click the map to call fighter strafe (Esc to cancel)';
       } else if (manager.pending === 'barrage') {
         hint.textContent = 'Click the map for artillery barrage (Esc to cancel)';
@@ -2784,6 +2900,13 @@ export class UIManager {
         hint.textContent = 'Click the map — creeping barrage lifts toward your target (Esc to cancel)';
       } else if (manager.pending === 'airborneDrop') {
         hint.textContent = 'Click the map to drop elite paratroopers (Esc to cancel)';
+      } else if (manager.game?.clearance || manager.game?.lastStand) {
+        const airLeft = manager.airborneUsesLeft;
+        const modeLabel = manager.game?.clearance ? 'Clear Defenses' : 'Battle Simulation';
+        hint.textContent =
+          airLeft === 0
+            ? `Off-map support — Airborne already used (once per side in ${modeLabel})`
+            : `Off-map support — Airborne once per side in ${modeLabel}; other assets recharge`;
       } else {
         hint.textContent = 'Call off-map support — each strike has a long cooldown';
       }
@@ -2858,6 +2981,7 @@ export class UIManager {
 
     const activeType = manager.getActiveType();
     const activeRem = manager.getActiveRemaining();
+    const commandLink = manager.hasCommandLink?.() !== false;
 
     panel.classList.toggle('order-active', !!activeType);
 
@@ -2869,7 +2993,9 @@ export class UIManager {
       const isActive = activeType === order.id;
 
       if (cdEl) {
-        if (isActive) {
+        if (!commandLink) {
+          cdEl.textContent = 'No CMD';
+        } else if (isActive) {
           cdEl.textContent = `${Math.ceil(activeRem)}s`;
         } else if (ready) {
           cdEl.textContent = 'Ready';
@@ -2893,7 +3019,9 @@ export class UIManager {
     }
 
     if (hint) {
-      if (activeType === 'fullRetreat') {
+      if (!commandLink) {
+        hint.textContent = 'Commander lost — command-wide orders unavailable';
+      } else if (activeType === 'fullRetreat') {
         const retreatDest = this._hudClearance ? 'starting zone' : 'HQ';
         hint.textContent = `Full Retreat — units withdrawing to ${retreatDest} (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
       } else if (activeType === 'holdGround') {

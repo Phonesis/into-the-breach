@@ -118,6 +118,7 @@ const COMMANDER_ORDER_KINDS = [
   'airborneDrop',
   'fullRetreat',
   'holdGround',
+  'lostCommander',
 ];
 const COMMANDER_ORDER_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
 
@@ -989,15 +990,20 @@ export class SoundManager {
       if (!buf) return;
 
       const now = performance.now();
+      const throttleKey =
+        kind === 'lostCommander' ? `_commanderLoss-${key}` : '_commanderOrder';
       // Slightly longer throttle than unit select — commander net shouldn't stack
-      if (now - (this._lastByType._commanderOrder ?? 0) < 650) return;
-      this._lastByType._commanderOrder = now;
+      if (now - (this._lastByType[throttleKey] ?? 0) < 650) return;
+      this._lastByType[throttleKey] = now;
 
       const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
       const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
       const overRadio = opts.radio !== false;
       // Centered command presence — a bit louder than unit acks
-      const vol = Math.min(1.18, this._distanceGain(dist) * 1.02);
+      const vol =
+        kind === 'lostCommander'
+          ? 1.16
+          : Math.min(1.18, this._distanceGain(dist) * 1.02);
 
       if (overRadio) {
         this._playRadioVoice(buf, {

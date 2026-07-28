@@ -16,6 +16,7 @@ import {
   peekEngineerSiteNextId,
 } from './EngineerSandbags.js';
 import { exportAIState, importAIState } from './AI.js';
+import { CLEARANCE_ATTACK_PLANS } from './ClearanceMode.js';
 import { restoreTankRiderLinks } from './TankRiders.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { restoreTerrainDamage, serializeTerrainDamage } from '../world/TerrainDamage.js';
@@ -246,6 +247,10 @@ export function captureBattleSave(game, { id = null } = {}) {
       dead: !!u.dead,
       deathCause: u._deathCause ?? null,
       deathAt: u._deathAt ?? null,
+      commanderRearAnchor: u._commanderRearAnchor
+        ? { ...u._commanderRearAnchor }
+        : null,
+      commanderDeathHandled: !!u._commanderDeathHandled,
       preWreckYaw: u._preWreckYaw ?? null,
       corpseTimeLeft: u.corpseTimeLeft ?? 0,
       wreckTimeLeft: u.wreckTimeLeft ?? 0,
@@ -298,11 +303,18 @@ export function captureBattleSave(game, { id = null } = {}) {
       lastStandEchelon: u.lastStandEchelon ?? null,
       lastStandStance: u.lastStandStance ?? null,
       clearanceProbe: u._clearanceProbe ? { ...u._clearanceProbe } : null,
+      clearanceAttackRole: u.clearanceAttackRole ?? null,
     });
   }
 
   const sessionOptions = { ...(game.lastSession?.options ?? {}) };
   delete sessionOptions.restoreSnapshot;
+  if (game.clearance) {
+    sessionOptions.clearanceRole = game.clearanceRole ?? 'attack';
+    if (game.clearanceAttackPlan?.id) {
+      sessionOptions.clearanceAttackPlanId = game.clearanceAttackPlan.id;
+    }
+  }
 
   const snapshot = {
     version: SAVE_VERSION,
@@ -316,6 +328,8 @@ export function captureBattleSave(game, { id = null } = {}) {
       options: sessionOptions,
     },
     matchTime: game.matchTime,
+    clearanceRole: game.clearanceRole ?? null,
+    clearanceAttackPlanId: game.clearanceAttackPlan?.id ?? null,
     clearanceReinforcements: game.clearanceReinforcements
       ? { ...game.clearanceReinforcements }
       : null,
@@ -345,6 +359,11 @@ export function captureBattleSave(game, { id = null } = {}) {
     },
     fireSupport: {
       cooldowns: { ...game.fireSupport.cooldowns },
+      airborneUsesLeft: game.fireSupport.airborneUsesLeft,
+    },
+    enemyFireSupport: {
+      cooldowns: { ...game.enemyFireSupport?.cooldowns },
+      airborneUsesLeft: game.enemyFireSupport?.airborneUsesLeft,
     },
     generalOrders: {
       cooldowns: { ...game.generalOrders.cooldowns },
@@ -967,6 +986,18 @@ export function applyBattleSave(game, snapshot) {
   }
 
   game.matchTime = snapshot.matchTime ?? 0;
+  if (game.clearance) {
+    game.clearanceRole =
+      snapshot.clearanceRole ??
+      snapshot.session?.options?.clearanceRole ??
+      game.clearanceRole ??
+      'attack';
+    const planId =
+      snapshot.clearanceAttackPlanId ?? snapshot.session?.options?.clearanceAttackPlanId;
+    if (planId && CLEARANCE_ATTACK_PLANS[planId]) {
+      game.clearanceAttackPlan = CLEARANCE_ATTACK_PLANS[planId];
+    }
+  }
   if (game.clearanceReinforcements) {
     const saved = snapshot.clearanceReinforcements;
     if (saved?.enabled) {
@@ -1122,8 +1153,32 @@ export function applyBattleSave(game, snapshot) {
     ),
     ...snapshot.fireSupport?.cooldowns,
   };
+  if (snapshot.fireSupport?.airborneUsesLeft != null) {
+    game.fireSupport.airborneUsesLeft = snapshot.fireSupport.airborneUsesLeft;
+  } else if (game.clearance || game.lastStand) {
+    game.fireSupport.airborneUsesLeft = 1;
+  } else {
+    game.fireSupport.airborneUsesLeft = null;
+  }
   game.fireSupport.pending = null;
   game.fireSupport.clearPreview();
+  if (game.enemyFireSupport) {
+    game.enemyFireSupport.cooldowns = {
+      ...Object.fromEntries(
+        Object.keys(game.enemyFireSupport.cooldowns).map((id) => [id, 0])
+      ),
+      ...snapshot.enemyFireSupport?.cooldowns,
+    };
+    if (snapshot.enemyFireSupport?.airborneUsesLeft != null) {
+      game.enemyFireSupport.airborneUsesLeft = snapshot.enemyFireSupport.airborneUsesLeft;
+    } else if (game.clearance || game.lastStand) {
+      game.enemyFireSupport.airborneUsesLeft = 1;
+    } else {
+      game.enemyFireSupport.airborneUsesLeft = null;
+    }
+    game.enemyFireSupport.pending = null;
+    game.enemyFireSupport.clearPreview?.();
+  }
   game.generalOrders.cooldowns = {
     ...Object.fromEntries(
       Object.keys(game.generalOrders.cooldowns).map((id) => [id, 0])
@@ -1166,6 +1221,10 @@ export function applyBattleSave(game, snapshot) {
     unit.dead = !!uData.dead;
     unit._deathCause = uData.deathCause ?? null;
     unit._deathAt = uData.deathAt ?? null;
+    unit._commanderRearAnchor = uData.commanderRearAnchor
+      ? { ...uData.commanderRearAnchor }
+      : null;
+    unit._commanderDeathHandled = !!uData.commanderDeathHandled;
     unit._recoverableWreck = !!uData.recoverableWreck;
     unit._wreckRepairProgress = uData.wreckRepairProgress ?? 0;
     unit._mobilityDamaged = !!uData.mobilityDamaged;
@@ -1208,6 +1267,7 @@ export function applyBattleSave(game, snapshot) {
     unit.lastStandEchelon = uData.lastStandEchelon ?? null;
     unit.lastStandStance = uData.lastStandStance ?? null;
     unit._clearanceProbe = uData.clearanceProbe ? { ...uData.clearanceProbe } : null;
+    unit.clearanceAttackRole = uData.clearanceAttackRole ?? null;
     const restoredAtSavedPosition =
       Math.abs(unit.position.x - uData.x) < 0.01 &&
       Math.abs(unit.position.z - uData.z) < 0.01;

@@ -1,6 +1,12 @@
 /** Inline SVG icons for unit roster and reinforcements panel (currentColor inherits panel text). */
 
 const ICONS = {
+  commander: `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <circle cx="16" cy="16" r="12.5" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M16 5.5l2.7 6 6.5.7-4.8 4.4 1.4 6.4-5.8-3.2-5.8 3.2 1.4-6.4-4.8-4.4 6.5-.7z" fill="currentColor"/>
+    <circle cx="16" cy="16" r="2.2" fill="#f2ddb0"/>
+  </svg>`,
+
   infantry: `<svg viewBox="0 0 32 32" aria-hidden="true">
     <circle cx="16" cy="7.5" r="3.2" fill="currentColor"/>
     <path d="M12 28V14.5l4-2.5 4 2.5V28" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>

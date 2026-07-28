@@ -8,7 +8,10 @@ import {
 } from '../data/battleEconomics.js';
 
 export const UNIT_LOSS_LABELS = {
+  commander: 'Field commander',
+  commanderBodyguard: 'Commander bodyguards',
   infantry: 'Riflemen',
+  paratrooper: 'Paratroopers',
   medic: 'Medics',
   engineer: 'Engineers',
   vehicleCrew: 'Vehicle crew',
@@ -18,6 +21,7 @@ export const UNIT_LOSS_LABELS = {
   antiTankGun: 'AT guns',
   armoredCar: 'Armored cars',
   tank: 'Tanks',
+  tankDestroyer: 'Tank destroyers',
   superHeavyTank: 'Super heavy tanks',
   artillery: 'Artillery',
 };
@@ -125,13 +129,13 @@ export class BattleStats {
     for (const type of UNIT_TYPE_ORDER) {
       const unitCount = bucket[type];
       if (unitCount) {
-        lines.push(this._formatLossLine(type, unitCount));
+        lines.push(...this._formatLossLines(type, unitCount));
       }
     }
 
     for (const [type, unitCount] of Object.entries(bucket)) {
       if (!UNIT_TYPE_ORDER.includes(type)) {
-        lines.push(this._formatLossLine(type, unitCount));
+        lines.push(...this._formatLossLines(type, unitCount));
       }
     }
 
@@ -144,12 +148,12 @@ export class BattleStats {
 
     for (const type of UNIT_TYPE_ORDER) {
       const unitCount = bucket[type];
-      if (unitCount) lines.push(this._formatLossLine(type, unitCount));
+      if (unitCount) lines.push(...this._formatLossLines(type, unitCount));
     }
 
     for (const [type, unitCount] of Object.entries(bucket)) {
       if (!UNIT_TYPE_ORDER.includes(type)) {
-        lines.push(this._formatLossLine(type, unitCount));
+        lines.push(...this._formatLossLines(type, unitCount));
       }
     }
 
@@ -163,6 +167,25 @@ export class BattleStats {
       count: unitCount * personnelPerUnit(type),
       unitCount,
     };
+  }
+
+  _formatLossLines(type, unitCount) {
+    if (type !== 'commander') return [this._formatLossLine(type, unitCount)];
+    return [
+      {
+        type: 'commander',
+        label: UNIT_LOSS_LABELS.commander,
+        count: unitCount,
+        unitCount,
+      },
+      {
+        type: 'commanderBodyguard',
+        label: UNIT_LOSS_LABELS.commanderBodyguard,
+        count: unitCount * Math.max(0, personnelPerUnit('commander') - 1),
+        // The command group is already costed once on the commander row.
+        unitCount: 0,
+      },
+    ];
   }
 
   formatDefenseLosses(team = 'player') {

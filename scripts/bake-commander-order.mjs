@@ -22,6 +22,7 @@ const ORDER_KINDS = [
   'airborneDrop',
   'fullRetreat',
   'holdGround',
+  'lostCommander',
 ];
 
 /**
@@ -40,6 +41,7 @@ const FACTION_COMMANDER = {
       airborneDrop: 'Airborne drop authorized. Mark the DZ!',
       fullRetreat: 'All units, fall back to rally! Full retreat!',
       holdGround: 'Hold the line! Stand your ground!',
+      lostCommander: "We've lost our commander! The command net is down!",
     },
   },
   uk: {
@@ -53,6 +55,7 @@ const FACTION_COMMANDER = {
       airborneDrop: 'Airborne drop authorised. Mark the DZ!',
       fullRetreat: 'All units, withdraw to rally! Full retreat!',
       holdGround: 'Hold the line! Stand firm, chaps!',
+      lostCommander: "We've lost the commander! Command has been cut off!",
     },
   },
   germany: {
@@ -66,6 +69,7 @@ const FACTION_COMMANDER = {
       airborneDrop: 'Luftlandung genehmigt! Absprungzone markieren!',
       fullRetreat: 'Alle Einheiten, zurück zum Sammelpunkt! Rückzug!',
       holdGround: 'Haltet die Stellung! Stehen bleiben!',
+      lostCommander: 'Der Kommandeur ist gefallen! Die Führung ist ausgefallen!',
     },
   },
   russia: {
@@ -79,6 +83,7 @@ const FACTION_COMMANDER = {
       airborneDrop: 'Десант разрешён! Зона выброски!',
       fullRetreat: 'Всем отходить на сборный пункт! Отступление!',
       holdGround: 'Держать позицию! Ни шагу назад!',
+      lostCommander: 'Командир погиб! Мы потеряли управление!',
     },
   },
 };
@@ -149,8 +154,8 @@ function bakeTts(edge, voice, rate, pitch, text, outWav) {
 function writeLicense() {
   writeFileSync(
     join(OUT, 'COMMANDER_VOICES_LICENSE.txt'),
-    `Commander order voice lines (fire support + general orders)
-============================================================
+    `Commander radio voice lines (orders + commander loss)
+=====================================================
 
 Spoken via Microsoft Edge neural TTS (edge-tts):
   usa — en-US RogerNeural
@@ -180,9 +185,10 @@ async function main() {
 
   console.log('Using', edge);
 
+  const kinds = process.argv.includes('--lost-only') ? ['lostCommander'] : ORDER_KINDS;
   for (const [faction, cfg] of Object.entries(FACTION_COMMANDER)) {
     console.log(`\n=== ${faction} ===`);
-    for (const kind of ORDER_KINDS) {
+    for (const kind of kinds) {
       const text = cfg.lines[kind];
       if (!text) continue;
       const out = join(OUT, `commander-${faction}-${kind}.wav`);

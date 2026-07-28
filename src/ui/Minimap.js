@@ -132,6 +132,7 @@ function buildTerrainBitmap(mapDef) {
 function unitDotRadius(unit) {
   const type = unit.def?.type;
   if (!type) return 2.2;
+  if (type === 'commander') return 4;
   if (isTankType(type)) return 3.4;
   if (VEHICLE_TYPES.has(type)) return 2.8;
   return 2.2;
@@ -397,6 +398,13 @@ export class BattleMinimap {
       this.ctx.arc(x, y, r, 0, Math.PI * 2);
       this.ctx.fill();
       this.ctx.stroke();
+      if (unit.def?.type === 'commander') {
+        this.ctx.fillStyle = '#ffe28a';
+        this.ctx.font = 'bold 8px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('★', x, y + 0.25);
+      }
     }
   }
 }

@@ -26,19 +26,64 @@ export const CLEARANCE_CEASEFIRE_TIME = 0;
 
 export const CLEARANCE_REINFORCEMENT_INTERVAL = 180;
 
-const PLAYER_REINFORCEMENT_PACKAGES = [
-  ['infantry', 'machineGun'],
-  ['infantry', 'mortar'],
-  ['infantry', 'tank'],
-  ['infantry', 'antiTankGun'],
-];
+/** Packages by size — rotate each wave. Small matches the original two-unit groups. */
+const REINFORCEMENT_PACKAGES = {
+  small: {
+    player: [
+      ['infantry', 'machineGun'],
+      ['infantry', 'mortar'],
+      ['infantry', 'tank'],
+      ['infantry', 'antiTankGun'],
+    ],
+    defender: [
+      ['infantry', 'machineGun'],
+      ['infantry', 'antiTankGun'],
+      ['infantry', 'armoredCar'],
+      ['infantry', 'mortar'],
+    ],
+  },
+  medium: {
+    player: [
+      ['infantry', 'machineGun', 'mortar'],
+      ['infantry', 'infantry', 'antiTankGun'],
+      ['infantry', 'tank', 'machineGun'],
+      ['infantry', 'engineer', 'antiTankGun'],
+      ['infantry', 'mortar', 'machineGun'],
+    ],
+    defender: [
+      ['infantry', 'machineGun', 'antiTankGun'],
+      ['infantry', 'armoredCar', 'mortar'],
+      ['infantry', 'infantry', 'machineGun'],
+      ['infantry', 'antiTankGun', 'mortar'],
+      ['infantry', 'armoredCar', 'machineGun'],
+    ],
+  },
+  large: {
+    player: [
+      ['infantry', 'infantry', 'machineGun', 'mortar', 'antiTankGun'],
+      ['infantry', 'machineGun', 'tank', 'infantry', 'mortar'],
+      ['infantry', 'infantry', 'antiTankGun', 'tank', 'engineer'],
+      ['infantry', 'machineGun', 'armoredCar', 'mortar', 'infantry'],
+      ['infantry', 'medic', 'machineGun', 'antiTankGun', 'tank'],
+    ],
+    defender: [
+      ['infantry', 'infantry', 'machineGun', 'antiTankGun', 'mortar'],
+      ['infantry', 'armoredCar', 'machineGun', 'infantry', 'antiTankGun'],
+      ['infantry', 'infantry', 'mortar', 'tank', 'machineGun'],
+      ['infantry', 'antiTankGun', 'armoredCar', 'infantry', 'mortar'],
+      ['infantry', 'machineGun', 'antiTankGun', 'infantry', 'armoredCar'],
+    ],
+  },
+};
 
-const DEFENDER_REINFORCEMENT_PACKAGES = [
-  ['infantry', 'machineGun'],
-  ['infantry', 'antiTankGun'],
-  ['infantry', 'armoredCar'],
-  ['infantry', 'mortar'],
-];
+function resolvePackageSize(sizeId) {
+  if (REINFORCEMENT_PACKAGES[sizeId]) return sizeId;
+  return 'small';
+}
+
+function getReinforcementPackages(sizeId) {
+  return REINFORCEMENT_PACKAGES[resolvePackageSize(sizeId)];
+}
 
 const CLEARANCE_PROBE_TYPES = new Set([
   'infantry',
@@ -272,9 +317,22 @@ export function isEnemyHalfPosition(x, z, mapDef) {
   return (x - midX) * ax + (z - midZ) * az > 0.5;
 }
 
-/** Rally / staging anchor for the attacker — no HQ in Clear Defenses. */
-export function getClearanceStagingAnchor(mapDef) {
-  const base = getClearancePlayerSpawnBase(mapDef);
+/**
+ * Rally / staging anchor for the player's force — no HQ in Clear Defenses.
+ * Attackers stage at the rear assembly; defenders fall back toward the belt.
+ */
+export function getClearanceStagingAnchor(mapDef, role = 'attack') {
+  if (role === 'defend') {
+    const fl = mapDef?.frontline ?? { x: 0, z: 0 };
+    const { ax, az } = axisFromPlayerToEnemy(mapDef);
+    // Slightly toward the defensive half so Full Retreat does not dump into the assault assembly.
+    return {
+      team: 'player',
+      dead: false,
+      position: { x: fl.x + ax * 8, z: fl.z + az * 8 },
+    };
+  }
+  const base = getClearanceAttackerSpawnBase(mapDef);
   return {
     team: 'player',
     dead: false,
@@ -282,8 +340,8 @@ export function getClearanceStagingAnchor(mapDef) {
   };
 }
 
-/** Assembly area for the player's starting force — well behind the line, away from contact. */
-export function getClearancePlayerSpawnBase(mapDef) {
+/** Assault force assembly — well behind the line, away from contact. */
+export function getClearanceAttackerSpawnBase(mapDef) {
   const { ax, az, pb } = axisFromPlayerToEnemy(mapDef);
   const half = (mapDef.size ?? 120) * 0.5 - 6;
   const pullBack = 24;
@@ -294,10 +352,74 @@ export function getClearancePlayerSpawnBase(mapDef) {
   return { x, z };
 }
 
-export function createClearanceReinforcementState(enabled = false) {
+/** @deprecated use getClearanceAttackerSpawnBase */
+export function getClearancePlayerSpawnBase(mapDef) {
+  return getClearanceAttackerSpawnBase(mapDef);
+}
+
+/** Battle plans used when the AI commands the Clear Defenses assault force. */
+export const CLEARANCE_ATTACK_PLANS = {
+  infantryAssault: {
+    id: 'infantryAssault',
+    label: 'Infantry assault',
+    infantryAdvance: 0.72,
+    armorFollow: 0.35,
+    supportHold: 0.55,
+    flankBias: 0,
+  },
+  armoredThrust: {
+    id: 'armoredThrust',
+    label: 'Armored thrust',
+    infantryAdvance: 0.48,
+    armorFollow: 0.82,
+    supportHold: 0.4,
+    flankBias: 0,
+  },
+  flankingHook: {
+    id: 'flankingHook',
+    label: 'Flanking hook',
+    infantryAdvance: 0.58,
+    armorFollow: 0.62,
+    supportHold: 0.45,
+    flankBias: 1,
+  },
+  firePreparation: {
+    id: 'firePreparation',
+    label: 'Fire preparation',
+    infantryAdvance: 0.38,
+    armorFollow: 0.42,
+    supportHold: 0.78,
+    flankBias: 0,
+  },
+  combinedArms: {
+    id: 'combinedArms',
+    label: 'Combined arms',
+    infantryAdvance: 0.55,
+    armorFollow: 0.55,
+    supportHold: 0.5,
+    flankBias: 0.35,
+  },
+};
+
+export function pickClearanceAttackPlan(rng = Math.random) {
+  const ids = Object.keys(CLEARANCE_ATTACK_PLANS);
+  return CLEARANCE_ATTACK_PLANS[ids[Math.floor(rng() * ids.length)]];
+}
+
+export function isClearancePlayerAttacker(game) {
+  return (game?.clearanceRole ?? 'attack') !== 'defend';
+}
+
+/**
+ * @param {boolean} enabled
+ * @param {string} [sizeId='small'] small | medium | large
+ */
+export function createClearanceReinforcementState(enabled = false, sizeId = 'small') {
   if (!enabled) return null;
+  const size = resolvePackageSize(sizeId);
   return {
     enabled: true,
+    size,
     interval: CLEARANCE_REINFORCEMENT_INTERVAL,
     nextAt: CLEARANCE_REINFORCEMENT_INTERVAL,
     wave: 0,
@@ -306,14 +428,21 @@ export function createClearanceReinforcementState(enabled = false) {
   };
 }
 
+function teamIsClearanceAttacker(game, team) {
+  const playerAttacks = isClearancePlayerAttacker(game);
+  return team === 'player' ? playerAttacks : !playerAttacks;
+}
+
 function spawnReinforcementPackage(game, team, types, wave) {
   const faction = team === 'player' ? game.playerFaction : game.enemyFaction;
-  const base = team === 'player'
-    ? getClearancePlayerSpawnBase(game.mapDef)
-    : game.mapDef.enemyBase;
+  const isAttacker = teamIsClearanceAttacker(game, team);
   const { ax, az } = axisFromPlayerToEnemy(game.mapDef);
-  const facingX = team === 'player' ? ax : -ax;
-  const facingZ = team === 'player' ? az : -az;
+  // Attackers assemble on the map player-base rear; defenders on the enemy base.
+  const base = isAttacker
+    ? getClearanceAttackerSpawnBase(game.mapDef)
+    : game.mapDef.enemyBase;
+  const facingX = isAttacker ? ax : -ax;
+  const facingZ = isAttacker ? az : -az;
   const sideX = -az;
   const sideZ = ax;
   const spawned = [];
@@ -340,54 +469,73 @@ function spawnReinforcementPackage(game, team, types, wave) {
     unit._mapDef = game.mapDef;
     unit.position.y = sampleTerrainHeight(position.x, position.z, game.mapDef);
     unit.mesh.rotation.y = Math.atan2(facingX, facingZ);
-    if (team === 'enemy') {
+    if (!isAttacker) {
       unit.defensiveHold = {
         x: position.x + facingX * (6 + (wave % 2) * 3),
         z: position.z + facingZ * (6 + (wave % 2) * 3),
         radius: 15,
       };
+    } else if (team === 'enemy') {
+      // AI assault reinforcements inherit the current battle plan.
+      unit.clearanceAttackRole = roleForClearanceAttackerType(types[i]);
     }
     spawned.push(unit);
   }
   return spawned;
 }
 
-/** Add one small reinforcement group to each side when the three-minute clock expires. */
+export function roleForClearanceAttackerType(type) {
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') {
+    return 'armor';
+  }
+  if (type === 'artillery' || type === 'mortar' || type === 'antiTankGun') return 'support';
+  if (type === 'sniper' || type === 'machineGun') return 'support';
+  return 'line';
+}
+
+/** Add one reinforcement group to each side when the three-minute clock expires. */
 export function updateClearanceReinforcements(game) {
   const state = game?.clearanceReinforcements;
   if (!state?.enabled || game.gameOver || game.matchTime < state.nextAt) return null;
 
+  const packages = getReinforcementPackages(state.size ?? 'small');
+  const playerAttacks = isClearancePlayerAttacker(game);
   const allSpawned = [];
   let cycles = 0;
   while (game.matchTime >= state.nextAt && cycles < 3) {
     state.wave += 1;
-    const packageIndex = (state.wave - 1) % PLAYER_REINFORCEMENT_PACKAGES.length;
+    const packageIndex = (state.wave - 1) % packages.player.length;
+    // Attacker roster packages for the assaulting side; defender packages for the garrison.
+    const playerPkg = playerAttacks
+      ? packages.player[packageIndex]
+      : packages.defender[packageIndex % packages.defender.length];
+    const enemyPkg = playerAttacks
+      ? packages.defender[packageIndex % packages.defender.length]
+      : packages.player[packageIndex];
     allSpawned.push(
-      ...spawnReinforcementPackage(
-        game,
-        'player',
-        PLAYER_REINFORCEMENT_PACKAGES[packageIndex],
-        state.wave
-      ),
-      ...spawnReinforcementPackage(
-        game,
-        'enemy',
-        DEFENDER_REINFORCEMENT_PACKAGES[packageIndex],
-        state.wave
-      )
+      ...spawnReinforcementPackage(game, 'player', playerPkg, state.wave),
+      ...spawnReinforcementPackage(game, 'enemy', enemyPkg, state.wave)
     );
     state.nextAt += state.interval;
     cycles += 1;
   }
   if (!allSpawned.length) return null;
   game.units.push(...allSpawned);
-  return { wave: state.wave, units: allSpawned };
+  return { wave: state.wave, units: allSpawned, size: state.size };
 }
 
-/** Periodically release a small mobile detachment to test and pursue the attackers. */
+/**
+ * Periodically release a small mobile detachment from the defending AI to test
+ * and pursue the assault. Only runs when the enemy is the garrison.
+ */
 export function updateClearanceCounterattacks(game) {
   const state = game?.clearanceReinforcements;
   if (!state?.enabled || game.gameOver || game.matchTime < (state.nextProbeAt ?? 52)) {
+    return null;
+  }
+  // Probes belong to the defending side. When the player holds the line, skip.
+  if (!isClearancePlayerAttacker(game)) {
+    state.nextProbeAt = game.matchTime + 40;
     return null;
   }
 
@@ -422,10 +570,16 @@ export function updateClearanceCounterattacks(game) {
   });
 
   const aggression = game.difficulty?.attackAggressionMult ?? 1;
+  const packageSize = state.size ?? 'small';
+  const probeCap = packageSize === 'large' ? 6 : packageSize === 'medium' ? 5 : 4;
+  const probeFloor = packageSize === 'large' ? 3 : 2;
   const size = Math.min(
-    4,
+    probeCap,
     candidates.length,
-    Math.max(2, Math.round(2 + (aggression - 1) * 2 + candidates.length * 0.08))
+    Math.max(
+      probeFloor,
+      Math.round(probeFloor + (aggression - 1) * 2 + candidates.length * 0.08)
+    )
   );
   const duration = 34 + Math.random() * 14;
   const probing = candidates.slice(0, size);
@@ -611,14 +765,29 @@ export function spawnClearanceDefenders({
 }
 
 export function checkClearanceVictory(game) {
-  const enemyAlive = game.units.filter((u) => u.team === 'enemy' && !u.dead).length;
-  const playerAlive = game.units.filter((u) => u.team === 'player' && !u.dead).length;
+  const enemyAlive = game.units.filter(
+    (u) => u.team === 'enemy' && !u.dead && u.def?.type !== 'commander'
+  ).length;
+  const playerAlive = game.units.filter(
+    (u) => u.team === 'player' && !u.dead && u.def?.type !== 'commander'
+  ).length;
+  const playerAttacks = isClearancePlayerAttacker(game);
 
   if (enemyAlive === 0) {
-    return { victory: true, detail: 'All enemy defensive positions cleared!' };
+    return {
+      victory: true,
+      detail: playerAttacks
+        ? 'All enemy defensive positions cleared!'
+        : 'Assault broken — the attacking force has been destroyed!',
+    };
   }
   if (playerAlive === 0) {
-    return { victory: false, detail: 'All your units have been lost!' };
+    return {
+      victory: false,
+      detail: playerAttacks
+        ? 'All your units have been lost!'
+        : 'Defenses overrun — your garrison has been wiped out!',
+    };
   }
   return null;
 }

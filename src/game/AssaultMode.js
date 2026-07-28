@@ -115,8 +115,12 @@ export function checkAssaultVictory(game) {
   const a = game.assault;
   if (!a) return null;
 
-  const playerAlive = game.units.filter((u) => u.team === PLAYER && !u.dead);
-  const enemyAlive = game.units.filter((u) => u.team === ENEMY && !u.dead);
+  const playerAlive = game.units.filter(
+    (u) => u.team === PLAYER && !u.dead && u.def?.type !== 'commander'
+  );
+  const enemyAlive = game.units.filter(
+    (u) => u.team === ENEMY && !u.dead && u.def?.type !== 'commander'
+  );
   const playerHQ = game.hqs.find((h) => h.team === PLAYER);
   const enemyHQ = game.hqs.find((h) => h.team === ENEMY);
 

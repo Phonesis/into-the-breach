@@ -13,6 +13,7 @@ import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
+import { isCommanderAlive } from './FieldCommander.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
@@ -45,6 +46,11 @@ export class FireSupportManager {
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
+    /**
+     * Clear Defenses: each side may call Airborne once only.
+     * null = unlimited (standard / assault / etc.).
+     */
+    this.airborneUsesLeft = null;
   }
 
   get ownerFaction() {
@@ -72,13 +78,28 @@ export class FireSupportManager {
     this.cooldowns = makeCooldowns();
     this.events = [];
     this.clearPreview();
+    // Clear Defenses & Battle Simulation: one airborne drop per side per match.
+    this.airborneUsesLeft =
+      this.game?.clearance || this.game?.lastStand ? 1 : null;
   }
 
   getDef(type) {
     return FIRE_SUPPORT_TYPES[type];
   }
 
+  /** False after the single Clear Defenses airborne has been spent. */
+  isAirborneAvailable() {
+    if (this.airborneUsesLeft == null) return true;
+    return this.airborneUsesLeft > 0;
+  }
+
+  hasCommandLink() {
+    return isCommanderAlive(this.game, this.ownerTeam);
+  }
+
   isReady(type) {
+    if (!this.hasCommandLink()) return false;
+    if (type === 'airborneDrop' && !this.isAirborneAvailable()) return false;
     return (this.cooldowns[type] ?? 0) <= 0;
   }
 
@@ -197,6 +218,7 @@ export class FireSupportManager {
     this.pending = null;
     this.clearPreview();
     this.cooldowns[type] = this.getDef(type).cooldown;
+    this._consumeAirborneUse(type);
     this.scheduleStrike(type, x, z);
     sounds.play('order');
     return true;
@@ -210,11 +232,18 @@ export class FireSupportManager {
       z = target.z;
     }
     this.cooldowns[type] = this.getDef(type).cooldown;
+    this._consumeAirborneUse(type);
     this.scheduleStrike(type, x, z);
     return true;
   }
 
+  _consumeAirborneUse(type) {
+    if (type !== 'airborneDrop' || this.airborneUsesLeft == null) return;
+    this.airborneUsesLeft = Math.max(0, this.airborneUsesLeft - 1);
+  }
+
   scheduleStrike(type, tx, tz) {
+    if (!isCommanderAlive(this.game, this.ownerTeam)) return false;
     if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(tx, tz)) return false;
     const def = this.getDef(type);
     const scene = this.game.scene;

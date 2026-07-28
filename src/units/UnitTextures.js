@@ -36,6 +36,7 @@ const INFANTRY_TYPES = new Set([
   'sniper',
   'medic',
   'engineer',
+  'commander',
 ]);
 
 const cache = new Map();

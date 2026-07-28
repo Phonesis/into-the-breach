@@ -1501,7 +1501,12 @@ function applySplashDamage(
     if (!other.surrendered) {
       markUnderFire(other);
       const appliedDamage = scalePracticeHqDamage(other, splashDmg, options);
-      other.takeDamage(appliedDamage, { explosive: true });
+      other.takeDamage(appliedDamage, {
+        explosive: true,
+        // Fling bodies away from the detonation, not the distant gun.
+        blastOrigin: { x: point.x, z: point.z },
+        impactFrom: { x: point.x, z: point.z },
+      });
       if (appliedDamage > 0 && !other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
           maybeTriggerRetreat(other, hqs, units, attacker, {
@@ -1541,6 +1546,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       // Clear Defenses: no player HQ — rally to starting/staging zone instead
       const hq = resolveRetreatHq(unit, hqs, {
         clearance: options.clearance,
+        clearanceRole: options.clearanceRole,
         mapDef,
       });
       if (!hq) {

@@ -438,8 +438,15 @@ export class Unit {
       this.dead = true;
       if (opts.cause === 'crush' || opts.crushed) {
         this._deathCause = 'crush';
+        this._deathBlastOrigin = null;
       } else if (opts.explosive || opts.cause === 'explosion') {
         this._deathCause = 'explosion';
+        // Blast epicentre (preferred) or attacker muzzle — used to fling corpses outward.
+        const origin = opts.blastOrigin ?? opts.impactFrom ?? null;
+        this._deathBlastOrigin =
+          origin && Number.isFinite(origin.x) && Number.isFinite(origin.z)
+            ? { x: origin.x, z: origin.z }
+            : null;
       }
       clearRetreat(this);
       clearSurrender(this);

@@ -593,6 +593,93 @@ export function buildFactionInfantry(group, _body, _dark, factionId) {
   group.userData.hitRadius = 1.2;
 }
 
+export function buildFactionCommander(group, _body, dark, factionId) {
+  const positions = [
+    { x: 0, z: 0, officer: true },
+    { x: -0.72, z: 0.48 },
+    { x: 0.72, z: 0.48 },
+    { x: -0.72, z: -0.55 },
+    { x: 0.72, z: -0.55 },
+  ];
+  const insigniaColors = {
+    germany: 0xc6a45c,
+    usa: 0xd7c27a,
+    uk: 0xc8b36a,
+    russia: 0xc9362b,
+  };
+
+  for (let i = 0; i < positions.length; i++) {
+    const { x, z, officer } = positions[i];
+    buildSquadSoldier(group, {
+      factionId,
+      squadIndex: i,
+      x,
+      z,
+      withPack: !officer,
+      withRifle: !officer,
+      extraMeshes: officer
+        ? (soldier, mats) => {
+            const helmet = soldier.children.find(
+              (child) => child.userData?.infantryPart === 'helmet'
+            );
+            if (helmet) helmet.visible = false;
+
+            const cap = new THREE.Group();
+            cap.name = `commanderCap-${factionId}`;
+            cap.position.set(0, 0.91, 0);
+            const crown = new THREE.Mesh(
+              factionId === 'russia'
+                ? new THREE.CylinderGeometry(0.11, 0.125, 0.09, 12)
+                : new THREE.CylinderGeometry(0.105, 0.125, 0.075, 12),
+              mats.helmet
+            );
+            crown.scale.z = 1.12;
+            const visor = new THREE.Mesh(
+              new THREE.BoxGeometry(0.15, 0.018, 0.09),
+              dark
+            );
+            visor.position.set(0, -0.045, 0.105);
+            visor.rotation.x = -0.16;
+            const band = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.126, 0.126, 0.025, 12),
+              mat(insigniaColors[factionId] ?? 0xd0b56b, { metal: 0.18, rough: 0.55 })
+            );
+            band.position.y = -0.025;
+            cap.add(crown, visor, band);
+            tagEquipShadow(crown);
+            soldier.add(cap);
+
+            const binoculars = new THREE.Group();
+            binoculars.name = 'commanderBinoculars';
+            binoculars.position.set(0.05, 0.48, 0.13);
+            for (const bx of [-0.045, 0.045]) {
+              const glass = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.035, 0.045, 0.14, 8),
+                dark
+              );
+              glass.rotation.x = Math.PI / 2;
+              glass.position.x = bx;
+              binoculars.add(glass);
+            }
+            soldier.add(binoculars);
+
+            const mapCase = new THREE.Mesh(
+              new THREE.BoxGeometry(0.17, 0.22, 0.08),
+              mat(0x6b4b2e, { rough: 0.9 })
+            );
+            mapCase.position.set(-0.16, 0.35, 0.08);
+            mapCase.rotation.z = 0.12;
+            soldier.add(mapCase);
+          }
+        : undefined,
+    });
+  }
+
+  group.userData.squadSize = positions.length;
+  group.userData.commanderOfficerIndex = 0;
+  group.userData.hitRadius = 1.65;
+}
+
 export function buildFactionVehicleCrew(group, _body, _dark, factionId) {
   const positions = [
     { x: -0.42, z: 0.08 },

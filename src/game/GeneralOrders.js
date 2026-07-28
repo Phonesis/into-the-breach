@@ -5,6 +5,7 @@ import {
   HOLD_GROUND_RETREAT_MULT,
 } from '../data/generalOrders.js';
 import { startRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
+import { isCommanderAlive } from './FieldCommander.js';
 
 const PLAYER = 'player';
 const HQ_REACHED_DIST = 18;
@@ -15,6 +16,7 @@ function makeCooldowns() {
 
 function canReceiveOrder(unit) {
   if (!unit || unit.dead || unit.team !== PLAYER) return false;
+  if (unit.def?.type === 'commander') return false;
   if (unit.surrendered || unit._captureExit || unit._dropping) return false;
   return true;
 }
@@ -24,7 +26,11 @@ function playerHq(game) {
   return resolveRetreatHq(
     { team: PLAYER },
     game.hqs,
-    { clearance: game.clearance, mapDef: game.mapDef }
+    {
+      clearance: game.clearance,
+      clearanceRole: game.clearanceRole,
+      mapDef: game.mapDef,
+    }
   );
 }
 
@@ -58,8 +64,16 @@ export class GeneralOrdersManager {
     return Math.max(0, this.active?.remaining ?? 0);
   }
 
+  hasCommandLink() {
+    return isCommanderAlive(this.game, PLAYER);
+  }
+
   isReady(type) {
-    return (this.cooldowns[type] ?? 0) <= 0 && !this.active;
+    return (
+      this.hasCommandLink() &&
+      (this.cooldowns[type] ?? 0) <= 0 &&
+      !this.active
+    );
   }
 
   getCooldownRemaining(type) {

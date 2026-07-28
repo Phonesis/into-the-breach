@@ -1,7 +1,8 @@
 import { getProducibleUnits, isLastStandMode, LAST_STAND_SUPPLIES } from '../data/gameModes.js';
 import {
   isLastStandPresetDeployMode,
-  LAST_STAND_PRESET_ROSTER,
+  getLastStandPresetRoster,
+  resolveLastStandPresetSize,
 } from '../data/lastStandForces.js';
 import { pickLastStandTactic, getLastStandTactic } from '../data/lastStandTactics.js';
 import { buildLastStandBriefing } from '../data/lastStandBriefing.js';
@@ -120,11 +121,13 @@ const PRESET_ECHELON_BY_ROLE = {
   armor: 'reserve',
 };
 
-export function createLastStandState(deployMode = 'manual') {
+export function createLastStandState(deployMode = 'manual', presetSize = 'medium') {
   const preset = isLastStandPresetDeployMode(deployMode);
   return {
     phase: 'deploy',
     deployMode,
+    /** small | medium | large — only used for presetForce. */
+    presetSize: preset ? presetSize : null,
     supplies: preset
       ? { player: 0, enemy: 0 }
       : { player: LAST_STAND_SUPPLIES, enemy: LAST_STAND_SUPPLIES },
@@ -236,16 +239,20 @@ function spawnPresetUnit(game, { faction, team, unitType, echelon, index, count,
   return true;
 }
 
-/** Deploy mirrored preset battle groups for both sides (large-map preset mode). */
+/** Deploy mirrored preset battle groups for both sides (any map; size-scaled). */
 export function deployLastStandPresetForces(game) {
   const state = game.lastStand;
   if (!state || !isLastStandPresetDeployMode(state.deployMode)) return;
+
+  // Resolve size against the map (e.g. Berlin cannot field Large).
+  state.presetSize = resolveLastStandPresetSize(state.presetSize ?? 'medium', game.mapDef);
+  const roster = getLastStandPresetRoster(game.mapDef, state.presetSize);
 
   for (const team of ['player', 'enemy']) {
     const faction = team === 'player' ? game.playerFaction : game.enemyFaction;
     const basis = getFormationBasis(game.mapDef, team);
 
-    for (const slot of LAST_STAND_PRESET_ROSTER) {
+    for (const slot of roster) {
       const def = faction?.units?.[slot.type];
       if (!def) continue;
       for (let i = 0; i < slot.count; i++) {
@@ -550,7 +557,7 @@ export function assignLastStandEnemyStances(game) {
 function livingTeamCount(units, team) {
   let n = 0;
   for (const u of units) {
-    if (u.team === team && !u.dead) n++;
+    if (u.team === team && !u.dead && u.def?.type !== 'commander') n++;
   }
   return n;
 }

@@ -20,13 +20,14 @@ export const GAME_MODES = {
     id: 'clearance',
     name: 'Clear Defenses',
     subtitle:
-      'Wipe every dug-in defender — choose Classic fixed forces or Reinforced three-minute arrivals on the Theater screen.',
+      'Attack dug-in defenses or hold them yourself — timed reinforcements for both sides (Small / Medium / Large) and no HQ economy.',
+    needsRole: true,
   },
+  /** @deprecated Legacy alias; starts as Clear Defenses with Small reinforcements. */
   clearanceReinforced: {
     id: 'clearanceReinforced',
-    name: 'Clear Defenses — Reinforced',
-    subtitle:
-      'Clear dug-in defenders while both sides receive small automatic reinforcement groups every 3 minutes.',
+    name: 'Clear Defenses',
+    subtitle: 'Legacy alias for Clear Defenses.',
     hidden: true,
   },
   towerDefense: {
@@ -51,20 +52,33 @@ export const STANDARD_UNIT_LIMIT = 30;
 
 export const GAME_MODE_LIST = Object.values(GAME_MODES).filter((mode) => !mode.hidden);
 
-export const CLEARANCE_STYLES = {
-  classic: {
-    id: 'classic',
-    name: 'Classic',
-    subtitle: 'Original fixed-force battle — no HQ, production, or reinforcements.',
+/** Clear Defenses always uses timed reinforcements; this sets how large each wave is. */
+export const CLEARANCE_REINFORCEMENT_SIZES = {
+  small: {
+    id: 'small',
+    name: 'Small',
+    subtitle: 'Two-unit packages every 3 minutes — current baseline (infantry + one support).',
   },
-  reinforced: {
-    id: 'reinforced',
-    name: 'Reinforced',
-    subtitle: 'Three-minute reinforcements plus frequent defender probing counterattacks.',
+  medium: {
+    id: 'medium',
+    name: 'Medium',
+    subtitle: 'Three- to four-unit packages every 3 minutes — extra rifles and support weapons.',
+  },
+  large: {
+    id: 'large',
+    name: 'Large',
+    subtitle: 'Five- to six-unit packages every 3 minutes — platoon-scale arrivals for both sides.',
   },
 };
 
-export const CLEARANCE_STYLE_LIST = Object.values(CLEARANCE_STYLES);
+export const CLEARANCE_REINFORCEMENT_SIZE_LIST = Object.values(CLEARANCE_REINFORCEMENT_SIZES);
+
+/** @deprecated Prefer CLEARANCE_REINFORCEMENT_SIZES — kept for any external imports. */
+export const CLEARANCE_STYLES = CLEARANCE_REINFORCEMENT_SIZES;
+/** @deprecated Prefer CLEARANCE_REINFORCEMENT_SIZE_LIST */
+export const CLEARANCE_STYLE_LIST = CLEARANCE_REINFORCEMENT_SIZE_LIST;
+
+export const DEFAULT_CLEARANCE_REINFORCEMENT_SIZE = 'small';
 
 export const ASSAULT_ROLES = {
   attack: {
@@ -80,6 +94,31 @@ export const ASSAULT_ROLES = {
 };
 
 export const ASSAULT_ROLE_LIST = Object.values(ASSAULT_ROLES);
+
+/** Clear Defenses mission choice — player is either the assault force or the garrison. */
+export const CLEARANCE_ROLES = {
+  attack: {
+    id: 'attack',
+    name: 'Attack',
+    subtitle:
+      'Assault prepared defenses with a fixed force. Timed rear reinforcements; wipe every defender to win.',
+  },
+  defend: {
+    id: 'defend',
+    name: 'Defend',
+    subtitle:
+      'Hold dug-in positions against an AI assault. Timed reinforcements; destroy the attacking force to win.',
+  },
+};
+
+export const CLEARANCE_ROLE_LIST = Object.values(CLEARANCE_ROLES);
+export const DEFAULT_CLEARANCE_ROLE = 'attack';
+
+export function resolveClearanceRole(options = {}) {
+  const raw = options.clearanceRole ?? options.assaultRole;
+  if (raw === 'defend' || raw === 'attack') return raw;
+  return DEFAULT_CLEARANCE_ROLE;
+}
 
 /** Seconds the attacker must hold the frontline to win. */
 export const ASSAULT_HOLD_TIME = 45;
@@ -127,8 +166,22 @@ export function isClearanceMode(gameMode) {
   return gameMode === 'clearance' || gameMode === 'clearanceReinforced';
 }
 
+/** Clear Defenses always runs with timed reinforcements (legacy classic removed). */
 export function isReinforcedClearanceMode(gameMode, options = {}) {
-  return gameMode === 'clearanceReinforced' || options.clearanceStyle === 'reinforced';
+  if (isClearanceMode(gameMode)) return true;
+  // Explicit opt-in from older saves / options.
+  return options.clearanceStyle === 'reinforced' || options.clearanceReinforced === true;
+}
+
+export function resolveClearanceReinforcementSize(options = {}) {
+  const raw =
+    options.clearanceReinforcementSize ??
+    options.clearanceStyle ??
+    DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
+  // Map legacy style ids: classic/reinforced → small
+  if (raw === 'classic' || raw === 'reinforced') return DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
+  if (CLEARANCE_REINFORCEMENT_SIZES[raw]) return raw;
+  return DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
 }
 
 export function isTowerDefenseMode(gameMode) {

@@ -5,6 +5,8 @@
  */
 
 export const UNIT_MATERIEL_COST_USD_1944 = {
+  commander: 7_500,
+  commanderBodyguard: 0,
   infantry: 4_200,
   medic: 3_800,
   engineer: 6_500,

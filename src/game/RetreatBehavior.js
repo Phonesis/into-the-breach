@@ -35,7 +35,7 @@ export function getCoverRetreatMultiplier(unit) {
  */
 export function resolveRetreatHq(unit, hqs, opts = {}) {
   if (opts.clearance && unit?.team === 'player' && opts.mapDef) {
-    return getClearanceStagingAnchor(opts.mapDef);
+    return getClearanceStagingAnchor(opts.mapDef, opts.clearanceRole ?? 'attack');
   }
   return hqs?.find((h) => h.team === unit.team && !h.dead) ?? null;
 }
@@ -168,6 +168,7 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
 
   const hq = resolveRetreatHq(unit, hqs, {
     clearance: options.clearance,
+    clearanceRole: options.clearanceRole,
     mapDef: options.mapDef,
   });
   if (!hq) return;

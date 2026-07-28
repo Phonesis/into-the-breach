@@ -17,6 +17,8 @@ import {
   isAssaultMode,
   isClearanceMode,
   isReinforcedClearanceMode,
+  resolveClearanceReinforcementSize,
+  resolveClearanceRole,
   isTowerDefenseMode,
   isLastStandMode,
   LAST_STAND_SUPPLIES,
@@ -39,7 +41,11 @@ import {
   isLastStandDeployPhase,
   tryPlacePlayerUnit,
 } from './LastStandMode.js';
-import { isLastStandPresetDeployMode } from '../data/lastStandForces.js';
+import {
+  isLastStandPresetDeployMode,
+  resolveLastStandPresetSize,
+  DEFAULT_LAST_STAND_PRESET_SIZE,
+} from '../data/lastStandForces.js';
 import {
   createTowerDefenseState,
   startNextWave,
@@ -58,12 +64,14 @@ import { getFrontlineDef } from './AssaultMode.js';
 import {
   spawnClearanceDefenders,
   checkClearanceVictory,
-  getClearancePlayerSpawnBase,
+  getClearanceAttackerSpawnBase,
   getClearanceStagingAnchor,
   CLEARANCE_CEASEFIRE_TIME,
   createClearanceReinforcementState,
   updateClearanceReinforcements,
   updateClearanceCounterattacks,
+  pickClearanceAttackPlan,
+  roleForClearanceAttackerType,
 } from './ClearanceMode.js';
 import { updateRetreatState, removeRetreatMarker, resolveRetreatHq } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
@@ -71,6 +79,12 @@ import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
 import { updateVehicleBailouts } from './VehicleBailout.js';
+import {
+  ensureFieldCommanders,
+  getFieldCommander,
+  isCommanderAlive,
+  updateFieldCommanders,
+} from './FieldCommander.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
 import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js';
 import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
@@ -350,6 +364,8 @@ export class Game {
     this.gameMode = 'campaign';
     this.tutorial = false;
     this.clearance = false;
+    this.clearanceRole = 'attack';
+    this.clearanceAttackPlan = null;
     this.clearanceReinforcements = null;
     this.assault = null;
     this.assaultRole = null;
@@ -847,12 +863,22 @@ export class Game {
     this.gameMode = gameMode;
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
+    this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
+    this.clearanceAttackPlan = null;
     this.clearanceReinforcements = createClearanceReinforcementState(
-      isReinforcedClearanceMode(gameMode, startOptions)
+      isReinforcedClearanceMode(gameMode, startOptions),
+      resolveClearanceReinforcementSize(startOptions)
     );
     this.towerDefense = isTowerDefenseMode(gameMode);
     this.lastStand = isLastStandMode(gameMode)
-      ? createLastStandState(startOptions.lastStandDeployMode ?? 'manual')
+      ? createLastStandState(
+          startOptions.lastStandDeployMode ?? 'manual',
+          resolveLastStandPresetSize(
+            startOptions.lastStandPresetSize ?? DEFAULT_LAST_STAND_PRESET_SIZE,
+            // Map id is enough to block Large on Berlin before mapDef is built.
+            mapId
+          )
+        )
       : null;
     this.campaign = isCampaignMode(gameMode);
     let campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
@@ -863,9 +889,8 @@ export class Game {
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
     let mapSizeId = startOptions.mapSize ?? 'medium';
-    if (this.lastStand && isLastStandPresetDeployMode(this.lastStand.deployMode)) {
-      mapSizeId = 'large';
-    } else if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
+    // Preset battle groups no longer force a large theater — any map size works.
+    if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
       mapSizeId = 'large';
     }
     // Maps like Berlin may only allow certain sizes (enforced in buildMapDef).
@@ -876,6 +901,13 @@ export class Game {
     this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
     if (this.campaign) {
       this.mapDef = spreadCampaignCapturePoints(this.mapDef);
+    }
+    // Clamp preset size after mapDef exists (Berlin / urban cannot field Large).
+    if (this.lastStand && isLastStandPresetDeployMode(this.lastStand.deployMode)) {
+      this.lastStand.presetSize = resolveLastStandPresetSize(
+        this.lastStand.presetSize ?? DEFAULT_LAST_STAND_PRESET_SIZE,
+        this.mapDef
+      );
     }
     setActiveVehicleTheatre(this.mapDef.id);
     const mapScale = this.mapDef.sizeScale ?? 1;
@@ -1089,17 +1121,49 @@ export class Game {
         : 'assaultAttack'
       : null;
 
-    const clearanceSpawnBase = this.clearance
-      ? getClearancePlayerSpawnBase(this.mapDef)
+    const playerAttacksClearance = this.clearance && this.clearanceRole !== 'defend';
+    const clearanceAttackerBase = this.clearance
+      ? getClearanceAttackerSpawnBase(this.mapDef)
       : null;
 
     const baseBuildingCampaign = this.campaignStyle === 'baseBuilding';
-    this.units = restoreSnapshot || this.towerDefense || this.lastStand
-      ? []
-      : spawnArmy({
+    this.units = [];
+    if (!restoreSnapshot && !this.towerDefense && !this.lastStand) {
+      if (this.clearance && !playerAttacksClearance) {
+        // Player defends: dig-in force for player, AI assault from rear assembly.
+        this.clearanceAttackPlan = pickClearanceAttackPlan();
+        const attackers = spawnArmy({
+          faction: this.enemyFaction,
+          team: ENEMY_TEAM,
+          base: clearanceAttackerBase,
+          scene: this.scene,
+          offsetSign: 1,
+          clearanceSpawn: true,
+          mapDef: this.mapDef,
+          enemyArmyMult: this.difficulty.enemyArmyMult,
+          scenery: this.scenery,
+        });
+        for (const u of attackers) {
+          u.clearanceAttackRole = roleForClearanceAttackerType(u.def?.type);
+        }
+        this.units.push(...attackers);
+        this.units.push(
+          ...spawnClearanceDefenders({
+            faction: this.playerFaction,
+            team: PLAYER_TEAM,
+            scene: this.scene,
+            mapDef: this.mapDef,
+            capturePoints: this.capturePoints,
+            enemyArmyMult: 1,
+            attackerUnits: attackers,
+            scenery: this.scenery,
+          })
+        );
+      } else {
+        this.units = spawnArmy({
           faction: this.playerFaction,
           team: PLAYER_TEAM,
-          base: clearanceSpawnBase ?? playerBasePos,
+          base: clearanceAttackerBase ?? playerBasePos,
           scene: this.scene,
           offsetSign: assault && this.assaultRole === 'attack' ? -1 : 1,
           tutorial: this.tutorial,
@@ -1110,21 +1174,24 @@ export class Game {
           baseBuilding: baseBuildingCampaign,
           scenery: this.scenery,
         });
+        if (this.clearance) {
+          this.units.push(
+            ...spawnClearanceDefenders({
+              faction: this.enemyFaction,
+              team: ENEMY_TEAM,
+              scene: this.scene,
+              mapDef: this.mapDef,
+              capturePoints: this.capturePoints,
+              enemyArmyMult: this.difficulty.enemyArmyMult,
+              attackerUnits: this.units,
+              scenery: this.scenery,
+            })
+          );
+        }
+      }
+    }
 
-    if (this.clearance) {
-      this.units.push(
-        ...spawnClearanceDefenders({
-          faction: this.enemyFaction,
-          team: ENEMY_TEAM,
-          scene: this.scene,
-          mapDef: this.mapDef,
-          capturePoints: this.capturePoints,
-          enemyArmyMult: this.difficulty.enemyArmyMult,
-          attackerUnits: this.units,
-          scenery: this.scenery,
-        })
-      );
-    } else if (!this.tutorial && !this.towerDefense && !this.lastStand) {
+    if (!this.clearance && !this.tutorial && !this.towerDefense && !this.lastStand && !restoreSnapshot) {
       const enemyArmyScale =
         this.difficulty.enemyArmyMult *
         (this.campaign ? CAMPAIGN_BALANCE.enemyArmyMult : 1);
@@ -1165,11 +1232,16 @@ export class Game {
       this._rebuildUnitCaches();
     }
 
-    const camFocus = clearanceSpawnBase ?? playerBasePos;
+    const camFocus =
+      this.clearance && this.clearanceRole === 'defend'
+        ? this.mapDef.frontline ?? this.mapDef.enemyBase ?? playerBasePos
+        : clearanceAttackerBase ?? playerBasePos;
     const enemyFocus = this.tutorial || this.towerDefense
       ? this.mapDef.enemyBase
       : this.clearance
-        ? this.mapDef.enemyBase
+        ? this.clearanceRole === 'defend'
+          ? clearanceAttackerBase ?? playerBasePos
+          : this.mapDef.enemyBase
         : enemyBasePos;
     if (restoreSnapshot) {
       if (!applyBattleSave(this, restoreSnapshot)) {
@@ -1204,6 +1276,7 @@ export class Game {
       }
       this._showDeployZoneRings(deployTeams);
     }
+    ensureFieldCommanders(this);
 
     if (!restoreSnapshot) {
       resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
@@ -1258,6 +1331,8 @@ export class Game {
       lastStandPreset: isLastStandPresetForce(this),
       campaignStyle: this.campaignStyle,
       clearanceReinforced: !!this.clearanceReinforcements,
+      clearanceReinforcementSize: this.clearanceReinforcements?.size ?? 'small',
+      clearanceRole: this.clearanceRole ?? 'attack',
     });
     if (isTabletLikeDevice()) {
       this.setTabletTargetMode(true);
@@ -1322,8 +1397,8 @@ export class Game {
     this._rebuildUnitCaches();
     this._syncUnitRoster();
     this._updateMinimap();
-    preloadUnitFieldIcons(getProducibleUnits(this.playerFaction)).then(() => {
-      if (this.running) syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+    preloadUnitFieldIcons([...getProducibleUnits(this.playerFaction), 'commander']).then(() => {
+      if (this.running) syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
     });
     this._bootstrapBattleView();
     this._startRenderLoop();
@@ -1486,7 +1561,7 @@ export class Game {
       return { x, z };
     }
     const hq = this.clearance
-      ? getClearanceStagingAnchor(this.mapDef)
+      ? getClearanceStagingAnchor(this.mapDef, this.clearanceRole)
       : this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
     return clampPointToHqZone(x, z, hq, getStagingMoveRadius(this.mapDef));
   }
@@ -1534,7 +1609,11 @@ export class Game {
       !hqs.some((h) => h.team === PLAYER_TEAM)
     ) {
       rings.push(
-        ...createDeployZoneRings([getClearanceStagingAnchor(this.mapDef)], this.mapDef, this.scene)
+        ...createDeployZoneRings(
+          [getClearanceStagingAnchor(this.mapDef, this.clearanceRole)],
+          this.mapDef,
+          this.scene
+        )
       );
     }
     this._deployZoneRings = rings;
@@ -1678,7 +1757,7 @@ export class Game {
 
   setUnitFieldIconsEnabled(enabled) {
     this.showUnitFieldIcons = !!enabled;
-    syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+    syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
     syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
   }
 
@@ -2013,6 +2092,8 @@ export class Game {
     this.ui?.clearMinimap();
     this.ui?.setPlacementCapture(false);
     this.clearance = false;
+    this.clearanceRole = 'attack';
+    this.clearanceAttackPlan = null;
     this.clearanceReinforcements = null;
     this.campaign = false;
     this.production.setBuildTimeMult(1);
@@ -2104,13 +2185,15 @@ export class Game {
     this.ui?.updateGeneralOrders(this.generalOrders);
   }
 
-  /** Faction HQ general over radio for fire support / general orders. */
+  /** Faction field commander over radio for fire support / general orders. */
   _playCommanderOrder(kind) {
     const factionId = this.playerFaction?.id ?? null;
+    const commander = getFieldCommander(this, PLAYER_TEAM);
     const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
-    const pos = hq?.position
+    const pos = (!commander?.dead ? commander?.position : null)
+      ?? hq?.position
       ?? (this.clearance && this.mapDef
-        ? getClearanceStagingAnchor(this.mapDef).position
+        ? getClearanceStagingAnchor(this.mapDef, this.clearanceRole).position
         : this.cameraTarget
           ? { x: this.cameraTarget.x, z: this.cameraTarget.z }
           : null);
@@ -2573,6 +2656,10 @@ export class Game {
 
     const pending = this.defenses.getPending();
     if (pending === 'barrage') {
+      if (!isCommanderAlive(this, PLAYER_TEAM)) {
+        this.defenses.cancelPending();
+        return;
+      }
       if (this.defenses.tryBarrage(x, z)) {
         this.ui?.updateDefenses(this);
         this._syncPlacementCapture();
@@ -2653,6 +2740,7 @@ export class Game {
 
   armTowerDefenseBarrage() {
     if (!this.running || this.gameOver || !this.defenses) return;
+    if (!isCommanderAlive(this, PLAYER_TEAM)) return;
     sounds.unlock();
     if (!this.defenses.armBarrage()) return;
     this.ui?.updateDefenses(this);
@@ -2807,7 +2895,8 @@ export class Game {
   }
 
   _countAlive(team) {
-    return team === PLAYER_TEAM ? this._playerAlive.length : this._enemyAlive.length;
+    const units = team === PLAYER_TEAM ? this._playerAlive : this._enemyAlive;
+    return units.filter((unit) => unit.def?.type !== 'commander').length;
   }
 
   /** HUD panels — throttled so DOM work does not scale with frame rate. */
@@ -3508,7 +3597,7 @@ export class Game {
         this._fieldIconUiAccum += dt;
         if (this._fieldIconUiAccum >= 0.12) {
           this._fieldIconUiAccum = 0;
-          syncPlayerFieldIcons(this._playerAlive, this.showUnitFieldIcons);
+          syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
         }
 
         if (isLastStandDeployPhase(this)) {
@@ -3561,7 +3650,7 @@ export class Game {
         const stagingTeams = this._getDeployZoneTeamsAt();
         if (stagingTeams.length) {
           const stagingAnchors = this.clearance
-            ? { player: getClearanceStagingAnchor(this.mapDef) }
+            ? { player: getClearanceStagingAnchor(this.mapDef, this.clearanceRole) }
             : null;
           containTeamsToDeployZone(
             this._aliveUnits,
@@ -3580,6 +3669,7 @@ export class Game {
           if (u.retreating) {
             const hq = resolveRetreatHq(u, this.hqs, {
               clearance: this.clearance,
+              clearanceRole: this.clearanceRole,
               mapDef: this.mapDef,
             });
             updateRetreatState(u, hq, this.mapDef);
@@ -3643,6 +3733,7 @@ export class Game {
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
               baseBuildingTargets: combatBuildings,
               clearance: this.clearance,
+              clearanceRole: this.clearanceRole,
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,
               smokeScreens: this.smokeScreens,
@@ -3650,6 +3741,7 @@ export class Game {
             }
           );
           this._rebuildUnitCaches();
+          updateFieldCommanders(this, dt);
           if (isTdHqDefenseStyle(this.towerDefense)) {
             enforcePlayerFrontlineClamp(this);
           }

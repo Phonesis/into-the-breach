@@ -7,6 +7,7 @@ const textureCache = new Map();
 const ICON_SCALE = 2.4;
 
 const SHORT_LABELS = {
+  commander: 'CMD',
   infantry: 'INF',
   paratrooper: 'ABN',
   medic: 'MED',
@@ -23,6 +24,7 @@ const SHORT_LABELS = {
 };
 
 const ICON_HEIGHT = {
+  commander: 3.05,
   infantry: 2.35,
   paratrooper: 2.5,
   medic: 2.35,
@@ -197,9 +199,13 @@ function attachFieldIcon(unit) {
     depthTest: false,
     depthWrite: false,
   });
+  if (type === 'commander') {
+    mat.color.setHex(unit.team === 'player' ? 0xffdf72 : 0xff6b5f);
+  }
   const sprite = new THREE.Sprite(mat);
   sprite.name = 'fieldUnitIcon';
-  sprite.scale.set(ICON_SCALE, ICON_SCALE, 1);
+  const scale = type === 'commander' ? ICON_SCALE * 1.22 : ICON_SCALE;
+  sprite.scale.set(scale, scale, 1);
   sprite.renderOrder = 22;
   unit.mesh.add(sprite);
   unit.fieldIcon = sprite;
@@ -214,13 +220,14 @@ export function removeFieldIcon(unit) {
 }
 
 export function syncUnitFieldIcon(unit, enabled) {
-  if (!unit.mesh || unit.dead || unit.team !== 'player') {
+  const commander = unit.def?.type === 'commander';
+  if (!unit.mesh || unit.dead || (unit.team !== 'player' && !commander)) {
     removeFieldIcon(unit);
     return;
   }
 
   // Always show icons while garrisoned (mesh is hidden inside the building)
-  const mustShow = enabled || isUnitGarrisoned(unit);
+  const mustShow = commander || enabled || isUnitGarrisoned(unit);
   if (!mustShow) {
     removeFieldIcon(unit);
     return;
@@ -235,7 +242,7 @@ export function syncUnitFieldIcon(unit, enabled) {
 
 export function syncPlayerFieldIcons(units, enabled) {
   for (const unit of units) {
-    if (unit.team !== 'player') continue;
+    if (unit.team !== 'player' && unit.def?.type !== 'commander') continue;
     syncUnitFieldIcon(unit, enabled);
   }
 }
