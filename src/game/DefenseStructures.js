@@ -534,15 +534,47 @@ export class DefenseStructureManager {
         if (!MINE_VEHICLE_TYPES.has(u.def.type)) continue;
         const d = Math.hypot(u.position.x - entry.x, u.position.z - entry.z);
         if (d > entry.def.triggerRadius) continue;
-        const y = sampleTerrainHeight(entry.x, entry.z, this.mapDef);
-        spawnExplosion(this.scene, { x: entry.x, y: y + 0.5, z: entry.z });
-        addExplosionCrater(this.scene, this.mapDef, entry.x, entry.z, 'light', this.getTerrainMesh());
-        sounds.play('explosion');
-        u.takeDamage(entry.def.damage);
-        this.destroyEntry(entry);
+        this._detonateMine(entry);
         break;
       }
     }
+  }
+
+  detonateMinesAt(x, z, radius, attackerTeam) {
+    const hits = this.entries.filter((entry) => {
+      if (entry.destroyed || entry.typeId !== 'mine') return false;
+      if ((entry.team ?? 'player') === attackerTeam) return false;
+      return Math.hypot(entry.x - x, entry.z - z) <= Math.max(1.2, radius);
+    });
+    for (const entry of hits) this._detonateMine(entry);
+    return hits.length;
+  }
+
+  _detonateMine(entry) {
+    if (!entry || entry.destroyed) return false;
+    const y = sampleTerrainHeight(entry.x, entry.z, this.mapDef);
+    spawnExplosion(this.scene, { x: entry.x, y: y + 0.5, z: entry.z });
+    addExplosionCrater(
+      this.scene,
+      this.mapDef,
+      entry.x,
+      entry.z,
+      'light',
+      this.getTerrainMesh()
+    );
+    sounds.play('explosion');
+
+    const blastRadius = entry.def.triggerRadius * 2.2;
+    for (const unit of this.getEnemyUnits()) {
+      if (unit.dead || !MINE_VEHICLE_TYPES.has(unit.def?.type)) continue;
+      const distance = Math.hypot(unit.position.x - entry.x, unit.position.z - entry.z);
+      if (distance > blastRadius) continue;
+      const falloff = Math.max(0.35, 1 - distance / blastRadius);
+      unit.takeDamage(entry.def.damage * falloff);
+      if (!unit.dead) applyMobilityDamage(unit);
+    }
+    this.destroyEntry(entry);
+    return true;
   }
 
   _fireWeapon(entry, target, bestD, scene, mapDef, directFireProxy = null) {
@@ -618,7 +650,7 @@ export class DefenseStructureManager {
       const fromY = sampleTerrainHeight(entry.x, entry.z, mapDef) + 1.2;
       const toY = sampleTerrainHeight(target.position.x, target.position.z, mapDef) + 1;
       const from = { x: entry.x, y: fromY, z: entry.z };
-      const to = { x: target.position.x, y: toY, z: target.position.z };
+      const to = armorHit?.impactPosition ?? { x: target.position.x, y: toY, z: target.position.z };
       if (wType === 'mortar') {
         const craterTier = (def.caliber ?? 0) >= 105 ? 'heavy' : 'medium';
         spawnShellExplosion(scene, to, 'medium', def.caliber);
@@ -659,7 +691,11 @@ export class DefenseStructureManager {
         }
       );
       if (armorHit) {
-        sounds.playImpact(armorHit.deflected ? 'bullet' : 'tank_round', target.position, 0.08 + bestD / 180);
+        sounds.playImpact(
+          armorHit.deflected ? 'armor_ricochet' : 'tank_round',
+          armorHit.impactPosition ?? target.position,
+          0.08 + bestD / 180
+        );
       }
     }
     return true;

@@ -649,9 +649,12 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
   );
   if (engineers.length && game.engineerSandbags?.canUse?.()) {
     const engineer = engineers[Math.floor(Math.random() * engineers.length)];
-    const buildType = game.engineerSandbags.canBuildSandbags?.()
-      ? (assault?.defenderTeam === 'enemy' || Math.random() < 0.65 ? 'sandbags' : 'bunker')
-      : 'bunker';
+    const mineChance = game.engineerSandbags.canBuildMine?.() && Math.random() < 0.24;
+    const buildType = mineChance
+      ? 'mine'
+      : game.engineerSandbags.canBuildSandbags?.()
+        ? (assault?.defenderTeam === 'enemy' || Math.random() < 0.65 ? 'sandbags' : 'bunker')
+        : 'bunker';
     // tryAiPlace searches nearby open ground so AI does not dig under tenements.
     if (
       game.engineerSandbags.tryAiPlace(
@@ -680,7 +683,12 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
 }
 
 function canDigAiTrenchType(type) {
-  return type === 'infantry' || type === 'machineGun' || type === 'sniper';
+  return (
+    type === 'infantry' ||
+    type === 'paratrooper' ||
+    type === 'machineGun' ||
+    type === 'sniper'
+  );
 }
 
 function chooseCoverMove(unit, players, game, assault) {

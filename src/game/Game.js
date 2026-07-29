@@ -2158,6 +2158,8 @@ export class Game {
       if (this.fireSupport.tryPlaceTarget(x, z)) {
         this.ui?.updateFireSupport(this.fireSupport);
         this._syncBattleCursor();
+      } else {
+        this.ui?.updateFireSupport(this.fireSupport);
       }
     }
   }
@@ -2375,6 +2377,10 @@ export class Game {
     this.armEngineerBuild('bunker');
   }
 
+  armMineBuild() {
+    this.armEngineerBuild('mine');
+  }
+
   armTrenchDig() {
     if (!this.running || this.gameOver) return;
     const mgr = this.infantryTrenches;
@@ -2387,6 +2393,7 @@ export class Game {
         !u._trenchDigSite &&
         !u._trenchId &&
         (u.def?.type === 'infantry' ||
+          u.def?.type === 'paratrooper' ||
           u.def?.type === 'machineGun' ||
           u.def?.type === 'sniper')
     );
@@ -2567,6 +2574,24 @@ export class Game {
   handleSandbagPlacement(mode, x, z) {
     if (!this.running || this.gameOver || !this.engineerSandbags?.getPending()) return;
     const type = this.engineerSandbags.getPending();
+    if (type === 'mine') {
+      if (mode === 'preview') return;
+      const placed = this.engineerSandbags.tryPlace(x, z, PLAYER_TEAM, 0);
+      if (placed) sounds.play('select');
+      else {
+        const reason = this.engineerSandbags.getPlacementRejectReason(
+          x,
+          z,
+          PLAYER_TEAM,
+          type
+        );
+        if (reason) this.ui?.showEngineerBuildHint(reason);
+      }
+      this.ui?.updateEngineerBuild(this);
+      this._syncPlacementCapture();
+      this._syncBattleCursor();
+      return;
+    }
     const placed = this._handleDirectionalPlacement(
       'engineer',
       type,
@@ -3331,7 +3356,11 @@ export class Game {
     }
 
     if (isTankType(def.type) || def.type === 'antiTankGun' || (def.type === 'paratrooper' && paratrooperAtFire)) {
-      sounds.playImpact(armorHit?.deflected ? 'bullet' : 'tank_round', { x: to.x, z: to.z }, 0.08 + dist / 180);
+      sounds.playImpact(
+        armorHit?.deflected ? 'armor_ricochet' : 'tank_round',
+        armorHit?.impactPosition ?? { x: to.x, z: to.z },
+        0.08 + dist / 180
+      );
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
         sounds.playInfantryDeath(
@@ -3369,10 +3398,12 @@ export class Game {
         (def.type === 'paratrooper' && paratrooperAtFire));
 
     if (armorHit?.deflected && !killed) {
-      const ricochetY = this.mapDef
-        ? sampleTerrainHeight(to.x, to.z, this.mapDef) + 1.1
-        : (to.y ?? 0) + 1.1;
-      spawnArmorRicochet(this.scene, { x: to.x, y: ricochetY, z: to.z }, from);
+      const ricochetPos = armorHit.impactPosition ?? {
+        x: to.x,
+        y: this.mapDef ? sampleTerrainHeight(to.x, to.z, this.mapDef) + 1.1 : (to.y ?? 0) + 1.1,
+        z: to.z,
+      };
+      spawnArmorRicochet(this.scene, ricochetPos, from);
     }
     if (armorHit && (attacker?.team === 'player' || target?.team === 'player')) {
       const now = performance.now();
@@ -3381,7 +3412,7 @@ export class Game {
         this._lastArmorHitToastAt = now;
         const vehicleName = target?.name ?? 'Vehicle';
         const message = armorHit.weakSpot
-          ? `${vehicleName}: weak spot hit — ${armorHit.weakSpot}`
+          ? `${vehicleName}: CRITICAL HIT — ${armorHit.weakSpot}`
           : armorHit.mobilityDamaged
             ? `${vehicleName}: ${armorHit.mobilityDamageKind === 'wheel' ? 'wheel damaged' : 'track broken'} — engineer required`
             : `${vehicleName}: shell deflected by ${armorHit.aspect} armor`;
@@ -3738,6 +3769,8 @@ export class Game {
               towerDefense: this.towerDefense,
               smokeScreens: this.smokeScreens,
               generalOrders: this.generalOrders,
+              engineerSandbags: this.engineerSandbags,
+              defenses: this.defenses,
             }
           );
           this._rebuildUnitCaches();

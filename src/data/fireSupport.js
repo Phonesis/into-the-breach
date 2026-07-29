@@ -1,3 +1,5 @@
+export const AIRBORNE_CLOUD_COVER_SECONDS = 5 * 60;
+
 export const FIRE_SUPPORT_TYPES = {
   strafe: {
     id: 'strafe',

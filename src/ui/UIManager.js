@@ -324,6 +324,10 @@ export class UIManager {
               Base Building requires a <strong>Large</strong> map.
             </p>
           </div>
+          <div class="campaign-style-block hidden" id="clearance-role-block">
+            <h2>Mission Role</h2>
+            <div class="campaign-style-grid" id="clearance-role-grid"></div>
+          </div>
           <div class="campaign-style-block hidden" id="clearance-style-block">
             <h2>Reinforcement Size</h2>
             <div class="campaign-style-grid" id="clearance-style-grid"></div>
@@ -643,6 +647,9 @@ export class UIManager {
                 <button type="button" class="btn btn-secondary interactive" id="btn-build-bunker">
                   Build bunker
                 </button>
+                <button type="button" class="btn btn-secondary interactive" id="btn-lay-mine">
+                  Lay AT mine
+                </button>
               </div>
               <p class="engineer-build-hint" id="engineer-build-hint">
                 Click a valid map location — the engineer will move there and build. Esc to cancel.
@@ -655,7 +662,7 @@ export class UIManager {
                 </button>
               </div>
               <p class="engineer-build-hint" id="infantry-trench-hint">
-                Infantry / MG / sniper dig a fighting trench (~14 s). Move onto it to dig in.
+                Infantry / airborne / MG / sniper dig a fighting trench (~14 s).
               </p>
             </div>
             <div class="medic-tent-actions hidden" id="medic-tent-actions">
@@ -932,6 +939,19 @@ export class UIManager {
     ).join('');
   }
 
+  renderClearanceRoles() {
+    const grid = this.root.querySelector('#clearance-role-grid');
+    if (!grid) return;
+    grid.innerHTML = CLEARANCE_ROLE_LIST.map(
+      (role) => `
+      <button type="button" class="card-btn interactive campaign-style-card clearance-role-card${role.id === this.selectedClearanceRole ? ' selected' : ''}" data-id="${role.id}">
+        <span class="name">${role.name}</span>
+        <span class="meta">${role.subtitle}</span>
+      </button>
+    `
+    ).join('');
+  }
+
   updateCampaignStyleMapSizeLock() {
     const lockBaseBuilding =
       this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
@@ -1032,6 +1052,7 @@ export class UIManager {
   updateDifficultyPanel() {
     const block = this.root.querySelector('#difficulty-block');
     const styleBlock = this.root.querySelector('#campaign-style-block');
+    const clearanceRoleBlock = this.root.querySelector('#clearance-role-block');
     const clearanceStyleBlock = this.root.querySelector('#clearance-style-block');
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
     const tdStyleBlock = this.root.querySelector('#td-style-block');
@@ -1043,6 +1064,7 @@ export class UIManager {
     const isLastStand = this.selectedGameMode === 'lastStand';
     if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
+    if (clearanceRoleBlock) clearanceRoleBlock.classList.toggle('hidden', !isClearance);
     if (clearanceStyleBlock) clearanceStyleBlock.classList.toggle('hidden', !isClearance);
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
     if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
@@ -1052,7 +1074,10 @@ export class UIManager {
       this.renderCampaignStyles();
       this.updateCampaignStyleMapSizeLock();
     }
-    if (isClearance) this.renderClearanceStyles();
+    if (isClearance) {
+      this.renderClearanceRoles();
+      this.renderClearanceStyles();
+    }
     if (isTowerDefense) {
       this.renderTdWaveModes();
       this.renderTdStyles();
@@ -1068,19 +1093,15 @@ export class UIManager {
   renderAssaultRoles() {
     const grid = this.root.querySelector('#role-grid');
     if (!grid) return;
-    const clearance = this.selectedGameMode === 'clearance';
-    const roles = clearance ? CLEARANCE_ROLE_LIST : ASSAULT_ROLE_LIST;
-    const selectedId = clearance
-      ? this.selectedClearanceRole
-      : this.selectedAssaultRole;
+    const roles = ASSAULT_ROLE_LIST;
+    const selectedId = this.selectedAssaultRole;
     const title = this.root.querySelector('#role-screen-title');
     const blurb = this.root.querySelector('#role-screen-blurb');
     const heading = this.root.querySelector('#role-screen-heading');
-    if (title) title.textContent = clearance ? 'Clear Defenses Mission' : 'Your Mission';
+    if (title) title.textContent = 'Your Mission';
     if (blurb) {
-      blurb.textContent = clearance
-        ? 'Choose whether you assault prepared defenses or hold them against the AI attack force. Units are auto-deployed for both roles.'
-        : 'Attackers must capture and hold the frontline. Defenders must hold until time expires.';
+      blurb.textContent =
+        'Attackers must capture and hold the frontline. Defenders must hold until time expires.';
     }
     if (heading) heading.textContent = 'Attack or Defend';
     grid.innerHTML = roles.map(
@@ -1254,7 +1275,7 @@ export class UIManager {
     });
 
     this.root.querySelector('#btn-to-faction').onclick = () => {
-      if (this.selectedGameMode === 'assault' || this.selectedGameMode === 'clearance') {
+      if (this.selectedGameMode === 'assault') {
         this.renderAssaultRoles();
         show('assault-role');
       } else show('faction');
@@ -1266,15 +1287,18 @@ export class UIManager {
       if (!btn) return;
       this.root.querySelectorAll('.role-card').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
-      if (this.selectedGameMode === 'clearance') {
-        this.selectedClearanceRole = btn.dataset.id;
-      } else {
-        this.selectedAssaultRole = btn.dataset.id;
-      }
+      this.selectedAssaultRole = btn.dataset.id;
       this.root.querySelector('#btn-to-faction-role').disabled = false;
     });
     this.root.querySelector('#btn-to-faction-role').onclick = () => show('faction');
-    this.root.querySelector('#btn-back-mode').onclick = () => show('mode');
+    this.root.querySelector('#btn-back-mode').onclick = () => {
+      if (this.selectedGameMode === 'assault') {
+        this.renderAssaultRoles();
+        show('assault-role');
+      } else {
+        show('mode');
+      }
+    };
     this.root.querySelector('#btn-back-faction').onclick = () => show('faction');
 
     this.root.querySelectorAll('.faction-card').forEach((btn) => {
@@ -1327,6 +1351,16 @@ export class UIManager {
       });
       btn.classList.add('selected');
       this.selectedClearanceReinforcementSize = btn.dataset.id;
+    });
+
+    this.root.querySelector('#clearance-role-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.clearance-role-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.clearance-role-card').forEach((roleBtn) => {
+        roleBtn.classList.remove('selected');
+      });
+      btn.classList.add('selected');
+      this.selectedClearanceRole = btn.dataset.id;
     });
 
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
@@ -1499,6 +1533,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-build-bunker')?.addEventListener('click', () => {
       this.callbacks.onArmBunker?.();
+    });
+    this.root.querySelector('#btn-lay-mine')?.addEventListener('click', () => {
+      this.callbacks.onArmMine?.();
     });
     this.root.querySelector('#btn-dig-trench')?.addEventListener('click', () => {
       this.callbacks.onArmTrenchDig?.();
@@ -2514,9 +2551,9 @@ export class UIManager {
   _defaultEngineerBuildHint(game) {
     const baseBuilding = game?.baseBuildings?.active ?? false;
     if (baseBuilding) {
-      return 'Garrison bunker — engineer erects on site (~28 s). Move troops onto it to enter. Esc to cancel.';
+      return 'Garrison bunker (~28 s) or AT mine (~8 s) — engineers move to the site before building. Esc to cancel.';
     }
-    return 'Sandbags (~11 s) or bunkers (~28 s) — click a site and the engineer will move there. Esc to cancel.';
+    return 'Sandbags (~11 s), bunkers (~28 s), or AT mines (~8 s) — click a site and the engineer will move there. Esc to cancel.';
   }
 
   showEngineerBuildHint(message) {
@@ -2538,13 +2575,15 @@ export class UIManager {
     const panel = this.root.querySelector('#engineer-build-actions');
     const sandbagBtn = this.root.querySelector('#btn-build-sandbags');
     const bunkerBtn = this.root.querySelector('#btn-build-bunker');
+    const mineBtn = this.root.querySelector('#btn-lay-mine');
     const hint = this.root.querySelector('#engineer-build-hint');
-    if (!panel || !sandbagBtn || !bunkerBtn) return;
+    if (!panel || !sandbagBtn || !bunkerBtn || !mineBtn) return;
 
     this._lastEngineerBuildGame = game;
     const mgr = game?.engineerSandbags;
     const canSandbags = mgr?.canBuildSandbags?.() ?? false;
     const canBunker = mgr?.canBuildBunker?.() ?? false;
+    const canMine = mgr?.canBuildMine?.() ?? false;
     const selectedEngineers =
       game?.units?.filter(
         (u) =>
@@ -2555,11 +2594,12 @@ export class UIManager {
           u.def?.type === 'engineer'
       ) ?? [];
     const freeEngineers = selectedEngineers.filter((u) => !u._sandbagSite);
-    const show = (canSandbags || canBunker) && selectedEngineers.length > 0;
+    const show = (canSandbags || canBunker || canMine) && selectedEngineers.length > 0;
 
     panel.classList.toggle('hidden', !show);
     sandbagBtn.classList.toggle('hidden', !canSandbags);
     bunkerBtn.classList.toggle('hidden', !canBunker);
+    mineBtn.classList.toggle('hidden', !canMine);
     if (!show) {
       this.updateInfantryTrench(game);
       return;
@@ -2568,15 +2608,21 @@ export class UIManager {
     const pending = mgr?.getPending?.() ?? null;
     sandbagBtn.classList.toggle('btn-armed', pending === 'sandbags');
     bunkerBtn.classList.toggle('btn-armed', pending === 'bunker');
+    mineBtn.classList.toggle('btn-armed', pending === 'mine');
     sandbagBtn.textContent = pending === 'sandbags' ? 'Placing sandbags…' : 'Build sandbags';
     bunkerBtn.textContent = pending === 'bunker' ? 'Placing bunker…' : 'Build bunker';
+    mineBtn.textContent = pending === 'mine' ? 'Placing mine…' : 'Lay AT mine';
 
     if (hint && !hint.classList.contains('engineer-build-hint-error')) {
       if (pending) {
-        const label = pending === 'bunker' ? 'bunker' : 'sandbag position';
-        hint.textContent = game._directionalPlacement?.kind === 'engineer'
-          ? `Move the facing arrow toward the threat, then click to confirm the ${label}. Esc to cancel.`
-          : `Click a valid map location for the ${label}; then choose which direction it faces. Esc to cancel.`;
+        const label =
+          pending === 'bunker' ? 'bunker' : pending === 'mine' ? 'AT mine' : 'sandbag position';
+        hint.textContent =
+          pending === 'mine'
+            ? 'Click a valid location — the engineer will move there and lay the AT mine. Esc to cancel.'
+            : game._directionalPlacement?.kind === 'engineer'
+              ? `Move the facing arrow toward the threat, then click to confirm the ${label}. Esc to cancel.`
+              : `Click a valid map location for the ${label}; then choose which direction it faces. Esc to cancel.`;
       } else if (freeEngineers.length === 0) {
         hint.textContent = 'Selected engineer is already building field works.';
       } else {
@@ -2616,6 +2662,7 @@ export class UIManager {
           !u.dead &&
           !u.surrendered &&
           (u.def?.type === 'infantry' ||
+            u.def?.type === 'paratrooper' ||
             u.def?.type === 'machineGun' ||
             u.def?.type === 'sniper')
       ) ?? [];
@@ -2642,7 +2689,7 @@ export class UIManager {
         hint.textContent = 'Selected troops are already digging or dug in.';
       } else {
         hint.textContent =
-          'Infantry / MG / sniper dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
+          'Infantry / airborne / MG / sniper dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
       }
     }
     this.updateMedicTent(game);
@@ -2870,14 +2917,23 @@ export class UIManager {
       const rem = manager.getCooldownRemaining(fs.id);
       const airborneSpent =
         fs.id === 'airborneDrop' && manager.isAirborneAvailable && !manager.isAirborneAvailable();
+      const airborneCloudCovered =
+        fs.id === 'airborneDrop' && manager.isAirborneCloudCovered?.();
+      const cloudRemaining = airborneCloudCovered
+        ? Math.ceil(manager.getAirborneCloudCoverRemaining?.() ?? 0)
+        : 0;
       const ready = manager.isReady(fs.id);
       const armed = manager.pending === fs.id;
 
       if (cdEl) {
+        const cloudMinutes = Math.floor(cloudRemaining / 60);
+        const cloudSeconds = String(cloudRemaining % 60).padStart(2, '0');
         cdEl.textContent = !commandLink
           ? 'No CMD'
           : airborneSpent
           ? 'Used'
+          : airborneCloudCovered
+          ? `Cloud ${cloudMinutes}:${cloudSeconds}`
           : ready
             ? 'Ready'
             : `${Math.ceil(rem)}s`;
@@ -2892,6 +2948,8 @@ export class UIManager {
     if (hint) {
       if (!commandLink) {
         hint.textContent = 'Commander lost — off-map support unavailable';
+      } else if (manager.targetRejectReason) {
+        hint.textContent = manager.targetRejectReason;
       } else if (manager.pending === 'strafe') {
         hint.textContent = 'Click the map to call fighter strafe (Esc to cancel)';
       } else if (manager.pending === 'barrage') {
@@ -2900,6 +2958,12 @@ export class UIManager {
         hint.textContent = 'Click the map — creeping barrage lifts toward your target (Esc to cancel)';
       } else if (manager.pending === 'airborneDrop') {
         hint.textContent = 'Click the map to drop elite paratroopers (Esc to cancel)';
+      } else if (manager.isAirborneCloudCovered?.()) {
+        const remaining = Math.ceil(manager.getAirborneCloudCoverRemaining?.() ?? 0);
+        const minutes = Math.floor(remaining / 60);
+        const seconds = String(remaining % 60).padStart(2, '0');
+        hint.textContent =
+          `Airborne grounded by cloud cover — conditions clear in ${minutes}:${seconds} for both sides`;
       } else if (manager.game?.clearance || manager.game?.lastStand) {
         const airLeft = manager.airborneUsesLeft;
         const modeLabel = manager.game?.clearance ? 'Clear Defenses' : 'Battle Simulation';
@@ -3261,6 +3325,7 @@ export class UIManager {
 
     if (game.lastStand.phase !== 'deploy') {
       banner?.classList.add('hidden');
+      banner?.classList.remove('opening-countdown--manual-deploy');
       launchBtn?.classList.add('hidden');
       this._hudLastStandDeploy = false;
       this._setProductionPanelVisible(false);
@@ -3281,6 +3346,7 @@ export class UIManager {
     this._setProductionPanelVisible(!preset);
     this.root.querySelector('#firesupport-panel')?.classList.add('hidden');
     this.root.querySelector('#generalorders-panel')?.classList.add('hidden');
+    banner?.classList.toggle('opening-countdown--manual-deploy', !preset);
     banner?.classList.remove('hidden');
     if (title) {
       title.textContent = preset ? 'Battle groups deployed' : 'Deploy your forces';
@@ -3364,6 +3430,7 @@ export class UIManager {
     const fill = this.root.querySelector('#opening-countdown-fill');
     const launchBtn = this.root.querySelector('#btn-launch-battle-now');
     if (!banner) return;
+    banner.classList.remove('opening-countdown--manual-deploy');
 
     if (!phase || phase.secondsLeft <= 0.05) {
       banner.classList.add('hidden');
@@ -3855,8 +3922,8 @@ export class UIManager {
         coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
       } else if (u.def?.type === 'engineer') {
         const fieldWorks = game?.baseBuildings?.active
-          ? 'can erect <strong>garrison bunkers</strong> in the field (Build bunker).'
-          : 'can erect <strong>sandbags</strong> or <strong>bunkers</strong> — move infantry onto a bunker to garrison inside.';
+          ? 'can erect <strong>garrison bunkers</strong> and lay <strong>AT mines</strong> in the field.'
+          : 'can erect <strong>sandbags</strong> or <strong>bunkers</strong> and lay <strong>AT mines</strong> — move infantry onto a bunker to garrison inside.';
         coverBlock = `<p class="unit-support-status">Combat engineer squad — rifles/SMGs; repairs vehicles within ~16 m; ${fieldWorks}</p>`;
       } else if (u.def?.type === 'medic') {
         const tent = game?.medicFieldHospitals?.getMedicDeployStatus?.(u);
@@ -3866,6 +3933,7 @@ export class UIManager {
         coverBlock = `${tentLine}<p class="unit-support-status">Combat medic — heals nearby infantry; can <strong>deploy a field hospital tent</strong> that heals non-vehicle units in range.</p>`;
       } else if (
         u.def?.type === 'infantry' ||
+        u.def?.type === 'paratrooper' ||
         u.def?.type === 'machineGun' ||
         u.def?.type === 'sniper'
       ) {

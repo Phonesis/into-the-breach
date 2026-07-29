@@ -1412,12 +1412,41 @@ function fire(
     }
   }
 
+  const directShellCanDetonateMine =
+    !coax &&
+    !target.isGround &&
+    (attacker.def.type === 'antiTankGun' ||
+      attacker.def.type === 'armoredCar' ||
+      isTankType(attacker.def.type) ||
+      paratrooperAt);
+  if (directShellCanDetonateMine) {
+    const mineHitRadius = attacker.def.type === 'superHeavyTank' ? 2 : 1.5;
+    options.engineerSandbags?.detonateMinesAt?.(
+      impact.x,
+      impact.z,
+      mineHitRadius,
+      attacker.team
+    );
+    options.defenses?.detonateMinesAt?.(
+      impact.x,
+      impact.z,
+      mineHitRadius,
+      attacker.team
+    );
+  }
+
   const showVfx =
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
 
   if (showVfx && scene) {
     const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
-    const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
+    const toY =
+      armorHit?.impactPosition?.y ??
+      (map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1);
+    if (armorHit?.impactPosition) {
+      impact.x = armorHit.impactPosition.x;
+      impact.z = armorHit.impactPosition.z;
+    }
     const to = { x: impact.x, y: toY, z: impact.z };
     spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
@@ -1481,6 +1510,27 @@ function applySplashDamage(
       impactFrom: { x: attacker.position.x, z: attacker.position.z },
       explosive: true,
     });
+  }
+  const shellDetonator =
+    attacker.def.type === 'artillery' ||
+    attacker.def.type === 'mortar' ||
+    attacker.def.type === 'antiTankGun' ||
+    attacker.def.type === 'armoredCar' ||
+    isTankType(attacker.def.type);
+  if (shellDetonator) {
+    const mineHitRadius = Math.max(1.5, splash * 0.45);
+    options.engineerSandbags?.detonateMinesAt?.(
+      point.x,
+      point.z,
+      mineHitRadius,
+      attacker.team
+    );
+    options.defenses?.detonateMinesAt?.(
+      point.x,
+      point.z,
+      mineHitRadius,
+      attacker.team
+    );
   }
 
   for (const other of targets) {

@@ -94,28 +94,76 @@ export function getArmorAspect(attacker, target) {
   };
 }
 
-function resolveWeakSpot(profile, aspect, random) {
-  if (profile.openTop && random < 0.32) {
-    return { name: 'open fighting compartment', multiplier: 2.15 };
+const VEHICLE_IMPACT_SIZE = {
+  armoredCar: { radius: 1.15, height: 1.45 },
+  tank: { radius: 1.65, height: 2.05 },
+  tankDestroyer: { radius: 1.75, height: 1.78 },
+  superHeavyTank: { radius: 1.92, height: 2.3 },
+};
+
+/**
+ * Sample a point on the struck plate. Criticals are only possible when this
+ * point overlaps a vulnerable area; they are not a free-floating damage roll.
+ */
+function sampleImpactArea(attacker, target, profile, aspect, random) {
+  const size = VEHICLE_IMPACT_SIZE[target.def.type] ?? VEHICLE_IMPACT_SIZE.tank;
+  // Averaging two rolls keeps most hits around the silhouette centre while
+  // still allowing track, roof and outer-plate strikes.
+  const lateral = random() + random() - 1;
+  const height = 0.16 + (random() + random()) * 0.39;
+
+  let area = height < 0.34 ? 'running gear' : height > 0.72 ? 'upper turret' : 'armor plate';
+  let weakSpot = null;
+  let criticalChance = 0;
+
+  if (profile.openTop && height > 0.7) {
+    area = 'open fighting compartment';
+    weakSpot = { name: area, multiplier: 2.15 };
+    criticalChance = 0.58;
+  } else if (height >= 0.58 && height <= 0.69) {
+    area = 'turret ring';
+    weakSpot = { name: area, multiplier: 1.85 };
+    criticalChance = aspect === 'front' ? 0.34 : 0.46;
+  } else if (aspect === 'front' && height >= 0.43 && height <= 0.57 && Math.abs(lateral) < 0.42) {
+    area = "driver's visor";
+    weakSpot = { name: area, multiplier: 1.75 };
+    criticalChance = 0.36;
+  } else if (aspect === 'side' && height >= 0.38 && height <= 0.58) {
+    area = 'ammunition rack';
+    weakSpot = { name: area, multiplier: 2.05 };
+    criticalChance = 0.39;
+  } else if (aspect === 'rear' && height >= 0.34 && height <= 0.58) {
+    area = Math.abs(lateral) < 0.5 ? 'engine deck' : 'rear ammunition stowage';
+    weakSpot = {
+      name: area,
+      multiplier: area === 'engine deck' ? 1.9 : 2.05,
+    };
+    criticalChance = area === 'engine deck' ? 0.48 : 0.55;
   }
-  if (aspect === 'rear') {
-    return random < 0.55
-      ? { name: 'engine deck', multiplier: 1.9 }
-      : { name: 'rear ammunition stowage', multiplier: 2.05 };
-  }
-  if (aspect === 'side') {
-    return random < 0.58
-      ? { name: 'ammunition rack', multiplier: 2.05 }
-      : { name: 'turret ring', multiplier: 1.8 };
-  }
-  return random < 0.56
-    ? { name: "driver's visor", multiplier: 1.75 }
-    : { name: 'turret ring', multiplier: 1.85 };
+
+  const dx = attacker.position.x - target.position.x;
+  const dz = attacker.position.z - target.position.z;
+  const len = Math.max(0.001, Math.hypot(dx, dz));
+  const towardX = dx / len;
+  const towardZ = dz / len;
+  const tangentX = towardZ;
+  const tangentZ = -towardX;
+  const baseY = target.position.y ?? target.mesh?.position?.y ?? 0;
+  const position = {
+    x: target.position.x + towardX * size.radius + tangentX * lateral * size.radius * 0.72,
+    y: baseY + 0.16 + height * size.height,
+    z: target.position.z + towardZ * size.radius + tangentZ * lateral * size.radius * 0.72,
+  };
+
+  return { area, weakSpot, criticalChance, height, lateral, position };
 }
 
 export function isDirectArmorShell(attacker, target, { coax = false, paratrooperAt = false } = {}) {
-  if (!attacker?.def || !target?.def || coax || paratrooperAt) return false;
-  return DIRECT_SHELL_TYPES.has(attacker.def.type) && ARMORED_TYPES.has(target.def.type);
+  if (!attacker?.def || !target?.def || coax) return false;
+  return (
+    (DIRECT_SHELL_TYPES.has(attacker.def.type) || paratrooperAt) &&
+    ARMORED_TYPES.has(target.def.type)
+  );
 }
 
 /**
@@ -130,8 +178,11 @@ export function resolveArmorHit(
   if (!isDirectArmorShell(attacker, target, { coax, paratrooperAt })) return null;
 
   const profile = ARMOR_PROFILES[target.def.name] ?? DEFAULT_ARMOR[target.def.type];
-  const basePower = GUN_PROFILES[attacker.def.name] ?? DEFAULT_GUN_POWER[attacker.def.type] ?? 1;
+  const basePower = paratrooperAt
+    ? 1.08
+    : GUN_PROFILES[attacker.def.name] ?? DEFAULT_GUN_POWER[attacker.def.type] ?? 1;
   const { aspect, angleDeg, plateAlignment } = getArmorAspect(attacker, target);
+  const impact = sampleImpactArea(attacker, target, profile, aspect, random);
   const rangeRatio = distance / Math.max(weaponRange, 1);
   const rangePower = 1 - Math.max(0, rangeRatio - 0.3) * 0.19;
   const aspectArmor = aspect === 'front' ? 1.16 : aspect === 'side' ? 0.76 : 0.58;
@@ -149,16 +200,25 @@ export function resolveArmorHit(
 
   const penetrated = random() < penetrationChance;
   let weakSpot = null;
-  if (penetrated) {
-    let weakSpotChance = aspect === 'rear' ? 0.19 : aspect === 'side' ? 0.105 : 0.055;
-    if (profile.openTop) weakSpotChance += 0.055;
-    if (penetrationRatio > 1.25) weakSpotChance += 0.045;
-    if (random() < weakSpotChance) weakSpot = resolveWeakSpot(profile, aspect, random());
+  if (penetrated && impact.weakSpot) {
+    const overmatchBonus = penetrationRatio > 1.25 ? 0.08 : 0;
+    if (random() < impact.criticalChance + overmatchBonus) weakSpot = impact.weakSpot;
   }
 
   // Side shots are much more likely to strike running gear. A shell stopped by
   // the main plate may still break a track or wheel without penetrating the hull.
-  let mobilityChance = aspect === 'side' ? (penetrated ? 0.14 : 0.23) : penetrated ? 0.045 : 0.075;
+  let mobilityChance =
+    impact.area === 'running gear'
+      ? penetrated
+        ? 0.42
+        : 0.68
+      : aspect === 'side'
+        ? penetrated
+          ? 0.07
+          : 0.12
+        : penetrated
+          ? 0.025
+          : 0.045;
   if (target.def.type === 'armoredCar') mobilityChance += 0.035;
   const mobilityDamaged = !target._mobilityDamaged && random() < mobilityChance;
   const mobilityDamageKind = target.def.type === 'armoredCar' ? 'wheel' : 'track';
@@ -181,6 +241,9 @@ export function resolveArmorHit(
     penetrationChance,
     damageMultiplier,
     weakSpot: weakSpot?.name ?? null,
+    critical: !!weakSpot,
+    impactArea: impact.area,
+    impactPosition: impact.position,
     mobilityDamaged,
     mobilityDamageKind,
   };

@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { FIRE_SUPPORT_TYPES } from '../data/fireSupport.js';
+import {
+  AIRBORNE_CLOUD_COVER_SECONDS,
+  FIRE_SUPPORT_TYPES,
+} from '../data/fireSupport.js';
 import { PRACTICE_TARGET_HQ_DAMAGE_MULT } from '../data/gameModes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
@@ -18,6 +21,24 @@ import { isCommanderAlive } from './FieldCommander.js';
 const PLAYER = 'player';
 const ENEMY = 'enemy';
 const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS * 2;
+const MIN_FIRE_SUPPORT_OBSERVATION_RANGE = 38;
+const FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE = {
+  infantry: 54,
+  paratrooper: 56,
+  machineGun: 52,
+  sniper: 68,
+  mortar: 48,
+  medic: 42,
+  engineer: 46,
+  vehicleCrew: 42,
+  commander: 58,
+  antiTankGun: 54,
+  artillery: 50,
+  armoredCar: 70,
+  tank: 62,
+  tankDestroyer: 64,
+  superHeavyTank: 60,
+};
 
 function makeCooldowns() {
   return Object.fromEntries(
@@ -46,6 +67,8 @@ export class FireSupportManager {
     this.events = [];
     this.preview = null;
     this._previewScale = 1;
+    this.targetRejectReason = null;
+    this.airborneCloudCoverRemaining = AIRBORNE_CLOUD_COVER_SECONDS;
     /**
      * Clear Defenses: each side may call Airborne once only.
      * null = unlimited (standard / assault / etc.).
@@ -78,6 +101,8 @@ export class FireSupportManager {
     this.cooldowns = makeCooldowns();
     this.events = [];
     this.clearPreview();
+    this.targetRejectReason = null;
+    this.airborneCloudCoverRemaining = AIRBORNE_CLOUD_COVER_SECONDS;
     // Clear Defenses & Battle Simulation: one airborne drop per side per match.
     this.airborneUsesLeft =
       this.game?.clearance || this.game?.lastStand ? 1 : null;
@@ -93,12 +118,21 @@ export class FireSupportManager {
     return this.airborneUsesLeft > 0;
   }
 
+  isAirborneCloudCovered() {
+    return this.airborneCloudCoverRemaining > 0;
+  }
+
+  getAirborneCloudCoverRemaining() {
+    return Math.max(0, this.airborneCloudCoverRemaining);
+  }
+
   hasCommandLink() {
     return isCommanderAlive(this.game, this.ownerTeam);
   }
 
   isReady(type) {
     if (!this.hasCommandLink()) return false;
+    if (type === 'airborneDrop' && this.isAirborneCloudCovered()) return false;
     if (type === 'airborneDrop' && !this.isAirborneAvailable()) return false;
     return (this.cooldowns[type] ?? 0) <= 0;
   }
@@ -109,6 +143,7 @@ export class FireSupportManager {
 
   arm(type) {
     if (!this.isReady(type)) return false;
+    this.targetRejectReason = null;
     if (this.pending === type) {
       this.pending = null;
       this.clearPreview();
@@ -120,6 +155,7 @@ export class FireSupportManager {
 
   cancel() {
     this.pending = null;
+    this.targetRejectReason = null;
     this.clearPreview();
   }
 
@@ -147,10 +183,9 @@ export class FireSupportManager {
     if (!this.pending || !this.game.mapDef) return;
     const def = this.getDef(this.pending);
     const { scale, color } = this._previewStyle(this.pending, def);
-    const previewColor =
-      this.pending === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)
-        ? 0xe05252
-        : color;
+    const rejectReason = this.getTargetRejectReason(this.pending, x, z);
+    if (!rejectReason) this.targetRejectReason = null;
+    const previewColor = rejectReason ? 0xe05252 : color;
     this._previewScale = scale;
     const y = sampleTerrainHeight(x, z, this.game.mapDef) + 0.25;
 
@@ -186,6 +221,57 @@ export class FireSupportManager {
     return !this._airborneHqConflict(x, z);
   }
 
+  isPointObserved(x, z) {
+    const observers = this.game.units ?? [];
+    const pointTarget = { position: { x, z } };
+    for (const unit of observers) {
+      if (
+        unit.team !== this.ownerTeam ||
+        unit.dead ||
+        unit.surrendered ||
+        unit._captureExit ||
+        unit._dropping
+      ) {
+        continue;
+      }
+      const observationRange = Math.max(
+        MIN_FIRE_SUPPORT_OBSERVATION_RANGE,
+        unit.def?.sightRange ??
+          FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE[unit.def?.type] ??
+          0
+      );
+      if (Math.hypot(unit.position.x - x, unit.position.z - z) > observationRange) continue;
+      if (
+        this.game.smokeScreens?.isLosObscured?.(
+          unit.position.x,
+          unit.position.z,
+          x,
+          z
+        )
+      ) {
+        continue;
+      }
+      const observer = {
+        position: unit.position,
+        def: { type: 'infantry' },
+        _garrisonBunkerId: unit._garrisonBunkerId,
+      };
+      if (this.game.scenery?.isLineOfFireBlocked?.(observer, pointTarget)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  getTargetRejectReason(type, x, z) {
+    if (!this.isPointObserved(x, z)) {
+      return 'Target must be within sight of at least one friendly unit.';
+    }
+    if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)) {
+      return 'Airborne cannot drop this close to the opposing HQ.';
+    }
+    return null;
+  }
+
   getSafeAirborneTarget(x, z) {
     const hq = this._airborneHqConflict(x, z);
     if (!hq || this.isAirborneTargetAllowed(x, z)) return { x, z };
@@ -213,9 +299,14 @@ export class FireSupportManager {
     const half = this.game.mapDef.size / 2 - 8;
     x = THREE.MathUtils.clamp(x, -half, half);
     z = THREE.MathUtils.clamp(z, -half, half);
-    if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)) return false;
+    const rejectReason = this.getTargetRejectReason(type, x, z);
+    if (rejectReason) {
+      this.targetRejectReason = rejectReason;
+      return false;
+    }
 
     this.pending = null;
+    this.targetRejectReason = null;
     this.clearPreview();
     this.cooldowns[type] = this.getDef(type).cooldown;
     this._consumeAirborneUse(type);
@@ -231,6 +322,7 @@ export class FireSupportManager {
       x = target.x;
       z = target.z;
     }
+    if (this.getTargetRejectReason(type, x, z)) return false;
     this.cooldowns[type] = this.getDef(type).cooldown;
     this._consumeAirborneUse(type);
     this.scheduleStrike(type, x, z);
@@ -244,7 +336,8 @@ export class FireSupportManager {
 
   scheduleStrike(type, tx, tz) {
     if (!isCommanderAlive(this.game, this.ownerTeam)) return false;
-    if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(tx, tz)) return false;
+    if (type === 'airborneDrop' && this.isAirborneCloudCovered()) return false;
+    if (this.getTargetRejectReason(type, tx, tz)) return false;
     const def = this.getDef(type);
     const scene = this.game.scene;
     const mapDef = this.game.mapDef;
@@ -461,6 +554,21 @@ export class FireSupportManager {
     }
 
     const strafe = attackerType === 'strafe';
+    if (!strafe) {
+      const mineHitRadius = Math.max(1.5, radius * 0.55);
+      this.game.engineerSandbags?.detonateMinesAt?.(
+        x,
+        z,
+        mineHitRadius,
+        this.ownerTeam
+      );
+      this.game.defenses?.detonateMinesAt?.(
+        x,
+        z,
+        mineHitRadius,
+        this.ownerTeam
+      );
+    }
     // Forward every visible impact so a shell that lands on a roof always leaves
     // a matching mark. The old path forwarded one in four impacts at 1.1x damage;
     // 0.275x per impact preserves that structural damage budget.
@@ -472,6 +580,16 @@ export class FireSupportManager {
   }
 
   update(dt) {
+    // Manual placement and preset briefings are setup, not battle time. Starting
+    // the simulation begins the five-minute weather window for both sides.
+    const battleClockRunning = !this.game?.lastStand || this.game.lastStand.phase === 'battle';
+    if (battleClockRunning && this.airborneCloudCoverRemaining > 0) {
+      this.airborneCloudCoverRemaining = Math.max(
+        0,
+        this.airborneCloudCoverRemaining - dt
+      );
+    }
+
     for (const key of Object.keys(this.cooldowns)) {
       if (this.cooldowns[key] > 0) this.cooldowns[key] = Math.max(0, this.cooldowns[key] - dt);
     }

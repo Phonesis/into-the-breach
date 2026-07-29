@@ -1,6 +1,7 @@
 import { FACTIONS } from '../data/factions.js';
 import { MAPS } from '../data/maps.js';
 import { GAME_MODES } from '../data/gameModes.js';
+import { AIRBORNE_CLOUD_COVER_SECONDS } from '../data/fireSupport.js';
 import { BASE_BUILDING_TYPES } from '../data/baseBuildings.js';
 import { DEFENSE_TYPES, isTdHqDefenseStyle } from '../data/towerDefense.js';
 import { getTdFrontlineDef } from './TowerDefenseMode.js';
@@ -360,10 +361,12 @@ export function captureBattleSave(game, { id = null } = {}) {
     fireSupport: {
       cooldowns: { ...game.fireSupport.cooldowns },
       airborneUsesLeft: game.fireSupport.airborneUsesLeft,
+      airborneCloudCoverRemaining: game.fireSupport.airborneCloudCoverRemaining,
     },
     enemyFireSupport: {
       cooldowns: { ...game.enemyFireSupport?.cooldowns },
       airborneUsesLeft: game.enemyFireSupport?.airborneUsesLeft,
+      airborneCloudCoverRemaining: game.enemyFireSupport?.airborneCloudCoverRemaining,
     },
     generalOrders: {
       cooldowns: { ...game.generalOrders.cooldowns },
@@ -486,6 +489,16 @@ export function captureBattleSave(game, { id = null } = {}) {
           garrison: [...(e.garrison ?? [])],
           rotationY: e.mesh?.rotation?.y ?? 0,
         })),
+      mines: (game.engineerSandbags?.mines ?? []).map((mine) => ({
+        id: mine.id,
+        team: mine.team,
+        x: mine.x,
+        z: mine.z,
+        y: mine.y,
+        damage: mine.damage,
+        triggerRadius: mine.triggerRadius,
+        rotationY: mine.mesh?.rotation?.y ?? 0,
+      })),
       engineerScenery: [],
     },
     infantryTrenches: game.infantryTrenches
@@ -881,6 +894,27 @@ function restoreFieldBunker(manager, data) {
   return entry;
 }
 
+function restoreEngineerMine(manager, data) {
+  const factionId =
+    data.team === 'player'
+      ? manager.game.playerFaction?.id
+      : manager.game.enemyFaction?.id;
+  const mesh = createDefenseMesh('mine', 0xc9a227, factionId);
+  mesh.position.set(data.x, data.y, data.z);
+  mesh.rotation.y = data.rotationY ?? 0;
+  manager.game.scene.add(mesh);
+  manager.mines.push({
+    id: data.id,
+    team: data.team,
+    x: data.x,
+    z: data.z,
+    y: data.y,
+    damage: data.damage ?? DEFENSE_TYPES.mine.damage,
+    triggerRadius: data.triggerRadius ?? DEFENSE_TYPES.mine.triggerRadius,
+    mesh,
+  });
+}
+
 function restoreTrenchState(game, data) {
   const manager = game.infantryTrenches;
   if (!manager || !data) return;
@@ -1115,6 +1149,9 @@ export function applyBattleSave(game, snapshot) {
     for (const bunker of snapshot.engineerSandbags.fieldBunkers ?? []) {
       restoreFieldBunker(es, bunker);
     }
+    for (const mine of snapshot.engineerSandbags.mines ?? []) {
+      restoreEngineerMine(es, mine);
+    }
   }
 
   if (snapshot.defenses && game.defenses) {
@@ -1153,6 +1190,12 @@ export function applyBattleSave(game, snapshot) {
     ),
     ...snapshot.fireSupport?.cooldowns,
   };
+  const legacyCloudCoverRemaining =
+    game.lastStand?.phase === 'deploy'
+      ? AIRBORNE_CLOUD_COVER_SECONDS
+      : Math.max(0, AIRBORNE_CLOUD_COVER_SECONDS - (snapshot.matchTime ?? 0));
+  game.fireSupport.airborneCloudCoverRemaining =
+    snapshot.fireSupport?.airborneCloudCoverRemaining ?? legacyCloudCoverRemaining;
   if (snapshot.fireSupport?.airborneUsesLeft != null) {
     game.fireSupport.airborneUsesLeft = snapshot.fireSupport.airborneUsesLeft;
   } else if (game.clearance || game.lastStand) {
@@ -1169,6 +1212,8 @@ export function applyBattleSave(game, snapshot) {
       ),
       ...snapshot.enemyFireSupport?.cooldowns,
     };
+    game.enemyFireSupport.airborneCloudCoverRemaining =
+      snapshot.enemyFireSupport?.airborneCloudCoverRemaining ?? legacyCloudCoverRemaining;
     if (snapshot.enemyFireSupport?.airborneUsesLeft != null) {
       game.enemyFireSupport.airborneUsesLeft = snapshot.enemyFireSupport.airborneUsesLeft;
     } else if (game.clearance || game.lastStand) {

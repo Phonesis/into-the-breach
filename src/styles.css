@@ -3225,6 +3225,14 @@ body,
   width: min(92vw, 22rem);
 }
 
+.opening-countdown.opening-countdown--manual-deploy {
+  top: 11.5rem;
+  right: 1.25rem;
+  left: auto;
+  transform: none;
+  width: min(22rem, calc(100vw - 2.5rem));
+}
+
 .opening-countdown-card {
   pointer-events: auto;
   text-align: center;
@@ -3300,6 +3308,14 @@ body,
     box-shadow:
       0 0 36px rgba(255, 210, 80, 0.5),
       0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (max-width: 720px) {
+  .opening-countdown.opening-countdown--manual-deploy {
+    top: 10rem;
+    right: 0.55rem;
+    width: min(18rem, 48vw);
   }
 }
 

@@ -29,6 +29,12 @@ const KIND = {
     ghost: { w: 4.0, h: 0.55, d: 2.2 },
     color: 0x8b6914,
   },
+  mine: {
+    label: 'AT Mine',
+    radius: 2.1,
+    ghost: { w: 2.2, h: 0.25, d: 2.2 },
+    color: 0x4a4338,
+  },
 };
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -92,7 +98,7 @@ function setProgressArc(mesh, radius, progress, lastBucket = -1) {
 
 /**
  * @param {object} opts
- * @param {'sandbags'|'bunker'|'trench'} opts.kind
+ * @param {'sandbags'|'bunker'|'trench'|'mine'} opts.kind
  * @param {'player'|'enemy'} [opts.team]
  * @param {string} [opts.label] — override display name
  * @param {string} [opts.verb] — "Building" / "Digging"

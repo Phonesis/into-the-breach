@@ -716,12 +716,19 @@ export function updateCombatEffects(dt) {
     } else if (fx.type === 'flash') {
       fx.material.opacity = Math.max(0, fx.life / fx.maxLife);
     } else if (fx.type === 'armorRicochet') {
-      const fade = Math.max(0, fx.life / fx.maxLife);
+      const t = 1 - Math.max(0, fx.life / fx.maxLife);
+      const fade = Math.max(0, 1 - t * 1.25);
       for (const particle of fx.particles) {
-        particle.velocity.y -= 11 * dt;
+        particle.velocity.y -= 13 * dt;
         particle.mesh.position.addScaledVector(particle.velocity, dt);
         particle.mesh.material.opacity = fade;
       }
+      if (fx.flash) {
+        const flashScale = 1 + t * 2.8;
+        fx.flash.scale.setScalar(flashScale);
+        fx.flash.material.opacity = Math.max(0, 1 - t * 4.5);
+      }
+      if (fx.light) fx.light.intensity = Math.max(0, 5.5 * (1 - t * 5));
     }
 
     if (fx.life <= 0) {
@@ -745,37 +752,60 @@ export function spawnArmorRicochet(scene, pos, shotFrom = null) {
   );
   if (away.lengthSq() < 0.01) away.set(1, 0, 0);
   away.normalize();
-  const geo = new THREE.SphereGeometry(0.075, 4, 3);
+  const geo = new THREE.SphereGeometry(0.09, 5, 4);
   const materials = [];
   const particles = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 18; i++) {
     const mat = new THREE.MeshBasicMaterial({
-      color: i < 3 ? 0xffffff : 0xffa51f,
+      color: i < 6 ? 0xffffff : i < 13 ? 0xffc43d : 0xff6a16,
       transparent: true,
       opacity: 1,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const spark = new THREE.Mesh(geo, mat);
+    const sparkLength = 2.4 + Math.random() * 3.8;
+    spark.scale.set(0.7, sparkLength, 0.7);
     group.add(spark);
     materials.push(mat);
+    const velocity = new THREE.Vector3(
+      away.x * (4.5 + Math.random() * 7) + (Math.random() - 0.5) * 7,
+      3.2 + Math.random() * 8,
+      away.z * (4.5 + Math.random() * 7) + (Math.random() - 0.5) * 7
+    );
+    spark.quaternion.setFromUnitVectors(_up, velocity.clone().normalize());
     particles.push({
       mesh: spark,
-      velocity: new THREE.Vector3(
-        away.x * (2.5 + Math.random() * 4) + (Math.random() - 0.5) * 5,
-        2.2 + Math.random() * 5,
-        away.z * (2.5 + Math.random() * 4) + (Math.random() - 0.5) * 5
-      ),
+      velocity,
     });
   }
+
+  const flashMat = new THREE.SpriteMaterial({
+    map: getFlashTexture(0xffbd4a),
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flash = new THREE.Sprite(flashMat);
+  flash.scale.setScalar(1.5);
+  group.add(flash);
+  materials.push(flashMat);
+
+  const light = new THREE.PointLight(0xff9d32, 5.5, 7, 2);
+  group.add(light);
+
   registerEffect({
     type: 'armorRicochet',
     group,
     particles,
+    flash,
+    light,
     geometries: [geo],
     materials,
-    life: 0.42,
-    maxLife: 0.42,
+    life: 0.58,
+    maxLife: 0.58,
   });
   return true;
 }

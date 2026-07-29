@@ -171,6 +171,20 @@ const CATALOG = [
     influence: 0.5,
     text: `Bullet striking packed dirt and sand, short thud with gravel spray, soft body, ${REALISTIC}`,
   },
+  {
+    file: 'armor-ricochet-01.wav',
+    duration: 0.8,
+    influence: 0.68,
+    text:
+      'A high velocity World War Two anti-tank shell glancing off thick steel armor plate, violent sharp metal strike, bright shower of sparks, brief rising ricochet whine, outdoor battlefield recording, dry, no voices, no music, no gun muzzle blast, no explosion, not synthetic',
+  },
+  {
+    file: 'armor-ricochet-02.wav',
+    duration: 0.75,
+    influence: 0.62,
+    text:
+      'World War Two tank shell deflected by heavy steel armor, hard metallic crack and scraping clang, hot sparks scattering, very short ricochet whine, authentic outdoor recording, dry, no voices, no music, no cannon firing sound, no explosion, not synthetic',
+  },
 
   // —— Generic fallbacks ——
   {

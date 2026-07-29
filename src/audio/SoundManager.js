@@ -54,6 +54,7 @@ const IMPACT_SAMPLE_FILES_FULL = [
   'impact-d.wav',
   'impact-e.wav',
 ];
+const ARMOR_RICOCHET_FILES = ['armor-ricochet-01.wav', 'armor-ricochet-02.wav'];
 const ATMOS_SAMPLE_FILES_FULL = ['battle-atmos.wav', 'battle-atmos-close.wav'];
 const RADIO_STATIC_FILES = ['radio-static-a.wav', 'radio-static-b.wav', 'radio-static-c.wav'];
 const ARTILLERY_IMPACT_FILES = Array.from(
@@ -168,6 +169,8 @@ export class SoundManager {
     this.explosionBuffers = [];
     /** @type {AudioBuffer[]} */
     this.impactBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.armorRicochetBuffers = [];
     /** @type {AudioBuffer[]} */
     this.atmosBuffers = [];
     /** @type {AudioBuffer[]} */
@@ -546,6 +549,7 @@ export class SoundManager {
     };
     this.explosionBuffers = [];
     this.impactBuffers = [];
+    this.armorRicochetBuffers = [];
     this.atmosBuffers = [];
     this.radioStaticBuffers = [];
     this.artilleryImpactBuffers = [];
@@ -553,6 +557,7 @@ export class SoundManager {
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
+    loadPool(ARMOR_RICOCHET_FILES, this.armorRicochetBuffers);
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
@@ -1168,28 +1173,40 @@ export class SoundManager {
   playImpact(type, worldPos, delaySec = 0) {
     this._runWhenReady(() => {
       const now = performance.now();
-      if (now - (this._lastByType._impact ?? 0) < (type === 'bullet' ? 120 : 80)) return;
+      const isRicochet = type === 'armor_ricochet';
+      const cooldownKey = isRicochet ? '_armorRicochetImpact' : '_impact';
+      if (now - (this._lastByType[cooldownKey] ?? 0) < (type === 'bullet' ? 120 : 80)) return;
       const useExplosion =
         type === 'shell' || type === 'tank_round' || type === 'explosion';
-      const buf = useExplosion
-        ? this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
-          this.buffers.explosion
-        : this._pickFromPool(this.impactBuffers, '_lastImpactFile') ?? this.buffers.impact;
+      const buf = isRicochet
+        ? this._pickFromPool(this.armorRicochetBuffers, '_lastArmorRicochetFile') ??
+          this._pickFromPool(this.impactBuffers, '_lastImpactFile') ??
+          this.buffers.impact
+        : useExplosion
+          ? this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
+            this.buffers.explosion
+          : this._pickFromPool(this.impactBuffers, '_lastImpactFile') ?? this.buffers.impact;
       if (!buf) return;
-      this._lastByType._impact = now;
+      this._lastByType[cooldownKey] = now;
 
       const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
       const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-      const gain = useExplosion
-        ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
-        : 0.85;
+      const gain = isRicochet
+        ? 1.35
+        : useExplosion
+          ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
+          : 0.85;
       const vol = this._distanceGain(dist) * gain;
 
       this._playBuffer(buf, {
         pan,
         vol,
-        rate: useExplosion ? 0.88 + Math.random() * 0.12 : 0.9 + Math.random() * 0.14,
-        wet: useExplosion ? 0.28 + Math.random() * 0.1 : 0.4,
+        rate: isRicochet
+          ? 0.96 + Math.random() * 0.09
+          : useExplosion
+            ? 0.88 + Math.random() * 0.12
+            : 0.9 + Math.random() * 0.14,
+        wet: isRicochet ? 0.24 : useExplosion ? 0.28 + Math.random() * 0.1 : 0.4,
         delay: delaySec,
       });
     });

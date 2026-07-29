@@ -22,9 +22,16 @@ export const TRENCH_COVER_MULT = 0.3;
 export const TRENCH_CAPACITY = 4;
 export const TRENCH_ENTER_RANGE = 3.2;
 
-const DIG_TYPES = new Set(['infantry', 'machineGun', 'sniper']);
+const DIG_TYPES = new Set(['infantry', 'paratrooper', 'machineGun', 'sniper']);
 /** Foot troops that can occupy a finished trench (not dig). */
-const OCCUPY_TYPES = new Set(['infantry', 'machineGun', 'sniper', 'medic', 'engineer']);
+const OCCUPY_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'sniper',
+  'medic',
+  'engineer',
+]);
 
 let nextTrenchId = 1;
 
@@ -223,7 +230,7 @@ export class InfantryTrenchManager {
     if (spacing) return spacing;
 
     if (!this._nearestDigger(px, pz, team, options.selectedOnly !== false)) {
-      return 'Select free infantry, an MG team, or a sniper to assign this dig site.';
+      return 'Select free infantry, airborne, an MG team, or a sniper to assign this dig site.';
     }
 
     return null;

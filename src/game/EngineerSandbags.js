@@ -5,8 +5,13 @@ import {
   createCampaignBunkerMesh,
   setBaseBuildingHpVisual,
 } from '../visual/BaseBuildingMeshes.js';
+import { createDefenseMesh } from '../visual/DefenseMeshes.js';
 import { BASE_BUILDING_TYPES, isBaseBuildingCampaign } from '../data/baseBuildings.js';
+import { DEFENSE_TYPES, MINE_VEHICLE_TYPES } from '../data/towerDefense.js';
 import { spawnExplosion } from '../effects/CombatEffects.js';
+import { addExplosionCrater } from '../world/TerrainDamage.js';
+import { sounds } from '../audio/SoundManager.js';
+import { applyMobilityDamage } from './ArmorPenetration.js';
 import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getGarrisonBunkerSources, releaseFromBunker } from './BunkerGarrison.js';
 import { distanceBetween } from './Targeting.js';
@@ -27,6 +32,8 @@ export const SANDBAG_HP = 120;
 export const BUNKER_MIN_SPACING = 9;
 export const BUNKER_HP = 240;
 export const BUNKER_COVER_RADIUS = 6;
+export const MINE_BUILD_TIME = 8;
+export const MINE_MAX_PER_TEAM = 16;
 
 export const FIELD_BUILD_TYPES = {
   sandbags: {
@@ -55,6 +62,17 @@ export const FIELD_BUILD_TYPES = {
     markerInner: 3,
     markerOuter: 3.55,
   },
+  mine: {
+    id: 'mine',
+    name: 'AT mine',
+    buildTime: MINE_BUILD_TIME,
+    hp: DEFENSE_TYPES.mine.hp,
+    maxPerTeam: MINE_MAX_PER_TEAM,
+    minSpacing: 3.2,
+    markerColor: 0x4a4338,
+    markerInner: 1.7,
+    markerOuter: 2.15,
+  },
 };
 
 let nextSiteId = 1;
@@ -74,19 +92,30 @@ export class EngineerSandbagManager {
     this.sites = [];
     this._builtPositions = [];
     this.fieldBunkers = [];
+    this.mines = [];
   }
 
   reset() {
     this.pendingType = null;
     this._clearSiteMarkers();
     this._clearFieldBunkers();
+    this._clearMines();
     this.sites = [];
     this._builtPositions = [];
     this.fieldBunkers = [];
+    this.mines = [];
   }
 
   _clearFieldBunkers() {
     for (const entry of this.fieldBunkers) {
+      if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
+      this._disposeMesh(entry.mesh);
+      entry.mesh = null;
+    }
+  }
+
+  _clearMines() {
+    for (const entry of this.mines) {
       if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
       this._disposeMesh(entry.mesh);
       entry.mesh = null;
@@ -211,6 +240,10 @@ export class EngineerSandbagManager {
     return this.canUse();
   }
 
+  canBuildMine() {
+    return this.canUse();
+  }
+
   getPending() {
     return this.canUse() && this.pendingType ? this.pendingType : null;
   }
@@ -220,6 +253,7 @@ export class EngineerSandbagManager {
     if (!preset) return false;
     if (buildType === 'sandbags' && !this.canBuildSandbags()) return false;
     if (buildType === 'bunker' && !this.canBuildBunker()) return false;
+    if (buildType === 'mine' && !this.canBuildMine()) return false;
 
     this.game.fireSupport?.cancel();
     this.game.defenses?.cancelPending?.();
@@ -352,6 +386,9 @@ export class EngineerSandbagManager {
     if (buildType === 'bunker' && !this.canBuildBunker()) {
       return 'Bunker builds unavailable in this mode.';
     }
+    if (buildType === 'mine' && !this.canBuildMine()) {
+      return 'Mine laying unavailable in this mode.';
+    }
     if (this.game._isPlayerDeployZoneActive?.()) {
       return 'Wait for battle launch before building field works.';
     }
@@ -363,7 +400,11 @@ export class EngineerSandbagManager {
     }
 
     const maxLabel =
-      buildType === 'bunker' && isBaseBuildingCampaign(this.game) ? 'bunkers per base' : `${preset.name} per side`;
+      buildType === 'bunker' && isBaseBuildingCampaign(this.game)
+        ? 'bunkers per base'
+        : buildType === 'mine'
+          ? 'AT mines per side'
+          : `${preset.name} per side`;
     if (this._teamBuiltCount(team, buildType) >= preset.maxPerTeam) {
       return `Maximum ${preset.maxPerTeam} ${maxLabel}.`;
     }
@@ -487,12 +528,17 @@ export class EngineerSandbagManager {
   }
 
   _attachSiteMarker(site) {
-    const kind = site.buildType === 'bunker' ? 'bunker' : 'sandbags';
+    const kind =
+      site.buildType === 'bunker'
+        ? 'bunker'
+        : site.buildType === 'mine'
+          ? 'mine'
+          : 'sandbags';
     const visual = createFieldConstructionVisual({
       kind,
       team: site.team,
-      label: kind === 'bunker' ? 'Bunker' : 'Sandbags',
-      verb: 'Building',
+      label: kind === 'bunker' ? 'Bunker' : kind === 'mine' ? 'AT Mine' : 'Sandbags',
+      verb: kind === 'mine' ? 'Laying' : 'Building',
     });
     visual.position.set(site.x, site.y, site.z);
     visual.rotation.y = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
@@ -510,6 +556,33 @@ export class EngineerSandbagManager {
     const preset = this._buildPreset(site.buildType);
     const factionId =
       site.team === 'player' ? this.game.playerFaction?.id : this.game.enemyFaction?.id;
+
+    if (site.buildType === 'mine') {
+      const def = DEFENSE_TYPES.mine;
+      const mesh = createDefenseMesh('mine', 0xc9a227, factionId);
+      mesh.position.set(site.x, site.y, site.z);
+      mesh.rotation.y = site.rotationY ?? 0;
+      this.game.scene.add(mesh);
+      this.mines.push({
+        id: site.id,
+        team: site.team,
+        x: site.x,
+        z: site.z,
+        y: site.y,
+        damage: def.damage,
+        triggerRadius: def.triggerRadius,
+        mesh,
+      });
+      this._builtPositions.push({
+        id: site.id,
+        x: site.x,
+        z: site.z,
+        team: site.team,
+        buildType: site.buildType,
+        rotationY: site.rotationY,
+      });
+      return;
+    }
 
     if (site.buildType === 'bunker' && isBaseBuildingCampaign(this.game)) {
       this.game.baseBuildings?.addEngineerBunker?.({
@@ -584,6 +657,7 @@ export class EngineerSandbagManager {
   }
 
   update(dt) {
+    this._updateMines();
     if (!this.sites.length) return;
 
     const finished = [];
@@ -621,6 +695,68 @@ export class EngineerSandbagManager {
     if (finished.length) {
       this.sites = this.sites.filter((s) => !finished.includes(s.id));
     }
+  }
+
+  _updateMines() {
+    if (!this.mines.length) return;
+    for (const mine of this.mines) {
+      const enemies =
+        mine.team === 'player'
+          ? (this.game._enemyAlive ?? [])
+          : (this.game._playerAlive ?? []);
+      for (const unit of enemies) {
+        if (unit.dead || !MINE_VEHICLE_TYPES.has(unit.def?.type)) continue;
+        const distance = Math.hypot(unit.position.x - mine.x, unit.position.z - mine.z);
+        if (distance > mine.triggerRadius) continue;
+        this._detonateMine(mine);
+        break;
+      }
+    }
+  }
+
+  detonateMinesAt(x, z, radius, attackerTeam) {
+    const hits = this.mines.filter((mine) => {
+      if (mine.team === attackerTeam) return false;
+      return Math.hypot(mine.x - x, mine.z - z) <= Math.max(1.2, radius);
+    });
+    for (const mine of hits) this._detonateMine(mine);
+    return hits.length;
+  }
+
+  _detonateMine(mine) {
+    if (!mine || !this.mines.includes(mine)) return false;
+    const y = this.game.mapDef
+      ? sampleTerrainHeight(mine.x, mine.z, this.game.mapDef)
+      : mine.y;
+    spawnExplosion(this.game.scene, { x: mine.x, y: y + 0.5, z: mine.z });
+    addExplosionCrater(
+      this.game.scene,
+      this.game.mapDef,
+      mine.x,
+      mine.z,
+      'light',
+      this.game._terrainMesh
+    );
+    sounds.play('explosion');
+
+    const blastRadius = mine.triggerRadius * 2.2;
+    for (const unit of this.game._aliveUnits ?? this.game.units) {
+      if (unit.dead || !MINE_VEHICLE_TYPES.has(unit.def?.type)) continue;
+      const distance = Math.hypot(unit.position.x - mine.x, unit.position.z - mine.z);
+      if (distance > blastRadius) continue;
+      const falloff = Math.max(0.35, 1 - distance / blastRadius);
+      unit.takeDamage(mine.damage * falloff);
+      if (!unit.dead) applyMobilityDamage(unit);
+    }
+
+    if (mine.mesh?.parent) mine.mesh.parent.remove(mine.mesh);
+    this._disposeMesh(mine.mesh);
+    mine.mesh = null;
+    this.mines = this.mines.filter((entry) => entry !== mine);
+    this._builtPositions = this._builtPositions.filter(
+      (position) => position.buildType !== 'mine' || position.id !== mine.id
+    );
+    return true;
   }
 
   getEngineerBuildStatus(engineer) {
