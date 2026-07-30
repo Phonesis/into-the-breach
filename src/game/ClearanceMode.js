@@ -538,6 +538,20 @@ export function updateClearanceCounterattacks(game) {
     state.nextProbeAt = game.matchTime + 40;
     return null;
   }
+  const operational = game.clearanceOperational;
+  if (
+    operational?.focus === 'defend' &&
+    (
+      operational.mode !== 'hold' ||
+      (operational.forceRatio ?? 1) < 0.88
+    )
+  ) {
+    // Do not strip a pressured or falling-back garrison for a scheduled probe.
+    // The recurring defensive plan will release a detachment when conditions
+    // favor a limited counterattack.
+    state.nextProbeAt = game.matchTime + 24;
+    return null;
+  }
 
   const attackers = game._playerAlive ?? [];
   const candidates = (game._enemyAlive ?? []).filter(

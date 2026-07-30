@@ -1448,7 +1448,7 @@ export function applyUnitDeathVisual(unit) {
       }
     }
     unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
-    if (unit._deathCause !== 'explosion') {
+    if (unit._deathCause !== 'explosion' && unit._deathCause !== 'crush') {
       mesh.userData.crewKilled = true;
       return;
     }

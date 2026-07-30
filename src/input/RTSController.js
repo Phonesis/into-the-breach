@@ -1036,32 +1036,33 @@ export class RTSController {
 
     this._lastOrderAt = Date.now();
 
-    if (!this.getDeployZoneActive()) {
-      const attackTarget = this.raycastAttackTarget();
-      if (attackTarget) {
-        this.issueAttackOn(attackTarget);
-        return;
-      }
-    }
-
     const player = this.getPlayerTeam();
-    const friendlyTarget = this.raycastUnit(player);
     const riders = selected.filter((u) => canRideTanks(u.def?.type));
+    const mountTarget = this.raycastUnit();
     if (
-      friendlyTarget &&
-      canHostRiders(friendlyTarget.def?.type) &&
+      mountTarget &&
+      canHostRiders(mountTarget.def?.type) &&
+      (mountTarget.team === player || mountTarget._crewless) &&
       riders.length > 0 &&
       riders.length === selected.length
     ) {
       const mounted = issueMountOrder(
         riders,
-        friendlyTarget,
+        mountTarget,
         this.getUnits(),
         this.getGarrisonSources?.()
       );
       if (mounted > 0) {
         this.onMoveOrder?.(selected);
         if (this.onOrder) this.onOrder('mount', riders);
+        return;
+      }
+    }
+
+    if (!this.getDeployZoneActive()) {
+      const attackTarget = this.raycastAttackTarget();
+      if (attackTarget) {
+        this.issueAttackOn(attackTarget);
         return;
       }
     }

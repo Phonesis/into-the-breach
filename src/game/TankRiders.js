@@ -4,6 +4,7 @@ import { distanceBetween } from './Targeting.js';
 import { releaseFromBunker, getGarrisonBunkerSources } from './BunkerGarrison.js';
 import { resetInfantryWalkPose } from '../units/InfantryVisuals.js';
 import { SQUAD_SIZES } from '../data/squadSizes.js';
+import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 
 export const TANK_MOUNT_RANGE = 4.2;
 export const TANK_DISMOUNT_SPREAD = 2.4;
@@ -98,7 +99,7 @@ function squadLivingCount(unit) {
   return Math.max(1, Math.ceil((unit.hp / Math.max(unit.maxHp, 1)) * size));
 }
 
-function canSupplyReplacementCrew(unit) {
+export function canSupplyReplacementCrew(unit) {
   return (
     (unit?.def?.type === 'infantry' || unit?.def?.type === 'paratrooper') &&
     squadLivingCount(unit) >= REPLACEMENT_CREW_COUNT
@@ -180,13 +181,49 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
 
 export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null) {
   if (!tank?._crewless || tank.dead || !canHostRiders(tank.def?.type)) return false;
-  if (!canSupplyReplacementCrew(rider) || rider.team !== tank.team) return false;
+  if (!canSupplyReplacementCrew(rider)) return false;
+
+  // An abandoned operational vehicle is neutral for remanning. Clear any
+  // stranded riders from the former side before checking deck capacity.
+  const oldTeam = tank.team;
+  const foreignRiderIds = (tank._tankRiderIds ?? []).filter((id) => {
+    const mounted = findUnitById(units, id);
+    return mounted && mounted.team !== rider.team;
+  });
+  for (let i = 0; i < foreignRiderIds.length; i++) {
+    const mounted = findUnitById(units, foreignRiderIds[i]);
+    if (mounted) {
+      releaseFromTank(
+        mounted,
+        units,
+        garrisonSources?.mapDef ?? null,
+        i
+      );
+    }
+  }
+
   if (!tryMountTank(rider, tank, units, garrisonSources)) return false;
+  if (oldTeam !== rider.team) {
+    if (tank.selected) tank.setSelected(false);
+    removeFieldIcon(tank);
+    tank.team = rider.team;
+  }
   tank._crewless = false;
+  // A captured hull must not inherit the former enemy crew's unfinished
+  // tactical reverse/flank state.
+  tank._aiTankManeuver = null;
+  tank._aiTankManeuverNextAt = 0;
+  tank._reverseMoveOrder = false;
+  tank.clearAttackOrder();
+  tank.moveTarget = null;
+  tank._movePath = null;
+  tank._finalMoveGoal = null;
   tank._replacementCrewUnitId = rider.id;
   rider._replacementCrewVehicleId = tank.id;
   rider._embeddedCrewCount = REPLACEMENT_CREW_COUNT;
   syncEmbeddedCrewVisibility(rider, true);
+  garrisonSources?._rebuildUnitCaches?.();
+  garrisonSources?._syncUnitRoster?.();
   return true;
 }
 
@@ -206,7 +243,8 @@ export function dismountAllRiders(tank, units, mapDef = null) {
 
 export function tryMountTank(rider, tank, units, garrisonSources = null) {
   if (!rider || rider.dead || rider.surrendered || rider._captureExit) return false;
-  if (!tank || tank.dead || tank.surrendered || tank.team !== rider.team) return false;
+  if (!tank || tank.dead || tank.surrendered) return false;
+  if (tank.team !== rider.team && !tank._crewless) return false;
   if (!canRideTanks(rider.def?.type) || !canHostRiders(tank.def?.type)) return false;
   if (!tank._crewless && !RIDER_DECK_TYPES.has(tank.def?.type)) return false;
 
@@ -243,7 +281,6 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
         rider &&
         !rider.dead &&
         !rider.surrendered &&
-        rider.team === tank.team &&
         canSupplyReplacementCrew(rider)
     );
     if (!replacement) return 0;
@@ -316,7 +353,7 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
 
     if (unit._pendingMountTankId) {
       const tank = unitById.get(unit._pendingMountTankId);
-      if (!tank || tank.dead || tank.team !== unit.team) {
+      if (!tank || tank.dead || (tank.team !== unit.team && !tank._crewless)) {
         unit._pendingMountTankId = null;
         unit._pendingReplacementCrew = false;
         continue;

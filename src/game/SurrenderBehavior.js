@@ -7,6 +7,7 @@ import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
+import { isTankType } from '../units/VehicleTypes.js';
 
 const SURRENDER_ELIGIBLE = new Set([
   'infantry',
@@ -18,6 +19,9 @@ const SURRENDER_ELIGIBLE = new Set([
   'engineer',
   'vehicleCrew',
   'antiTankGun',
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
 ]);
 
 const ISOLATION_RADIUS = 28;
@@ -172,6 +176,7 @@ export function isSurrenderEligible(unit) {
 export function canUnitSurrender(unit, options = {}) {
   if (!isSurrenderEligible(unit)) return false;
   if (unit.surrendered || unit._captureExit) return false;
+  if (isTankType(unit.def?.type) && (unit._crewless || unit._crewBailedOut)) return false;
   if (unit.retreating || unit.defensiveHold) return false;
   if (unit._liberationGrace > 0) return false;
   if (options.tutorial || options.towerDefense) return false;
@@ -191,7 +196,12 @@ function countNearby(unit, units, radius, predicate) {
 }
 
 function isIsolated(unit, units) {
-  const allies = countNearby(unit, units, ISOLATION_RADIUS, (o) => o.team === unit.team && !o.surrendered);
+  const allies = countNearby(
+    unit,
+    units,
+    ISOLATION_RADIUS,
+    (o) => o.team === unit.team && !o.surrendered && !o._crewless
+  );
   const enemies = countNearby(unit, units, ISOLATION_RADIUS, (o) => o.team !== unit.team);
   return allies === 0 && enemies >= 1;
 }
@@ -200,7 +210,7 @@ function nearestAlly(unit, units, maxDist) {
   let best = null;
   let bestD = maxDist;
   for (const other of units) {
-    if (other.dead || other.surrendered || other._captureExit) continue;
+    if (other.dead || other.surrendered || other._captureExit || other._crewless) continue;
     if (other.team !== unit.team) continue;
     const d = distanceBetween(unit, other);
     if (d < bestD) {
@@ -216,7 +226,7 @@ function nearestCaptor(unit, units, maxDist) {
   let best = null;
   let bestD = maxDist;
   for (const other of units) {
-    if (other.dead || other.surrendered || other._captureExit) continue;
+    if (other.dead || other.surrendered || other._captureExit || other._crewless) continue;
     if (other.team !== captorTeam) continue;
     const d = distanceBetween(unit, other);
     if (d < bestD) {
@@ -270,11 +280,28 @@ export function maybeTriggerSurrender(unit, units, options = {}, attacker = null
   if (unit.def.type === 'machineGun') chance *= 1.12;
   if (unit.def.type === 'medic' || unit.def.type === 'engineer') chance *= 1.18;
   if (unit.def.type === 'antiTankGun') chance *= 0.82;
+  // Armored crews are substantially less likely to give up than exposed foot
+  // troops, but an isolated, badly damaged tank can still be abandoned.
+  if (isTankType(unit.def.type)) chance *= 0.22;
 
   chance *= getMedicRetreatMultiplier(unit, units);
   chance *= getRankMoralePressure(unit, units, attacker);
 
   if (Math.random() < chance) {
+    if (isTankType(unit.def.type)) {
+      const crew = options.spawnSurrenderingVehicleCrew?.(unit);
+      if (!crew) return false;
+      clearRetreat(unit);
+      unit.clearAttackOrder();
+      unit.target = null;
+      unit.moveTarget = null;
+      unit._movePath = null;
+      unit._userMoveOrder = false;
+      unit._reverseMoveOrder = false;
+      unit._crewless = true;
+      crew._surrenderAfterBailout = true;
+      return true;
+    }
     startSurrender(unit);
     return true;
   }
@@ -391,6 +418,13 @@ export function updateSurrenderState(game, units, dt) {
         unit.statusBanner.position.y =
           markerHeight(unit) + 0.35 + Math.sin(performance.now() * 0.005) * 0.1;
       }
+    }
+
+    // A tank crew must finish climbing clear of the hatch before visibly
+    // surrendering or becoming available for capture.
+    if (unit._surrenderAfterBailout && !unit._dropping) {
+      unit._surrenderAfterBailout = false;
+      startSurrender(unit);
     }
 
     if (unit._captureExit) {

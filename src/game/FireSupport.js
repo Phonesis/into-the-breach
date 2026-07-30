@@ -17,9 +17,12 @@ import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 import { isCommanderAlive } from './FieldCommander.js';
+import { WEAPON_RANGE_SLACK } from './Targeting.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
+const VALID_TARGET_PREVIEW_COLOR = 0x4ade80;
+const INVALID_TARGET_PREVIEW_COLOR = 0xef4444;
 const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS * 2;
 const MIN_FIRE_SUPPORT_OBSERVATION_RANGE = 38;
 const FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE = {
@@ -39,6 +42,16 @@ const FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE = {
   tankDestroyer: 64,
   superHeavyTank: 60,
 };
+
+export function getFireSupportObservationRange(unit) {
+  const def = unit?.def;
+  return Math.max(
+    MIN_FIRE_SUPPORT_OBSERVATION_RANGE,
+    Number.isFinite(def?.sightRange) ? def.sightRange : 0,
+    FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE[def?.type] ?? 0,
+    Number.isFinite(def?.range) ? def.range * WEAPON_RANGE_SLACK : 0
+  );
+}
 
 function makeCooldowns() {
   return Object.fromEntries(
@@ -169,23 +182,25 @@ export class FireSupportManager {
   }
 
   _previewStyle(type, def) {
-    if (type === 'barrage') return { scale: def.radius, color: 0xff5533 };
+    if (type === 'barrage') return { scale: def.radius };
     if (type === 'creepingBarrage') {
-      return { scale: def.targetRadius ?? def.creepLength * 0.4, color: 0xff2244 };
+      return { scale: def.targetRadius ?? def.creepLength * 0.4 };
     }
     if (type === 'airborneDrop') {
-      return { scale: def.dropRadius ?? 11, color: 0x6ec4ff };
+      return { scale: def.dropRadius ?? 11 };
     }
-    return { scale: def.runLength * 0.5, color: 0xffcc55 };
+    return { scale: def.runLength * 0.5 };
   }
 
   updatePreview(x, z) {
     if (!this.pending || !this.game.mapDef) return;
     const def = this.getDef(this.pending);
-    const { scale, color } = this._previewStyle(this.pending, def);
+    const { scale } = this._previewStyle(this.pending, def);
     const rejectReason = this.getTargetRejectReason(this.pending, x, z);
     if (!rejectReason) this.targetRejectReason = null;
-    const previewColor = rejectReason ? 0xe05252 : color;
+    const previewColor = rejectReason
+      ? INVALID_TARGET_PREVIEW_COLOR
+      : VALID_TARGET_PREVIEW_COLOR;
     this._previewScale = scale;
     const y = sampleTerrainHeight(x, z, this.game.mapDef) + 0.25;
 
@@ -234,12 +249,7 @@ export class FireSupportManager {
       ) {
         continue;
       }
-      const observationRange = Math.max(
-        MIN_FIRE_SUPPORT_OBSERVATION_RANGE,
-        unit.def?.sightRange ??
-          FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE[unit.def?.type] ??
-          0
-      );
+      const observationRange = getFireSupportObservationRange(unit);
       if (Math.hypot(unit.position.x - x, unit.position.z - z) > observationRange) continue;
       if (
         this.game.smokeScreens?.isLosObscured?.(

@@ -95,6 +95,13 @@ const SMALL_ARMS_TYPES = new Set([
   'vehicleCrew',
 ]);
 
+// Coax fire cannot harm tanks, but a crew may still fire a short, occasional
+// burst to suppress exposed crew or mark the target for nearby friendlies.
+const ARMOR_COAX_BURST_MIN_ROUNDS = 2;
+const ARMOR_COAX_BURST_MAX_ROUNDS = 3;
+const ARMOR_COAX_BURST_PAUSE_MIN_SEC = 6;
+const ARMOR_COAX_BURST_PAUSE_MAX_SEC = 10;
+
 /**
  * In-flight mortar / artillery shells. Aim point is locked at fire time so a
  * unit that walks away is only hit if still inside the splash when the round lands.
@@ -247,9 +254,10 @@ export const HAND_GRENADE_RANGE = 8;
 export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
 const HAND_GRENADE_DAMAGE = 12;
 
-/** Foot troops low enough that a tank can grind them under the tracks. */
+/** Enemies low or vulnerable enough that a tracked vehicle can overrun them. */
 function isCrushableFootTarget(unit) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
+  if (CREW_SERVED_GUN_TYPES.has(unit.def?.type)) return true;
   if (!isFootSoldier(unit.def?.type) && unit.def?.type !== 'engineer') return false;
   if (isUnitMounted(unit) || isUnitGarrisoned(unit)) return false;
   if (unit._trenchId || unit._diggingTrench) return true;
@@ -266,6 +274,12 @@ function isCrushableFootTarget(unit) {
   return false;
 }
 
+function trackCrushTargetRadius(type) {
+  if (type === 'artillery') return 1.8;
+  if (type === 'antiTankGun') return 1.45;
+  return 0;
+}
+
 function trackCrushRadius(type) {
   if (type === 'superHeavyTank') return 2.9;
   if (type === 'tankDestroyer') return 2.35;
@@ -273,8 +287,8 @@ function trackCrushRadius(type) {
 }
 
 /**
- * Tracked vehicles kill prone / trench infantry they drive over and collapse
- * any finished trenches under the hull.
+ * Tracked vehicles kill prone / trench infantry and smash crew-served guns
+ * they drive over, while collapsing any finished trenches under the hull.
  */
 function applyTrackCrush(vehicle, units, options, vehicleRadius) {
   if (!TRACK_CRUSH_VEHICLE_TYPES.has(vehicle.def?.type)) return;
@@ -288,7 +302,7 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
     if (target.team === vehicle.team) continue;
     if (!isCrushableFootTarget(target)) continue;
     const dist = Math.hypot(target.position.x - vx, target.position.z - vz);
-    if (dist > radius) continue;
+    if (dist > radius + trackCrushTargetRadius(target.def?.type)) continue;
     // Super-heavies always finish the job; medium tanks still deal lethal crush.
     const damage = target.hp + 40 + (vehicle.def.type === 'superHeavyTank' ? 40 : 0);
     // Align tread grooves on the corpse with the tank's path.
@@ -692,6 +706,7 @@ export function updateCombat(
     // still traversing; otherwise a slow turret can make the hull overshoot.
     if (
       !attacker._userMoveOrder &&
+      !attacker._aiTankManeuver &&
       (mainGunCanAim || coaxInRange || crewSmallArmsInRange)
     ) {
       if (attacker.moveTarget && attacker.attackOrder && !target.isGround) {
@@ -724,6 +739,8 @@ export function updateCombat(
     const canFireCrewSmallArms = crewSmallArmsInRange;
     const coaxHandlesSoft =
       coaxInRange && isCoaxSoftTarget(target) && attacker.def.coaxMG;
+    const coaxEngagingArmor =
+      canFireCoax && isTankType(target.def?.type);
 
     if (!canFireMain && !canFireCoax && !canFireCrewSmallArms) continue;
 
@@ -751,6 +768,24 @@ export function updateCombat(
     }
 
     if (canFireCoax && attacker.def.coaxMG && attacker.mgCooldown <= 0) {
+      if (coaxEngagingArmor) {
+        if (
+          attacker._armorCoaxBurstTarget !== target ||
+          attacker._armorCoaxBurstRoundsLeft <= 0
+        ) {
+          attacker._armorCoaxBurstTarget = target;
+          attacker._armorCoaxBurstRoundsLeft =
+            ARMOR_COAX_BURST_MIN_ROUNDS +
+            Math.floor(
+              Math.random() *
+                (ARMOR_COAX_BURST_MAX_ROUNDS - ARMOR_COAX_BURST_MIN_ROUNDS + 1)
+            );
+        }
+      } else {
+        attacker._armorCoaxBurstTarget = null;
+        attacker._armorCoaxBurstRoundsLeft = 0;
+      }
+
       const firedCoax = fire(
         attacker,
         target,
@@ -768,7 +803,19 @@ export function updateCombat(
         options,
         { coax: true }
       );
-      if (firedCoax !== false) attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
+      if (firedCoax !== false) {
+        if (coaxEngagingArmor) {
+          attacker._armorCoaxBurstRoundsLeft -= 1;
+          const burstComplete = attacker._armorCoaxBurstRoundsLeft <= 0;
+          attacker.mgCooldown = burstComplete
+            ? ARMOR_COAX_BURST_PAUSE_MIN_SEC +
+              Math.random() *
+                (ARMOR_COAX_BURST_PAUSE_MAX_SEC - ARMOR_COAX_BURST_PAUSE_MIN_SEC)
+            : 1 / attacker.def.coaxMG.attackSpeed;
+        } else {
+          attacker.mgCooldown = 1 / attacker.def.coaxMG.attackSpeed;
+        }
+      }
     }
 
     const fireMainGun =
@@ -877,7 +924,9 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
         // Clearing it for both teams also removes misleading target lines and
         // lets normal acquisition select an actually exposed unit next tick.
         attacker.clearAttackOrder();
-        if (!attacker._userMoveOrder) attacker.moveTarget = null;
+        if (!attacker._userMoveOrder && !attacker._aiTankManeuver) {
+          attacker.moveTarget = null;
+        }
         return null;
       }
       return attacker.attackOrder;
@@ -1026,7 +1075,9 @@ function fire(
       if (attacker.attackOrder === target) {
         if (!shouldRetainBlockedOrder(attacker, target)) {
           attacker.clearAttackOrder();
-          if (!attacker._userMoveOrder) attacker.moveTarget = null;
+          if (!attacker._userMoveOrder && !attacker._aiTankManeuver) {
+            attacker.moveTarget = null;
+          }
         }
       }
       return false;
@@ -1649,6 +1700,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit._finalMoveGoal = null;
     } else if (
       !unit._userMoveOrder &&
+      !unit._aiTankManeuver &&
       !unit.retreating &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
@@ -1716,6 +1768,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       ];
       if (
         !unit._userMoveOrder &&
+        !unit._aiTankManeuver &&
         !unit.retreating &&
         unit.attackOrder &&
         !unit.attackOrder.dead &&
@@ -1770,10 +1823,10 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         });
         const directionX = unit.position.x - beforeX;
         const directionZ = unit.position.z - beforeZ;
+        let blockedByBuilding = false;
         if (options.scenery && Math.hypot(directionX, directionZ) > 0.01) {
           const pathRadius = unitPathRadius(unit.def?.type);
           const allowBuildingId = unit._bunkerEntryId ?? null;
-          let blockedByBuilding = false;
 
           if (isVehicleUnit(unit.def?.type)) {
             const collisionOptions = {
@@ -1799,11 +1852,6 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
                 pathRadius,
                 collisionOptions
               );
-              if (TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type)) {
-                options._crushDirX = directionX;
-                options._crushDirZ = directionZ;
-                applyTrackCrush(unit, units, options, pathRadius);
-              }
             }
           } else {
             // Infantry / foot support: stop at masonry unless ordered inside.
@@ -1935,6 +1983,20 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
               }
             }
           }
+        }
+        if (
+          !blockedByBuilding &&
+          Math.hypot(directionX, directionZ) > 0.01 &&
+          TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type)
+        ) {
+          options._crushDirX = directionX;
+          options._crushDirZ = directionZ;
+          applyTrackCrush(
+            unit,
+            units,
+            options,
+            unitPathRadius(unit.def?.type)
+          );
         }
         advanceMovePath(unit, mapDef);
         if (!unit.moveTarget) unit._chasingAttack = false;

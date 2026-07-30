@@ -3946,7 +3946,7 @@ export class UIManager {
       const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
       const riderBlock =
         u._crewless
-          ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — select an infantry or paratrooper squad and RMB this tank. Two troops will crew it; the rest ride on the hull.</p>'
+          ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — infantry or airborne from either side can capture this operational tank. Select a squad and RMB the vehicle; two troops take control and the rest ride on the hull.</p>'
           : u._replacementCrewUnitId
             ? `<p class="unit-support-status"><strong>Replacement crew aboard</strong> — two troops operate the tank; the remaining squad members ride on the hull${riderN > 1 ? ` with ${riderN - 1} additional rider unit${riderN > 2 ? 's' : ''}` : ''}.</p>`
             : riderN > 0

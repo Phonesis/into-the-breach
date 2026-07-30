@@ -78,7 +78,10 @@ import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
 import { updateEngineerHealing, updateEngineerHqRepair } from './EngineerBehavior.js';
-import { updateVehicleBailouts } from './VehicleBailout.js';
+import {
+  spawnVehicleCrewBailout,
+  updateVehicleBailouts,
+} from './VehicleBailout.js';
 import {
   ensureFieldCommanders,
   getFieldCommander,
@@ -278,6 +281,9 @@ import { updateAutoBuild } from './AutoBuild.js';
 
 const PLAYER_TEAM = 'player';
 const ENEMY_TEAM = 'enemy';
+const LARGE_BATTLE_SIM_PIXEL_RATIO = 1;
+const LARGE_BATTLE_SIM_MOVEMENT_STEP = 1 / 30;
+const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
 
 export class Game {
   constructor({ canvas, ui }) {
@@ -342,6 +348,9 @@ export class Game {
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
     this._unitVisualSyncAccum = 0;
+    this._largeBattleMovementAccum = 0;
+    this._largeBattleTacticalVisualAccum = 0;
+    this._largeBattleSimulationPerfActive = false;
     this.showUnitFieldIcons = true;
     this.seekCoverMode = false;
     this.autoBuildMode = false;
@@ -366,6 +375,7 @@ export class Game {
     this.clearance = false;
     this.clearanceRole = 'attack';
     this.clearanceAttackPlan = null;
+    this.clearanceOperational = null;
     this.clearanceReinforcements = null;
     this.assault = null;
     this.assaultRole = null;
@@ -784,6 +794,35 @@ export class Game {
     return true;
   }
 
+  _isLargeBattleSimulation() {
+    return (
+      !!this.lastStand &&
+      isLastStandPresetForce(this) &&
+      this.lastStand.presetSize === 'large'
+    );
+  }
+
+  _configureLargeBattleSimulationPerformance() {
+    const active = this._isLargeBattleSimulation();
+    this._largeBattleSimulationPerfActive = active;
+    this._largeBattleMovementAccum = 0;
+    this._largeBattleTacticalVisualAccum = 0;
+    if (!active) return;
+
+    // The 68-v-68 preset is the only mode that needs this dedicated budget.
+    // At its normal wide camera distance, a 1x drawing buffer retains useful
+    // battlefield detail without paying the full Retina fill-rate cost.
+    this._setRenderPixelRatio(
+      Math.min(this._nativePixelRatio, LARGE_BATTLE_SIM_PIXEL_RATIO)
+    );
+    if (this.lights?.sun) {
+      // Scenery plus 136 combined-arms units otherwise requires a second
+      // multi-thousand-call scene render every frame. Directional/ambient
+      // lighting stays intact; only the dynamic sun shadow pass is omitted.
+      this.lights.sun.castShadow = false;
+    }
+  }
+
   _bindPinchZoom(canvas) {
     let lastPinchDist = 0;
 
@@ -865,6 +904,7 @@ export class Game {
     this.clearance = isClearanceMode(gameMode);
     this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
     this.clearanceAttackPlan = null;
+    this.clearanceOperational = null;
     this.clearanceReinforcements = createClearanceReinforcementState(
       isReinforcedClearanceMode(gameMode, startOptions),
       resolveClearanceReinforcementSize(startOptions)
@@ -966,6 +1006,7 @@ export class Game {
     this._setRenderPixelRatio(this._nativePixelRatio);
     setupSceneEnvironment(this.scene, this.mapDef, this.renderer);
     this.lights = setupLighting(this.scene, this.mapDef);
+    this._configureLargeBattleSimulationPerformance();
 
     this.scenery = new DestructibleScenery(this.scene, this.mapDef, () => this._terrainMesh);
     this.coverSystem = new CoverSystem([]);
@@ -1300,6 +1341,8 @@ export class Game {
     this._fieldIconUiAccum = 0;
     this._minimapUiAccum = 0;
     this._unitVisualSyncAccum = 0;
+    this._largeBattleMovementAccum = 0;
+    this._largeBattleTacticalVisualAccum = 0;
     this._selectionUiKey = '';
     this._hoverUiId = '';
     this._combatAccum = 0;
@@ -1312,7 +1355,11 @@ export class Game {
     this._renderPerformance.baselineFps = 60;
     this._renderPerformance.highFpsFor = 0;
     this._renderPerformance.qualityCooldown = 0;
-    this._setRenderPixelRatio(this._nativePixelRatio);
+    this._setRenderPixelRatio(
+      this._largeBattleSimulationPerfActive
+        ? LARGE_BATTLE_SIM_PIXEL_RATIO
+        : this._nativePixelRatio
+    );
     if (!restoreSnapshot) {
       this.matchTime = 0;
     }
@@ -2094,6 +2141,7 @@ export class Game {
     this.clearance = false;
     this.clearanceRole = 'attack';
     this.clearanceAttackPlan = null;
+    this.clearanceOperational = null;
     this.clearanceReinforcements = null;
     this.campaign = false;
     this.production.setBuildTimeMult(1);
@@ -3638,15 +3686,31 @@ export class Game {
           return;
         }
 
-        updateMovement(this._aliveUnits, dt, this.mapDef, this.hqs, {
-          terrainMesh: this._terrainMesh,
-          getWireSlowMult: this.defenses
-            ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
-            : null,
-          scenery: this.scenery,
-          clearance: this.clearance,
-          infantryTrenches: this.infantryTrenches,
-        });
+        let movementDt = dt;
+        let updateArmyMovement = true;
+        if (this._largeBattleSimulationPerfActive) {
+          this._largeBattleMovementAccum = Math.min(
+            0.1,
+            this._largeBattleMovementAccum + dt
+          );
+          if (this._largeBattleMovementAccum < LARGE_BATTLE_SIM_MOVEMENT_STEP) {
+            updateArmyMovement = false;
+          } else {
+            movementDt = LARGE_BATTLE_SIM_MOVEMENT_STEP;
+            this._largeBattleMovementAccum -= LARGE_BATTLE_SIM_MOVEMENT_STEP;
+          }
+        }
+        if (updateArmyMovement) {
+          updateMovement(this._aliveUnits, movementDt, this.mapDef, this.hqs, {
+            terrainMesh: this._terrainMesh,
+            getWireSlowMult: this.defenses
+              ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
+              : null,
+            scenery: this.scenery,
+            clearance: this.clearance,
+            infantryTrenches: this.infantryTrenches,
+          });
+        }
         this.scenery?.update(dt);
         if (
           getGarrisonBunkerSources(this).length > 0 ||
@@ -3771,6 +3835,8 @@ export class Game {
               generalOrders: this.generalOrders,
               engineerSandbags: this.engineerSandbags,
               defenses: this.defenses,
+              spawnSurrenderingVehicleCrew: (vehicle) =>
+                spawnVehicleCrewBailout(this, vehicle),
             }
           );
           this._rebuildUnitCaches();
@@ -3780,8 +3846,10 @@ export class Game {
           }
         }
 
-        for (const u of this._aliveUnits) {
-          updateInfantryWeaponPose(u, dt);
+        if (updateArmyMovement) {
+          for (const u of this._aliveUnits) {
+            updateInfantryWeaponPose(u, movementDt);
+          }
         }
 
         if (this.towerDefense && this.defenses) {
@@ -3837,8 +3905,18 @@ export class Game {
           updateWreckEffects(dt, this.camera);
           updateVehicleCookOffs(this, dt);
           updateHqBurnEffects(dt, this.camera, this.hqs);
-          this.rangeRings.updateForUnits(this._aliveUnits);
-          this.targetIndicators.update(playerSelected, this._playerAlive);
+          let updateTacticalVisuals = true;
+          if (this._largeBattleSimulationPerfActive) {
+            this._largeBattleTacticalVisualAccum += dt;
+            updateTacticalVisuals =
+              this._largeBattleTacticalVisualAccum >=
+              LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP;
+            if (updateTacticalVisuals) this._largeBattleTacticalVisualAccum = 0;
+          }
+          if (updateTacticalVisuals) {
+            this.rangeRings.updateForUnits(this._aliveUnits);
+            this.targetIndicators.update(playerSelected, this._playerAlive);
+          }
           updateCombatEffects(dt);
           updateShellCasings(dt, this.mapDef, this._terrainMesh);
           this._fireSupportUiAccum += dt;
@@ -3887,7 +3965,8 @@ export class Game {
 
           this.cleanupDead(dt);
           this._rosterUiAccum += dt;
-          if (this._rosterUiAccum >= 0.35) {
+          const rosterInterval = this._largeBattleSimulationPerfActive ? 0.7 : 0.35;
+          if (this._rosterUiAccum >= rosterInterval) {
             this._rosterUiAccum = 0;
             this._syncUnitRoster();
           }
@@ -3930,8 +4009,15 @@ export class Game {
     // Reduce only the drawing-buffer resolution; simulation and model detail
     // remain unchanged. Restore sharpness gradually after the field thins out.
     const liveCount = this._aliveUnits.length;
-    const loadPixelRatioCap =
-      liveCount >= 68 ? 1.15 : liveCount >= 50 ? 1.35 : liveCount >= 38 ? 1.6 : this._nativePixelRatio;
+    const loadPixelRatioCap = this._largeBattleSimulationPerfActive
+      ? LARGE_BATTLE_SIM_PIXEL_RATIO
+      : liveCount >= 68
+        ? 1.15
+        : liveCount >= 50
+          ? 1.35
+          : liveCount >= 38
+            ? 1.6
+            : this._nativePixelRatio;
     let desiredPixelRatio = Math.min(this._nativePixelRatio, loadPixelRatioCap);
     if (desiredPixelRatio < this._renderPixelRatio && perf.qualityCooldown <= 0) {
       if (this._setRenderPixelRatio(desiredPixelRatio)) perf.qualityCooldown = 2;

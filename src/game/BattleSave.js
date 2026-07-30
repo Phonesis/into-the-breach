@@ -271,7 +271,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       elite: u.elite,
       killCount: u.killCount ?? 0,
       retreating: u.retreating,
-      surrendered: u.surrendered,
+      // A crew partway through its bailout is committed to surrender. Loading
+      // resumes it safely on the ground with the surrender state applied.
+      surrendered: u.surrendered || !!u._surrenderAfterBailout,
       _garrisonBunkerId: u._garrisonBunkerId ?? null,
       _garrisonBunkerMapKey:
         game.scenery?.objects.find((obj) => obj.id === u._garrisonBunkerId)?.mapKey ?? null,
@@ -331,6 +333,17 @@ export function captureBattleSave(game, { id = null } = {}) {
     matchTime: game.matchTime,
     clearanceRole: game.clearanceRole ?? null,
     clearanceAttackPlanId: game.clearanceAttackPlan?.id ?? null,
+    clearanceOperational: game.clearanceOperational
+      ? {
+          ...game.clearanceOperational,
+          anchor: game.clearanceOperational.anchor
+            ? { ...game.clearanceOperational.anchor }
+            : null,
+          lastCenter: game.clearanceOperational.lastCenter
+            ? { ...game.clearanceOperational.lastCenter }
+            : null,
+        }
+      : null,
     clearanceReinforcements: game.clearanceReinforcements
       ? { ...game.clearanceReinforcements }
       : null,
@@ -410,6 +423,17 @@ export function captureBattleSave(game, { id = null } = {}) {
           enemyTacticId: game.lastStand.enemyTactic?.id ?? game.lastStand.enemyTacticId ?? null,
           flankSide: game.lastStand.flankSide ?? 1,
           briefingShown: game.lastStand.briefingShown ?? game.lastStand.phase !== 'deploy',
+          enemyOperational: game.lastStand.enemyOperational
+            ? {
+                ...game.lastStand.enemyOperational,
+                anchor: game.lastStand.enemyOperational.anchor
+                  ? { ...game.lastStand.enemyOperational.anchor }
+                  : null,
+                lastCenter: game.lastStand.enemyOperational.lastCenter
+                  ? { ...game.lastStand.enemyOperational.lastCenter }
+                  : null,
+              }
+            : null,
         }
       : null,
     defenses: game.defenses
@@ -1031,6 +1055,17 @@ export function applyBattleSave(game, snapshot) {
     if (planId && CLEARANCE_ATTACK_PLANS[planId]) {
       game.clearanceAttackPlan = CLEARANCE_ATTACK_PLANS[planId];
     }
+    game.clearanceOperational = snapshot.clearanceOperational
+      ? {
+          ...snapshot.clearanceOperational,
+          anchor: snapshot.clearanceOperational.anchor
+            ? { ...snapshot.clearanceOperational.anchor }
+            : null,
+          lastCenter: snapshot.clearanceOperational.lastCenter
+            ? { ...snapshot.clearanceOperational.lastCenter }
+            : null,
+        }
+      : null;
   }
   if (game.clearanceReinforcements) {
     const saved = snapshot.clearanceReinforcements;
@@ -1109,6 +1144,17 @@ export function applyBattleSave(game, snapshot) {
     game.lastStand = {
       ...snapshot.lastStand,
       supplies: { ...snapshot.lastStand.supplies },
+      enemyOperational: snapshot.lastStand.enemyOperational
+        ? {
+            ...snapshot.lastStand.enemyOperational,
+            anchor: snapshot.lastStand.enemyOperational.anchor
+              ? { ...snapshot.lastStand.enemyOperational.anchor }
+              : null,
+            lastCenter: snapshot.lastStand.enemyOperational.lastCenter
+              ? { ...snapshot.lastStand.enemyOperational.lastCenter }
+              : null,
+          }
+        : null,
     };
     if (game.lastStand.enemyTacticId) {
       game.lastStand.enemyTactic = getLastStandTactic(game.lastStand.enemyTacticId);
