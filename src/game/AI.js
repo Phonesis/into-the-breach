@@ -2174,6 +2174,7 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
 
 function canDigAiTrenchType(type) {
   return (
+    type === 'radioOperator' ||
     type === 'infantry' ||
     type === 'paratrooper' ||
     type === 'machineGun' ||
@@ -2720,7 +2721,8 @@ function roleFromUnitType(type) {
     type === 'mortar' ||
     type === 'antiTankGun' ||
     type === 'sniper' ||
-    type === 'machineGun'
+    type === 'machineGun' ||
+    type === 'radioOperator'
   ) {
     return 'support';
   }
@@ -2848,10 +2850,11 @@ function rollEnemyUnitType(assault, difficulty) {
     return 'superHeavyTank';
   }
   if (roll < 0.48 - heavyBias) return 'infantry';
-  if (roll < 0.54) return 'medic';
-  if (roll < 0.6) return 'engineer';
-  if (roll < 0.68) return 'infantry';
-  if (roll < 0.76) return 'sniper';
+  if (roll < 0.53) return 'medic';
+  if (roll < 0.58) return 'engineer';
+  if (roll < 0.62) return 'radioOperator';
+  if (roll < 0.69) return 'infantry';
+  if (roll < 0.77) return 'sniper';
   if (roll < 0.84) return 'armoredCar';
   if (roll < 0.86) return 'mortar';
   if (roll < 0.9 - heavyBias * 0.35) return 'antiTankGun';
@@ -2865,6 +2868,7 @@ function tryProduce(production, resources, spend, assault, difficulty) {
   const pick = rollEnemyUnitType(assault, difficulty);
   const tryOrder = [
     pick,
+    'radioOperator',
     'infantry',
     'medic',
     'engineer',

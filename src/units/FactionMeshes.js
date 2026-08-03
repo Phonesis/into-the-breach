@@ -518,6 +518,210 @@ export function buildFactionEngineer(group, body, dark, factionId) {
   group.userData.hitRadius = 1.55;
 }
 
+/**
+ * One-man signals detachment with a faction-specific period backpack set.
+ * The radio is deliberately a real pack, aerial, handset, and cable silhouette
+ * rather than a generic infantry marker so the unit remains readable in a
+ * crowded rear assembly and in the field.
+ */
+export function buildFactionRadioOperator(group, _body, dark, factionId) {
+  const radioSpecs = {
+    germany: {
+      caseColor: 0x46503a,
+      panelColor: 0x5d5a43,
+      width: 0.2,
+      height: 0.31,
+      depth: 0.13,
+      antenna: 0.58,
+      tilt: -0.08,
+      handsetX: 0.1,
+      sideDetail: 'battery',
+    },
+    usa: {
+      caseColor: 0x4c5c3a,
+      panelColor: 0x68714a,
+      width: 0.22,
+      height: 0.34,
+      depth: 0.14,
+      antenna: 0.52,
+      tilt: 0.04,
+      handsetX: 0.1,
+      sideDetail: 'handle',
+    },
+    uk: {
+      caseColor: 0x6a5f40,
+      panelColor: 0x82744c,
+      width: 0.19,
+      height: 0.28,
+      depth: 0.13,
+      antenna: 0.64,
+      tilt: 0.02,
+      handsetX: -0.1,
+      sideDetail: 'pouch',
+    },
+    russia: {
+      caseColor: 0x46573a,
+      panelColor: 0x5d6844,
+      width: 0.21,
+      height: 0.3,
+      depth: 0.14,
+      antenna: 0.57,
+      tilt: 0.12,
+      handsetX: -0.1,
+      sideDetail: 'battery',
+    },
+  }[factionId] ?? null;
+  const spec = radioSpecs ?? {
+    caseColor: 0x46503a,
+    panelColor: 0x5d5a43,
+    width: 0.2,
+    height: 0.31,
+    depth: 0.13,
+    antenna: 0.58,
+    tilt: -0.08,
+    handsetX: 0.1,
+    sideDetail: 'battery',
+  };
+
+  buildSquadSoldier(group, {
+    factionId,
+    squadIndex: 0,
+    x: 0,
+    z: 0,
+    withPack: false,
+    withRifle: true,
+    withWebbing: true,
+    extraMeshes: (soldier, mats) => {
+      const radioCase = mat(spec.caseColor, { rough: 0.82, metal: 0.12 });
+      const radioPanel = mat(spec.panelColor, { rough: 0.7, metal: 0.22 });
+      const leather = mat(0x332c22, { rough: 0.92, metal: 0.02 });
+
+      const pack = new THREE.Mesh(
+        new THREE.BoxGeometry(spec.width, spec.height, spec.depth),
+        radioCase
+      );
+      pack.name = `radioSet-${factionId}`;
+      pack.position.set(0, 0.47, -0.135);
+      pack.geometry.translate(0, 0, -0.018);
+      pack.userData.radioPart = 'set';
+      tagEquipShadow(pack);
+      soldier.add(pack);
+
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(spec.width * 0.86, 0.035, spec.depth * 0.9),
+        radioPanel
+      );
+      top.position.set(0, 0.47 + spec.height * 0.5 + 0.018, -0.14);
+      top.userData.radioPart = 'topPanel';
+      tagEquipShadow(top);
+      soldier.add(top);
+
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.032, 0.07, 8),
+        dark
+      );
+      base.position.set(0, top.position.y + 0.045, -0.14);
+      base.userData.radioPart = 'aerialBase';
+      tagEquipShadow(base);
+      soldier.add(base);
+
+      const aerial = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.009, 0.014, spec.antenna, 6),
+        dark
+      );
+      aerial.position.set(0, base.position.y + 0.035 + spec.antenna * 0.5, -0.14);
+      aerial.rotation.z = spec.tilt;
+      aerial.userData.radioPart = 'aerial';
+      tagEquipShadow(aerial);
+      soldier.add(aerial);
+
+      const dial = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.024, 0.024, 0.018, 10),
+        dark
+      );
+      dial.rotation.x = Math.PI / 2;
+      dial.position.set(-spec.width * 0.27, top.position.y - 0.01, -0.215);
+      dial.userData.radioPart = 'dial';
+      soldier.add(dial);
+
+      const handset = new THREE.Mesh(
+        new THREE.BoxGeometry(0.055, 0.19, 0.04),
+        dark
+      );
+      handset.position.set(spec.handsetX, 0.54, 0.12);
+      handset.rotation.z = spec.handsetX > 0 ? -0.12 : 0.12;
+      handset.userData.radioPart = 'handset';
+      soldier.add(handset);
+
+      const shoulderStrap = new THREE.Mesh(
+        new THREE.BoxGeometry(0.035, 0.3, 0.018),
+        leather
+      );
+      shoulderStrap.position.set(0.08, 0.48, 0.09);
+      shoulderStrap.rotation.z = -0.2;
+      shoulderStrap.userData.radioPart = 'shoulderStrap';
+      soldier.add(shoulderStrap);
+
+      if (spec.sideDetail === 'handle') {
+        const handle = new THREE.Mesh(
+          new THREE.TorusGeometry(0.055, 0.012, 5, 10, Math.PI),
+          leather
+        );
+        handle.rotation.x = Math.PI / 2;
+        handle.position.set(0, top.position.y + 0.035, -0.14);
+        handle.userData.radioPart = 'carryHandle';
+        soldier.add(handle);
+      } else if (spec.sideDetail === 'pouch') {
+        const pouch = new THREE.Mesh(
+          new THREE.BoxGeometry(0.09, 0.13, 0.065),
+          leather
+        );
+        pouch.position.set(-0.17, 0.38, 0.035);
+        pouch.userData.radioPart = 'batteryPouch';
+        tagEquipShadow(pouch);
+        soldier.add(pouch);
+      } else {
+        const battery = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.14, 0.07),
+          radioPanel
+        );
+        battery.position.set(0.16, 0.38, -0.08);
+        battery.userData.radioPart = 'batteryBox';
+        tagEquipShadow(battery);
+        soldier.add(battery);
+      }
+
+      const cable = new THREE.Mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3([
+            new THREE.Vector3(spec.handsetX, 0.47, 0.105),
+            new THREE.Vector3(spec.handsetX * 0.5, 0.39, 0.06),
+            new THREE.Vector3(0.04, 0.3, -0.02),
+          ]),
+          8,
+          0.012,
+          5,
+          false
+        ),
+        dark
+      );
+      cable.name = 'radioHandsetCable';
+      cable.userData.radioPart = 'cable';
+      tagEquipShadow(cable, 'receive');
+      soldier.add(cable);
+
+      // Signals operators carry their own radio but remain a single combat man.
+      soldier.userData.radioOperator = true;
+      soldier.userData.radioSet = pack;
+      void mats;
+    },
+  });
+
+  group.userData.squadSize = 1;
+  group.userData.radioOperator = true;
+  group.userData.hitRadius = 1.35;
+}
+
 export function buildFactionMortar(group, body, detail, dark, factionId) {
   const mortar = new THREE.Group();
   mortar.name = 'deployedMortar';

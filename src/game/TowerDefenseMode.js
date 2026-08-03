@@ -470,7 +470,9 @@ export function updateTowerDefenseMode(game, dt) {
       td.spawnTimer += td.spawnInterval;
     }
 
-    const enemiesAlive = game._enemyAlive.filter((u) => u.def?.type !== 'commander').length;
+    const enemiesAlive = game._enemyAlive.filter(
+      (u) => u.def?.type !== 'commander' && u.def?.type !== 'radioOperator'
+    ).length;
     if (td.spawnQueue.length === 0 && enemiesAlive === 0) {
       onWaveCleared(game, td);
     }
@@ -597,7 +599,7 @@ function computeTdEnemyMoveGoal(unit, game) {
 export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
   const crewlessTankClaims = new Set();
   for (const unit of enemyUnits) {
-    if (unit.def?.type === 'commander') continue;
+    if (unit.def?.type === 'commander' || unit.def?.type === 'radioOperator') continue;
     if (unit.retreating || unit.surrendered || unit._captureExit) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
     if (unit.attackOrder && !unit.attackOrder.dead) continue;

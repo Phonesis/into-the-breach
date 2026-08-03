@@ -7,6 +7,7 @@ const MAX_QUEUE = 4;
 
 /** Target mix weights — combined-arms balance (higher = more of that type over time). */
 const AUTO_BUILD_WEIGHTS = {
+  radioOperator: 6,
   infantry: 38,
   medic: 5,
   engineer: 5,

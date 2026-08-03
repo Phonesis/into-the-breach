@@ -602,6 +602,48 @@ function commanderDef(factionId) {
   };
 }
 
+function radioOperatorDef(factionId) {
+  const identity = {
+    germany: {
+      name: 'Funksprecher',
+      designation: 'Heer Funktrupp — Torn.Fu.d2',
+      description: 'Signals operator carrying a Torn.Fu.d2 backpack radio and Kar98k.',
+    },
+    usa: {
+      name: 'Radio Operator',
+      designation: 'U.S. Signal Corps — SCR-300',
+      description: 'Signal Corps operator with an SCR-300 backpack set and M1 carbine.',
+    },
+    uk: {
+      name: 'Wireless Operator',
+      designation: 'British Signals — Wireless Set No. 18',
+      description: 'Signals operator with a Wireless Set No. 18 and Lee–Enfield rifle.',
+    },
+    russia: {
+      name: 'Radio Operator',
+      designation: 'RKKA Signals — RB / 12-RP field set',
+      description: 'Red Army signals operator with a portable RB-series field radio and rifle.',
+    },
+  }[factionId];
+  return {
+    type: 'radioOperator',
+    ...identity,
+    hp: 58,
+    damage: 9,
+    range: 38,
+    rangeMeters: 400,
+    sightRange: 72,
+    sightRangeMeters: 720,
+    supportRange: 72,
+    supportRangeMeters: 720,
+    speed: 4.1,
+    attackSpeed: 1.2,
+    cost: 58,
+    buildTime: 10,
+    weaponSound: `rifle_${factionId}`,
+  };
+}
+
 export const FACTIONS = {
   germany: {
     id: 'germany',
@@ -613,6 +655,7 @@ export const FACTIONS = {
     enemyDefault: 'usa',
     units: {
       commander: commanderDef('germany'),
+      radioOperator: radioOperatorDef('germany'),
       vehicleCrew: vehicleCrewDef('germany'),
       infantry: {
         type: 'infantry',
@@ -729,6 +772,7 @@ export const FACTIONS = {
     enemyDefault: 'germany',
     units: {
       commander: commanderDef('usa'),
+      radioOperator: radioOperatorDef('usa'),
       vehicleCrew: vehicleCrewDef('usa'),
       infantry: {
         type: 'infantry',
@@ -844,6 +888,7 @@ export const FACTIONS = {
     enemyDefault: 'germany',
     units: {
       commander: commanderDef('uk'),
+      radioOperator: radioOperatorDef('uk'),
       vehicleCrew: vehicleCrewDef('uk'),
       infantry: {
         type: 'infantry',
@@ -960,6 +1005,7 @@ export const FACTIONS = {
     enemyDefault: 'germany',
     units: {
       commander: commanderDef('russia'),
+      radioOperator: radioOperatorDef('russia'),
       vehicleCrew: vehicleCrewDef('russia'),
       infantry: {
         type: 'infantry',

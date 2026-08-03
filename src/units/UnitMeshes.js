@@ -11,6 +11,7 @@ import {
   buildFactionMedic,
   buildFactionEngineer,
   buildFactionSniper,
+  buildFactionRadioOperator,
 } from './FactionMeshes.js';
 import { isTankType } from './VehicleTypes.js';
 import {
@@ -29,6 +30,7 @@ import { SQUAD_SIZES } from '../data/squadSizes.js';
 export { mat };
 
 const INFANTRY_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',
@@ -93,6 +95,9 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   } else if (type === 'engineer') {
     buildFactionEngineer(group, body, dark, factionId);
     built = true;
+  } else if (type === 'radioOperator') {
+    buildFactionRadioOperator(group, body, dark, factionId);
+    built = true;
   } else if (type === 'infantry') {
     buildFactionInfantry(group, body, dark, factionId);
     built = true;
@@ -139,6 +144,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     mortar: 2.2,
     medic: 1.4,
     engineer: 2.25,
+    radioOperator: 1.35,
     commander: 2.55,
     armoredCar: group.userData.hitRadius ?? 2.6,
     tankDestroyer: group.userData.hitRadius ?? 3.0,
@@ -164,6 +170,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     mortar: 0.65,
     medic: 0.52,
     engineer: 0.52,
+    radioOperator: 0.52,
     sniper: 0.5,
     infantry: 0.55,
     vehicleCrew: 0.52,
@@ -1416,6 +1423,7 @@ export function applyUnitDeathVisual(unit) {
   }
 
   if (
+    type === 'radioOperator' ||
     type === 'infantry' ||
     type === 'paratrooper' ||
     type === 'machineGun' ||

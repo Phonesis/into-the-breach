@@ -140,6 +140,7 @@ export const ASSAULT_ENEMY_RESOURCES = 120;
 
 /** Unit keys shown in production UI (order matters). */
 export const UNIT_TYPE_ORDER = [
+  'radioOperator',
   'infantry',
   'medic',
   'engineer',

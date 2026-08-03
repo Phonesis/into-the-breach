@@ -8,6 +8,7 @@ const ICON_SCALE = 2.4;
 
 const SHORT_LABELS = {
   commander: 'CMD',
+  radioOperator: 'RAD',
   infantry: 'INF',
   paratrooper: 'ABN',
   medic: 'MED',
@@ -25,6 +26,7 @@ const SHORT_LABELS = {
 
 const ICON_HEIGHT = {
   commander: 3.05,
+  radioOperator: 2.85,
   infantry: 2.35,
   paratrooper: 2.5,
   medic: 2.35,

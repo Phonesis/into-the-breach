@@ -3,6 +3,7 @@ import { distanceBetween } from './Targeting.js';
 import { clearRetreat } from './RetreatBehavior.js';
 import { getMedicRetreatMultiplier } from './MedicBehavior.js';
 import { getRankMoralePressure, removeRankMarker } from './EliteBehavior.js';
+import { getCommanderMoraleMultiplier } from './CommanderBehavior.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
@@ -10,6 +11,7 @@ import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { isTankType } from '../units/VehicleTypes.js';
 
 const SURRENDER_ELIGIBLE = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',
@@ -286,6 +288,7 @@ export function maybeTriggerSurrender(unit, units, options = {}, attacker = null
 
   chance *= getMedicRetreatMultiplier(unit, units);
   chance *= getRankMoralePressure(unit, units, attacker);
+  chance *= getCommanderMoraleMultiplier(unit, units);
 
   if (Math.random() < chance) {
     if (isTankType(unit.def.type)) {

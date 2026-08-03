@@ -4,6 +4,7 @@ import { getMedicRetreatMultiplier } from './MedicBehavior.js';
 import { getEngineerRetreatMultiplier } from './EngineerBehavior.js';
 import { getRankMoralePressure, getRankRetreatMultiplier } from './EliteBehavior.js';
 import { getCommanderRetreatMultiplier } from './GeneralOrders.js';
+import { getCommanderMoraleMultiplier } from './CommanderBehavior.js';
 import { getClearanceStagingAnchor } from './ClearanceMode.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { applyObstaclePath } from './MovePath.js';
@@ -187,6 +188,7 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
   chance *= getEngineerRetreatMultiplier(unit, units);
   chance *= getRankRetreatMultiplier(unit);
   chance *= getRankMoralePressure(unit, units, attacker);
+  chance *= getCommanderMoraleMultiplier(unit, units);
   chance *= getCommanderRetreatMultiplier(unit, options.generalOrders);
   chance *= getCoverRetreatMultiplier(unit);
 

@@ -22,6 +22,7 @@ export function shouldUseTacticalReverse(unit, x, z) {
 
 /** Infantry-scale units that medics can treat (excludes towed guns and vehicles). */
 export const FOOT_SOLDIER_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',

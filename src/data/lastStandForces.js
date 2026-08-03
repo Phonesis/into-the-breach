@@ -23,17 +23,17 @@ export const LAST_STAND_PRESET_SIZES = {
   small: {
     id: 'small',
     name: 'Small',
-    subtitle: '~23 combat units per side — skirmish battle group.',
+    subtitle: '~24 combat units per side — skirmish battle group with signals support.',
   },
   medium: {
     id: 'medium',
     name: 'Medium',
-    subtitle: '~37 combat units per side — balanced engagement (default).',
+    subtitle: '~38 combat units per side — balanced engagement with signals support (default).',
   },
   large: {
     id: 'large',
     name: 'Large',
-    subtitle: '~67 combat units per side — full field force (not on Berlin).',
+    subtitle: '~68 combat units per side — full field force with signals support (not on Berlin).',
   },
 };
 
@@ -48,6 +48,7 @@ export const LAST_STAND_PRESET_ROSTER_LARGE = [
   { type: 'infantry', count: 24, echelon: 'front' },
   { type: 'machineGun', count: 7, echelon: 'front' },
   { type: 'sniper', count: 3, echelon: 'front' },
+  { type: 'radioOperator', count: 1, echelon: 'support' },
   { type: 'medic', count: 3, echelon: 'support' },
   { type: 'engineer', count: 3, echelon: 'support' },
   { type: 'mortar', count: 5, echelon: 'support' },
@@ -63,6 +64,7 @@ export const LAST_STAND_PRESET_ROSTER_MEDIUM = [
   { type: 'infantry', count: 12, echelon: 'front' },
   { type: 'machineGun', count: 4, echelon: 'front' },
   { type: 'sniper', count: 2, echelon: 'front' },
+  { type: 'radioOperator', count: 1, echelon: 'support' },
   { type: 'medic', count: 2, echelon: 'support' },
   { type: 'engineer', count: 2, echelon: 'support' },
   { type: 'mortar', count: 3, echelon: 'support' },
@@ -78,6 +80,7 @@ export const LAST_STAND_PRESET_ROSTER_SMALL = [
   { type: 'infantry', count: 8, echelon: 'front' },
   { type: 'machineGun', count: 2, echelon: 'front' },
   { type: 'sniper', count: 1, echelon: 'front' },
+  { type: 'radioOperator', count: 1, echelon: 'support' },
   { type: 'medic', count: 1, echelon: 'support' },
   { type: 'engineer', count: 1, echelon: 'support' },
   { type: 'mortar', count: 2, echelon: 'support' },

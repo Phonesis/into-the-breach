@@ -19,6 +19,7 @@ const ENEMY_DEPLOY_BURST = 4;
 
 /** Base mix for manual-deploy AI — composition is chosen freely, not copied. */
 const ENEMY_TYPE_WEIGHTS = {
+  radioOperator: 1.4,
   infantry: 5,
   medic: 1,
   engineer: 1,
@@ -99,6 +100,7 @@ const PRESET_ECHELON_DEPTH = {
 };
 
 const PRESET_ROLE_BY_TYPE = {
+  radioOperator: 'support',
   infantry: 'line',
   machineGun: 'line',
   sniper: 'support',

@@ -5,6 +5,7 @@ import { isUnitMounted } from './TankRiders.js';
 export const BUNKER_GARRISON_COVER_MULT = 0.12;
 
 const GARRISON_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',

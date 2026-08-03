@@ -93,6 +93,7 @@ const INFANTRY_DEATH_FACTIONS = {
   russia: { prefix: 'infantry-death-russia', factions: new Set(['russia']) },
 };
 const INFANTRY_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',

@@ -101,11 +101,8 @@ export function ensureFieldCommanders(game) {
 function announceLoss(game, commander) {
   commander._commanderDeathHandled = true;
   const isPlayer = commander.team === PLAYER;
-  const manager = isPlayer ? game.fireSupport : game.enemyFireSupport;
-  manager?.cancel?.();
   if (isPlayer) {
     game.generalOrders?.cancelActive?.();
-    game.defenses?.cancelPending?.();
   }
 
   sounds.playCommanderOrder(
@@ -116,8 +113,8 @@ function announceLoss(game, commander) {
   );
   game.ui?.showSaveToast?.(
     isPlayer
-      ? 'Commander killed — Fire Support and General Orders are unavailable.'
-      : 'Enemy commander killed — hostile off-map support is disabled.'
+      ? 'Commander killed — morale has collapsed. General Orders are unavailable; radio operators still control off-map support.'
+      : 'Enemy commander killed — hostile morale has collapsed, but surviving radio operators can still call off-map support.'
   );
   game.ui?.updateFireSupport?.(game.fireSupport);
   game.ui?.updateGeneralOrders?.(game.generalOrders);

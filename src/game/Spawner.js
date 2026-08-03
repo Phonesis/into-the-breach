@@ -4,6 +4,7 @@ import { sampleTerrainHeight } from '../world/Terrain.js';
 import { BASE_BUILDING_STARTING_ARMY } from '../data/baseBuildings.js';
 
 const PLAYER_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 5 },
   { type: 'infantry', count: 3, spread: 6 },
   { type: 'medic', count: 1, spread: 5 },
   { type: 'engineer', count: 1, spread: 5 },
@@ -17,6 +18,7 @@ const PLAYER_ARMY = [
 ];
 
 const ENEMY_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 5 },
   { type: 'infantry', count: 3, spread: 6 },
   { type: 'medic', count: 1, spread: 5 },
   { type: 'engineer', count: 1, spread: 5 },
@@ -30,6 +32,7 @@ const ENEMY_ARMY = [
 ];
 
 const ASSAULT_ATTACKER_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 5 },
   { type: 'infantry', count: 4, spread: 6 },
   { type: 'machineGun', count: 1, spread: 5 },
   { type: 'sniper', count: 1, spread: 5 },
@@ -41,6 +44,7 @@ const ASSAULT_ATTACKER_ARMY = [
 ];
 
 const ASSAULT_DEFENDER_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 5 },
   { type: 'infantry', count: 3, spread: 6 },
   { type: 'machineGun', count: 1, spread: 5 },
   { type: 'sniper', count: 1, spread: 5 },
@@ -52,6 +56,7 @@ const ASSAULT_DEFENDER_ARMY = [
 ];
 
 const TUTORIAL_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 5 },
   { type: 'infantry', count: 3, spread: 6 },
   { type: 'engineer', count: 1, spread: 5 },
   { type: 'machineGun', count: 1, spread: 5 },
@@ -71,6 +76,11 @@ function resolveLayout({ roster, tutorial, team, campaign, baseBuilding }) {
   if (baseBuilding) return BASE_BUILDING_STARTING_ARMY;
   if (campaign) return BASE_BUILDING_STARTING_ARMY;
   return team === 'enemy' ? ENEMY_ARMY : PLAYER_ARMY;
+}
+
+function ensureRadioOperatorLayout(layout) {
+  if (layout.some((slot) => slot.type === 'radioOperator' && slot.count > 0)) return layout;
+  return [...layout, { type: 'radioOperator', count: 1, spread: 5 }];
 }
 
 function scaleEnemyLayout(layout, armyMult) {
@@ -104,6 +114,7 @@ const CLEARANCE_DEPLOYMENT = {
   ],
   engineer: [{ forward: 2, lateral: 4 }],
   medic: [{ forward: 1, lateral: -3 }],
+  radioOperator: [{ forward: -1, lateral: 5 }],
   mortar: [{ forward: 1, lateral: -9 }],
   artillery: [{ forward: 0, lateral: 8 }],
 };
@@ -358,7 +369,9 @@ export function spawnArmy({
   baseBuilding = false,
   scenery = null,
 }) {
-  let layout = resolveLayout({ roster, tutorial, team, campaign, baseBuilding });
+  let layout = ensureRadioOperatorLayout(
+    resolveLayout({ roster, tutorial, team, campaign, baseBuilding })
+  );
   if (team === 'enemy' && !tutorial) {
     layout = scaleEnemyLayout(layout, enemyArmyMult);
   }

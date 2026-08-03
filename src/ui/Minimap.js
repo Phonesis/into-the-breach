@@ -133,6 +133,7 @@ function unitDotRadius(unit) {
   const type = unit.def?.type;
   if (!type) return 2.2;
   if (type === 'commander') return 4;
+  if (type === 'radioOperator') return 2.7;
   if (isTankType(type)) return 3.4;
   if (VEHICLE_TYPES.has(type)) return 2.8;
   return 2.2;

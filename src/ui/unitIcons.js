@@ -7,6 +7,14 @@ const ICONS = {
     <circle cx="16" cy="16" r="2.2" fill="#f2ddb0"/>
   </svg>`,
 
+  radioOperator: `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <circle cx="16" cy="7.2" r="3" fill="currentColor"/>
+    <path d="M12 28V14.5l4-2.5 4 2.5V28" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <rect x="10" y="15" width="6.5" height="8" rx="0.7" fill="currentColor" opacity="0.65"/>
+    <path d="M12 15v-3.5l4-5.5M13 18h3.5M13 20.5h2.5" fill="none" stroke="#e8e4dc" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M19.5 15.5l7-3.5M20 17.5l7 0M20 19.5l6.5 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+  </svg>`,
+
   infantry: `<svg viewBox="0 0 32 32" aria-hidden="true">
     <circle cx="16" cy="7.5" r="3.2" fill="currentColor"/>
     <path d="M12 28V14.5l4-2.5 4 2.5V28" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>

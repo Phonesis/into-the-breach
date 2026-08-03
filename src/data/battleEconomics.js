@@ -5,6 +5,7 @@
  */
 
 export const UNIT_MATERIEL_COST_USD_1944 = {
+  radioOperator: 7_000,
   commander: 7_500,
   commanderBodyguard: 0,
   infantry: 4_200,

@@ -16,7 +16,11 @@ import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
-import { isCommanderAlive } from './FieldCommander.js';
+import {
+  getRadioOperators,
+  getRadioOperatorSupportRange,
+  hasRadioOperator,
+} from './RadioOperatorBehavior.js';
 import { WEAPON_RANGE_SLACK } from './Targeting.js';
 
 const PLAYER = 'player';
@@ -140,7 +144,7 @@ export class FireSupportManager {
   }
 
   hasCommandLink() {
-    return isCommanderAlive(this.game, this.ownerTeam);
+    return hasRadioOperator(this.game, this.ownerTeam);
   }
 
   isReady(type) {
@@ -237,19 +241,10 @@ export class FireSupportManager {
   }
 
   isPointObserved(x, z) {
-    const observers = this.game.units ?? [];
+    const observers = getRadioOperators(this.game.units, this.ownerTeam);
     const pointTarget = { position: { x, z } };
     for (const unit of observers) {
-      if (
-        unit.team !== this.ownerTeam ||
-        unit.dead ||
-        unit.surrendered ||
-        unit._captureExit ||
-        unit._dropping
-      ) {
-        continue;
-      }
-      const observationRange = getFireSupportObservationRange(unit);
+      const observationRange = getRadioOperatorSupportRange(unit);
       if (Math.hypot(unit.position.x - x, unit.position.z - z) > observationRange) continue;
       if (
         this.game.smokeScreens?.isLosObscured?.(
@@ -274,7 +269,7 @@ export class FireSupportManager {
 
   getTargetRejectReason(type, x, z) {
     if (!this.isPointObserved(x, z)) {
-      return 'Target must be within sight of at least one friendly unit.';
+      return 'Target must be within radio range of at least one living radio operator.';
     }
     if (type === 'airborneDrop' && !this.isAirborneTargetAllowed(x, z)) {
       return 'Airborne cannot drop this close to the opposing HQ.';
@@ -345,7 +340,7 @@ export class FireSupportManager {
   }
 
   scheduleStrike(type, tx, tz) {
-    if (!isCommanderAlive(this.game, this.ownerTeam)) return false;
+    if (!this.hasCommandLink()) return false;
     if (type === 'airborneDrop' && this.isAirborneCloudCovered()) return false;
     if (this.getTargetRejectReason(type, tx, tz)) return false;
     const def = this.getDef(type);

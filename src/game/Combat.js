@@ -86,6 +86,7 @@ import { isUnitGarrisoned } from './BunkerGarrison.js';
 
 
 const SMALL_ARMS_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'engineer',
   'machineGun',
@@ -725,6 +726,7 @@ export function updateCombat(
     if (
       canFireMain &&
       (attacker.def.type === 'infantry' ||
+        attacker.def.type === 'radioOperator' ||
         attacker.def.type === 'engineer' ||
         attacker.def.type === 'vehicleCrew' ||
         attacker.def.type === 'paratrooper' ||
@@ -1503,6 +1505,7 @@ function fire(
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
     if (
       attacker.def.type === 'infantry' ||
+      attacker.def.type === 'radioOperator' ||
       attacker.def.type === 'engineer' ||
       attacker.def.type === 'vehicleCrew' ||
       attacker.def.type === 'paratrooper' ||

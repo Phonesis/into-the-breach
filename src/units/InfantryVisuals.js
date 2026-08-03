@@ -6,6 +6,7 @@ const POSE_YAW = [0, 0.18, -0.14, 0.24, -0.2, 0.1, -0.26, 0.16];
 const POSE_LEAN = [0, 0.04, -0.03, 0.05, -0.04, 0.02, -0.05, 0.03];
 
 const INFANTRY_WALK_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'medic',
@@ -18,6 +19,7 @@ const INFANTRY_WALK_TYPES = new Set([
 ]);
 
 const WEAPON_POSE_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'sniper',
@@ -25,7 +27,7 @@ const WEAPON_POSE_TYPES = new Set([
   'vehicleCrew',
   'commander',
 ]);
-const PRONE_FIRE_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
+const PRONE_FIRE_TYPES = new Set(['radioOperator', 'infantry', 'paratrooper', 'engineer']);
 
 /** True while a foot squad is visually prone (stationary and firing). */
 export function isUnitVisuallyProne(unit) {
@@ -41,6 +43,7 @@ export function isUnitVisuallyProne(unit) {
 const TACTICAL_FORMATION_TYPES = new Set(['infantry', 'paratrooper', 'engineer', 'commander']);
 const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const FOOT_MUZZLE_UNIT_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'sniper',

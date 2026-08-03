@@ -29,6 +29,7 @@ import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
+import { canDigTrenchType } from '../game/InfantryTrench.js';
 import {
   canDismountRiders,
   canHostRiders,
@@ -81,6 +82,7 @@ import {
 
 const PRODUCE_LABELS = {
   commander: 'CMD',
+  radioOperator: 'Radio',
   infantry: 'Inf',
   medic: 'Medic',
   engineer: 'Eng',
@@ -151,6 +153,7 @@ function loadAutoBuildPreference(campaignStyle = 'classic') {
 
 const FACTION_ROSTER_LABELS = {
   commander: 'Field commander',
+  radioOperator: 'Radio operator',
   infantry: 'Infantry',
   medic: 'Medic section',
   engineer: 'Engineer section',
@@ -662,7 +665,7 @@ export class UIManager {
                 </button>
               </div>
               <p class="engineer-build-hint" id="infantry-trench-hint">
-                Infantry / airborne / MG / sniper dig a fighting trench (~14 s).
+                Radio operators / infantry / airborne / MG / snipers dig a fighting trench (~14 s).
               </p>
             </div>
             <div class="medic-tent-actions hidden" id="medic-tent-actions">
@@ -2661,10 +2664,7 @@ export class UIManager {
           u.team === 'player' &&
           !u.dead &&
           !u.surrendered &&
-          (u.def?.type === 'infantry' ||
-            u.def?.type === 'paratrooper' ||
-            u.def?.type === 'machineGun' ||
-            u.def?.type === 'sniper')
+          canDigTrenchType(u.def?.type)
       ) ?? [];
     const free = diggers.filter((u) => !u._trenchDigSite && !u._trenchId);
     const show = canDig && diggers.length > 0;
@@ -2689,7 +2689,7 @@ export class UIManager {
         hint.textContent = 'Selected troops are already digging or dug in.';
       } else {
         hint.textContent =
-          'Infantry / airborne / MG / sniper dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
+          'Radio operators / infantry / airborne / MG / snipers dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
       }
     }
     this.updateMedicTent(game);
@@ -2929,7 +2929,7 @@ export class UIManager {
         const cloudMinutes = Math.floor(cloudRemaining / 60);
         const cloudSeconds = String(cloudRemaining % 60).padStart(2, '0');
         cdEl.textContent = !commandLink
-          ? 'No CMD'
+          ? 'No Radio'
           : airborneSpent
           ? 'Used'
           : airborneCloudCovered
@@ -2947,7 +2947,7 @@ export class UIManager {
 
     if (hint) {
       if (!commandLink) {
-        hint.textContent = 'Commander lost — off-map support unavailable';
+        hint.textContent = 'No living radio operator — off-map support unavailable';
       } else if (manager.targetRejectReason) {
         hint.textContent = manager.targetRejectReason;
       } else if (manager.pending === 'strafe') {
@@ -3931,6 +3931,8 @@ export class UIManager {
           ? `<p class="unit-support-status unit-building-status"><strong>${tent.label}</strong> — ${tent.pct}% complete</p>`
           : '';
         coverBlock = `${tentLine}<p class="unit-support-status">Combat medic — heals nearby infantry; can <strong>deploy a field hospital tent</strong> that heals non-vehicle units in range.</p>`;
+      } else if (u.def?.type === 'radioOperator') {
+        coverBlock = '<p class="unit-support-status">Signals operator — rifle only; keeps off-map fire support and airborne calls available within ~72 m, with clear line of sight. Can dig a fighting trench. Multiple radio operators can cover separate positions.</p>';
       } else if (
         u.def?.type === 'infantry' ||
         u.def?.type === 'paratrooper' ||

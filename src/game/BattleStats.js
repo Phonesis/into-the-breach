@@ -10,6 +10,7 @@ import {
 export const UNIT_LOSS_LABELS = {
   commander: 'Field commander',
   commanderBodyguard: 'Commander bodyguards',
+  radioOperator: 'Radio operators',
   infantry: 'Riflemen',
   paratrooper: 'Paratroopers',
   medic: 'Medics',

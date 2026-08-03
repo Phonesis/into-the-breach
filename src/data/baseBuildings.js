@@ -31,20 +31,23 @@ export const CAMPAIGN_STYLE_LIST = Object.values(CAMPAIGN_STYLES);
 export const HQ_BASE_UNITS = [];
 
 /** Opening force per side in Standard campaign — one rifle squad only (spread keeps it clear of HQ). */
-export const BASE_BUILDING_STARTING_ARMY = [{ type: 'infantry', count: 1, spread: 16 }];
+export const BASE_BUILDING_STARTING_ARMY = [
+  { type: 'radioOperator', count: 1, spread: 14 },
+  { type: 'infantry', count: 1, spread: 16 },
+];
 
 export const BASE_BUILDING_TYPES = {
   infantryGarrison: {
     id: 'infantryGarrison',
     name: 'Infantry Garrison',
-    subtitle: 'Click to train infantry squads',
+    subtitle: 'Click to train infantry squads or radio operators',
     cost: 130,
     buildTime: 38,
     hp: 320,
     radius: 3.6,
     hitRadius: 4,
-    unlocks: ['infantry'],
-    spawns: ['infantry'],
+    unlocks: ['infantry', 'radioOperator'],
+    spawns: ['infantry', 'radioOperator'],
     maxPerTeam: 1,
     placementMinFromHq: 10,
     placementMaxFromHq: 48,
@@ -115,7 +118,7 @@ export const BASE_BUILDING_TYPES = {
     spawns: [],
     garrison: true,
     garrisonCapacity: 2,
-    garrisonTypes: ['infantry', 'machineGun', 'sniper', 'medic'],
+    garrisonTypes: ['infantry', 'radioOperator', 'machineGun', 'sniper', 'medic'],
     maxPerTeam: 6,
     placementMinFromHq: 8,
     placementMaxFromHq: 55,
@@ -133,6 +136,7 @@ export const BASE_BUILDING_TYPE_LIST = [
 
 const SPAWN_BUILDING_FOR_UNIT = {
   infantry: 'infantryGarrison',
+  radioOperator: 'infantryGarrison',
   medic: 'hospital',
   machineGun: 'ordnanceYard',
   mortar: 'ordnanceYard',

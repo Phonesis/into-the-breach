@@ -85,11 +85,14 @@ import {
 import {
   ensureFieldCommanders,
   getFieldCommander,
-  isCommanderAlive,
   updateFieldCommanders,
 } from './FieldCommander.js';
 import { EngineerSandbagManager } from './EngineerSandbags.js';
-import { InfantryTrenchManager, updateTrenchVisuals } from './InfantryTrench.js';
+import {
+  InfantryTrenchManager,
+  canDigTrenchType,
+  updateTrenchVisuals,
+} from './InfantryTrench.js';
 import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
@@ -215,6 +218,11 @@ import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
 import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
+import {
+  ensureStartingRadioOperators,
+  getRadioOperators,
+  hasRadioOperator,
+} from './RadioOperatorBehavior.js';
 import {
   updateCombat,
   updateMovement,
@@ -1318,6 +1326,14 @@ export class Game {
       this._showDeployZoneRings(deployTeams);
     }
     ensureFieldCommanders(this);
+    // All modes with a pre-deployed force retain a radio link even when an old
+    // save or a custom roster predates the radio-operator unit.
+    if (!this.lastStand || isLastStandPresetForce(this)) {
+      ensureStartingRadioOperators(
+        this,
+        this.tutorial ? [PLAYER_TEAM] : [PLAYER_TEAM, ENEMY_TEAM]
+      );
+    }
 
     if (!restoreSnapshot) {
       resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
@@ -2217,7 +2233,7 @@ export class Game {
     if (!this.fireSupport.isReady(type) && this.fireSupport.pending !== type) return;
     this.cancelSmokeShellTargeting();
     this.fireSupport.arm(type);
-    // Commander radio when arming (not when clicking again to cancel arm)
+    // Command-net acknowledgement when arming (not when clicking again to cancel arm)
     if (this.fireSupport.pending === type) {
       this._playCommanderOrder(type);
     }
@@ -2228,19 +2244,21 @@ export class Game {
   tryGeneralOrder(type) {
     if (!this.running || this.gameOver || this.paused || this._isPlayerDeployZoneActive()) return;
     if (!this.generalOrders.issue(type)) return;
-    // Commander radio when issuing (not when cancelling an active order)
+    // Command-net acknowledgement when issuing (not when cancelling an active order)
     if (this.generalOrders.getActiveType() === type) {
       this._playCommanderOrder(type);
     }
     this.ui?.updateGeneralOrders(this.generalOrders);
   }
 
-  /** Faction field commander over radio for fire support / general orders. */
+  /** Faction command-net acknowledgement for fire support / general orders. */
   _playCommanderOrder(kind) {
     const factionId = this.playerFaction?.id ?? null;
+    const radioOperator = getRadioOperators(this.units, PLAYER_TEAM)[0];
     const commander = getFieldCommander(this, PLAYER_TEAM);
     const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
-    const pos = (!commander?.dead ? commander?.position : null)
+    const pos = radioOperator?.position
+      ?? (!commander?.dead ? commander?.position : null)
       ?? hq?.position
       ?? (this.clearance && this.mapDef
         ? getClearanceStagingAnchor(this.mapDef, this.clearanceRole).position
@@ -2440,10 +2458,7 @@ export class Game {
         !u.dead &&
         !u._trenchDigSite &&
         !u._trenchId &&
-        (u.def?.type === 'infantry' ||
-          u.def?.type === 'paratrooper' ||
-          u.def?.type === 'machineGun' ||
-          u.def?.type === 'sniper')
+        canDigTrenchType(u.def?.type)
     );
     if (!hasDigger) return;
     sounds.unlock();
@@ -2729,7 +2744,7 @@ export class Game {
 
     const pending = this.defenses.getPending();
     if (pending === 'barrage') {
-      if (!isCommanderAlive(this, PLAYER_TEAM)) {
+      if (!hasRadioOperator(this, PLAYER_TEAM)) {
         this.defenses.cancelPending();
         return;
       }
@@ -2813,7 +2828,7 @@ export class Game {
 
   armTowerDefenseBarrage() {
     if (!this.running || this.gameOver || !this.defenses) return;
-    if (!isCommanderAlive(this, PLAYER_TEAM)) return;
+    if (!hasRadioOperator(this, PLAYER_TEAM)) return;
     sounds.unlock();
     if (!this.defenses.armBarrage()) return;
     this.ui?.updateDefenses(this);
@@ -3364,13 +3379,15 @@ export class Game {
     // Keep base rate near 1.0 — sample pools provide variety; big pitch swings sound fake
     let rate = 0.99 + Math.random() * 0.02;
     let volume = 1;
-    if (def.type === 'infantry' || def.type === 'engineer') {
-      // Squad mix: rifles + SMGs (engineers carry the same small-arms mix)
+    if (def.type === 'infantry' || def.type === 'radioOperator' || def.type === 'engineer') {
+      // Rifle squads and engineers use a mixed small-arms pool; radio operators
+      // carry only their rifle and must never emit an SMG sample.
       attacker._infVolley = (attacker._infVolley ?? 0) + 1;
-      const useSmg = attacker._infVolley % 3 === 0; // ~1/3 SMG bursts
+      const useSmg = def.type !== 'radioOperator' && attacker._infVolley % 3 === 0;
       profile = useSmg ? smgProfileForFaction(factionId) : `rifle_${factionId}`;
       rate = 0.99 + Math.random() * 0.025;
       if (def.type === 'engineer') volume = 0.92;
+      if (def.type === 'radioOperator') volume = 0.88;
     } else if (def.type === 'paratrooper' && !paratrooperAtFire) {
       const useMg = def.usesMG && (attacker._mgVolley ?? 0) % 2 !== 0;
       profile = useMg ? mgProfileForFaction(factionId) : `rifle_${factionId}`;

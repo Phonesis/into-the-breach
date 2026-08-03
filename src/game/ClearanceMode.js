@@ -9,6 +9,7 @@ import { resolveUnitSpawnPosition } from './Spawner.js';
 
 /** Defender layout scaled by difficulty.enemyArmyMult in spawn. */
 export const CLEARANCE_DEFENDER_LAYOUT = [
+  { type: 'radioOperator', count: 1 },
   { type: 'infantry', count: 4 },
   { type: 'machineGun', count: 2 },
   { type: 'sniper', count: 1 },
@@ -435,6 +436,13 @@ function teamIsClearanceAttacker(game, team) {
 
 function spawnReinforcementPackage(game, team, types, wave) {
   const faction = team === 'player' ? game.playerFaction : game.enemyFaction;
+  const spawnTypes = [...types];
+  // Radio operators are ordinary reinforcement rolls: they can add a second
+  // support net or replace a lost operator without making every package a
+  // guaranteed signals detachment.
+  if (faction.units.radioOperator && Math.random() < 0.22) {
+    spawnTypes.push('radioOperator');
+  }
   const isAttacker = teamIsClearanceAttacker(game, team);
   const { ax, az } = axisFromPlayerToEnemy(game.mapDef);
   // Attackers assemble on the map player-base rear; defenders on the enemy base.
@@ -447,10 +455,10 @@ function spawnReinforcementPackage(game, team, types, wave) {
   const sideZ = ax;
   const spawned = [];
 
-  for (let i = 0; i < types.length; i++) {
-    const def = faction.units[types[i]];
+  for (let i = 0; i < spawnTypes.length; i++) {
+    const def = faction.units[spawnTypes[i]];
     if (!def) continue;
-    const lateral = (i - (types.length - 1) / 2) * 4.6;
+    const lateral = (i - (spawnTypes.length - 1) / 2) * 4.6;
     const depth = 3 + i * 1.8;
     const requestedPosition = {
       x: base.x + sideX * lateral - facingX * depth,
@@ -477,7 +485,7 @@ function spawnReinforcementPackage(game, team, types, wave) {
       };
     } else if (team === 'enemy') {
       // AI assault reinforcements inherit the current battle plan.
-      unit.clearanceAttackRole = roleForClearanceAttackerType(types[i]);
+      unit.clearanceAttackRole = roleForClearanceAttackerType(spawnTypes[i]);
     }
     spawned.push(unit);
   }
@@ -485,6 +493,7 @@ function spawnReinforcementPackage(game, team, types, wave) {
 }
 
 export function roleForClearanceAttackerType(type) {
+  if (type === 'radioOperator') return 'support';
   if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') {
     return 'armor';
   }

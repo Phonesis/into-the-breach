@@ -29,6 +29,7 @@ const VEHICLE_TYPES = new Set([
 ]);
 
 const INFANTRY_TYPES = new Set([
+  'radioOperator',
   'infantry',
   'paratrooper',
   'machineGun',
