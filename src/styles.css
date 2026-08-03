@@ -674,6 +674,54 @@ body,
   color: #8fd99a;
 }
 
+.selection-morale {
+  margin-top: 0.5rem;
+  border-radius: 5px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(222, 190, 82, 0.75);
+  background: rgba(71, 57, 20, 0.72);
+}
+
+.selection-morale.hidden {
+  display: none;
+}
+
+.morale-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.morale-banner-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #f3d46f;
+}
+
+.morale-banner-title {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffe9a5;
+  letter-spacing: 0.02em;
+}
+
+.morale-banner-sub {
+  display: block;
+  font-size: 0.76rem;
+  color: #ffe7a0;
+  margin-top: 0.08rem;
+}
+
+.morale-banner-detail {
+  display: block;
+  font-size: 0.7rem;
+  color: #ddc36b;
+  opacity: 0.95;
+  margin-top: 0.2rem;
+  line-height: 1.35;
+}
+
 .cover-banner-inner {
   display: flex;
   align-items: center;
@@ -726,6 +774,11 @@ body,
   color: #0a1a0c;
 }
 
+.cover-tag.inspired-tag {
+  background: #dfbe55;
+  color: #241d08;
+}
+
 .unit-cover-status.in-garrison {
   background: rgba(22, 48, 28, 0.72);
   border: 1px solid rgba(107, 207, 122, 0.55);
@@ -750,6 +803,21 @@ body,
   background: rgba(40, 32, 28, 0.5);
   border: 1px solid rgba(120, 100, 80, 0.35);
   color: rgba(232, 200, 160, 0.85);
+}
+
+.unit-morale-status {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 0.35rem 0.45rem;
+  border-radius: 4px;
+  opacity: 1;
+}
+
+.unit-morale-status.inspired {
+  background: rgba(71, 57, 20, 0.72);
+  border: 1px solid rgba(222, 190, 82, 0.65);
+  color: #ffe9a5;
 }
 
 .unit-surrender-status {

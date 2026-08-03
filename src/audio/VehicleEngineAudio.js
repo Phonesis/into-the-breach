@@ -263,7 +263,7 @@ export class VehicleEngineAudio {
       this.clear();
       return;
     }
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx.state === 'suspended') void this.sm.resumeContext();
 
     const now = performance.now();
     const active = [];

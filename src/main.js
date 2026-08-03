@@ -9,19 +9,20 @@ const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
 
 let game = null;
-let audioPrimed = false;
 
 function primeAudio() {
-  if (audioPrimed) return;
-  audioPrimed = true;
   sounds.unlock();
 }
 
 function resumeAudioContext() {
   primeAudio();
-  void sounds.primeForCombat().then(() => {
-    if (!sounds.inBattle) sounds.setMenuMusicActive(true);
-  });
+  void sounds
+    .primeForCombat()
+    .then((running) => {
+      if (running && !sounds.inBattle) sounds.setMenuMusicActive(true);
+    })
+    // Autoplay policy can reject a resume attempt; the next user gesture retries it.
+    .catch(() => {});
 }
 
 uiRoot.addEventListener('pointerdown', resumeAudioContext);

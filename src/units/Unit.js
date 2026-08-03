@@ -12,6 +12,7 @@ import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeRankMarker } from '../game/EliteBehavior.js';
 import { removeHealMarker } from '../visual/HealMarkers.js';
+import { removeMoraleMarker } from '../visual/MoraleMarkers.js';
 import { removeDamageSmoke } from '../visual/DamageSmoke.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import {
@@ -454,6 +455,7 @@ export class Unit {
       removeFieldIcon(this);
       removeRankMarker(this);
       removeHealMarker(this);
+      removeMoraleMarker(this);
       removeDamageSmoke(this);
       removeUnitHealthBar(this);
       if (this.selected) this.setSelected(false);
@@ -535,6 +537,7 @@ export class Unit {
     removeFieldIcon(this);
     removeRankMarker(this);
     removeHealMarker(this);
+    removeMoraleMarker(this);
     removeDamageSmoke(this);
     removeUnitHealthBar(this);
     scene.remove(this.mesh);

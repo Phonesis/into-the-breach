@@ -1,6 +1,7 @@
 /** Redirect move orders toward nearby cover when seek-cover mode is active. */
 
 const SEEK_COVER_UNIT_TYPES = new Set([
+  'commander',
   'infantry',
   'paratrooper',
   'machineGun',

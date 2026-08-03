@@ -2174,6 +2174,7 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
 
 function canDigAiTrenchType(type) {
   return (
+    type === 'commander' ||
     type === 'radioOperator' ||
     type === 'infantry' ||
     type === 'paratrooper' ||

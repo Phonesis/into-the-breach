@@ -23,6 +23,7 @@ export const TRENCH_CAPACITY = 4;
 export const TRENCH_ENTER_RANGE = 3.2;
 
 const DIG_TYPES = new Set([
+  'commander',
   'radioOperator',
   'infantry',
   'paratrooper',
@@ -31,6 +32,7 @@ const DIG_TYPES = new Set([
 ]);
 /** Foot troops that can occupy a finished trench (not dig). */
 const OCCUPY_TYPES = new Set([
+  'commander',
   'radioOperator',
   'infantry',
   'paratrooper',

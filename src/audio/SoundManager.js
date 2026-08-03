@@ -322,15 +322,15 @@ export class SoundManager {
 
   unlock() {
     if (this.unlocked) {
-      this._resumeContext();
-      return;
+      return true;
     }
     try {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return false;
+      this.ctx = new AudioContextCtor();
       this._buildGraph();
       this.unlocked = true;
       this._warmedUp = false;
-      this._resumeContext();
       this.vehicleEngines = new VehicleEngineAudio(this);
       this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
@@ -339,8 +339,25 @@ export class SoundManager {
       if (this.menuMusicVisible && !this.inBattle) {
         this.menuMusic.setMenuActive(true);
       }
+      return true;
     } catch {
-      /* unavailable */
+      this.unlocked = false;
+      this._loadPromise = null;
+      this._samplesReady = false;
+      try {
+        this.ctx?.close?.();
+      } catch {
+        /* unavailable */
+      }
+      this.ctx = null;
+      this.master = null;
+      this.reverb = null;
+      this.dryBus = null;
+      this.wetBus = null;
+      this.vehicleEngines = null;
+      this.strafeAircraft = null;
+      this.menuMusic = null;
+      return false;
     }
   }
 
@@ -634,12 +651,24 @@ export class SoundManager {
   }
 
   _resumeContext() {
-    if (!this.ctx || this.ctx.state === 'running') return Promise.resolve();
-    if (this.ctx.state !== 'suspended') return Promise.resolve();
+    if (!this.ctx || this.ctx.state === 'running') return Promise.resolve(true);
+    if (this.ctx.state !== 'suspended') return Promise.resolve(false);
     if (!this._resumePromise) {
-      this._resumePromise = this.ctx.resume().finally(() => {
-        this._resumePromise = null;
-      });
+      try {
+        // Call resume synchronously before any sample-loading await so a user
+        // gesture's transient activation is still available to the browser.
+        const resumeResult = this.ctx.resume();
+        this._resumePromise = Promise.resolve(resumeResult)
+          .then(() => this._isRunning())
+          .catch(() => false)
+          .finally(() => {
+            this._resumePromise = null;
+          });
+      } catch {
+        this._resumePromise = Promise.resolve(false).finally(() => {
+          this._resumePromise = null;
+        });
+      }
     }
     return this._resumePromise;
   }
@@ -754,9 +783,12 @@ export class SoundManager {
 
   /** Wait until weapon/impact samples are decoded (call after unlock before combat). */
   async ensureLoaded() {
-    this.unlock();
+    if (!this.unlock()) return false;
+    // Start the resume attempt before waiting for the (large) sample batch.
+    const resumePromise = this._resumeContext();
     if (this._loadPromise) await this._loadPromise;
-    await this._resumeContext();
+    await resumePromise;
+    return this._isRunning();
   }
 
   resumeContext() {

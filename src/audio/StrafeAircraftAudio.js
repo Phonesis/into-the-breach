@@ -208,7 +208,7 @@ export class StrafeAircraftAudio {
 
     const begin = () => {
       if (!buffers.aircraft_flyby || this.manager.muted) return;
-      if (ctx.state === 'suspended') ctx.resume();
+      if (ctx.state === 'suspended') void this.manager.resumeContext();
       const voice = new FlybyVoice(this.manager, { x, z, velX, velZ, duration });
       if (voice.alive) this.voices.push(voice);
     };

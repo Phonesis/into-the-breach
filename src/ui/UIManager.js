@@ -28,6 +28,10 @@ const GENERAL_ORDER_CANCEL_LABELS = {
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
+import {
+  COMMANDER_AURA_RANGE,
+  isUnitInspiredByCommander,
+} from '../game/CommanderBehavior.js';
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { canDigTrenchType } from '../game/InfantryTrench.js';
 import {
@@ -594,6 +598,7 @@ export class UIManager {
               <p>Click a unit in Forces or on the battlefield to select.</p>
             </div>
             <div id="selection-cover" class="selection-cover hidden"></div>
+            <div id="selection-morale" class="selection-morale hidden"></div>
             <div class="target-offer hidden" id="target-offer">
               <p class="target-offer-label" id="target-offer-label">Enemy in sights</p>
               <button type="button" class="btn btn-target interactive" id="btn-engage-target">Engage target</button>
@@ -665,7 +670,7 @@ export class UIManager {
                 </button>
               </div>
               <p class="engineer-build-hint" id="infantry-trench-hint">
-                Radio operators / infantry / airborne / MG / snipers dig a fighting trench (~14 s).
+                Commanders, radio operators, infantry, airborne, MGs, and snipers dig a fighting trench (~14 s).
               </p>
             </div>
             <div class="medic-tent-actions hidden" id="medic-tent-actions">
@@ -2689,7 +2694,7 @@ export class UIManager {
         hint.textContent = 'Selected troops are already digging or dug in.';
       } else {
         hint.textContent =
-          'Radio operators / infantry / airborne / MG / snipers dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
+          'Commanders, radio operators, infantry, airborne, MGs, and snipers dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
       }
     }
     this.updateMedicTent(game);
@@ -3557,6 +3562,44 @@ export class UIManager {
     `;
   }
 
+  _renderMoraleBanner(units, game) {
+    const el = this.root.querySelector('#selection-morale');
+    if (!el) return;
+
+    const selected = Array.isArray(units) ? units : [];
+    const allUnits = game?.units ?? [];
+    const inspired = selected.filter((unit) => isUnitInspiredByCommander(unit, allUnits));
+    if (inspired.length === 0) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      return;
+    }
+
+    const allInspired = inspired.length === selected.length;
+    const title =
+      inspired.length === 1
+        ? `${inspired[0].name} — INSPIRED`
+        : allInspired
+          ? `${inspired.length} selected units — INSPIRED`
+          : `${inspired.length} of ${selected.length} selected units — INSPIRED`;
+    const detail =
+      inspired.length === 1
+        ? `Within ${COMMANDER_AURA_RANGE} m of a living field commander`
+        : `${inspired.length} unit${inspired.length === 1 ? '' : 's'} currently within the commander's ${COMMANDER_AURA_RANGE} m aura`;
+
+    el.className = 'selection-morale inspired';
+    el.innerHTML = `
+      <div class="morale-banner-inner">
+        <span class="morale-banner-icon" aria-hidden="true">✦</span>
+        <div class="morale-banner-text">
+          <strong class="morale-banner-title">${title}</strong>
+          <span class="morale-banner-sub">${detail}</span>
+          <span class="morale-banner-detail">Automatic retreat and surrender pressure is greatly reduced while the aura holds.</span>
+        </div>
+      </div>
+    `;
+  }
+
   updateAssaultHUD(assault) {
     if (!assault) return;
     const hud = formatAssaultHud(assault);
@@ -3817,6 +3860,7 @@ export class UIManager {
 
     if (hq && !hq.dead) {
       this._renderCoverBanner([]);
+      this._renderMoraleBanner([], game);
       const teamLabel = hq.team === 'player' ? 'Your headquarters' : 'Enemy headquarters';
       const beingRepaired =
         hq.hp < hq.maxHp && isHqBeingRepairedByEngineers(hq, game?.units ?? []);
@@ -3844,6 +3888,7 @@ export class UIManager {
     const baseEntry = game?.selectedBaseBuilding;
     if (baseEntry && units.length === 0) {
       this._renderCoverBanner([]);
+      this._renderMoraleBanner([], game);
       const hpPct = Math.round((baseEntry.hp / Math.max(baseEntry.maxHp, 1)) * 100);
       const garrisonN = baseEntry.garrison?.length ?? 0;
       const cap = baseEntry.def.garrisonCapacity ?? 0;
@@ -3875,6 +3920,7 @@ export class UIManager {
         : 'Click or drag to select units. Click your HQ for status.';
       body.innerHTML = `<h3>No selection</h3><p>${emptyHint}</p>`;
       this._renderCoverBanner([]);
+      this._renderMoraleBanner([], game);
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
@@ -3883,6 +3929,7 @@ export class UIManager {
     }
 
     this._renderCoverBanner(units);
+    this._renderMoraleBanner(units, game);
 
     if (units.length === 1) {
       const u = units[0];
@@ -3906,6 +3953,7 @@ export class UIManager {
             : ` · Attacking <strong>${TargetIndicators.getTargetLabel(u.attackOrder)}</strong>`
         : '';
       const cover = getCoverStatus(u);
+      const inspired = isUnitInspiredByCommander(u, game?.units ?? []);
       const garrisoned = isUnitGarrisoned(u) || !!cover.garrisoned;
       const dig = game?.infantryTrenches?.getDiggerStatus?.(u);
       const engBuild = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
@@ -3931,6 +3979,8 @@ export class UIManager {
           ? `<p class="unit-support-status unit-building-status"><strong>${tent.label}</strong> — ${tent.pct}% complete</p>`
           : '';
         coverBlock = `${tentLine}<p class="unit-support-status">Combat medic — heals nearby infantry; can <strong>deploy a field hospital tent</strong> that heals non-vehicle units in range.</p>`;
+      } else if (u.def?.type === 'commander') {
+        coverBlock = '<p class="unit-support-status">Field commander — can dig a fighting trench or move into a building/bunker for heavy cover.</p>';
       } else if (u.def?.type === 'radioOperator') {
         coverBlock = '<p class="unit-support-status">Signals operator — rifle only; keeps off-map fire support and airborne calls available within ~72 m, with clear line of sight. Can dig a fighting trench. Multiple radio operators can cover separate positions.</p>';
       } else if (
@@ -3944,6 +3994,9 @@ export class UIManager {
       }
       const surrenderBlock = u.surrendered
         ? '<p class="unit-surrender-status"><strong>Surrendered</strong> — move a friendly unit within ~11 m to liberate; enemy contact captures them.</p>'
+        : '';
+      const moraleBlock = inspired
+        ? `<p class="unit-morale-status inspired"><strong>Inspired</strong> — within ${COMMANDER_AURA_RANGE} m of a living field commander; automatic retreat and surrender pressure is greatly reduced.</p>`
         : '';
       const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
       const riderBlock =
@@ -3966,10 +4019,11 @@ export class UIManager {
             : cover.inCover
               ? ' <span class="cover-tag">COVER</span>'
               : ''
-        }${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
+        }${inspired ? ' <span class="cover-tag inspired-tag">INSPIRED</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${orderLine}</p>
         ${surrenderBlock}
+        ${moraleBlock}
         ${mobilityBlock}
         ${riderBlock}
         ${coverBlock}

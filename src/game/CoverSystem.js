@@ -113,6 +113,7 @@ export function getCoverStatus(unit) {
 }
 
 const COVER_UNIT_TYPES = new Set([
+  'commander',
   'infantry',
   'paratrooper',
   'machineGun',

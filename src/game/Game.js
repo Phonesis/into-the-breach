@@ -111,6 +111,7 @@ const UNIT_SELECTION_SHORTCUTS = new Map([
   ['KeyE', { type: 'engineer', label: 'engineer' }],
   ['KeyM', { type: 'medic', label: 'medic' }],
   ['KeyA', { type: 'artillery', label: 'artillery' }],
+  ['KeyR', { type: 'radioOperator', label: 'radio operator' }],
 ]);
 
 function shellCraterTier(def) {
@@ -120,6 +121,7 @@ function shellCraterTier(def) {
 }
 
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
+import { syncMoraleMarkers } from '../visual/MoraleMarkers.js';
 import {
   preloadUnitFieldIcons,
   syncPlayerFieldIcons,
@@ -3791,6 +3793,7 @@ export class Game {
         if (this.coverSystem && this._coverUiAccum >= 0.12) {
           this._coverUiAccum = 0;
           this.coverSystem.updateUnits(this._aliveUnits);
+          syncMoraleMarkers(this._aliveUnits, this.units);
         }
         const playerSelected = this._playerAlive.filter((u) => u.selected);
         this._maybeUpdateSelectionPanel(playerSelected, dt);

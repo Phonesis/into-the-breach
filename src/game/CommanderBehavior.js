@@ -37,3 +37,12 @@ export function getCommanderMoraleMultiplier(unit, units = []) {
 
   return hasLivingCommander ? 1 : COMMANDER_LOSS_MORALE_PRESSURE;
 }
+
+/**
+ * Whether the unit is currently receiving the nearby-commander morale boost.
+ * Keep the UI and battlefield marker tied to the same calculation used by
+ * automatic retreat and surrender checks.
+ */
+export function isUnitInspiredByCommander(unit, units = []) {
+  return getCommanderMoraleMultiplier(unit, units) < 1;
+}

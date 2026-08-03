@@ -49,16 +49,33 @@ export class MenuMusic {
     if (this.sm.inBattle || !this.sm.unlocked || !this.sm.ctx || this.sm.muted) {
       return;
     }
-    if (this.sm.ctx.state === 'suspended') this.sm.ctx.resume();
+    // Do not attempt autoplay from page-load code. The explicit gesture handler
+    // resumes the context first, then calls this again to start the theme.
+    if (this.sm.ctx.state !== 'running') return;
     const gen = this._generation;
     this.ensureLoaded().then(() => {
-      if (gen !== this._generation || !this._wanted || this.sm.inBattle) return;
+      if (
+        gen !== this._generation ||
+        !this._wanted ||
+        this.sm.inBattle ||
+        this.sm.ctx?.state !== 'running'
+      ) {
+        return;
+      }
       this._fadeIn();
-    });
+    }).catch(() => {});
   }
 
   _fadeIn() {
-    if (this.sm.inBattle || !this._wanted || !this.buffer || !this.sm.ctx) return;
+    if (
+      this.sm.inBattle ||
+      !this._wanted ||
+      !this.buffer ||
+      !this.sm.ctx ||
+      this.sm.ctx.state !== 'running'
+    ) {
+      return;
+    }
     if (this._playing && this.source) {
       this._rampGain(TARGET_GAIN);
       return;
