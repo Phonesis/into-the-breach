@@ -101,9 +101,8 @@ export function ensureFieldCommanders(game) {
 function announceLoss(game, commander) {
   commander._commanderDeathHandled = true;
   const isPlayer = commander.team === PLAYER;
-  if (isPlayer) {
-    game.generalOrders?.cancelActive?.();
-  }
+  const generalOrders = isPlayer ? game.generalOrders : game.enemyGeneralOrders;
+  generalOrders?.cancelActive?.();
 
   sounds.playCommanderOrder(
     'lostCommander',
@@ -122,7 +121,15 @@ function announceLoss(game, commander) {
 
 function holdEnemyCommander(game, commander) {
   if (commander.dead) return;
-  const anchor = commander._commanderRearAnchor;
+  // Let the AI finish entering (or remain inside) a shelter. Re-seeding the
+  // normal hold order here would clear the bunker entry order every 0.45 s.
+  if (
+    commander._garrisonBunkerId ||
+    commander._trenchId ||
+    commander._diggingTrench ||
+    (commander._aiCommanderMode === 'shelter' && commander._bunkerEntryId)
+  ) return;
+  const anchor = commander._aiCommanderAnchor ?? commander._commanderRearAnchor;
   if (!anchor) return;
   commander.engagementStance = 'hold';
   commander.defensiveHold = { ...anchor, radius: RETURN_RADIUS };

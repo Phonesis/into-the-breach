@@ -9,6 +9,7 @@ import {
 import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior.js';
 import { getActiveMotorPools, isUnitNearMotorPool } from '../game/MotorPoolBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
+import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
 
 const _tex = { cross: null, spanner: null, mobility: null };
 
@@ -219,7 +220,7 @@ function getHealKind(unit, units, baseBuildings, hqs = null, depotCache = null) 
 }
 
 function attachHealMarker(unit, kind) {
-  if (!unit.mesh) return;
+  if (!areUnitStatusMarkersVisible() || !unit.mesh) return;
   const map = kind === 'medic'
     ? getCrossTexture()
     : kind === 'mobility'
@@ -262,7 +263,7 @@ export function removeHealMarker(unit) {
 }
 
 function attachHqRepairMarker(hq) {
-  if (!hq?.mesh) return;
+  if (!areUnitStatusMarkersVisible() || !hq?.mesh) return;
   const map = getSpannerTexture();
   const baseScale = 2.4;
 
@@ -295,6 +296,12 @@ export function removeHqRepairMarker(hq) {
 }
 
 export function syncHealMarkers(units, baseBuildings = null, hqs = null, depotCache = null) {
+  if (!areUnitStatusMarkersVisible()) {
+    for (const unit of units ?? []) removeHealMarker(unit);
+    for (const hq of hqs ?? []) removeHqRepairMarker(hq);
+    return;
+  }
+
   const hospitals = depotCache?.hospitals ?? getActiveHospitals(baseBuildings);
   const motorPools = depotCache?.motorPools ?? getActiveMotorPools(baseBuildings);
   const cache = depotCache ?? { hospitals, motorPools };

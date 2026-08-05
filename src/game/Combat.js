@@ -1721,6 +1721,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !!getDirectFireBlocker(unit, unit.attackOrder, options.scenery);
     if (
       !unit._userMoveOrder &&
+      !unit._aiTankManeuver &&
       !unit.retreating &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&

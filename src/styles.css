@@ -1262,9 +1262,17 @@ body,
 
 .unit-roster-toggle-icon {
   display: flex;
+  align-items: center;
+  justify-content: center;
   width: 1.1rem;
   height: 1.1rem;
   color: #e8e4dc;
+}
+
+.unit-roster-status-icon {
+  color: #f3d46f;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .unit-roster-toggle-icon svg {

@@ -9,6 +9,7 @@ import { getClearanceStagingAnchor } from './ClearanceMode.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { applyObstaclePath } from './MovePath.js';
 import { sounds } from '../audio/SoundManager.js';
+import { areUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
 
 const _retreatTex = { tex: null };
 
@@ -71,7 +72,7 @@ function getRetreatTexture() {
 }
 
 export function attachRetreatMarker(unit) {
-  if (!unit.mesh || unit.retreatMarker) return;
+  if (!areUnitStatusMarkersVisible() || !unit.mesh || unit.retreatMarker) return;
   const mat = new THREE.SpriteMaterial({
     map: getRetreatTexture(),
     transparent: true,
@@ -93,6 +94,16 @@ export function removeRetreatMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   unit.retreatMarker.material?.dispose();
   unit.retreatMarker = null;
+}
+
+export function syncRetreatMarkers(units) {
+  for (const unit of units ?? []) {
+    if (!unit?.retreating || unit.dead || !areUnitStatusMarkersVisible()) {
+      removeRetreatMarker(unit);
+      continue;
+    }
+    attachRetreatMarker(unit);
+  }
 }
 
 /**

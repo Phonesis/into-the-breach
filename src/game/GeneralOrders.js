@@ -6,29 +6,70 @@ import {
 } from '../data/generalOrders.js';
 import { startRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
 import { isCommanderAlive } from './FieldCommander.js';
+import { getClearanceStagingAnchor } from './ClearanceMode.js';
 
 const PLAYER = 'player';
+const ENEMY = 'enemy';
 const HQ_REACHED_DIST = 18;
 
 function makeCooldowns() {
   return Object.fromEntries(GENERAL_ORDER_LIST.map((o) => [o.id, 0]));
 }
 
-function canReceiveOrder(unit) {
-  if (!unit || unit.dead || unit.team !== PLAYER) return false;
+function canReceiveOrder(unit, ownerTeam) {
+  if (!unit || unit.dead || unit.team !== ownerTeam) return false;
   if (unit.def?.type === 'commander') return false;
   if (unit.surrendered || unit._captureExit || unit._dropping) return false;
   return true;
 }
 
-/** Player HQ, or Clear Defenses starting/staging zone when there is no HQ. */
-function playerHq(game) {
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+/** Enemy Clear Defenses has no HQ, so mirror the player's rally rules. */
+function enemyClearanceRallyPoint(game) {
+  const mapDef = game.mapDef;
+  const playerRole = game.clearanceRole ?? 'attack';
+
+  // When the player attacks, the enemy is the prepared defender and rallies
+  // just behind its side of the defensive belt.
+  if (playerRole === 'attack') {
+    const anchor = getClearanceStagingAnchor(mapDef, 'defend');
+    return { team: ENEMY, dead: false, position: { ...anchor.position } };
+  }
+
+  // When the player defends, the enemy is the assault force. Its rear assembly
+  // is the enemy base pulled away from the player, matching the player's
+  // attacker assembly on the opposite side of the map.
+  const playerBase = mapDef.playerBase ?? { x: 0, z: 0 };
+  const enemyBase = mapDef.enemyBase ?? { x: 0, z: 0 };
+  let dx = enemyBase.x - playerBase.x;
+  let dz = enemyBase.z - playerBase.z;
+  const length = Math.hypot(dx, dz) || 1;
+  dx /= length;
+  dz /= length;
+  const half = (mapDef.size ?? 120) * 0.5 - 6;
+  return {
+    team: ENEMY,
+    dead: false,
+    position: {
+      x: clamp(enemyBase.x + dx * 24, -half, half),
+      z: clamp(enemyBase.z + dz * 24, -half, half),
+    },
+  };
+}
+
+/** Team HQ, or that team's Clear Defenses starting/staging zone. */
+function commandRallyPoint(game, ownerTeam) {
+  if (game.clearance && game.mapDef) {
+    if (ownerTeam === ENEMY) return enemyClearanceRallyPoint(game);
+    return getClearanceStagingAnchor(game.mapDef, game.clearanceRole ?? 'attack');
+  }
   return resolveRetreatHq(
-    { team: PLAYER },
+    { team: ownerTeam },
     game.hqs,
     {
-      clearance: game.clearance,
-      clearanceRole: game.clearanceRole,
       mapDef: game.mapDef,
     }
   );
@@ -41,8 +82,9 @@ function distToHq(unit, hq) {
 }
 
 export class GeneralOrdersManager {
-  constructor(game) {
+  constructor(game, ownerTeam = PLAYER) {
     this.game = game;
+    this.ownerTeam = ownerTeam;
     this.cooldowns = makeCooldowns();
     this.active = null;
   }
@@ -65,7 +107,7 @@ export class GeneralOrdersManager {
   }
 
   hasCommandLink() {
-    return isCommanderAlive(this.game, PLAYER);
+    return isCommanderAlive(this.game, this.ownerTeam);
   }
 
   isReady(type) {
@@ -82,12 +124,16 @@ export class GeneralOrdersManager {
 
   issue(type) {
     if (!GENERAL_ORDER_LIST.some((o) => o.id === type)) return false;
+    if (!this.hasCommandLink()) {
+      if (this.active) this.cancelActive();
+      return false;
+    }
     if (this.active?.type === type) return this.cancelActive();
     if (!this.isReady(type)) return false;
     if (!this.game.running || this.game.gameOver) return false;
 
-    const hq = playerHq(this.game);
-    if (!hq) return false;
+    const hq = commandRallyPoint(this.game, this.ownerTeam);
+    if (type === 'fullRetreat' && !hq) return false;
 
     if (type === 'fullRetreat') {
       this._applyFullRetreat(hq);
@@ -113,9 +159,17 @@ export class GeneralOrdersManager {
 
     if (!this.active) return;
 
+    // Losing the commander immediately ends any active command-wide order.
+    // This protects both the player and AI from a stale order surviving a
+    // commander casualty between combat ticks.
+    if (!this.hasCommandLink()) {
+      this.cancelActive();
+      return;
+    }
+
     this.active.remaining -= dt;
     if (this.active.type === 'fullRetreat') {
-      const hq = playerHq(this.game);
+      const hq = commandRallyPoint(this.game, this.ownerTeam);
       if (hq) this._enforceFullRetreat(hq);
     }
 
@@ -124,8 +178,9 @@ export class GeneralOrdersManager {
     }
   }
 
-  _playerUnits() {
-    return this.game._playerAlive ?? this.game.units.filter((u) => u.team === PLAYER && !u.dead);
+  _teamUnits() {
+    const cache = this.ownerTeam === PLAYER ? this.game._playerAlive : this.game._enemyAlive;
+    return cache ?? this.game.units.filter((u) => u.team === this.ownerTeam && !u.dead);
   }
 
   _applyFullRetreat(hq) {
@@ -135,15 +190,15 @@ export class GeneralOrdersManager {
       // The HQ commander speaks first; one throttled unit withdrawal call follows.
       voiceDelay: 2.2,
     };
-    for (const unit of this._playerUnits()) {
-      if (!canReceiveOrder(unit)) continue;
+    for (const unit of this._teamUnits()) {
+      if (!canReceiveOrder(unit, this.ownerTeam)) continue;
       if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
       startRetreat(unit, hq, pathOpts);
     }
   }
 
   _clearCommanderRetreats() {
-    for (const unit of this._playerUnits()) {
+    for (const unit of this._teamUnits()) {
       if (!unit.retreating) continue;
       clearRetreat(unit);
       unit.moveTarget = null;
@@ -158,8 +213,8 @@ export class GeneralOrdersManager {
       scenery: this.game.scenery,
       voiceDelay: 2.2,
     };
-    for (const unit of this._playerUnits()) {
-      if (!canReceiveOrder(unit)) continue;
+    for (const unit of this._teamUnits()) {
+      if (!canReceiveOrder(unit, this.ownerTeam)) continue;
       if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
       if (!unit.retreating) {
         startRetreat(unit, hq, pathOpts);
@@ -176,7 +231,17 @@ export class GeneralOrdersManager {
 }
 
 export function getCommanderRetreatMultiplier(unit, manager) {
-  if (!manager?.active || unit.team !== PLAYER) return 1;
-  if (manager.active.type === 'holdGround') return HOLD_GROUND_RETREAT_MULT;
+  if (!manager) return 1;
+
+  // Combat may pass the player and enemy managers together. Keep accepting a
+  // single manager for older callers and tests.
+  const selected = manager.ownerTeam
+    ? manager.ownerTeam === unit.team
+      ? manager
+      : null
+    : manager[unit.team] ?? manager[unit.team === PLAYER ? 'player' : 'enemy']
+      ?? (unit.team === PLAYER ? manager : null);
+  if (!selected?.active) return 1;
+  if (selected.active.type === 'holdGround') return HOLD_GROUND_RETREAT_MULT;
   return 1;
 }

@@ -9,6 +9,7 @@ import { removeHealMarker } from '../visual/HealMarkers.js';
 import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { isTankType } from '../units/VehicleTypes.js';
+import { areUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
 
 const SURRENDER_ELIGIBLE = new Set([
   'radioOperator',
@@ -96,7 +97,7 @@ function syncSurrenderMarkerTransform(unit) {
 }
 
 export function attachSurrenderMarker(unit) {
-  if (!unit.mesh || unit.surrenderMarker) return;
+  if (!areUnitStatusMarkersVisible() || !unit.mesh || unit.surrenderMarker) return;
   const mat = new THREE.SpriteMaterial({
     map: getSurrenderTexture(),
     transparent: true,
@@ -144,7 +145,7 @@ function getStatusTexture(label) {
 }
 
 export function attachStatusBanner(unit, label) {
-  if (!unit?.mesh) return;
+  if (!areUnitStatusMarkersVisible() || !unit?.mesh) return;
   removeStatusBanner(unit);
   const mat = new THREE.SpriteMaterial({
     map: getStatusTexture(label),
@@ -454,9 +455,27 @@ export function updateSurrenderState(game, units, dt) {
 }
 
 export function syncSurrenderMarkers(units) {
-  for (const unit of units) {
-    if (unit.dead || unit._captureExit) {
+  const visible = areUnitStatusMarkersVisible();
+  const now = performance.now() * 0.001;
+  for (const unit of units ?? []) {
+    if (!visible) {
       removeSurrenderMarker(unit);
+      removeStatusBanner(unit);
+      continue;
+    }
+    if (unit.dead) {
+      removeSurrenderMarker(unit);
+      removeStatusBanner(unit);
+      continue;
+    }
+    if (unit._captureExit) {
+      removeSurrenderMarker(unit);
+      if (!unit.statusBanner) attachStatusBanner(unit, 'CAPTURED');
+      continue;
+    }
+    if (unit._liberatedBannerUntil && now < unit._liberatedBannerUntil) {
+      removeSurrenderMarker(unit);
+      if (!unit.statusBanner) attachStatusBanner(unit, 'LIBERATED');
       continue;
     }
     if (!unit.surrendered) {

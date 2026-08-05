@@ -128,6 +128,7 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
 }
 
 const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
+const UNIT_STATUS_VISIBLE_KEY = 'ww2-rts-unit-status-visible';
 const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
 const CAPTURE_POINTS_VISIBLE_KEY = 'ww2-rts-capture-points-visible';
 const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
@@ -195,6 +196,7 @@ export class UIManager {
     this._hudBaseBuilding = false;
     this._hudStandardCampaign = false;
     this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
+    this.showUnitStatus = localStorage.getItem(UNIT_STATUS_VISIBLE_KEY) !== '0';
     this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
     this.showCapturePoints = localStorage.getItem(CAPTURE_POINTS_VISIBLE_KEY) !== '0';
     this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
@@ -218,6 +220,7 @@ export class UIManager {
     });
     this.showMinimap = this.minimap.visible;
     this._syncFieldIconToggle();
+    this._syncUnitStatusToggle();
     this._syncFrontlineToggle();
     this._syncCapturePointToggle();
     this._syncFireSupportCollapse();
@@ -587,6 +590,16 @@ export class UIManager {
           >
             <span class="unit-roster-toggle-icon" aria-hidden="true">${getUnitIconMarkup('infantry')}</span>
             <span class="unit-roster-toggle-label">Field icons</span>
+          </button>
+          <button
+            type="button"
+            class="unit-roster-toggle interactive"
+            id="btn-toggle-unit-status"
+            title="Show unit status markers above your forces on the battlefield"
+            aria-pressed="true"
+          >
+            <span class="unit-roster-toggle-icon unit-roster-status-icon" aria-hidden="true">✦</span>
+            <span class="unit-roster-toggle-label">Unit status</span>
           </button>
           <div class="unit-roster-list" id="unit-roster-list"></div>
         </aside>
@@ -1232,6 +1245,10 @@ export class UIManager {
       if (this.callbacks.onToggleUnitFieldIcons) {
         this.callbacks.onToggleUnitFieldIcons(this.showUnitFieldIcons);
       }
+    });
+    this.root.querySelector('#btn-toggle-unit-status')?.addEventListener('click', () => {
+      this.setUnitStatusEnabled(!this.showUnitStatus);
+      this.callbacks.onToggleUnitStatus?.(this.showUnitStatus);
     });
     this.root.querySelector('#btn-dismount-riders')?.addEventListener('click', () => {
       this.callbacks.onDismountTankRiders?.();
@@ -2040,6 +2057,7 @@ export class UIManager {
     if (baseBuilding) this.renderBaseBuildButtons();
     this._bindUnitRoster();
     this._syncFieldIconToggle();
+    this._syncUnitStatusToggle();
     this._syncSeekCoverToggle();
   }
 
@@ -2057,6 +2075,22 @@ export class UIManager {
     btn.title = this.showUnitFieldIcons
       ? 'Hide unit type icons above your forces'
       : 'Show unit type icons above your forces';
+  }
+
+  setUnitStatusEnabled(on) {
+    this.showUnitStatus = !!on;
+    localStorage.setItem(UNIT_STATUS_VISIBLE_KEY, on ? '1' : '0');
+    this._syncUnitStatusToggle();
+  }
+
+  _syncUnitStatusToggle() {
+    const btn = this.root.querySelector('#btn-toggle-unit-status');
+    if (!btn) return;
+    btn.classList.toggle('off', !this.showUnitStatus);
+    btn.setAttribute('aria-pressed', this.showUnitStatus ? 'true' : 'false');
+    btn.title = this.showUnitStatus
+      ? 'Hide unit status markers above your forces'
+      : 'Show unit status markers above your forces';
   }
 
   setSeekCoverMode(on) {

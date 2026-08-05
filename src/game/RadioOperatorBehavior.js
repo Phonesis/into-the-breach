@@ -18,7 +18,9 @@ export function isRadioOperatorOperational(unit) {
     !unit.dead &&
     !unit.surrendered &&
     !unit._captureExit &&
-    !unit._dropping
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._mobilityDamaged
   );
 }
 
@@ -39,6 +41,37 @@ export function getRadioOperatorSupportRange(unit) {
       ? unit.def.supportRange
       : RADIO_OPERATOR_SUPPORT_RANGE
   );
+}
+
+/**
+ * Shared radio observation rule used by fire support and AI relay planning.
+ * `origin` is optional so the AI can test a proposed relay position without
+ * teleporting the operator before the movement system applies the order.
+ */
+export function isRadioOperatorPointObserved(game, unit, x, z, origin = unit?.position) {
+  if (!isRadioOperatorOperational(unit) || !origin) return false;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+
+  const observationRange = getRadioOperatorSupportRange(unit);
+  if (Math.hypot(origin.x - x, origin.z - z) > observationRange) return false;
+  if (
+    game?.smokeScreens?.isLosObscured?.(
+      origin.x,
+      origin.z,
+      x,
+      z
+    )
+  ) {
+    return false;
+  }
+
+  const observer = {
+    position: origin,
+    def: { type: 'infantry' },
+    _garrisonBunkerId: unit._garrisonBunkerId,
+  };
+  const pointTarget = { position: { x, z } };
+  return !game?.scenery?.isLineOfFireBlocked?.(observer, pointTarget);
 }
 
 function rearAssemblyAnchor(mapDef, team) {

@@ -120,6 +120,7 @@ const COVER_UNIT_TYPES = new Set([
   'sniper',
   'medic',
   'engineer',
+  'radioOperator',
   'vehicleCrew',
 ]);
 

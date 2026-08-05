@@ -5,6 +5,7 @@ import {
   isUnitInspiredByCommander,
 } from '../game/CommanderBehavior.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
 
 let inspiredTexture = null;
 
@@ -102,7 +103,7 @@ function updateInspiredMarkerTransform(unit) {
 }
 
 export function attachMoraleMarker(unit) {
-  if (!unit?.mesh) return;
+  if (!areUnitStatusMarkersVisible() || !unit?.mesh) return;
 
   const map = getInspiredTexture();
   if (!unit.inspiredMarker) {
@@ -136,6 +137,7 @@ export function removeMoraleMarker(unit) {
 export function syncMoraleMarkers(units, allUnits = units) {
   for (const unit of units ?? []) {
     if (
+      !areUnitStatusMarkersVisible() ||
       !unit?.mesh ||
       unit.dead ||
       unit.surrendered ||

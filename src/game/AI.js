@@ -17,6 +17,17 @@ import {
 } from './TankRiders.js';
 import { getArmorAspect } from './ArmorPenetration.js';
 import { getClearanceAttackerSpawnBase } from './ClearanceMode.js';
+import { getFieldCommander } from './FieldCommander.js';
+import {
+  COMMANDER_AURA_RANGE,
+  isUnitInspiredByCommander,
+} from './CommanderBehavior.js';
+import { resolveRetreatHq, startRetreat } from './RetreatBehavior.js';
+import {
+  getRadioOperators,
+  getRadioOperatorSupportRange,
+  isRadioOperatorPointObserved,
+} from './RadioOperatorBehavior.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
@@ -37,12 +48,34 @@ const SUPPORT_CARE_SEEK_RANGE = 78;
 /** Stand roughly this fraction of the aura from the patient/job. */
 const SUPPORT_CARE_STANDOFF_FRAC = 0.42;
 const AI_CREWLESS_TANK_SEEK_RANGE = 64;
-const AI_TANK_MANEUVER_REASSESS_MIN = 10;
-const AI_TANK_MANEUVER_REASSESS_MAX = 17;
+const AI_TANK_MANEUVER_REASSESS_MIN = 6;
+const AI_TANK_MANEUVER_REASSESS_MAX = 11;
 const AI_TANK_REVERSE_MIN_DISTANCE = 10;
 const AI_TANK_REVERSE_MAX_DISTANCE = 17;
-const AI_TANK_FLANK_MIN_REAR_OFFSET = 18;
-const AI_TANK_FLANK_MAX_REAR_OFFSET = 28;
+const AI_TANK_FLANK_MIN_REAR_OFFSET = 12;
+const AI_TANK_FLANK_MAX_REAR_OFFSET = 21;
+const AI_TANK_FLANK_MIN_LATERAL_OFFSET = 14;
+const AI_TANK_FLANK_MAX_LATERAL_OFFSET = 22;
+const AI_RADIO_RELAY_REASSESS_MIN = 8;
+const AI_RADIO_RELAY_REASSESS_MAX = 14;
+const AI_RADIO_RELAY_CLUSTER_RADIUS = 16;
+const AI_RADIO_RELAY_MIN_SAFE_DISTANCE = 18;
+const AI_RADIO_RELAY_OPEN_MIN_SAFE_DISTANCE = 24;
+const AI_RADIO_RELAY_MIN_REAR_DISTANCE = 12;
+const AI_RADIO_RELAY_MAX_REAR_DISTANCE = 52;
+const AI_RADIO_SAFETY_REASSESS_MIN = 5;
+const AI_RADIO_SAFETY_REASSESS_MAX = 9;
+const AI_RADIO_CRITICAL_HP_RATIO = 0.34;
+const AI_RADIO_DANGER_HP_RATIO = 0.7;
+const AI_RADIO_CRITICAL_DISTANCE = 15;
+const AI_RADIO_DANGER_DISTANCE = 30;
+const AI_COMMANDER_SUPPORT_MIN_OFFSET = 25;
+const AI_COMMANDER_SUPPORT_MAX_OFFSET = 31;
+const AI_COMMANDER_CRITICAL_DISTANCE = 18;
+const AI_COMMANDER_DANGER_DISTANCE = 27;
+const AI_COMMANDER_SCREEN_RADIUS = 24;
+const AI_COMMANDER_SHELTER_SEEK_RANGE = 58;
+const AI_COMMANDER_SAFETY_HOLD_SEC = 9;
 const LAST_STAND_OPERATIONAL_REASSESS_MIN = 11;
 const LAST_STAND_OPERATIONAL_REASSESS_MAX = 16;
 const LAST_STAND_OPENING_REASSESS_DELAY = 13;
@@ -168,7 +201,12 @@ function getAiTankFlankDestination(
     AI_TANK_FLANK_MAX_REAR_OFFSET,
     Math.max(AI_TANK_FLANK_MIN_REAR_OFFSET, (unit.def?.range ?? 55) * 0.38)
   );
-  const lateralOffset = 8 + random() * 7;
+  // Give the hull a real side approach. A small lateral offset sends the
+  // route straight through the opposing tank and looks like a stalled
+  // frontal advance rather than a hook around its flank.
+  const lateralOffset =
+    AI_TANK_FLANK_MIN_LATERAL_OFFSET +
+    random() * (AI_TANK_FLANK_MAX_LATERAL_OFFSET - AI_TANK_FLANK_MIN_LATERAL_OFFSET);
 
   for (const flankSide of [side, -side]) {
     const point = clampAiTankDestination(
@@ -190,7 +228,7 @@ function pickAiTankManeuverTarget(unit, players, scenery) {
       target.dead ||
       target.surrendered ||
       target._captureExit ||
-      !isTankType(target.def?.type) ||
+      (!isTankType(target.def?.type) && target.def?.type !== 'antiTankGun') ||
       !isVisibleAttackTarget(unit, target, scenery)
     ) {
       continue;
@@ -339,11 +377,30 @@ export function tryAssignAiTankManeuver(
     }
   }
 
-  if (!allowFlank || hpRatio < 0.3 || getArmorAspect(unit, target).aspect !== 'front') {
+  const targetIsArmored = isTankType(target.def?.type);
+  const targetAspect = targetIsArmored ? getArmorAspect(unit, target).aspect : 'front';
+  if (!allowFlank || hpRatio < 0.3 || targetAspect !== 'front') {
     return false;
   }
   const aggression = difficulty?.attackAggressionMult ?? 1;
-  const flankChance = Math.min(0.46, 0.25 * aggression + (outnumbered ? 0.06 : 0));
+  const closeContact = distance <= (unit.def?.range ?? 55) * 1.05;
+  const targetIsActivelyEngaging =
+    target.attackOrder === unit || target.target === unit;
+  const valuableTarget =
+    target.def?.type === 'tankDestroyer' || target.def?.type === 'superHeavyTank';
+  // A tank that has a frontal armor problem should usually try to solve it;
+  // the previous 25%-base roll made a flank an occasional novelty, especially
+  // on Easy and during the long gaps between reassessments.
+  const flankChance = clamp(
+    0.36 +
+      (aggression - 1) * 0.14 +
+      (closeContact ? 0.18 : 0.06) +
+      (targetIsActivelyEngaging ? 0.12 : 0) +
+      (valuableTarget ? 0.06 : 0) +
+      (outnumbered ? 0.05 : 0),
+    0.28,
+    0.72
+  );
   if (random() >= flankChance) return false;
 
   const side = ((unit.id ?? 0) & 1) === 0 ? 1 : -1;
@@ -1440,8 +1497,10 @@ export function updateAI({
 
   // Off-map support (including Clear Defenses — same toolkit as the player).
   if (!enemyStagingPhase) {
-    updateAISupport(enemyFireSupport, playerUnits, dt, d, {
+    updateAIOffMapSupport(enemyFireSupport, playerUnits, dt, d, {
       clearance: !!clearance,
+      game,
+      enemyUnits,
     });
   }
 
@@ -1456,6 +1515,15 @@ export function updateAI({
   const alivePlayers = playerUnits;
 
   tryAiSmokeScreen(aliveEnemies, alivePlayers, game, d);
+
+  if (!enemyStagingPhase) {
+    updateAICommandSystems({
+      game,
+      enemyUnits: aliveEnemies,
+      playerUnits: alivePlayers,
+      clearance: !!clearance,
+    });
+  }
 
   if (alivePlayers.length === 0 && (!assault || assault.attackerTeam === 'enemy')) return;
 
@@ -1513,6 +1581,17 @@ export function updateAI({
     if (unit.attackOrder?.isSmokeShell) continue;
 
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
+
+    // Radio operators have their own relay behavior. Let them hold the
+    // assigned station (or a mode-specific defensive hold) instead of the
+    // generic support logic pulling them toward the nearest enemy.
+    if (unit.def?.type === 'radioOperator') {
+      if (!unit.defensiveHold && !unit._aiRadioManeuver && !unit._aiRadioSafety) {
+        unit.clearAttackOrder();
+        unit.moveTarget = null;
+      }
+      continue;
+    }
 
     const holdsPreparedClearanceLine =
       !!clearance && game?.clearanceRole !== 'defend';
@@ -2212,7 +2291,7 @@ function pickFriendlyBunker(unit, sources) {
   for (const source of sources ?? []) {
     const entries = source.entries ?? source.fieldBunkers ?? source.objects ?? [];
     for (const entry of entries) {
-      if (entry.destroyed || entry.building) continue;
+      if (entry.destroyed || entry.building || !entry.def?.garrison) continue;
       if (!entry.neutralGarrison && entry.team !== unit.team) continue;
       const capacity = entry.def?.garrisonCapacity ?? 2;
       if ((entry.garrison?.length ?? 0) >= capacity) continue;
@@ -2226,6 +2305,1193 @@ function pickFriendlyBunker(unit, sources) {
   return best;
 }
 
+const AI_COMMANDER_FRONTLINE_TYPES = new Set([
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'armoredCar',
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
+  'antiTankGun',
+]);
+
+function isAiMoraleUnit(unit) {
+  return (
+    unit &&
+    !unit.dead &&
+    !unit.retreating &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._crewless &&
+    unit.def?.type !== 'commander'
+  );
+}
+
+function getAiCommanderThreatWeight(unit) {
+  const type = unit?.def?.type;
+  if (type === 'superHeavyTank') return 2.25;
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'antiTankGun') return 1.85;
+  if (type === 'artillery' || type === 'mortar') return 1.55;
+  if (type === 'sniper') return 1.3;
+  if (type === 'machineGun') return 1.15;
+  return 1;
+}
+
+/** Estimate close/direct danger without treating the entire weapon range as an
+ * automatic commander emergency. Long-range guns can still be screened or
+ * blocked, while a nearby attacker must always pull the officer rearward. */
+function getAiCommanderThreatProfile(point, commander, playerUnits, scenery, current = false) {
+  const x = point?.x ?? commander?.position?.x ?? 0;
+  const z = point?.z ?? commander?.position?.z ?? 0;
+  let nearest = Infinity;
+  let score = 0;
+  let engaged = false;
+
+  for (const player of playerUnits ?? []) {
+    if (
+      !player ||
+      player.dead ||
+      player.surrendered ||
+      player._captureExit ||
+      player._dropping ||
+      player._crewless
+    ) continue;
+
+    const dx = player.position.x - x;
+    const dz = player.position.z - z;
+    const distance = Math.hypot(dx, dz);
+    nearest = Math.min(nearest, distance);
+
+    // On the live commander position, do not count a direct-fire unit whose
+    // shot is visibly blocked. Indirect fire remains a threat regardless.
+    if (
+      current &&
+      commander &&
+      player.def?.type !== 'mortar' &&
+      !isVisibleAttackTarget(player, commander, scenery)
+    ) {
+      continue;
+    }
+
+    const weaponRange = Math.max(20, player.def?.range ?? 0);
+    const closeBand = Math.min(40, Math.max(24, weaponRange * 0.7));
+    const weight = getAiCommanderThreatWeight(player);
+    if (distance <= closeBand) {
+      const proximity = 1 + (closeBand - distance) / closeBand;
+      score += weight * proximity;
+    }
+
+    const hasCommanderOrder =
+      player.attackOrder === commander || player.target === commander;
+    if (hasCommanderOrder && distance <= weaponRange + 6) {
+      score += weight * 4;
+      engaged = true;
+    }
+  }
+
+  if (current && (commander?._underFireTimer ?? 0) > 0) {
+    score += 3.2;
+    engaged = true;
+  }
+
+  const cover = current ? getCoverStatus(commander) : null;
+  if (cover?.garrisoned) score *= 0.28;
+  else if (cover?.inTrench) score *= 0.42;
+  else if (cover?.inCover) score *= 0.68;
+
+  return {
+    nearest,
+    score,
+    engaged,
+    danger: nearest <= AI_COMMANDER_CRITICAL_DISTANCE || engaged || score >= 6.5,
+  };
+}
+
+function getAiCommanderRearAxis(game) {
+  const playerBase = game?.mapDef?.playerBase ?? { x: 0, z: 0 };
+  const enemyBase = game?.mapDef?.enemyBase ?? { x: 0, z: 0 };
+  let x = enemyBase.x - playerBase.x;
+  let z = enemyBase.z - playerBase.z;
+  const length = Math.hypot(x, z) || 1;
+  return {
+    x: x / length,
+    z: z / length,
+    enemyBase,
+  };
+}
+
+function clampAiCommanderPoint(game, x, z) {
+  const half = (game?.mapDef?.size ?? 120) * 0.5 - 8;
+  return {
+    x: clamp(x, -half, half),
+    z: clamp(z, -half, half),
+  };
+}
+
+function getAiCommanderScreenCount(anchor, focus, troops) {
+  const dx = focus.x - anchor.x;
+  const dz = focus.z - anchor.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 1) return 0;
+  const dirX = dx / distance;
+  const dirZ = dz / distance;
+  let count = 0;
+
+  for (const troop of troops) {
+    const tx = troop.position.x - anchor.x;
+    const tz = troop.position.z - anchor.z;
+    const projection = tx * dirX + tz * dirZ;
+    const lateral = Math.abs(tx * dirZ - tz * dirX);
+    if (projection >= 2 && projection <= distance + 9 && lateral <= 15) count++;
+  }
+  return count;
+}
+
+function getAiCommanderCoverMultiplier(point, coverSystem) {
+  let best = 1;
+  for (const zone of coverSystem?.zones ?? []) {
+    const distance = Math.hypot(point.x - zone.x, point.z - zone.z);
+    if (distance <= (zone.radius ?? 0)) best = Math.min(best, zone.mult ?? 1);
+  }
+  return best;
+}
+
+function findAiCommanderSupportAnchor(game, commander, focus, troops, playerUnits) {
+  const rear = getAiCommanderRearAxis(game);
+  const candidates = [];
+  const addCandidate = (point) => {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.z)) return;
+    const clamped = clampAiCommanderPoint(game, point.x, point.z);
+    if (
+      candidates.some(
+        (candidate) =>
+          Math.hypot(candidate.x - clamped.x, candidate.z - clamped.z) < 2.5
+      )
+    ) return;
+    candidates.push(clamped);
+  };
+
+  // Work from the rear edge of the aura forward. This gives the commander the
+  // morale benefit while keeping as much depth as the situation permits.
+  for (
+    let offset = AI_COMMANDER_SUPPORT_MAX_OFFSET;
+    offset >= AI_COMMANDER_SUPPORT_MIN_OFFSET;
+    offset -= 2
+  ) {
+    const raw = {
+      x: focus.x + rear.x * offset,
+      z: focus.z + rear.z * offset,
+    };
+    addCandidate(raw);
+    addCandidate(resolveSeekCoverDestination(
+      commander,
+      raw.x,
+      raw.z,
+      game.coverSystem
+    ));
+  }
+
+  // If the commander is already in a good supporting position, retaining it
+  // avoids unnecessary zig-zagging when the front shifts by a few metres.
+  addCandidate(commander.position);
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const candidate of candidates) {
+    const focusDistance = Math.hypot(
+      candidate.x - focus.x,
+      candidate.z - focus.z
+    );
+    if (focusDistance > COMMANDER_AURA_RANGE - 1) continue;
+
+    const threat = getAiCommanderThreatProfile(
+      candidate,
+      commander,
+      playerUnits,
+      game.scenery
+    );
+    // A whole enemy line can sit at the far side of the aura while friendly
+    // troops screen the officer. For a hypothetical support anchor, reject
+    // close/actively directed threats rather than treating several distant
+    // shooters as an automatic emergency.
+    if (threat.nearest < AI_COMMANDER_DANGER_DISTANCE || threat.engaged) continue;
+
+    const screen = getAiCommanderScreenCount(candidate, focus, troops);
+    const coverMult = getAiCommanderCoverMultiplier(candidate, game.coverSystem);
+    const rearDepth =
+      (candidate.x - rear.enemyBase.x) * rear.x +
+      (candidate.z - rear.enemyBase.z) * rear.z;
+    let score =
+      focusDistance * 0.95 +
+      threat.nearest * 1.25 -
+      threat.score * 18 +
+      (1 - coverMult) * 52 +
+      screen * 16 +
+      rearDepth * 0.08;
+    if (screen === 0) score -= 12;
+    if (candidate.x === commander.position.x && candidate.z === commander.position.z) {
+      score += getCoverStatus(commander).inCover ? 14 : 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function findAiCommanderShelter(commander, game) {
+  if (
+    !commander ||
+    commander._garrisonBunkerId ||
+    commander._trenchId ||
+    commander._diggingTrench
+  ) return null;
+
+  const rear = getAiCommanderRearAxis(game);
+  const rearAnchor = commander._commanderRearAnchor ?? rear.enemyBase;
+  let best = null;
+  let bestScore = Infinity;
+  for (const source of getGarrisonBunkerSources(game)) {
+    const entries = source.entries ?? source.fieldBunkers ?? source.objects ?? [];
+    for (const entry of entries) {
+      if (entry.destroyed || entry.building || !entry.def?.garrison) continue;
+      if (!entry.neutralGarrison && entry.team !== commander.team) continue;
+      if ((entry.garrison?.length ?? 0) >= (entry.def.garrisonCapacity ?? 2)) continue;
+
+      const distance = Math.hypot(
+        commander.position.x - entry.x,
+        commander.position.z - entry.z
+      );
+      if (distance > AI_COMMANDER_SHELTER_SEEK_RANGE) continue;
+
+      const distanceToRear = Math.hypot(
+        entry.x - rearAnchor.x,
+        entry.z - rearAnchor.z
+      );
+      const rearDepth =
+        (entry.x - rear.enemyBase.x) * rear.x +
+        (entry.z - rear.enemyBase.z) * rear.z;
+      const score = distance * 0.35 + distanceToRear * 0.85 - rearDepth * 0.12;
+      if (score < bestScore) {
+        bestScore = score;
+        best = entry;
+      }
+    }
+  }
+  return best ? { x: best.x, z: best.z, bunkerId: best.id } : null;
+}
+
+function issueAiCommanderDestination(game, commander, destination, {
+  mode = 'rear',
+  bunkerId = null,
+} = {}) {
+  if (!destination) return false;
+  const next = clampAiCommanderPoint(game, destination.x, destination.z);
+  const previousGoal = commander._aiCommanderGoal;
+  const goalDistance = previousGoal
+    ? Math.hypot(previousGoal.x - next.x, previousGoal.z - next.z)
+    : Infinity;
+  const atDestination = Math.hypot(
+    commander.position.x - next.x,
+    commander.position.z - next.z
+  ) <= 6;
+
+  commander._aiCommanderMode = mode;
+  commander._aiCommanderShelterId = bunkerId;
+  commander._aiCommanderGoal = { ...next };
+  commander.defensiveHold = { ...next, radius: mode === 'support' ? 8 : 10 };
+  if (mode === 'rear') {
+    commander._aiCommanderAnchor = null;
+    commander._aiCommanderAnchorUntil = 0;
+  } else {
+    commander._aiCommanderAnchor = { ...next };
+  }
+
+  const shelterAlreadyOrdered =
+    bunkerId &&
+    (commander._garrisonBunkerId === bunkerId || commander._bunkerEntryId === bunkerId);
+  if (shelterAlreadyOrdered) return true;
+
+  if (
+    goalDistance < 3 &&
+    (atDestination || commander.moveTarget || commander._garrisonBunkerId || commander._trenchId)
+  ) return true;
+
+  commander.clearAttackOrder?.();
+  commander.moveTo?.(
+    next.x,
+    next.z,
+    game.mapDef,
+    false,
+    game.scenery,
+    bunkerId ? { allowBuildingId: bunkerId } : {}
+  );
+  return true;
+}
+
+function returnAiCommanderToRear(game, commander, { preferShelter = false } = {}) {
+  const rear = commander._commanderRearAnchor;
+  const inShelter = commander._garrisonBunkerId || commander._trenchId;
+  const distanceToRear = rear
+    ? Math.hypot(
+        commander.position.x - rear.x,
+        commander.position.z - rear.z
+      )
+    : 0;
+  if (inShelter && distanceToRear <= 24) {
+    commander._aiCommanderMode = 'shelter';
+    commander._aiCommanderShelterId = commander._garrisonBunkerId ?? null;
+    commander._aiCommanderAnchor = null;
+    return true;
+  }
+
+  if (!rear) return false;
+
+  if (preferShelter) {
+    const shelter = findAiCommanderShelter(commander, game);
+    if (shelter) {
+      return issueAiCommanderDestination(game, commander, shelter, {
+        mode: 'shelter',
+        bunkerId: shelter.bunkerId,
+      });
+    }
+  }
+
+  const coveredRear = resolveSeekCoverDestination(
+    commander,
+    rear.x,
+    rear.z,
+    game.coverSystem
+  );
+  const rearDestination =
+    Math.hypot(coveredRear.x - rear.x, coveredRear.z - rear.z) <= 18
+      ? coveredRear
+      : rear;
+  return issueAiCommanderDestination(game, commander, rearDestination, { mode: 'rear' });
+}
+
+/** Keep the commander protected by default, but use the far edge of his aura
+ * as a deliberate support position when several pressured frontline units
+ * need him. A close threat or direct attack order always overrides the aura
+ * request and sends him back to depth/cover. */
+function updateAICommander(game, enemyUnits, playerUnits) {
+  const commander = getFieldCommander(game, 'enemy');
+  if (!commander || commander.dead) return false;
+
+  const now = game.matchTime ?? 0;
+  const troops = enemyUnits.filter(isAiMoraleUnit);
+  const commanderCover = getCoverStatus(commander);
+  const protectedInPlace =
+    commanderCover.garrisoned || commanderCover.inTrench ||
+    !!commander._garrisonBunkerId || !!commander._trenchId;
+  const currentThreat = getAiCommanderThreatProfile(
+    commander.position,
+    commander,
+    playerUnits,
+    game.scenery,
+    true
+  );
+
+  if (
+    currentThreat.danger &&
+    (!protectedInPlace || currentThreat.engaged) &&
+    now >= (commander._aiCommanderSafetyUntil ?? 0)
+  ) {
+    commander._aiCommanderSafetyUntil = now + AI_COMMANDER_SAFETY_HOLD_SEC;
+    returnAiCommanderToRear(game, commander, { preferShelter: true });
+    return true;
+  }
+
+  if (now < (commander._aiCommanderSafetyUntil ?? 0)) {
+    returnAiCommanderToRear(game, commander, { preferShelter: true });
+    return true;
+  }
+
+  if (!troops.length || !playerUnits.length) {
+    if (commander._aiCommanderAnchor && now >= (commander._aiCommanderAnchorUntil ?? 0)) {
+      returnAiCommanderToRear(game, commander, { preferShelter: true });
+    }
+    return false;
+  }
+
+  const uncovered = troops
+    .map((unit) => {
+      const enemyNearby = playerUnits.some(
+        (player) =>
+          !player.dead &&
+          !player.surrendered &&
+          !player._captureExit &&
+          Math.hypot(unit.position.x - player.position.x, unit.position.z - player.position.z) <=
+            COMMANDER_AURA_RANGE * 0.7
+      );
+      const hpRatio = unit.hp / Math.max(1, unit.maxHp);
+      const underFire = (unit._underFireTimer ?? 0) > 0;
+      const underPressure = enemyNearby || hpRatio < 0.72 || underFire;
+      return {
+        unit,
+        score:
+          (underPressure ? 3 : 0) +
+          (enemyNearby ? 2 : 0) +
+          (hpRatio < 0.5 ? 2 : 0) +
+          (underFire ? 1 : 0) +
+          (AI_COMMANDER_FRONTLINE_TYPES.has(unit.def?.type) ? 1 : 0),
+        underPressure,
+      };
+    })
+    .filter(
+      ({ unit, underPressure }) =>
+        underPressure && !isUnitInspiredByCommander(unit, enemyUnits)
+    )
+    .sort((a, b) => b.score - a.score);
+
+  const anchorUntil = commander._aiCommanderAnchorUntil ?? 0;
+  if (!uncovered.length) {
+    if (commander._aiCommanderAnchor && now >= anchorUntil) {
+      returnAiCommanderToRear(game, commander, { preferShelter: true });
+    }
+    return false;
+  }
+
+  const frontlineUncovered = uncovered.filter(({ unit }) =>
+    AI_COMMANDER_FRONTLINE_TYPES.has(unit.def?.type)
+  );
+  const leadPressure = uncovered[0]?.score ?? 0;
+  const supportRequired = frontlineUncovered.length >= 2 || leadPressure >= 6;
+  // A commander already inside a bunker/trench should not abandon excellent
+  // protection for one isolated casualty. Multiple frontline elements in
+  // contact, or a badly mauled unit under fire, justify leaving it.
+  if (
+    protectedInPlace &&
+    frontlineUncovered.length < 3 &&
+    leadPressure < 7
+  ) {
+    if (commander._aiCommanderAnchor && now >= anchorUntil) {
+      returnAiCommanderToRear(game, commander, { preferShelter: true });
+    }
+    return false;
+  }
+  if (!supportRequired) {
+    if (commander._aiCommanderAnchor && now >= anchorUntil) {
+      returnAiCommanderToRear(game, commander, { preferShelter: true });
+    }
+    return false;
+  }
+  if (now < anchorUntil) return true;
+
+  const focus = averagePosition(
+    uncovered.slice(0, Math.min(6, uncovered.length)).map(({ unit }) => unit)
+  );
+  const anchor = findAiCommanderSupportAnchor(
+    game,
+    commander,
+    focus,
+    troops,
+    playerUnits
+  );
+  if (!anchor) {
+    returnAiCommanderToRear(game, commander, { preferShelter: true });
+    return false;
+  }
+
+  if (
+    commander._aiCommanderAnchor &&
+    Math.hypot(
+      commander._aiCommanderAnchor.x - anchor.x,
+      commander._aiCommanderAnchor.z - anchor.z
+    ) < 4
+  ) {
+    commander._aiCommanderAnchorUntil = now + 18;
+    return true;
+  }
+
+  commander._aiCommanderAnchorUntil = now + 18;
+  issueAiCommanderDestination(game, commander, anchor, { mode: 'support' });
+  return true;
+}
+
+/** Make enemy command decisions using the same commander-gated order system. */
+function updateAIGeneralOrders(game, enemyUnits, playerUnits, { clearance = false } = {}) {
+  const manager = game?.enemyGeneralOrders;
+  if (!manager) return false;
+  if (!manager.hasCommandLink()) {
+    manager.cancelActive?.();
+    return false;
+  }
+  if (manager.isActive() || playerUnits.length === 0) return false;
+
+  const enemySummary = getLastStandForceSummary(enemyUnits);
+  const playerSummary = getLastStandForceSummary(playerUnits);
+  if (enemySummary.count === 0 || playerSummary.count === 0) return false;
+
+  const nearbyPlayers = playerUnits.filter(
+    (unit) =>
+      Math.hypot(
+        unit.position.x - enemySummary.center.x,
+        unit.position.z - enemySummary.center.z
+      ) <= 34
+  );
+  const forceRatio = enemySummary.score / Math.max(0.1, playerSummary.score);
+  const underPressure =
+    nearbyPlayers.length > 0 &&
+    (enemySummary.hpRatio < 0.84 || forceRatio < 0.98 || enemyUnits.some((unit) => (unit._underFireTimer ?? 0) > 0));
+  const desperate =
+    enemySummary.hpRatio < 0.42 && forceRatio < 0.78 ||
+    (enemySummary.hpRatio < 0.55 && forceRatio < 0.58);
+
+  // Clear Defenses has role-specific regroup logic and intentionally does not
+  // turn the garrison into a generic retreat. Its normal AI still uses the
+  // commander aura and radio support above.
+  if (!clearance && desperate && manager.isReady('fullRetreat')) {
+    return manager.issue('fullRetreat');
+  }
+
+  if (
+    underPressure &&
+    !desperate &&
+    manager.isReady('holdGround')
+  ) {
+    return manager.issue('holdGround');
+  }
+  return false;
+}
+
+function isAiRadioRelayCandidate(unit) {
+  return (
+    unit &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._mobilityDamaged &&
+    !unit._diggingTrench &&
+    !unit._trenchDigSite &&
+    !unit._sandbagSite &&
+    !isUnitGarrisoned(unit)
+  );
+}
+
+function isAiRadioRelayTarget(unit) {
+  return (
+    unit &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping
+  );
+}
+
+function getAiRadioRelayTargetValue(unit) {
+  if (isTankType(unit.def?.type)) return 3;
+  if (unit.def?.type === 'antiTankGun' || unit.def?.type === 'artillery') return 2.4;
+  if (unit.def?.type === 'mortar' || unit.def?.type === 'machineGun') return 1.8;
+  return 1;
+}
+
+function findLargestAiRadioRelayCluster(players) {
+  const candidates = (players ?? []).filter(isAiRadioRelayTarget);
+  let best = null;
+
+  for (const anchor of candidates) {
+    const members = candidates.filter(
+      (unit) =>
+        Math.hypot(
+          unit.position.x - anchor.position.x,
+          unit.position.z - anchor.position.z
+        ) <= AI_RADIO_RELAY_CLUSTER_RADIUS
+    );
+    if (!members.length) continue;
+
+    const center = averagePosition(members);
+    const value = members.reduce(
+      (sum, unit) => sum + getAiRadioRelayTargetValue(unit),
+      0
+    );
+    const score = members.length * 10 + value;
+    if (
+      best &&
+      (members.length < best.count ||
+        (members.length === best.count && score <= best.score))
+    ) {
+      continue;
+    }
+
+    best = {
+      count: members.length,
+      score,
+      center,
+      members,
+      key: members
+        .map((unit) => String(unit.id ?? `${unit.position.x}:${unit.position.z}`))
+        .sort()
+        .join(','),
+    };
+  }
+
+  return best;
+}
+
+function getAiRadioRelayObservationPoints(cluster) {
+  return [
+    cluster.center,
+    ...cluster.members.map((unit) => ({
+      x: unit.position.x,
+      z: unit.position.z,
+    })),
+  ];
+}
+
+function isAiRadioRelayClusterObserved(game, radios, cluster) {
+  const points = getAiRadioRelayObservationPoints(cluster);
+  return points.some((point) =>
+    radios.some((radio) =>
+      isRadioOperatorPointObserved(game, radio, point.x, point.z)
+    )
+  );
+}
+
+function getAiRadioRearAxis(game, cluster, radio) {
+  const ownBase = game.mapDef?.enemyBase;
+  const playerBase = game.mapDef?.playerBase;
+  let rearX = (ownBase?.x ?? radio.position.x) - (playerBase?.x ?? cluster.center.x);
+  let rearZ = (ownBase?.z ?? radio.position.z) - (playerBase?.z ?? cluster.center.z);
+  let length = Math.hypot(rearX, rearZ);
+
+  if (length < 0.001) {
+    rearX = radio.position.x - cluster.center.x;
+    rearZ = radio.position.z - cluster.center.z;
+    length = Math.hypot(rearX, rearZ);
+  }
+  if (length < 0.001) {
+    rearX = 0;
+    rearZ = -1;
+    length = 1;
+  }
+
+  return {
+    rearX: rearX / length,
+    rearZ: rearZ / length,
+  };
+}
+
+function getNearestAiDistance(point, units, exclude = null) {
+  let nearest = Infinity;
+  for (const unit of units ?? []) {
+    if (!unit || unit === exclude || unit.dead || unit.surrendered) continue;
+    nearest = Math.min(
+      nearest,
+      Math.hypot(unit.position.x - point.x, unit.position.z - point.z)
+    );
+  }
+  return nearest;
+}
+
+function getAiRadioThreat(radio, playerUnits) {
+  const hpRatio = radio.hp / Math.max(1, radio.maxHp);
+  const nearestEnemyDistance = getNearestAiDistance(radio.position, playerUnits);
+  const underFire = (radio._underFireTimer ?? 0) > 0;
+  const critical =
+    hpRatio <= AI_RADIO_CRITICAL_HP_RATIO ||
+    nearestEnemyDistance <= AI_RADIO_CRITICAL_DISTANCE ||
+    (underFire && nearestEnemyDistance <= AI_RADIO_DANGER_DISTANCE) ||
+    (underFire && hpRatio <= 0.52);
+  return {
+    hpRatio,
+    nearestEnemyDistance,
+    underFire,
+    critical,
+    danger:
+      critical ||
+      underFire ||
+      hpRatio <= AI_RADIO_DANGER_HP_RATIO ||
+      nearestEnemyDistance <= AI_RADIO_DANGER_DISTANCE,
+  };
+}
+
+function getAiRadioSafetyDestination(game, radio, playerUnits, threat) {
+  const enemyCenter = playerUnits.length
+    ? averagePosition(playerUnits)
+    : { x: radio.position.x, z: radio.position.z };
+  const { rearX, rearZ } = getAiRadioRearAxis(
+    game,
+    { center: enemyCenter },
+    radio
+  );
+  const nearestEnemy = (playerUnits ?? [])
+    .filter((unit) => isAiRadioRelayTarget(unit))
+    .sort(
+      (a, b) =>
+        Math.hypot(a.position.x - radio.position.x, a.position.z - radio.position.z) -
+        Math.hypot(b.position.x - radio.position.x, b.position.z - radio.position.z)
+    )[0] ?? null;
+  let fleeX = rearX;
+  let fleeZ = rearZ;
+  if (nearestEnemy) {
+    const awayX = radio.position.x - nearestEnemy.position.x;
+    const awayZ = radio.position.z - nearestEnemy.position.z;
+    const awayLength = Math.hypot(awayX, awayZ);
+    if (awayLength > 0.001) {
+      fleeX = (rearX + awayX / awayLength) * 0.5;
+      fleeZ = (rearZ + awayZ / awayLength) * 0.5;
+      const fleeLength = Math.hypot(fleeX, fleeZ) || 1;
+      fleeX /= fleeLength;
+      fleeZ /= fleeLength;
+    }
+  }
+
+  const safeDistance = threat.underFire ? 22 : AI_RADIO_RELAY_MIN_SAFE_DISTANCE;
+  const bunker = pickFriendlyBunker(radio, getGarrisonBunkerSources(game));
+  if (
+    bunker &&
+    getNearestAiDistance(bunker, playerUnits) >= safeDistance &&
+    Math.hypot(bunker.x - radio.position.x, bunker.z - radio.position.z) <= 52
+  ) {
+    return {
+      x: bunker.x,
+      z: bunker.z,
+      bunkerId: bunker.id,
+      covered: true,
+      coverQuality: 1,
+    };
+  }
+
+  let best = null;
+  for (const zone of game.coverSystem?.zones ?? []) {
+    const travel = Math.hypot(zone.x - radio.position.x, zone.z - radio.position.z);
+    if (travel < 3 || travel > 64) continue;
+    const enemyDistance = getNearestAiDistance(zone, playerUnits);
+    if (enemyDistance < safeDistance) continue;
+    const rearDepth =
+      (zone.x - enemyCenter.x) * rearX + (zone.z - enemyCenter.z) * rearZ;
+    const awayDepth =
+      (zone.x - radio.position.x) * fleeX + (zone.z - radio.position.z) * fleeZ;
+    const coverQuality = Math.max(0, 1 - (zone.mult ?? 0.45));
+    const score =
+      travel * 0.7 +
+      Math.max(0, 24 - enemyDistance) * 7 -
+      Math.max(0, rearDepth) * 0.28 -
+      Math.max(0, awayDepth) * 0.18 -
+      coverQuality * 12 -
+      (zone.type === 'trench' ? 5 : 0);
+    if (!best || score < best.score) {
+      best = {
+        x: zone.x,
+        z: zone.z,
+        covered: true,
+        coverQuality,
+        score,
+      };
+    }
+  }
+  if (best) return best;
+
+  // A map without a usable cover zone still gets a proper rearward fallback.
+  // Try progressively deeper points so a radio operator does not stop at an
+  // exposed position merely because the first retreat step is still too close.
+  for (const distance of [28, 40, 52]) {
+    const raw = {
+      x: radio.position.x + fleeX * distance,
+      z: radio.position.z + fleeZ * distance,
+    };
+    const destination = clampAiTankDestination(game.mapDef, raw.x, raw.z);
+    if (game.scenery?.getUnitPlacementBlocker?.(destination.x, destination.z, 0.9)) {
+      continue;
+    }
+    if (getNearestAiDistance(destination, playerUnits) < safeDistance) continue;
+    return { ...destination, covered: false, coverQuality: 0 };
+  }
+  return null;
+}
+
+function updateAiRadioOperatorSafety(game, radios, playerUnits, clearance) {
+  const blocked = new Set();
+  const now = game.matchTime ?? 0;
+
+  for (const radio of radios) {
+    if (radio.retreating) {
+      radio._aiRadioManeuver = null;
+      radio._aiRadioSafety = { mode: 'retreat' };
+      blocked.add(radio);
+      continue;
+    }
+
+    const threat = getAiRadioThreat(radio, playerUnits);
+    const cover = getCoverStatus(radio);
+    if (threat.critical) {
+      const hq = resolveRetreatHq(radio, game.hqs, {
+        clearance,
+        mapDef: game.mapDef,
+      });
+      if (hq) {
+        clearAiRadioManeuver(radio);
+        radio._aiRadioSafety = { mode: 'retreat' };
+        startRetreat(radio, hq, {
+          mapDef: game.mapDef,
+          scenery: game.scenery,
+          voiceDelay: 0.25,
+        });
+        blocked.add(radio);
+        continue;
+      }
+    }
+
+    if (radio._aiRadioSafety?.mode === 'retreat') {
+      radio._aiRadioSafety = null;
+    }
+
+    const activeSafety = radio._aiRadioSafety;
+    if (activeSafety?.mode === 'cover') {
+      const remaining = Math.hypot(
+        radio.position.x - activeSafety.x,
+        radio.position.z - activeSafety.z
+      );
+      if (!cover.inCover && now < activeSafety.reassessAt) {
+        enforceAiRadioRelayMove(radio, activeSafety, game);
+        blocked.add(radio);
+        continue;
+      }
+      if (cover.inCover && !threat.danger) {
+        radio._aiRadioSafety = null;
+      } else if (threat.danger && (remaining > 4.5 || !cover.inCover)) {
+        enforceAiRadioRelayMove(radio, activeSafety, game);
+        blocked.add(radio);
+        continue;
+      } else {
+        radio._aiRadioSafety = null;
+      }
+    }
+
+    if (cover.inCover) {
+      // A dug-in or garrisoned operator should stay put while under pressure.
+      // Once safe, relay planning may choose another covered station if the
+      // current position cannot observe the target cluster.
+      if (threat.danger) blocked.add(radio);
+      continue;
+    }
+
+    // Exposed operators proactively seek a safe station. This also gives a
+    // freshly spawned operator cover before it starts range-seeking.
+    if (!threat.danger && radio._aiRadioManeuver) continue;
+    const destination = getAiRadioSafetyDestination(game, radio, playerUnits, threat);
+    if (!destination) {
+      if (threat.danger) blocked.add(radio);
+      continue;
+    }
+    const alreadyAtSafetyDestination =
+      Math.hypot(
+        radio.position.x - destination.x,
+        radio.position.z - destination.z
+      ) <= 4.5;
+    if (alreadyAtSafetyDestination && !destination.bunkerId) {
+      if (threat.danger) blocked.add(radio);
+      continue;
+    }
+
+    clearAiRadioManeuver(radio);
+    radio._aiRadioSafety = {
+      ...destination,
+      mode: 'cover',
+      reassessAt:
+        now +
+        AI_RADIO_SAFETY_REASSESS_MIN +
+        Math.random() * (AI_RADIO_SAFETY_REASSESS_MAX - AI_RADIO_SAFETY_REASSESS_MIN),
+    };
+    enforceAiRadioRelayMove(radio, radio._aiRadioSafety, game);
+    blocked.add(radio);
+  }
+
+  return { blocked, pending: blocked.size > 0 };
+}
+
+function getAiRadioRelayDestination(game, radio, cluster, enemyUnits, playerUnits) {
+  const { rearX, rearZ } = getAiRadioRearAxis(game, cluster, radio);
+  const perpX = -rearZ;
+  const perpZ = rearX;
+  const ownBase = game.mapDef?.enemyBase;
+  const distanceToOwnBase = ownBase
+    ? Math.hypot(cluster.center.x - ownBase.x, cluster.center.z - ownBase.z)
+    : AI_RADIO_RELAY_MAX_REAR_DISTANCE;
+  const supportRange = getRadioOperatorSupportRange(radio);
+  const idealRearDistance = clamp(
+    supportRange * 0.68,
+    AI_RADIO_RELAY_MIN_REAR_DISTANCE,
+    AI_RADIO_RELAY_MAX_REAR_DISTANCE
+  );
+  const rearDistance = Math.min(
+    idealRearDistance,
+    Math.max(AI_RADIO_RELAY_MIN_REAR_DISTANCE, distanceToOwnBase * 0.68)
+  );
+  const lateralOffsets = [0, -10, 10, -18, 18];
+  const points = getAiRadioRelayObservationPoints(cluster);
+  const idealPoint = {
+    x: cluster.center.x + rearX * rearDistance,
+    z: cluster.center.z + rearZ * rearDistance,
+  };
+  const candidates = lateralOffsets.map((lateral) => ({
+    x: idealPoint.x + perpX * lateral,
+    z: idealPoint.z + perpZ * lateral,
+    covered: false,
+    lateral,
+  }));
+
+  // Prefer a covered relay station near the rearward support line. An open
+  // point is still allowed when the map has no suitable cover, but it must be
+  // farther from the player force than a covered point.
+  for (const zone of game.coverSystem?.zones ?? []) {
+    const toIdeal = Math.hypot(zone.x - idealPoint.x, zone.z - idealPoint.z);
+    const toRadio = Math.hypot(zone.x - radio.position.x, zone.z - radio.position.z);
+    if (toIdeal > 30 || toRadio > 72) continue;
+    candidates.push({
+      x: zone.x,
+      z: zone.z,
+      covered: true,
+      coverQuality: Math.max(0, 1 - (zone.mult ?? 0.45)),
+      coverType: zone.type,
+      lateral: 0,
+      toIdeal,
+    });
+  }
+
+  const currentCover = getCoverStatus(radio);
+  let best = null;
+
+  for (const candidate of candidates) {
+    const destination = clampAiTankDestination(game.mapDef, candidate.x, candidate.z);
+    if (
+      !candidate.covered &&
+      game.scenery?.getUnitPlacementBlocker?.(destination.x, destination.z, 0.9)
+    ) {
+      continue;
+    }
+
+    const enemyDistance = getNearestAiDistance(destination, playerUnits);
+    const minimumSafeDistance = candidate.covered
+      ? AI_RADIO_RELAY_MIN_SAFE_DISTANCE
+      : AI_RADIO_RELAY_OPEN_MIN_SAFE_DISTANCE;
+    if (enemyDistance < minimumSafeDistance) continue;
+    const allyDistance = getNearestAiDistance(destination, enemyUnits, radio);
+    const observed = points.some((point) =>
+      isRadioOperatorPointObserved(
+        game,
+        radio,
+        point.x,
+        point.z,
+        destination
+      )
+    );
+    const travel = Math.hypot(
+      radio.position.x - destination.x,
+      radio.position.z - destination.z
+    );
+    const toIdeal =
+      candidate.toIdeal ??
+      Math.hypot(destination.x - idealPoint.x, destination.z - idealPoint.z);
+    const coverBonus = candidate.covered
+      ? 18 + (candidate.coverQuality ?? 0) * 10
+      : 0;
+    const exposedFromCoverPenalty = currentCover.inCover && !candidate.covered ? 24 : 0;
+    const score =
+      (observed ? -10000 : 0) +
+      travel * 0.35 +
+      toIdeal * 0.3 +
+      Math.max(0, 24 - enemyDistance) * 5 +
+      Math.max(0, 3 - allyDistance) * 4 +
+      Math.abs(candidate.lateral ?? 0) * 0.04 +
+      exposedFromCoverPenalty -
+      coverBonus;
+    if (!best || score < best.score) {
+      best = {
+        ...destination,
+        score,
+        observed,
+        covered: candidate.covered,
+        coverType: candidate.coverType ?? null,
+      };
+    }
+  }
+
+  return best;
+}
+
+function clearAiRadioManeuver(unit, stop = true) {
+  unit._aiRadioManeuver = null;
+  if (!stop || unit.retreating) return;
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._finalMoveGoal = null;
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+}
+
+function enforceAiRadioRelayMove(unit, destination, game) {
+  const goal = unit._finalMoveGoal;
+  const goalDrift = goal
+    ? Math.hypot(goal.x - destination.x, goal.z - destination.z)
+    : Infinity;
+  const bunkerChanged = (unit._bunkerEntryId ?? null) !== (destination.bunkerId ?? null);
+  if (!unit.moveTarget || goalDrift > 2 || bunkerChanged) {
+    unit.moveTo?.(
+      destination.x,
+      destination.z,
+      game.mapDef,
+      false,
+      game.scenery,
+      { allowBuildingId: destination.bunkerId ?? null }
+    );
+    if (!unit.moveTo) unit.moveTarget = { x: destination.x, z: destination.z };
+    unit._userMoveOrder = false;
+    unit._reverseMoveOrder = false;
+  }
+}
+
+function isAiRadioSupportReady(support) {
+  if (!support?.isReady) return true;
+  return ['strafe', 'barrage', 'creepingBarrage', 'airborneDrop'].some((type) =>
+    support.isReady(type)
+  );
+}
+
+/**
+ * Move one living enemy radio operator to a rear relay position when the
+ * highest-value player cluster is outside the current radio net. The operator
+ * is deliberately kept behind the cluster, away from direct contact, and the
+ * proposed position is checked with the same range/LOS rule as Fire Support.
+ */
+export function updateAIRadioOperators({
+  game,
+  enemyUnits = [],
+  playerUnits = [],
+  support = null,
+  clearance = false,
+  enemyStagingPhase = false,
+} = {}) {
+  if (enemyStagingPhase || !game?.mapDef || !playerUnits.length) return false;
+
+  const radioPool = game.units?.length ? game.units : enemyUnits;
+  const allRadios = getRadioOperators(radioPool, 'enemy');
+  if (!allRadios.length) return false;
+
+  const safety = updateAiRadioOperatorSafety(game, allRadios, playerUnits, clearance);
+  const movableRadios = allRadios.filter(
+    (radio) => isAiRadioRelayCandidate(radio) && !safety.blocked.has(radio)
+  );
+
+  const cluster = findLargestAiRadioRelayCluster(playerUnits);
+  const minCluster = clearance ? 2 : 3;
+  if (!cluster || cluster.count < minCluster) {
+    for (const radio of movableRadios) {
+      if (radio._aiRadioManeuver) clearAiRadioManeuver(radio);
+    }
+    return safety.pending;
+  }
+
+  if (isAiRadioRelayClusterObserved(game, allRadios, cluster)) {
+    for (const radio of movableRadios) {
+      if (radio._aiRadioManeuver) clearAiRadioManeuver(radio);
+    }
+    return safety.pending;
+  }
+
+  const now = game.matchTime ?? 0;
+  const active = movableRadios.find((radio) => radio._aiRadioManeuver);
+  if (active) {
+    const maneuver = active._aiRadioManeuver;
+    const targetDrift = Math.hypot(
+      maneuver.targetCenter.x - cluster.center.x,
+      maneuver.targetCenter.z - cluster.center.z
+    );
+    if (maneuver.targetKey === cluster.key && targetDrift <= 12 && now < maneuver.reassessAt) {
+      const remaining = Math.hypot(
+        active.position.x - maneuver.x,
+        active.position.z - maneuver.z
+      );
+      if (remaining > 4.5) {
+        enforceAiRadioRelayMove(active, maneuver, game);
+      }
+      // Keep support retrying while this relay is moving or waiting for a
+      // clear line of sight at its destination.
+      return true;
+    }
+    clearAiRadioManeuver(active);
+  }
+
+  if (!isAiRadioSupportReady(support)) return safety.pending;
+
+  let best = null;
+  for (const radio of movableRadios) {
+    if (now < (radio._aiRadioManeuverNextAt ?? 0)) continue;
+    const destination = getAiRadioRelayDestination(
+      game,
+      radio,
+      cluster,
+      enemyUnits,
+      playerUnits
+    );
+    if (!destination) continue;
+    const travel = Math.hypot(
+      radio.position.x - destination.x,
+      radio.position.z - destination.z
+    );
+    const score = travel + (destination.observed ? -1000 : 0);
+    if (!best || score < best.score) {
+      best = { radio, destination, score };
+    }
+  }
+  if (!best) return safety.pending;
+
+  const maneuver = {
+    targetKey: cluster.key,
+    targetCenter: { ...cluster.center },
+    x: best.destination.x,
+    z: best.destination.z,
+    reassessAt:
+      now +
+      AI_RADIO_RELAY_REASSESS_MIN +
+      Math.random() * (AI_RADIO_RELAY_REASSESS_MAX - AI_RADIO_RELAY_REASSESS_MIN),
+  };
+  best.radio._aiRadioManeuverNextAt = maneuver.reassessAt;
+  best.radio._aiRadioManeuver = maneuver;
+  enforceAiRadioRelayMove(best.radio, maneuver, game);
+  return true;
+}
+
+export function updateAICommandSystems({
+  game,
+  enemyUnits = [],
+  playerUnits = [],
+  clearance = false,
+  enemyStagingPhase = false,
+} = {}) {
+  if (enemyStagingPhase) return;
+  updateAICommander(game, enemyUnits, playerUnits);
+  updateAIGeneralOrders(game, enemyUnits, playerUnits, { clearance });
+}
+
+export function updateAIOffMapSupport(
+  support,
+  players,
+  dt,
+  difficulty,
+  options = {}
+) {
+  const game = options.game ?? support?.game ?? null;
+  const radioCoveragePending = updateAIRadioOperators({
+    game,
+    enemyUnits: options.enemyUnits ?? game?._enemyAlive ?? [],
+    playerUnits: players,
+    support,
+    clearance: !!options.clearance,
+    enemyStagingPhase: !!options.enemyStagingPhase,
+  });
+  updateAISupport(support, players, dt, difficulty, {
+    ...options,
+    radioCoveragePending,
+  });
+}
+
 function updateAISupport(support, players, dt, difficulty, options = {}) {
   if (!support || players.length < 2) return;
   aiSupportTimer -= dt;
@@ -2235,8 +3501,13 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
     ? 18 + Math.random() * 14
     : 24 + Math.random() * 18;
 
-  const target = findSupportTarget(players);
-  if (!target) return;
+  const target = findSupportTarget(players, support);
+  if (!target) {
+    // The radio operator may have just started a relay move. Retry shortly
+    // after movement rather than waiting for the normal support interval.
+    if (options.radioCoveragePending) aiSupportTimer = 2.75;
+    return;
+  }
 
   const aggression = difficulty.attackAggressionMult ?? 1;
   const barrageChance = Math.min(0.78, 0.48 * aggression);
@@ -2247,13 +3518,11 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
     target.count >= minCluster &&
     Math.random() < Math.min(0.55, 0.32 * aggression)
   ) {
-    support.tryAiStrike('strafe', target.x, target.z);
-    return;
+    if (support.tryAiStrike('strafe', target.x, target.z)) return;
   }
 
   if (support.isReady('barrage') && target.count >= minCluster && Math.random() < barrageChance) {
-    support.tryAiStrike('barrage', target.x, target.z);
-    return;
+    if (support.tryAiStrike('barrage', target.x, target.z)) return;
   }
 
   if (
@@ -2261,8 +3530,7 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
     target.count >= (options.clearance ? 3 : 4) &&
     Math.random() < barrageChance * 0.55
   ) {
-    support.tryAiStrike('creepingBarrage', target.x, target.z);
-    return;
+    if (support.tryAiStrike('creepingBarrage', target.x, target.z)) return;
   }
 
   // Airborne: once per side on Clear Defenses (isReady already enforces that).
@@ -2277,7 +3545,7 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
   }
 }
 
-function findSupportTarget(players) {
+function findSupportTarget(players, support = null) {
   let best = null;
   let bestCount = 0;
   for (const anchor of players) {
@@ -2290,9 +3558,22 @@ function findSupportTarget(players) {
       sumX += player.position.x;
       sumZ += player.position.z;
     }
-    if (count > bestCount) {
+
+    if (count <= bestCount) continue;
+    const center = { x: sumX / count, z: sumZ / count };
+    // Prefer a cluster centre, but fall back to an individual member if the
+    // centre is behind a building or just outside the 72 m radio envelope.
+    const candidates = [center, anchor.position, ...players
+      .filter((player) => Math.hypot(player.position.x - anchor.position.x, player.position.z - anchor.position.z) <= 16)
+      .map((player) => player.position)];
+    const observed = candidates.find(
+      (point) =>
+        typeof support?.isPointObserved !== 'function' ||
+        support.isPointObserved(point.x, point.z)
+    );
+    if (observed) {
       bestCount = count;
-      best = { x: sumX / count, z: sumZ / count, count };
+      best = { x: observed.x, z: observed.z, count };
     }
   }
   return best;

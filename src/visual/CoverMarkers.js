@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COVER_TYPES, formatCoverReduction, getCoverStatus } from '../game/CoverSystem.js';
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
 
 const textureCache = new Map();
 
@@ -97,7 +98,7 @@ function updateCoverMarkerTransform(unit) {
 }
 
 export function attachCoverMarker(unit, status) {
-  if (!unit.mesh || !status.inCover) return;
+  if (!areUnitStatusMarkersVisible() || !unit.mesh || !status.inCover) return;
 
   const tier = status.tier ?? 'medium';
   const garrisoned = !!status.garrisoned;
@@ -133,7 +134,7 @@ export function removeCoverMarker(unit) {
 }
 
 export function syncCoverMarker(unit) {
-  if (!unit.mesh || unit.dead) {
+  if (!areUnitStatusMarkersVisible() || !unit.mesh || unit.dead) {
     removeCoverMarker(unit);
     return;
   }

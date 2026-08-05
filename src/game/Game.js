@@ -73,7 +73,12 @@ import {
   pickClearanceAttackPlan,
   roleForClearanceAttackerType,
 } from './ClearanceMode.js';
-import { updateRetreatState, removeRetreatMarker, resolveRetreatHq } from './RetreatBehavior.js';
+import {
+  updateRetreatState,
+  removeRetreatMarker,
+  resolveRetreatHq,
+  syncRetreatMarkers,
+} from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
 import { updateMotorPoolHealing } from './MotorPoolBehavior.js';
@@ -132,6 +137,7 @@ import { getActiveHospitals } from './HospitalBehavior.js';
 import { getActiveMotorPools } from './MotorPoolBehavior.js';
 import { syncDamageSmoke, updateDamageSmoke } from '../visual/DamageSmoke.js';
 import { syncUnitHealthBars } from '../visual/UnitHealthBars.js';
+import { setUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
 import { updateSurrenderState, syncSurrenderMarkers } from './SurrenderBehavior.js';
 import { updatePlayerHqThreat } from './HqThreatBehavior.js';
 import { syncRankMarkers, updateRankMarkers } from './EliteBehavior.js';
@@ -231,7 +237,12 @@ import {
   tickUnitCooldowns,
   clearPendingMortarImpacts,
 } from './Combat.js';
-import { updateAI, resetAI } from './AI.js';
+import {
+  updateAI,
+  updateAICommandSystems,
+  updateAIOffMapSupport,
+  resetAI,
+} from './AI.js';
 import {
   containTeamsToDeployZone,
   clampPointToHqZone,
@@ -362,6 +373,7 @@ export class Game {
     this._largeBattleTacticalVisualAccum = 0;
     this._largeBattleSimulationPerfActive = false;
     this.showUnitFieldIcons = true;
+    this.showUnitStatus = true;
     this.seekCoverMode = false;
     this.autoBuildMode = false;
     this.showFrontline = true;
@@ -474,6 +486,7 @@ export class Game {
     this.fireSupport = new FireSupportManager(this);
     this.enemyFireSupport = new FireSupportManager(this, ENEMY_TEAM);
     this.generalOrders = new GeneralOrdersManager(this);
+    this.enemyGeneralOrders = new GeneralOrdersManager(this, ENEMY_TEAM);
     this.smokeScreens = new SmokeScreenManager(this);
     this.smokeShellTargeting = false;
     this.engineerSandbags = new EngineerSandbagManager(this);
@@ -1001,6 +1014,7 @@ export class Game {
     this.fireSupport.reset();
     this.enemyFireSupport.reset();
     this.generalOrders.reset();
+    this.enemyGeneralOrders.reset();
     this.smokeScreens.reset();
     this.smokeShellTargeting = false;
     this._clearDirectionalPlacement();
@@ -1403,6 +1417,8 @@ export class Game {
       this.setTabletTargetMode(true);
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
+    this.showUnitStatus = this.ui.showUnitStatus !== false;
+    setUnitStatusMarkersVisible(this.showUnitStatus);
     this.seekCoverMode = this.ui.seekCoverMode;
     this.autoBuildMode = this.ui.syncAutoBuildForCampaign(this.campaignStyle);
     if (this.cheatMode) {
@@ -1824,6 +1840,16 @@ export class Game {
     this.showUnitFieldIcons = !!enabled;
     syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
     syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
+  }
+
+  setUnitStatusEnabled(enabled) {
+    this.showUnitStatus = !!enabled;
+    setUnitStatusMarkersVisible(this.showUnitStatus);
+    this.coverSystem?.updateUnits?.(this._aliveUnits);
+    syncHealMarkers(this.units, this.baseBuildings, this.hqs);
+    syncMoraleMarkers(this._aliveUnits, this.units);
+    syncRetreatMarkers(this._aliveUnits);
+    syncSurrenderMarkers(this._aliveUnits);
   }
 
   setSeekCoverMode(enabled) {
@@ -3199,7 +3225,9 @@ export class Game {
     clearActiveParachuteDrops(this.scene);
     clearTerrainDamage(this.scene);
     this.fireSupport?.reset();
+    this.enemyFireSupport?.reset();
     this.generalOrders?.reset();
+    this.enemyGeneralOrders?.reset();
     this.smokeScreens?.reset();
     this.smokeShellTargeting = false;
   }
@@ -3660,6 +3688,7 @@ export class Game {
           this._unitVisualSyncAccum = 0;
           syncDamageSmoke(this._aliveUnits);
           syncUnitHealthBars(this._aliveUnits, this.showUnitFieldIcons);
+          syncRetreatMarkers(this._aliveUnits);
           syncSurrenderMarkers(this._aliveUnits);
           syncRankMarkers(this._aliveUnits);
         }
@@ -3852,7 +3881,10 @@ export class Game {
               tutorial: this.tutorial,
               towerDefense: this.towerDefense,
               smokeScreens: this.smokeScreens,
-              generalOrders: this.generalOrders,
+              generalOrders: {
+                player: this.generalOrders,
+                enemy: this.enemyGeneralOrders,
+              },
               engineerSandbags: this.engineerSandbags,
               defenses: this.defenses,
               spawnSurrenderingVehicleCrew: (vehicle) =>
@@ -3916,6 +3948,7 @@ export class Game {
         this.fireSupport.update(dt);
         this.enemyFireSupport.update(dt);
         this.generalOrders.update(dt);
+        this.enemyGeneralOrders.update(dt);
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
         updateParachuteDrops(dt, this.scene, this.mapDef);
@@ -3947,6 +3980,22 @@ export class Game {
           }
 
           if (this.towerDefense) {
+            const enemyStagingPhase = this.towerDefense.phase !== 'active';
+            if (!enemyStagingPhase) {
+              updateAIOffMapSupport(
+                this.enemyFireSupport,
+                this._playerAlive,
+                dt,
+                this.difficulty,
+                { clearance: false }
+              );
+            }
+            updateAICommandSystems({
+              game: this,
+              enemyUnits: this._enemyAlive,
+              playerUnits: this._playerAlive,
+              enemyStagingPhase,
+            });
             updateTowerDefenseEnemyAI(this._enemyAlive, this, this.defenses, dt);
           } else if (!this.tutorial && !isLastStandDeployPhase(this)) {
             updateAI({

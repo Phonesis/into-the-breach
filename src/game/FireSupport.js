@@ -18,8 +18,8 @@ import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 import {
   getRadioOperators,
-  getRadioOperatorSupportRange,
   hasRadioOperator,
+  isRadioOperatorPointObserved,
 } from './RadioOperatorBehavior.js';
 import { WEAPON_RANGE_SLACK } from './Targeting.js';
 
@@ -242,27 +242,8 @@ export class FireSupportManager {
 
   isPointObserved(x, z) {
     const observers = getRadioOperators(this.game.units, this.ownerTeam);
-    const pointTarget = { position: { x, z } };
     for (const unit of observers) {
-      const observationRange = getRadioOperatorSupportRange(unit);
-      if (Math.hypot(unit.position.x - x, unit.position.z - z) > observationRange) continue;
-      if (
-        this.game.smokeScreens?.isLosObscured?.(
-          unit.position.x,
-          unit.position.z,
-          x,
-          z
-        )
-      ) {
-        continue;
-      }
-      const observer = {
-        position: unit.position,
-        def: { type: 'infantry' },
-        _garrisonBunkerId: unit._garrisonBunkerId,
-      };
-      if (this.game.scenery?.isLineOfFireBlocked?.(observer, pointTarget)) continue;
-      return true;
+      if (isRadioOperatorPointObserved(this.game, unit, x, z)) return true;
     }
     return false;
   }

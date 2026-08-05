@@ -155,6 +155,9 @@ const ui = new UIManager(uiRoot, {
   onToggleUnitFieldIcons(enabled) {
     game?.setUnitFieldIconsEnabled(enabled);
   },
+  onToggleUnitStatus(enabled) {
+    game?.setUnitStatusEnabled(enabled);
+  },
   onToggleFrontline(enabled) {
     game?.setShowFrontlineEnabled(enabled);
   },
