@@ -25,7 +25,11 @@ import {
   TD_PLAYER_FRONTLINE_MARGIN,
   isTdHqDefenseStyle,
 } from '../data/towerDefense.js';
-import { tryAssignCrewlessTankRecovery } from './AI.js';
+import {
+  tryAssignCrewlessTankRecovery,
+  tryAssignSupportCare,
+  tryAssignSupportRearMove,
+} from './AI.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
@@ -598,10 +602,13 @@ function computeTdEnemyMoveGoal(unit, game) {
 
 export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
   const crewlessTankClaims = new Set();
+  const careClaims = new Set();
   for (const unit of enemyUnits) {
     if (unit.def?.type === 'commander' || unit.def?.type === 'radioOperator') continue;
     if (unit.retreating || unit.surrendered || unit._captureExit) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
+    if (tryAssignSupportCare(unit, enemyUnits, game, game?.mapDef, careClaims)) continue;
+    if (tryAssignSupportRearMove(unit, enemyUnits, game, game?.mapDef)) continue;
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
 
     const nearDefense = pickNearestDefenseInRange(unit, defenses);

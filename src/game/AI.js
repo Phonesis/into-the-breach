@@ -47,6 +47,12 @@ const MORTAR_INDIRECT_TYPES = new Set(['mortar']);
 const SUPPORT_CARE_SEEK_RANGE = 78;
 /** Stand roughly this fraction of the aura from the patient/job. */
 const SUPPORT_CARE_STANDOFF_FRAC = 0.42;
+/** Keep medical/repair specialists behind the main body between jobs. */
+const SUPPORT_REAR_OFFSET = { medic: 9, engineer: 14 };
+const SUPPORT_REAR_LATERAL_STEP = 2.4;
+const SUPPORT_REAR_HOLD_RADIUS = 5.5;
+const SUPPORT_REAR_MIN_THREAT_DISTANCE = 24;
+const SUPPORT_CARE_MIN_HP_RATIO = 0.42;
 const AI_CREWLESS_TANK_SEEK_RANGE = 64;
 const AI_TANK_MANEUVER_REASSESS_MIN = 6;
 const AI_TANK_MANEUVER_REASSESS_MAX = 11;
@@ -1628,6 +1634,11 @@ export function updateAI({
     }
 
     if (clearance) {
+      // Specialist care takes priority over clearance regroup/fallback holds;
+      // once the job is complete, the rear-support order keeps them out of the
+      // assault while the rest of the force follows its operational doctrine.
+      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
+      if (tryAssignSupportRearMove(unit, aliveEnemies, game, mapDef)) continue;
       if (
         (
           clearanceEnemyFocus === 'attack' &&
@@ -1648,7 +1659,6 @@ export function updateAI({
           continue;
         }
       }
-      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
       if (
         clearanceEnemyFocus === 'attack' &&
         clearanceOperationalMode === 'hold' &&
@@ -1670,6 +1680,11 @@ export function updateAI({
     }
 
     if (lastStand) {
+      // Battle Simulation regrouping must not strand medics or engineers away
+      // from casualties; they still withdraw to the protected support line
+      // after treatment while combat units obey the battle-plan hold.
+      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
+      if (tryAssignSupportRearMove(unit, aliveEnemies, game, mapDef)) continue;
       if (
         lastStandOperationalMode === 'regroup' &&
         updateLastStandOperationalPosition(
@@ -1681,8 +1696,6 @@ export function updateAI({
       ) {
         continue;
       }
-      if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
-      if (tryAssignMedicFollow(unit, aliveEnemies, mapDef)) continue;
       if (
         lastStandOperationalMode === 'defend' &&
         updateLastStandOperationalPosition(
@@ -1728,8 +1741,9 @@ export function updateAI({
     if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) {
       continue;
     }
-    // Idle medics (non-combat) shadow their own force instead of charging the enemy.
-    if (tryAssignMedicFollow(unit, aliveEnemies, mapDef)) {
+    // Keep medical and repair specialists with the protected rear support line
+    // instead of letting generic capture/attack logic pull them into contact.
+    if (tryAssignSupportRearMove(unit, aliveEnemies, game, mapDef)) {
       continue;
     }
 
@@ -1895,10 +1909,18 @@ export function tryAssignCrewlessTankRecovery(unit, game, claims = new Set()) {
  * so without this the AI only benefits when support units happen to be nearby.
  * @returns {boolean} true if a care order was issued
  */
-function tryAssignSupportCare(unit, allies, game, mapDef, careClaims) {
+export function tryAssignSupportCare(unit, allies, game, mapDef, careClaims = new Set()) {
   const type = unit?.def?.type;
   if (type !== 'medic' && type !== 'engineer') return false;
   if (!unit || unit.dead || unit.retreating || unit.surrendered) return false;
+  if (isUnitGarrisoned(unit)) return false;
+  if (
+    unit._mobilityDamaged ||
+    unit.hp / Math.max(1, unit.maxHp) < SUPPORT_CARE_MIN_HP_RATIO ||
+    (unit._underFireTimer ?? 0) > 0.45
+  ) {
+    return false;
+  }
   if (unit._sandbagSite || unit._medicTentSite || unit._trenchDigSite || unit._diggingTrench) {
     return false;
   }
@@ -1918,19 +1940,162 @@ function tryAssignSupportCare(unit, allies, game, mapDef, careClaims) {
   const stayRange = job.stayRange;
   if (dist <= stayRange) {
     // Inside the heal/repair aura — hold so the passive tick can work.
-    unit.moveTarget = null;
-    unit._userMoveOrder = false;
+    holdAiSupportPosition(unit, 'care');
     return true;
   }
 
-  // Approach the patient/job; small jitter avoids stacking on the same point.
-  const half = (mapDef?.size ?? 120) / 2 - 8;
-  const jitter = 1.4;
-  unit.moveTarget = {
-    x: clamp(job.x + (Math.random() - 0.5) * jitter, -half, half),
-    z: clamp(job.z + (Math.random() - 0.5) * jitter, -half, half),
-  };
+  // Approach from the friendly rear side of the patient rather than standing
+  // directly on top of a vehicle or casualty in the firing line.
+  issueAiSupportMove(
+    unit,
+    getAiSupportCareDestination(unit, job, game, mapDef),
+    'care'
+  );
+  return true;
+}
+
+function issueAiSupportMove(unit, destination, mode) {
+  const goal = unit._finalMoveGoal;
+  const changed =
+    !unit.moveTarget ||
+    !goal ||
+    Math.hypot(goal.x - destination.x, goal.z - destination.z) > 2.5;
+  if (changed) {
+    unit.moveTarget = { x: destination.x, z: destination.z };
+    unit._movePath = null;
+    unit._finalMoveGoal = { x: destination.x, z: destination.z };
+    unit._pathRepathAttempts = 0;
+    unit._lastPathRepathX = null;
+    unit._lastPathRepathZ = null;
+  }
   unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._aiSupportMode = mode;
+}
+
+function holdAiSupportPosition(unit, mode) {
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._finalMoveGoal = null;
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._aiSupportMode = mode;
+}
+
+function getAiSupportCareDestination(unit, job, game, mapDef) {
+  const rear = getAiCommanderRearAxis(game);
+  const lateral = ((Math.abs(unit.id ?? 0) % 3) - 1) * 0.9;
+  const standOff = job.stayRange * 0.82;
+  const raw = {
+    x: job.x + rear.x * standOff - rear.z * lateral,
+    z: job.z + rear.z * standOff + rear.x * lateral,
+  };
+  const half = (mapDef?.size ?? 120) / 2 - 8;
+  return {
+    x: clamp(raw.x, -half, half),
+    z: clamp(raw.z, -half, half),
+  };
+}
+
+function getAiSupportRearDestination(unit, allies, game, mapDef) {
+  const rear = getAiCommanderRearAxis(game);
+  const combatAllies = (allies ?? []).filter(
+    (ally) =>
+      ally &&
+      !ally.dead &&
+      !ally.surrendered &&
+      !ally._captureExit &&
+      !ally._crewless &&
+      ally.id !== unit.id &&
+      !['commander', 'medic', 'engineer', 'radioOperator'].includes(ally.def?.type)
+  );
+  const hq = game?.hqs?.find((candidate) => candidate.team === unit.team && !candidate.dead);
+  const anchor = combatAllies.length
+    ? averagePosition(combatAllies)
+    : hq?.position ?? rear.enemyBase;
+  const type = unit.def?.type;
+  const offset = combatAllies.length ? SUPPORT_REAR_OFFSET[type] ?? 11 : 4;
+  const slot = ((Math.abs(unit.id ?? 0) % 5) - 2) * SUPPORT_REAR_LATERAL_STEP;
+  const raw = {
+    x: anchor.x + rear.x * offset - rear.z * slot,
+    z: anchor.z + rear.z * offset + rear.x * slot,
+  };
+  const half = (mapDef?.size ?? 120) / 2 - 8;
+  const rearPoint = {
+    x: clamp(raw.x, -half, half),
+    z: clamp(raw.z, -half, half),
+  };
+  const threats = game?._playerAlive ?? [];
+  let nearestThreat = Infinity;
+  for (const threat of threats) {
+    if (
+      !threat ||
+      threat.dead ||
+      threat.surrendered ||
+      threat._captureExit ||
+      threat._crewless
+    ) continue;
+    if (!threat.position) continue;
+    nearestThreat = Math.min(
+      nearestThreat,
+      Math.hypot(rearPoint.x - threat.position.x, rearPoint.z - threat.position.z)
+    );
+  }
+  if (nearestThreat < SUPPORT_REAR_MIN_THREAT_DISTANCE) {
+    const push = SUPPORT_REAR_MIN_THREAT_DISTANCE - nearestThreat;
+    rearPoint.x = clamp(rearPoint.x + rear.x * push, -half, half);
+    rearPoint.z = clamp(rearPoint.z + rear.z * push, -half, half);
+  }
+  const covered = resolveSeekCoverDestination(
+    unit,
+    rearPoint.x,
+    rearPoint.z,
+    game?.coverSystem
+  );
+  if (
+    covered &&
+    Math.hypot(covered.x - rearPoint.x, covered.z - rearPoint.z) <= 26
+  ) {
+    return {
+      x: clamp(covered.x, -half, half),
+      z: clamp(covered.z, -half, half),
+    };
+  }
+  return rearPoint;
+}
+
+/** Keep medical and repair specialists in a safe rear support position. */
+export function tryAssignSupportRearMove(unit, allies, game, mapDef) {
+  const type = unit?.def?.type;
+  if (type !== 'medic' && type !== 'engineer') return false;
+  if (!unit || unit.dead || unit.retreating || unit.surrendered || unit._captureExit) return false;
+  if (unit._sandbagSite || unit._medicTentSite || unit._trenchDigSite || unit._diggingTrench) {
+    return false;
+  }
+
+  unit.clearAttackOrder();
+  unit._chasingAttack = false;
+
+  // A garrisoned or mobility-damaged specialist cannot make a rear move; hold
+  // it in place and let the normal healing aura work if a patient is nearby.
+  if (isUnitGarrisoned(unit) || unit._mobilityDamaged) {
+    holdAiSupportPosition(unit, 'rear');
+    return true;
+  }
+
+  const destination = getAiSupportRearDestination(unit, allies, game, mapDef);
+  const distance = Math.hypot(
+    unit.position.x - destination.x,
+    unit.position.z - destination.z
+  );
+  if (distance <= SUPPORT_REAR_HOLD_RADIUS) {
+    holdAiSupportPosition(unit, 'rear');
+    return true;
+  }
+
+  issueAiSupportMove(unit, destination, 'rear');
   return true;
 }
 
@@ -2091,59 +2256,6 @@ function findEngineerCareJob(engineer, allies, game, careClaims) {
   }
 
   return best;
-}
-
-/**
- * Keep spare medics with the main body so the next casualty is already nearby.
- * They do not fight (nonCombat) so advancing on the player is wasted.
- */
-function tryAssignMedicFollow(unit, allies, mapDef) {
-  if (unit?.def?.type !== 'medic') return false;
-
-  const combatAllies = allies.filter(
-    (a) =>
-      !a.dead &&
-      a.id !== unit.id &&
-      a.team === unit.team &&
-      a.def?.type !== 'medic' &&
-      !a.surrendered &&
-      !a._captureExit
-  );
-  if (!combatAllies.length) return false;
-
-  // Prefer the nearest cluster of non-medic friendlies.
-  let anchor = null;
-  let bestNear = -1;
-  for (const candidate of combatAllies) {
-    let near = 0;
-    for (const other of combatAllies) {
-      if (candidate.distanceTo(other) <= 22) near++;
-    }
-    if (near > bestNear) {
-      bestNear = near;
-      anchor = candidate;
-    }
-  }
-  if (!anchor) anchor = combatAllies[0];
-
-  // Bias slightly behind the ally relative to map center (enemy side of map is
-  // usually positive Z or based on bases — keep it simple: stick close to ally).
-  const dist = unit.distanceTo(anchor);
-  unit.clearAttackOrder();
-  unit._chasingAttack = false;
-  if (dist <= MEDIC_AURA_RANGE * 0.75) {
-    unit.moveTarget = null;
-    unit._userMoveOrder = false;
-    return true;
-  }
-
-  const half = (mapDef?.size ?? 120) / 2 - 8;
-  unit.moveTarget = {
-    x: clamp(anchor.position.x + (Math.random() - 0.5) * 6, -half, half),
-    z: clamp(anchor.position.z + (Math.random() - 0.5) * 6, -half, half),
-  };
-  unit._userMoveOrder = false;
-  return true;
 }
 
 function tryAiSmokeScreen(enemyUnits, playerUnits, game, difficulty) {
