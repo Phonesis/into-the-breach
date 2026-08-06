@@ -588,6 +588,28 @@ function migrateMeshCorpsesToWorld(unit) {
 }
 
 /**
+ * Match corpse cloth to the living infantry material when a faction has no
+ * dedicated uniform texture. This keeps procedural-only factions from falling
+ * back to the white tint used for textured uniforms.
+ */
+function createCorpseClothMaterial(factionId, { ghillie = false, roughness = 0.94 } = {}) {
+  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
+  if (uniformTex) {
+    return createCamoMaterial(
+      0xffffff,
+      uniformTex,
+      ghillie ? [1.4, 1] : [1.1, 0.75],
+      { rough: roughness }
+    );
+  }
+
+  const fallback = getInfantryMaterials(factionId).body.clone();
+  fallback.roughness = roughness;
+  fallback.metalness = 0;
+  return fallback;
+}
+
+/**
  * Spawn occasional flying limbs when infantry die to blast/HE.
  * Chancey — not every kill, and not every limb.
  */
@@ -602,10 +624,9 @@ function spawnExplosionGibs(unit, factionId, unitType) {
     unit.position.z
   );
 
-  const uniformTex =
-    unitType === 'sniper' ? getGhillieTexture() : getInfantryUniformTexture(factionId);
-  const cloth = createCamoMaterial(0xffffff, uniformTex, unitType === 'sniper' ? [1.4, 1] : [1.1, 0.75], {
-    rough: 0.94,
+  const cloth = createCorpseClothMaterial(factionId, {
+    ghillie: unitType === 'sniper',
+    roughness: 0.94,
   });
   cloth.color.multiplyScalar(0.7);
   const skin = new THREE.MeshStandardMaterial({ color: 0x8a6e58, roughness: 0.88 });
@@ -935,6 +956,11 @@ function addFallenHelmet(group, helmetMat, factionId) {
     helmet.scale.set(1.08, 0.5, 1.08);
     helmet.rotation.x = Math.PI / 2;
     helmet.position.set(0.04, 0.07, 0.16);
+  } else if (factionId === 'japan') {
+    helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), helmetMat);
+    helmet.scale.set(1.05, 0.46, 1.08);
+    helmet.rotation.x = Math.PI / 2;
+    helmet.position.set(0.04, 0.07, 0.16);
   } else {
     helmet = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), helmetMat);
     helmet.scale.set(1.1, 0.48, 1.1);
@@ -949,9 +975,9 @@ function buildFallenSoldierBody(factionId, { ghillie = false } = {}) {
   const group = new THREE.Group();
   group.name = 'fallenBody';
 
-  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
-  const uniformMat = createCamoMaterial(0xffffff, uniformTex, ghillie ? [1.4, 1] : [1.1, 0.75], {
-    rough: 0.94,
+  const uniformMat = createCorpseClothMaterial(factionId, {
+    ghillie,
+    roughness: 0.94,
   });
   uniformMat.color.multiplyScalar(0.72);
 
@@ -1039,9 +1065,9 @@ function buildCrushedSoldierBody(factionId, { ghillie = false, trackYaw = 0 } = 
   group.name = 'fallenBody';
   group.userData.crushed = true;
 
-  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
-  const uniformMat = createCamoMaterial(0xffffff, uniformTex, ghillie ? [1.4, 1] : [1.1, 0.75], {
-    rough: 0.97,
+  const uniformMat = createCorpseClothMaterial(factionId, {
+    ghillie,
+    roughness: 0.97,
   });
   // Mud + blood soak: darken camo without pure black.
   uniformMat.color.multiplyScalar(0.42);

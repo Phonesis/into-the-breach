@@ -238,6 +238,28 @@ function buildZIS3(group, body, detail, dark) {
   addTowedGunCrew(group, 'russia');
 }
 
+function buildShinhotoChiHa(group, body, detail, dark) {
+  buildTankFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'tank'));
+}
+
+function buildChiNu(group, body, detail, dark) {
+  buildTankFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'superHeavyTank'));
+}
+
+function buildChiyoda(group, body, detail, dark) {
+  buildArmoredCarFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'armoredCar'));
+}
+
+function buildType91Howitzer(group, body, detail, dark) {
+  buildArtilleryFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'artillery'));
+  addTowedGunCrew(group, 'japan', { artillery: true });
+}
+
+function buildType1AtGun(group, body, detail, dark) {
+  buildAtGunFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'antiTankGun'));
+  addTowedGunCrew(group, 'japan');
+}
+
 function addMgTripod(group, dark, { spread = 0.46, legLen = 0.54, pivotY = 0.34 } = {}) {
   const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.1, 8), dark);
   pivot.position.y = pivotY;
@@ -386,6 +408,36 @@ export function buildFactionMG(group, body, detail, dark, factionId) {
     panRim.rotation.x = Math.PI / 2;
     panRim.position.set(0, 0.65, 0.02);
     gun.add(panRim);
+  } else if (factionId === 'japan') {
+    addMgTripod(gun, dark, { spread: 0.43, legLen: 0.5, pivotY: 0.34 });
+
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.14), dark);
+    receiver.position.set(0.04, 0.49, 0.06);
+    gun.add(receiver);
+
+    const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.06, 0.6, 10), dark);
+    jacket.rotation.z = Math.PI / 2;
+    jacket.position.set(0.42, 0.5, 0.06);
+    gun.add(jacket);
+    muzzleMesh = jacket;
+
+    for (let i = 0; i < 6; i++) {
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.009, 5, 10), dark);
+      rib.rotation.y = Math.PI / 2;
+      rib.position.set(0.2 + i * 0.085, 0.5, 0.06);
+      gun.add(rib);
+    }
+
+    const feedStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.035, 0.075),
+      mat(0x665b42, { metal: 0.46, rough: 0.58 })
+    );
+    feedStrip.position.set(-0.12, 0.53, -0.12);
+    gun.add(feedStrip);
+
+    const shoulderBar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.055, 0.16), dark);
+    shoulderBar.position.set(-0.24, 0.46, 0.06);
+    gun.add(shoulderBar);
   } else {
     addMgTripod(gun, dark, { spread: 0.4, legLen: 0.5, pivotY: 0.35 });
 
@@ -568,6 +620,17 @@ export function buildFactionRadioOperator(group, _body, dark, factionId) {
       antenna: 0.57,
       tilt: 0.12,
       handsetX: -0.1,
+      sideDetail: 'battery',
+    },
+    japan: {
+      caseColor: 0x64603e,
+      panelColor: 0x7a7048,
+      width: 0.2,
+      height: 0.29,
+      depth: 0.13,
+      antenna: 0.66,
+      tilt: -0.05,
+      handsetX: 0.1,
       sideDetail: 'battery',
     },
   }[factionId] ?? null;
@@ -810,6 +873,7 @@ export function buildFactionCommander(group, _body, dark, factionId) {
     usa: 0xd7c27a,
     uk: 0xc8b36a,
     russia: 0xc9362b,
+    japan: 0xd3b85e,
   };
 
   for (let i = 0; i < positions.length; i++) {
@@ -1038,6 +1102,14 @@ const VEHICLE_BUILDERS = {
     armoredCar: buildBA64,
     artillery: buildM30,
     antiTankGun: buildZIS3,
+  },
+  japan: {
+    tank: buildShinhotoChiHa,
+    tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'japan'),
+    superHeavyTank: buildChiNu,
+    armoredCar: buildChiyoda,
+    artillery: buildType91Howitzer,
+    antiTankGun: buildType1AtGun,
   },
 };
 

@@ -3,6 +3,7 @@
 const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const CREW_MOVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const TRACKED_PIVOT_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
+const ENGINE_FACTIONS = new Set(['germany', 'usa', 'uk', 'russia', 'japan']);
 
 const BUFFER_KEYS = {
   tank: 'engine_tank',
@@ -221,14 +222,23 @@ export class VehicleEngineAudio {
   }
 
   _buffersFor(type, factionId = null) {
-    const key = type === 'tankDestroyer'
-      ? `${BUFFER_KEYS.tankDestroyer}_${factionId ?? 'germany'}`
-      : BUFFER_KEYS[type];
-    const main = this.sm.buffers[key];
+    const faction = ENGINE_FACTIONS.has(factionId) ? factionId : null;
+    const genericKey = BUFFER_KEYS[type];
+    const key = faction && type === 'tankDestroyer'
+      ? `${BUFFER_KEYS.tankDestroyer}_${faction}`
+      : faction && (type === 'tank' || type === 'superHeavyTank')
+        ? `engine_tank_${faction}`
+        : faction && type === 'armoredCar'
+          ? `engine_armored_car_${faction}`
+          : genericKey;
+    const main = this.sm.buffers[key] ??
+      (key !== genericKey ? this.sm.buffers[genericKey] : null) ??
+      (type === 'tankDestroyer' ? this.sm.buffers.engine_tank : null);
     const exhaust = this.sm.buffers[`${key}_exhaust`] ??
-      (type === 'tankDestroyer' ? this.sm.buffers.engine_tank_exhaust : null);
+      (type === 'tankDestroyer' ? this.sm.buffers.engine_tank_exhaust :
+        this.sm.buffers[`${genericKey}_exhaust`] ?? null);
     const pivot = TRACKED_PIVOT_TYPES.has(type)
-      ? this.sm.buffers.engine_tank_pivot_tracks
+      ? this.sm.buffers[`${key}_pivot_tracks`] ?? this.sm.buffers.engine_tank_pivot_tracks
       : null;
     if (!main) return null;
     return { main, exhaust: exhaust ?? null, pivot: pivot ?? null };

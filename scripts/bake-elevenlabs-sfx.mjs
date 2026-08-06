@@ -24,18 +24,16 @@ const TMP = join(__dir, '../.tmp-elevenlabs-sfx');
 const API = 'https://api.elevenlabs.io/v1/sound-generation';
 
 const API_KEY = process.env.ELEVENLABS_API_KEY?.trim();
-if (!API_KEY) {
-  console.error('Missing ELEVENLABS_API_KEY. Create one at https://elevenlabs.io/app/developers/api-keys');
-  process.exit(1);
-}
 
 const args = process.argv.slice(2);
 const force = args.includes('--force');
+const validate = args.includes('--validate');
 const onlyIdx = args.indexOf('--only');
+const onlyArg = onlyIdx >= 0 ? args[onlyIdx + 1] ?? '' : null;
 const onlySet =
-  onlyIdx >= 0
+  onlyArg !== null
     ? new Set(
-        args[onlyIdx + 1]
+        onlyArg
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean)
@@ -56,14 +54,33 @@ mkdirSync(TMP, { recursive: true });
 function convertToGameWav(srcPath, destName, { fadeOut = 0.05, pad = 0.02 } = {}) {
   const dest = join(OUT, destName);
   const isExplosion = /^explosion/i.test(destName);
-  const isImpact = /^impact/i.test(destName);
+  const isImpact = /^(impact|bullet-impact|bullet-structure|bullet-metal)/i.test(destName);
+  const isRicochet = /^armor-ricochet/i.test(destName);
+  const isWhiz = /^bullet-whiz/i.test(destName);
   const isGun =
     /^(rifle|mg|tank|at-|mortar|howitzer|artillery)/i.test(destName) &&
     !isExplosion;
 
   const isMortar = /^mortar/i.test(destName);
-  const eq = isMortar
+  const eq = isWhiz
     ? [
+        // Passing rounds need a clean transient and little low end.
+        'highpass=f=180',
+        'lowpass=f=11500',
+        'equalizer=f=2800:t=q:w=1.0:g=2',
+        'equalizer=f=6500:t=q:w=1.0:g=-3',
+      ]
+    : isRicochet
+      ? [
+          // Keep the steel strike present without turning the tail into a bell.
+          'highpass=f=65',
+          'lowpass=f=13000',
+          'equalizer=f=180:t=q:w=0.8:g=2.5',
+          'equalizer=f=3200:t=q:w=1.0:g=-2',
+          'equalizer=f=7200:t=q:w=1.0:g=-3',
+        ]
+      : isMortar
+        ? [
         // Mortar = low hollow thump, not a bright crack
         'highpass=f=40',
         'lowpass=f=6500',
@@ -71,9 +88,9 @@ function convertToGameWav(srcPath, destName, { fadeOut = 0.05, pad = 0.02 } = {}
         'equalizer=f=200:t=q:w=0.9:g=3',
         'equalizer=f=2500:t=q:w=1.0:g=-6',
         'equalizer=f=4500:t=q:w=1.0:g=-8',
-      ]
-    : isGun
-      ? [
+          ]
+        : isGun
+          ? [
           // Keep sub-thump; cut thin hiss that reads as "tinny"
           'highpass=f=50',
           'lowpass=f=10500',
@@ -85,10 +102,17 @@ function convertToGameWav(srcPath, destName, { fadeOut = 0.05, pad = 0.02 } = {}
           'equalizer=f=2800:t=q:w=1.1:g=-5.0',
           'equalizer=f=4500:t=q:w=1.0:g=-5.5',
           'equalizer=f=7000:t=q:w=1.0:g=-3.5',
-        ]
-      : isExplosion
-        ? ['highpass=f=30', 'lowpass=f=12000', 'equalizer=f=60:t=q:w=0.7:g=2.5']
-        : ['highpass=f=40', 'lowpass=f=12000'];
+            ]
+          : isExplosion
+            ? ['highpass=f=30', 'lowpass=f=12000', 'equalizer=f=60:t=q:w=0.7:g=2.5']
+            : isImpact
+              ? [
+                  'highpass=f=45',
+                  'lowpass=f=11500',
+                  'equalizer=f=120:t=q:w=0.8:g=2',
+                  'equalizer=f=2500:t=q:w=1.0:g=-2',
+                ]
+              : ['highpass=f=40', 'lowpass=f=12000'];
 
   const af = [
     ...eq,
@@ -100,7 +124,11 @@ function convertToGameWav(srcPath, destName, { fadeOut = 0.05, pad = 0.02 } = {}
     // Hotter targets so one-shots punch through battle mix
     isGun || isMortar
       ? 'loudnorm=I=-9:TP=-0.5:LRA=5'
-      : 'loudnorm=I=-14:TP=-1.0:LRA=7',
+      : isRicochet || isImpact
+        ? 'loudnorm=I=-12:TP=-1.0:LRA=7'
+        : isWhiz
+          ? 'loudnorm=I=-16:TP=-1.0:LRA=7'
+          : 'loudnorm=I=-14:TP=-1.0:LRA=7',
     'volume=1.15',
     'alimiter=limit=0.98',
   ].join(',');
@@ -442,9 +470,148 @@ const CATALOG = [
   },
 ];
 
+/** Additional battlefield one-shots. Keep these separate from the legacy pool
+ * so the game can distinguish dirt, masonry/wood, steel and passing rounds. */
+const COMBAT_EFFECT_CATALOG = [
+  {
+    file: 'armor-ricochet-03.wav',
+    duration: 0.82,
+    influence: 0.67,
+    text:
+      'World War Two armor-piercing shell glancing off an angled tank plate, hard steel impact, short tearing scrape, hot sparks and a brief rising deflection whistle, authentic outdoor field recording, dry, no voices, no music, no cannon muzzle blast, no explosion, no sci-fi, no synthetic sound',
+  },
+  {
+    file: 'armor-ricochet-04.wav',
+    duration: 0.78,
+    influence: 0.64,
+    text:
+      'High velocity 75 millimeter tank shell striking and skipping from sloped armor, sharp plate crack, fragments and sparks, short metallic deflection tail, realistic World War Two range recording, dry, no voices, no music, no gun firing, no explosion, no electronic or cinematic sound',
+  },
+  {
+    file: 'armor-ricochet-05.wav',
+    duration: 0.88,
+    influence: 0.65,
+    text:
+      'Heavy 88 millimeter shell hitting thick steel tank armor at a bad angle, brutal low metal slam followed by a short scraping deflection and bright sparks, authentic outdoor battlefield recording, dry, no voices, no music, no muzzle blast, no explosion, no sci-fi or synthetic sound',
+  },
+  {
+    file: 'armor-ricochet-06.wav',
+    duration: 0.68,
+    influence: 0.6,
+    text:
+      'Small World War Two anti-tank round striking a steel vehicle side plate and glancing away, dry punch, two fast metal impacts, brief real ricochet whistle, outdoor field recording, no voices, no music, no gun muzzle blast, no explosion, no electronic or cinematic sound',
+  },
+  {
+    file: 'bullet-impact-dirt-01.wav',
+    duration: 0.5,
+    influence: 0.58,
+    text:
+      'Single World War Two rifle bullet striking dry packed earth at close range, short dusty thud with a small spray of grit and pebbles, authentic outdoor field recording, dry, no gunshot, no bullet pass-by, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-impact-dirt-02.wav',
+    duration: 0.5,
+    influence: 0.56,
+    text:
+      'Several rifle bullets striking dry grass and loose soil, tight irregular dirt pops and tiny gravel sprays, realistic World War Two battlefield ground impacts, close outdoor recording, no gunshots, no voices, no music, no explosion, no electronic sound',
+  },
+  {
+    file: 'bullet-impact-dirt-03.wav',
+    duration: 0.5,
+    influence: 0.56,
+    text:
+      'Single rifle bullet hitting sandy soil and small stones, gritty slap, brief dust puff and scattered pebbles, authentic outdoor live-fire range recording, no muzzle blast, no bullet whiz, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-impact-dirt-04.wav',
+    duration: 0.52,
+    influence: 0.55,
+    text:
+      'Rifle bullets hitting damp battlefield mud, dull wet earth slaps with small flecks of soil, short natural close-mic field recording, no gunshot, no passing bullet, no voices, no music, no explosion, no electronic sound',
+  },
+  {
+    file: 'bullet-impact-structure-01.wav',
+    duration: 0.5,
+    influence: 0.58,
+    text:
+      'Single World War Two rifle bullet striking a rough wooden plank and splintering it, dry sharp woody crack with tiny fragments, authentic outdoor field recording, no gunshot, no ricochet, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-impact-structure-02.wav',
+    duration: 0.54,
+    influence: 0.56,
+    text:
+      'Rifle bullet striking old brick and plaster masonry, compact brittle chip and dust puff, realistic battlefield structure impact recorded outdoors, no muzzle blast, no ricochet, no voices, no music, no explosion, no electronic sound',
+  },
+  {
+    file: 'bullet-impact-structure-03.wav',
+    duration: 0.52,
+    influence: 0.55,
+    text:
+      'Rifle bullet punching a sandbag wall, muted fabric and packed-sand thump with a little dust, close authentic World War Two field recording, no gunshot, no bullet whiz, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-impact-metal-01.wav',
+    duration: 0.5,
+    influence: 0.58,
+    text:
+      'Single rifle bullet striking thin steel equipment outdoors, short sharp metal ping with a muted body and no long ringing tail, realistic World War Two range recording, no ricochet, no gunshot, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-impact-metal-02.wav',
+    duration: 0.52,
+    influence: 0.58,
+    text:
+      'Several rifle bullets hitting a steel vehicle hull, close compact metallic knocks with different pitches and a dull armored body, authentic outdoor battlefield recording, no ricochet, no cannon firing, no voices, no music, no explosion, no electronic sound',
+  },
+  {
+    file: 'bullet-impact-metal-03.wav',
+    duration: 0.5,
+    influence: 0.55,
+    text:
+      'Rifle bullet hitting a steel ammunition box, brief hard tick and muted hollow body, realistic field recording with no sustained ring, no ricochet, no muzzle blast, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-whiz-01.wav',
+    duration: 0.5,
+    influence: 0.62,
+    text:
+      'A supersonic World War Two rifle bullet passing very close past the listener, fast clean air crack and short sharp whip, authentic outdoor battlefield recording, no gunshot, no impact, no voices, no music, no explosion, no synthetic or cinematic sound',
+  },
+  {
+    file: 'bullet-whiz-02.wav',
+    duration: 0.52,
+    influence: 0.6,
+    text:
+      'A rifle round passing ten meters overhead, distinct high-speed bullet snap with a brief air rush, realistic open field recording, no muzzle blast, no impact, no voices, no music, no explosion, no electronic sound',
+  },
+  {
+    file: 'bullet-whiz-03.wav',
+    duration: 0.58,
+    influence: 0.58,
+    text:
+      'A distant rifle bullet crossing from left to right past the listener, thin but natural supersonic crack and fading air trail, authentic World War Two field recording, no gunshot, no impact, no voices, no music, no explosion, no synthetic sound',
+  },
+  {
+    file: 'bullet-whiz-04.wav',
+    duration: 0.5,
+    influence: 0.6,
+    text:
+      'Two staggered rifle bullets passing close through open air, short realistic ballistic snaps with slight distance variation, outdoor combat recording, no muzzle blast, no impact, no voices, no music, no explosion, no electronic or cinematic sound',
+  },
+];
+
+const ALL_CATALOG = [...CATALOG, ...COMBAT_EFFECT_CATALOG];
+
 function matchesOnly(file) {
   if (!onlySet) return true;
   const stem = file.replace(/\.wav$/i, '');
+  if (
+    onlySet.has('combat-effects') &&
+    COMBAT_EFFECT_CATALOG.some((job) => job.file === file)
+  ) {
+    return true;
+  }
   for (const key of onlySet) {
     if (stem === key || stem.startsWith(key) || file.includes(key)) return true;
   }
@@ -452,9 +619,37 @@ function matchesOnly(file) {
 }
 
 async function main() {
-  const jobs = CATALOG.filter((j) => matchesOnly(j.file));
+  const jobs = ALL_CATALOG.filter((j) => matchesOnly(j.file));
   if (!jobs.length) {
     console.error('No matching samples for --only filter');
+    process.exit(1);
+  }
+
+  if (validate) {
+    let invalid = 0;
+    for (const job of jobs) {
+      const promptLength = job.text.length;
+      const durationValid = Number.isFinite(job.duration) && job.duration >= 0.5 && job.duration <= 30;
+      if (promptLength > 450 || !durationValid) {
+        const durationLabel = durationValid ? `${job.duration}s` : `${job.duration}s (expected 0.5–30s)`;
+        console.error(`FAIL ${job.file}: prompt ${promptLength}/450, duration ${durationLabel}`);
+        invalid += 1;
+      } else {
+        console.log(`ok ${job.file}: prompt ${promptLength}/450, ${job.duration}s`);
+      }
+    }
+    if (invalid) {
+      console.error(`Validation failed for ${invalid} prompt(s)`);
+      process.exit(1);
+    }
+    console.log(`Validated ${jobs.length} ElevenLabs SFX prompt(s)`);
+    return;
+  }
+
+  if (!API_KEY) {
+    console.error(
+      'Missing ELEVENLABS_API_KEY. Create one at https://elevenlabs.io/app/developers/api-keys'
+    );
     process.exit(1);
   }
 
@@ -487,7 +682,11 @@ async function main() {
       const tmpMp3 = join(TMP, `${job.file}.mp3`);
       writeFileSync(tmpMp3, mp3);
       convertToGameWav(tmpMp3, job.file, {
-        fadeOut: job.file.startsWith('explosion') ? 0.12 : 0.05,
+        fadeOut: job.file.startsWith('explosion')
+          ? 0.12
+          : job.file.startsWith('bullet-whiz')
+            ? 0.08
+            : 0.05,
       });
       console.log('ok');
       ok += 1;

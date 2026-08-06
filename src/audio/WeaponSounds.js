@@ -79,6 +79,11 @@ export const WEAPON_SAMPLE_FILES = {
     'smg-russia-c.wav',
     'smg-russia-d.wav',
     'smg-russia-e.wav'],
+  smg_japan: [
+    'smg-japan-el-01.wav',
+    'smg-japan-el-02.wav',
+    'smg-japan-el-03.wav',
+  ],
   mg: [
     'mg.wav',
     'mg-c.wav',
@@ -130,6 +135,14 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-russia-el-04.wav',
     'rifle-russia-el-05.wav',
     'rifle-russia-el-06.wav',
+  ],
+  rifle_japan: [
+    'rifle-japan-el-01.wav',
+    'rifle-japan-el-02.wav',
+    'rifle-japan-el-03.wav',
+    'rifle-japan-el-04.wav',
+    'rifle-japan-el-05.wav',
+    'rifle-japan-el-06.wav',
   ],
 
   mg_germany: [
@@ -208,6 +221,12 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-extra-long-a.wav',
     'mg-extra-long-b.wav',
   ],
+  mg_japan: [
+    'mg-japan-el-01.wav',
+    'mg-japan-el-02.wav',
+    'mg-japan-el-03.wav',
+    'mg-japan-el-04.wav',
+  ],
 
   tank_75_germany: [
     'tank-75-germany-el-01.wav',
@@ -227,11 +246,14 @@ export const WEAPON_SAMPLE_FILES = {
   tank_122_russia: [
     'tank-122-russia-el-01.wav',
     'tank-122-russia-el-02.wav'],
+  tank_47_japan: ['tank-47-japan-el-01.wav', 'tank-47-japan-el-02.wav'],
+  tank_75_japan: ['tank-75-japan-el-01.wav', 'tank-75-japan-el-02.wav'],
 
   td_88_germany: ['td-88-germany-el-01.wav', 'td-88-germany-el-02.wav'],
   td_76_usa: ['td-76-usa-el-01.wav', 'td-76-usa-el-02.wav'],
   td_17pdr_uk: ['tank-17pdr-uk-el-01.wav', 'tank-17pdr-uk-el-02.wav'],
   td_100_russia: ['td-100-russia-el-01.wav', 'td-100-russia-el-02.wav'],
+  td_75_japan: ['td-75-japan-el-01.wav', 'td-75-japan-el-02.wav'],
   td_mg_germany: ['td-mg-germany.wav'],
   td_mg_usa: ['td-mg-usa.wav'],
   td_mg_uk: ['td-mg-uk.wav'],
@@ -243,11 +265,17 @@ export const WEAPON_SAMPLE_FILES = {
   at_57_usa: ['at-57-usa.wav', 'at-57-usa-c.wav', 'at-57-usa-d.wav'],
   at_57_uk: ['at-57-uk.wav', 'at-57-uk-c.wav', 'at-57-uk-d.wav'],
   at_76_russia: ['at-76-russia.wav', 'at-76-russia-c.wav', 'at-76-russia-d.wav'],
+  at_47_japan: ['at-47-japan-el-01.wav', 'at-47-japan-el-02.wav'],
 
   mortar_germany: ['mortar-germany.wav', 'mortar-germany-c.wav', 'mortar-germany-d.wav'],
   mortar_usa: ['mortar-usa.wav', 'mortar-usa-c.wav', 'mortar-usa-d.wav'],
   mortar_uk: ['mortar-uk.wav', 'mortar-uk-c.wav', 'mortar-uk-d.wav'],
   mortar_russia: ['mortar-russia.wav', 'mortar-russia-c.wav', 'mortar-russia-d.wav'],
+  mortar_japan: [
+    'mortar-japan-el-01.wav',
+    'mortar-japan-el-02.wav',
+    'mortar-japan-el-03.wav',
+  ],
 
   howitzer_105_germany: [
     'howitzer-105-germany.wav',
@@ -265,6 +293,11 @@ export const WEAPON_SAMPLE_FILES = {
     'howitzer-122-russia.wav',
     'howitzer-122-russia-c.wav',
     'howitzer-122-russia-d.wav'],
+  howitzer_105_japan: [
+    'howitzer-105-japan-el-01.wav',
+    'howitzer-105-japan-el-02.wav',
+    'howitzer-105-japan-el-03.wav',
+  ],
 };
 
 const PROFILE_FALLBACK = {
@@ -275,9 +308,11 @@ const PROFILE_FALLBACK = {
   smg_usa: 'smg',
   smg_uk: 'smg',
   smg_russia: 'smg',
+  smg_japan: 'smg',
   mg_germany: 'mg',
   mg_usa: 'mg',
   mg_uk: 'mg',
+  mg_japan: 'mg',
   tank_75_germany: 'tank_75',
   tank_75_usa: 'tank_75',
   tank_75_uk: 'tank_75',
@@ -307,6 +342,13 @@ const PROFILE_FALLBACK = {
   at_76_russia: 'tank_75',
   mortar_russia: 'howitzer_105',
   howitzer_122_russia: 'howitzer_105',
+  rifle_japan: 'rifle',
+  tank_47_japan: 'tank_57',
+  tank_75_japan: 'tank_75',
+  td_75_japan: 'tank_75',
+  at_47_japan: 'tank_57',
+  mortar_japan: 'howitzer_105',
+  howitzer_105_japan: 'howitzer_105',
 };
 
 const PROFILE_MIN_GAP_MS = {
@@ -366,14 +408,14 @@ export function getAllWeaponSampleUrls() {
 
 export function mgProfileForFaction(factionId = 'germany') {
   const id = factionId ?? 'germany';
-  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia') return `mg_${id}`;
+  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia' || id === 'japan') return `mg_${id}`;
   return 'mg';
 }
 
 /** Squad SMG profile for infantry automatic fire (not MG-team LMG). */
 export function smgProfileForFaction(factionId = 'germany') {
   const id = factionId ?? 'germany';
-  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia') return `smg_${id}`;
+  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia' || id === 'japan') return `smg_${id}`;
   return 'smg';
 }
 
@@ -491,13 +533,19 @@ function weightedPick(files) {
 }
 
 export function pickSampleFile(profile, buffers) {
-  const resolved = resolveProfileFallback(profile);
-  const files = filterMasterFiles(
+  let resolved = resolveProfileFallback(profile);
+  let files = filterMasterFiles(
     WEAPON_SAMPLE_FILES[resolved] ?? WEAPON_SAMPLE_FILES[profile]
   );
   if (!files?.length) return null;
 
-  const available = files.filter((f) => buffers[f.replace(/\.wav$/i, '')]);
+  let available = files.filter((f) => buffers[f.replace(/\.wav$/i, '')]);
+  const fallback = PROFILE_FALLBACK[resolved] ?? PROFILE_FALLBACK[profile];
+  if (!available.length && fallback && fallback !== resolved) {
+    resolved = fallback;
+    files = filterMasterFiles(WEAPON_SAMPLE_FILES[fallback]);
+    available = files.filter((f) => buffers[f.replace(/\.wav$/i, '')]);
+  }
   if (!available.length) return null;
   if (available.length === 1) return available[0];
 

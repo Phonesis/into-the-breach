@@ -51,6 +51,17 @@ export const PARATROOPER_DEFS = {
     weaponSound: 'at_76_russia',
     caliber: 76,
   },
+  japan: {
+    ...BASE,
+    name: 'Teishin Raiding Party',
+    designation: 'Teishin Shudan — Type 2 rifle grenades and demolition charges',
+    description: 'Elite airborne raiders — Arisaka/Type 96 fire vs infantry and close assault charges vs armor.',
+    weaponSound: 'at_47_japan',
+    caliber: 40,
+    atAttackSpeed: 0.19,
+    antiArmorMult: 1.34,
+    softMult: 0.62,
+  },
 };
 
 export function getParatrooperDef(factionId = 'usa') {

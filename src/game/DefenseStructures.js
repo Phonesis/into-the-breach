@@ -58,6 +58,7 @@ const MORTAR_SOUND_BY_FACTION = {
   usa: 'mortar_usa',
   uk: 'mortar_uk',
   russia: 'mortar_russia',
+  japan: 'mortar_japan',
 };
 
 function emplacementWeaponProfile(def, factionId) {

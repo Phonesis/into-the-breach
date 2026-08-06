@@ -11,26 +11,37 @@ const uiRoot = document.getElementById('ui-root');
 let game = null;
 
 function primeAudio() {
-  sounds.unlock();
+  return sounds.unlock();
 }
 
 function resumeAudioContext() {
-  primeAudio();
+  if (!primeAudio()) return;
+  // Resume immediately while the browser still considers this a user gesture.
+  // Combat samples continue loading in the background; menu music must not wait
+  // for the entire sound library to decode.
   void sounds
-    .primeForCombat()
-    .then((running) => {
-      if (running && !sounds.inBattle) sounds.setMenuMusicActive(true);
-    })
+    .resumeContext()
     // Autoplay policy can reject a resume attempt; the next user gesture retries it.
     .catch(() => {});
 }
 
-uiRoot.addEventListener('pointerdown', resumeAudioContext);
-window.addEventListener('keydown', resumeAudioContext);
+function restoreAudioContext() {
+  if (!sounds.unlocked) return;
+  void sounds.resumeContext().catch(() => {});
+}
+
+// Capture gestures before UI handlers start asynchronous work. The click
+// fallback covers keyboard/assistive activation that does not emit pointerdown.
+window.addEventListener('pointerdown', resumeAudioContext, { capture: true });
+window.addEventListener('keydown', resumeAudioContext, { capture: true });
+window.addEventListener('click', resumeAudioContext, { capture: true });
+window.addEventListener('pageshow', restoreAudioContext);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) restoreAudioContext();
+});
 
 const ui = new UIManager(uiRoot, {
   onMenuVisible(visible) {
-    primeAudio();
     if (sounds.inBattle) {
       if (!visible) sounds.setMenuMusicActive(false);
       return;
@@ -38,9 +49,10 @@ const ui = new UIManager(uiRoot, {
     sounds.setMenuMusicActive(visible);
   },
   async onStartGame(factionId, mapId, gameMode, options = {}) {
-    await preloadUnitTextures();
     primeAudio();
-    await sounds.primeForCombat();
+    const audioReady = sounds.primeForCombat();
+    await preloadUnitTextures();
+    await audioReady;
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -57,9 +69,10 @@ const ui = new UIManager(uiRoot, {
     game?.saveBattle();
   },
   async onLoadBattle(saveId) {
-    await preloadUnitTextures();
     primeAudio();
-    await sounds.primeForCombat();
+    const audioReady = sounds.primeForCombat();
+    await preloadUnitTextures();
+    await audioReady;
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });

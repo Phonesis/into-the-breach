@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Type 3 Chi-Nu">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#282820"><rect x="13" y="46" width="8" height="10"/><rect x="106" y="46" width="8" height="10"/><rect x="17" y="48" width="93" height="6"/></g>
+  <g fill="#66623c"><path d="M25 44 L28 29 L42 23 L96 23 L104 31 L102 44 Z"/><path d="M42 23 L56 16 L84 16 L96 23 Z"/></g>
+  <g fill="#41422b"><rect x="89" y="18" width="34" height="5"/><rect x="82" y="16" width="11" height="9"/></g>
+  <g fill="#82734b" opacity="0.85"><rect x="51" y="14" width="26" height="10" rx="2"/></g>
+  <g fill="#c8aa55"><path d="m99 29 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/></g>
+</svg>

@@ -144,6 +144,28 @@ export class GeneralOrdersManager {
     return true;
   }
 
+  /**
+   * Scenario-enforced withdrawal. Unlike a discretionary order, a deadline
+   * retreat cannot be blocked by a dead commander, cooldown, or another order.
+   */
+  forceFullRetreat() {
+    if (!this.game.running || this.game.gameOver) return false;
+    const hq = commandRallyPoint(this.game, this.ownerTeam);
+    if (!hq) return false;
+
+    this._applyFullRetreat(hq);
+    this.active = {
+      type: 'fullRetreat',
+      remaining: GENERAL_ORDER_DURATION_SEC,
+      forced: true,
+    };
+    this.cooldowns.fullRetreat = Math.max(
+      this.cooldowns.fullRetreat ?? 0,
+      GENERAL_ORDER_COOLDOWN_SEC
+    );
+    return true;
+  }
+
   cancelActive() {
     if (!this.active) return false;
     const type = this.active.type;
@@ -159,10 +181,10 @@ export class GeneralOrdersManager {
 
     if (!this.active) return;
 
-    // Losing the commander immediately ends any active command-wide order.
-    // This protects both the player and AI from a stale order surviving a
-    // commander casualty between combat ticks.
-    if (!this.hasCommandLink()) {
+    // Losing the commander immediately ends discretionary command-wide orders.
+    // Scenario-forced withdrawals are the exception: the deadline order must
+    // still reach the assault force after its field commander has been lost.
+    if (!this.active.forced && !this.hasCommandLink()) {
       this.cancelActive();
       return;
     }

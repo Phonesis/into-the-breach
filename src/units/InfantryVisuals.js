@@ -257,6 +257,20 @@ function addHelmet(soldier, mats, factionId, baseY, { gunner = false } = {}) {
     const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.124, 0.132, 0.025, 12), mats.helmet);
     rim.position.y = -0.025;
     helmet.add(rim);
+  } else if (factionId === 'japan') {
+    helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 7, 0, Math.PI * 2, 0, Math.PI * 0.58),
+      mats.helmet
+    );
+    helmet.scale.set(1.03, 0.78, 1.06);
+    helmet.position.y = y - 0.018;
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.126, 0.134, 0.022, 12), mats.helmet);
+    rim.position.y = -0.016;
+    helmet.add(rim);
+    const neckCloth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.025), mats.body);
+    neckCloth.position.set(0, -0.09, -0.08);
+    neckCloth.rotation.x = -0.2;
+    helmet.add(neckCloth);
   } else {
     helmet = new THREE.Mesh(
       new THREE.SphereGeometry(0.112, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.52),
@@ -348,6 +362,14 @@ function addBackpack(soldier, mats, factionId) {
     roll.rotation.z = Math.PI / 2;
     roll.position.set(0, 0.55, -0.12);
     soldier.add(roll);
+  } else if (factionId === 'japan') {
+    const blanket = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.21, 8), mats.webbing);
+    blanket.rotation.z = Math.PI / 2;
+    blanket.position.set(0, 0.55, -0.13);
+    soldier.add(blanket);
+    const messTin = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.14, 0.055), mats.metal);
+    messTin.position.set(0.12, 0.34, -0.135);
+    soldier.add(messTin);
   } else {
     const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.17, 8), mats.webbing);
     roll.rotation.z = Math.PI / 2;
@@ -464,6 +486,21 @@ function addFactionRifle(soldier, mats, factionId, { crouching = false } = {}) {
     const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.04), dark);
     mag.position.set(-0.04, -0.06, 0.09);
     weapon.add(mag);
+  } else if (factionId === 'japan') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.065), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.045, 0.052), wood);
+    handguard.position.set(0.05, 0, 0.07);
+    weapon.add(handguard);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.019, 0.5, 7), dark);
+    barrel.userData.infantryPart = 'barrel';
+    barrel.position.set(0.19, 0.01, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const bayonet = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.012, 0.022), mats.metal);
+    bayonet.position.set(0.48, -0.005, 0.07);
+    weapon.add(bayonet);
   } else {
     const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.065), wood);
     stock.position.set(-0.1, 0, 0.07);

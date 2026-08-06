@@ -1,19 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 100" role="img" aria-label="United States">
-  <rect width="190" height="100" fill="#B22234"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="950" height="500" viewBox="0 0 1900 1000" role="img" aria-labelledby="title desc" shape-rendering="geometricPrecision">
+  <title id="title">United States flag</title>
+  <desc id="desc">The 48-star United States flag used from 1912 to 1959, with six aligned rows of eight stars.</desc>
+  <defs>
+    <g id="star">
+      <polygon fill="#fff" points="0,-30.8 6.915,-9.518 29.293,-9.518 11.189,3.635 18.104,24.918 0,11.765 -18.104,24.918 -11.189,3.635 -29.293,-9.518 -6.915,-9.518"/>
+    </g>
+    <g id="star-row">
+      <use href="#star" x="84.444"/>
+      <use href="#star" x="168.889"/>
+      <use href="#star" x="253.333"/>
+      <use href="#star" x="337.778"/>
+      <use href="#star" x="422.222"/>
+      <use href="#star" x="506.667"/>
+      <use href="#star" x="591.111"/>
+      <use href="#star" x="675.556"/>
+    </g>
+  </defs>
+
+  <rect width="1900" height="1000" fill="#b31942"/>
   <g fill="#fff">
-    <rect y="0" width="190" height="7.7"/>
-    <rect y="15.4" width="190" height="7.7"/>
-    <rect y="30.8" width="190" height="7.7"/>
-    <rect y="46.2" width="190" height="7.7"/>
-    <rect y="61.6" width="190" height="7.7"/>
-    <rect y="77" width="190" height="7.7"/>
-    <rect y="92.3" width="190" height="7.7"/>
+    <rect y="76.923" width="1900" height="76.923"/>
+    <rect y="230.769" width="1900" height="76.923"/>
+    <rect y="384.615" width="1900" height="76.923"/>
+    <rect y="538.462" width="1900" height="76.923"/>
+    <rect y="692.308" width="1900" height="76.923"/>
+    <rect y="846.154" width="1900" height="76.923"/>
   </g>
-  <rect width="76" height="53.8" fill="#3C3B6E"/>
-  <g fill="#fff" font-size="8" font-family="serif">
-    <text x="8" y="12">★</text><text x="20" y="12">★</text><text x="32" y="12">★</text><text x="44" y="12">★</text><text x="56" y="12">★</text><text x="68" y="12">★</text>
-    <text x="14" y="24">★</text><text x="26" y="24">★</text><text x="38" y="24">★</text><text x="50" y="24">★</text><text x="62" y="24">★</text>
-    <text x="8" y="36">★</text><text x="20" y="36">★</text><text x="32" y="36">★</text><text x="44" y="36">★</text><text x="56" y="36">★</text><text x="68" y="36">★</text>
-    <text x="14" y="48">★</text><text x="26" y="48">★</text><text x="38" y="48">★</text><text x="50" y="48">★</text><text x="62" y="48">★</text>
-  </g>
+
+  <rect width="760" height="538.462" fill="#0a3161"/>
+  <use href="#star-row" y="76.923"/>
+  <use href="#star-row" y="153.846"/>
+  <use href="#star-row" y="230.769"/>
+  <use href="#star-row" y="307.692"/>
+  <use href="#star-row" y="384.615"/>
+  <use href="#star-row" y="461.538"/>
 </svg>

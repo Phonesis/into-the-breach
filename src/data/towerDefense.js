@@ -12,13 +12,13 @@ export const TD_WAVES_TO_WIN = 12;
 export const TD_WAVE_MODES = {
   standard: {
     id: 'standard',
-    name: '12 Waves',
-    subtitle: 'Repel 12 assault waves to win.',
+    name: 'Decisive Defence',
+    subtitle: 'Break 12 escalating assault waves to secure the sector.',
   },
   endless: {
     id: 'endless',
-    name: 'Endless',
-    subtitle: 'Escalating waves — survive as long as you can.',
+    name: 'Lasting Defence',
+    subtitle: 'Face an unending escalation and hold the sector for as long as possible.',
   },
 };
 
@@ -28,13 +28,13 @@ export const TD_WAVE_MODE_LIST = Object.values(TD_WAVE_MODES);
 export const TD_STYLE_MODES = {
   emplacements: {
     id: 'emplacements',
-    name: 'Emplacements',
-    subtitle: 'Spend defense points on bunkers, wire, and guns behind the frontline.',
+    name: 'Prepared Positions',
+    subtitle: 'Spend defence points on bunkers, wire, minefields, and gun positions behind the frontline.',
   },
   hqDefense: {
     id: 'hqDefense',
-    name: 'HQ Defense',
-    subtitle: 'Spawn any unit from HQ — hold the line. Lose only if HQ is destroyed.',
+    name: 'Mobile Defence',
+    subtitle: 'Raise a field force from headquarters, trade ground when necessary, and prevent the enemy from destroying HQ.',
   },
 };
 

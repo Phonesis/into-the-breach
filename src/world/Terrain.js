@@ -98,6 +98,10 @@ function heightAt(x, z, mapDef, seed) {
   if (mapDef.terrain === 'hills') {
     return noise2(x, z, seed) * 4 + Math.sin(x * 0.06) * Math.cos(z * 0.05) * 5;
   }
+  if (mapDef.terrain === 'jungle') {
+    const foldedGround = ridge(x + z * 0.28, z - x * 0.16, 0.045) * 2.6;
+    return noise2(x, z, seed) * 2.3 + foldedGround;
+  }
   return noise2(x, z, seed) * 2;
 }
 
@@ -125,6 +129,9 @@ function terrainDecorationPalette(terrain) {
   }
   if (terrain === 'hills') {
     return { trunk: 0x4b362a, leaf: 0x425c32, leafDark: 0x293f27, leafLight: 0x68764a, bush: 0x526c3a, dry: 0x756a40, rock: 0x737066, earth: 0x5c513b };
+  }
+  if (terrain === 'jungle') {
+    return { trunk: 0x463426, leaf: 0x28532b, leafDark: 0x173a24, leafLight: 0x4f743c, bush: 0x315f32, dry: 0x796a3f, rock: 0x555b50, earth: 0x4d3e2d };
   }
   return { trunk: 0x4a3425, leaf: 0x315b2a, leafDark: 0x1f4120, leafLight: 0x52723a, bush: 0x3f6b32, dry: 0x6d653a, rock: 0x69675d, earth: 0x55462f };
 }
@@ -213,20 +220,45 @@ function mergeCompatibleGeometries(geometries) {
   return merged;
 }
 
-function consolidateGroupMeshes(group) {
+function consolidateGroupMeshes(group, includeDescendants = false) {
   const buckets = new Map();
-  for (const child of [...group.children]) {
+  let meshes;
+  let rootInverse = null;
+  let nestedGroups = null;
+  if (includeDescendants) {
+    group.updateMatrixWorld(true);
+    rootInverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+    meshes = [];
+    nestedGroups = [];
+    group.traverse((child) => {
+      if (child !== group && child.isMesh) meshes.push(child);
+      else if (child !== group && child.isGroup) nestedGroups.push(child);
+    });
+  } else {
+    meshes = [...group.children];
+  }
+
+  for (const child of meshes) {
     if (!child.isMesh || Array.isArray(child.material)) continue;
-    child.updateMatrix();
+    if (!includeDescendants) child.updateMatrix();
+    const transform = includeDescendants
+      ? new THREE.Matrix4().multiplyMatrices(rootInverse, child.matrixWorld)
+      : child.matrix;
     const transformed = child.geometry.clone();
-    transformed.applyMatrix4(child.matrix);
+    transformed.applyMatrix4(transform);
     const bucket = buckets.get(child.material) ?? { geometries: [], castShadow: false, receiveShadow: false };
     bucket.geometries.push(transformed);
     bucket.castShadow ||= child.castShadow;
     bucket.receiveShadow ||= child.receiveShadow;
     buckets.set(child.material, bucket);
-    group.remove(child);
+    child.parent?.remove(child);
     child.geometry.dispose();
+  }
+  if (nestedGroups) {
+    for (let i = nestedGroups.length - 1; i >= 0; i--) {
+      const nested = nestedGroups[i];
+      if (nested.children.length === 0) nested.parent?.remove(nested);
+    }
   }
   for (const [material, bucket] of buckets) {
     const geometry = bucket.geometries.length === 1
@@ -335,7 +367,10 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       if (scenery) scenery.register(g, { x, z, kind: 'rock', source: 'map' });
       else scene.add(g);
     } else {
-      const g = createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, mapDef.terrain);
+      const g =
+        mapDef.terrain === 'jungle' && mapRandom() < 0.42
+          ? createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat)
+          : createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, mapDef.terrain);
       g.position.set(x, y, z);
       g.rotation.y = mapRandom() * Math.PI * 2;
       if (scenery) scenery.register(g, { x, z, kind: 'tree', source: 'map' });
@@ -567,6 +602,90 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, terrain) 
   return consolidateGroupMeshes(g);
 }
 
+function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
+  const g = new THREE.Group();
+  g.name = 'vegetationPalm';
+  g.userData.vegetationKind = 'tree';
+
+  const height = 4.6 + mapRandom() * 2.3;
+  const leanX = (mapRandom() - 0.5) * 0.72;
+  const leanZ = (mapRandom() - 0.5) * 0.72;
+  const trunk = new THREE.Mesh(
+    createOrganicTrunkGeometry(height, 0.25, 0.15, leanX, leanZ),
+    trunkMat
+  );
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  g.add(trunk);
+
+  for (let band = 0; band < 8; band++) {
+    const scar = new THREE.Mesh(
+      new THREE.TorusGeometry(0.18 - band * 0.004, 0.018, 5, 12),
+      trunkMat
+    );
+    scar.rotation.x = Math.PI / 2;
+    scar.position.set(
+      leanX * (0.2 + band * 0.085),
+      height * (0.2 + band * 0.085),
+      leanZ * (0.2 + band * 0.085)
+    );
+    scar.scale.set(1, 1, 0.86);
+    g.add(scar);
+  }
+
+  const crown = new THREE.Group();
+  crown.position.set(leanX, height, leanZ);
+  g.add(crown);
+  const frondCount = 13;
+  for (let i = 0; i < frondCount; i++) {
+    const angle = (i / frondCount) * Math.PI * 2 + mapRandom() * 0.22;
+    const length = 1.65 + mapRandom() * 0.65;
+    const frond = new THREE.Group();
+    frond.rotation.y = -angle;
+    frond.rotation.z = -0.12 - mapRandom() * 0.18;
+    crown.add(frond);
+
+    const stem = new THREE.Mesh(
+      new THREE.BoxGeometry(length, 0.035, 0.045),
+      i % 4 === 0 ? lightLeafMat : leafMat
+    );
+    stem.position.x = length * 0.5;
+    stem.rotation.z = -0.12;
+    stem.castShadow = true;
+    frond.add(stem);
+
+    const leafletCount = 7;
+    for (let side = -1; side <= 1; side += 2) {
+      for (let j = 0; j < leafletCount; j++) {
+        const t = (j + 1) / (leafletCount + 1);
+        const leaflet = new THREE.Mesh(
+          new THREE.BoxGeometry(length * 0.2 * (1 - t * 0.35), 0.018, 0.19),
+          (i + j) % 5 === 0 ? darkLeafMat : leafMat
+        );
+        leaflet.position.set(length * t, -0.04 - t * 0.12, side * 0.1);
+        leaflet.rotation.y = side * (0.48 + t * 0.22);
+        leaflet.rotation.z = -0.16 - t * 0.16;
+        leaflet.castShadow = true;
+        frond.add(leaflet);
+      }
+    }
+  }
+
+  const coconutMat = new THREE.MeshStandardMaterial({
+    color: 0x55412c,
+    roughness: 0.9,
+    envMapIntensity: 0.2,
+  });
+  for (let i = 0; i < 4; i++) {
+    const coconut = new THREE.Mesh(new THREE.SphereGeometry(0.11, 7, 6), coconutMat);
+    const angle = (i / 4) * Math.PI * 2 + mapRandom() * 0.4;
+    coconut.position.set(Math.cos(angle) * 0.18, -0.16 - mapRandom() * 0.12, Math.sin(angle) * 0.18);
+    coconut.castShadow = true;
+    crown.add(coconut);
+  }
+  return consolidateGroupMeshes(g, true);
+}
+
 function createBushGroup(bushMat, accentMat, twigMat, terrain) {
   const g = new THREE.Group();
   g.name = 'vegetationBush';
@@ -726,7 +845,16 @@ function createGrassClumpGeometry() {
 function addGroundCover(mapDef, scene, size, seed, palette) {
   const terrain = mapDef.terrain;
   const scale = mapDef.sizeScale ?? 1;
-  const grassBase = terrain === 'desert' ? 120 : terrain === 'bocage' ? 620 : terrain === 'steppe' ? 520 : 470;
+  const grassBase =
+    terrain === 'desert'
+      ? 120
+      : terrain === 'bocage'
+        ? 620
+        : terrain === 'jungle'
+          ? 760
+          : terrain === 'steppe'
+            ? 520
+            : 470;
   const grassCount = Math.round(grassBase * scale * (scale > 1 ? 1.08 : 1));
   const grassGeo = createGrassClumpGeometry();
   const grassMat = new THREE.MeshStandardMaterial({
@@ -775,7 +903,9 @@ function addGroundCover(mapDef, scene, size, seed, palette) {
   grass.computeBoundingSphere();
   scene.add(grass);
 
-  const stoneCount = Math.round((terrain === 'desert' ? 190 : 90) * scale);
+  const stoneCount = Math.round(
+    (terrain === 'desert' ? 190 : terrain === 'jungle' ? 62 : 90) * scale
+  );
   const stoneGeo = new THREE.DodecahedronGeometry(0.13, 0);
   const stoneMat = new THREE.MeshStandardMaterial({
     color: palette.rock,
@@ -806,6 +936,10 @@ function addGroundCover(mapDef, scene, size, seed, palette) {
 }
 
 function addFarmClusters(mapDef, scene, size, seed, scenery) {
+  if (mapDef.terrain === 'jungle') {
+    addJungleVillageClusters(mapDef, scene, size, seed, scenery);
+    return;
+  }
   const scale = mapDef.sizeScale ?? 1;
   const count = scale >= 2.4 ? 5 : scale >= 1.7 ? 3 : 1;
   const mats = createFarmMaterials(mapDef);
@@ -820,6 +954,98 @@ function addFarmClusters(mapDef, scene, size, seed, scenery) {
     placed++;
   }
   Object.values(mats).forEach((mat) => mat.dispose());
+}
+
+function addJungleVillageClusters(mapDef, scene, size, seed, scenery) {
+  const scale = mapDef.sizeScale ?? 1;
+  const clusterCount = scale >= 2.4 ? 4 : scale >= 1.7 ? 3 : 2;
+  const mats = {
+    bamboo: new THREE.MeshStandardMaterial({ color: 0x8a784a, roughness: 0.96, envMapIntensity: 0.2 }),
+    timber: new THREE.MeshStandardMaterial({ color: 0x463022, roughness: 0.94, envMapIntensity: 0.2 }),
+    thatch: new THREE.MeshStandardMaterial({ color: 0x8a7441, roughness: 1, envMapIntensity: 0.14 }),
+    shadow: new THREE.MeshStandardMaterial({ color: 0x1d2119, roughness: 0.92, envMapIntensity: 0.15 }),
+  };
+
+  for (let cluster = 0; cluster < clusterCount; cluster++) {
+    const side = cluster % 2 === 0 ? -1 : 1;
+    const cx = side * size * (0.16 + mapRandom() * 0.18);
+    const cz = (mapRandom() - 0.5) * size * 0.52;
+    if (isReservedMapSpace(cx, cz, mapDef, 18 * scale)) continue;
+    const rot = mapRandom() * Math.PI * 2;
+    const huts = [
+      { x: -3.5, z: -1.4, kind: 'farmHouse', large: true },
+      { x: 3.4, z: 1.2, kind: 'outbuilding', large: false },
+      { x: 0.5, z: 5.2, kind: 'outbuilding', large: false },
+    ];
+    for (const hut of huts) {
+      const x = cx + Math.cos(rot) * hut.x - Math.sin(rot) * hut.z;
+      const z = cz + Math.sin(rot) * hut.x + Math.cos(rot) * hut.z;
+      const y = heightAt(x, z, mapDef, seed);
+      const group = createJungleHut(mats, hut.large);
+      group.position.set(x, y, z);
+      group.rotation.y = rot + (mapRandom() - 0.5) * 0.35;
+      if (scenery) scenery.register(group, { x, z, kind: hut.kind, source: 'map' });
+      else scene.add(group);
+    }
+  }
+  Object.values(mats).forEach((material) => material.dispose());
+}
+
+function createJungleHut(mats, large = false) {
+  const g = new THREE.Group();
+  const w = large ? 4.4 : 3.2;
+  const d = large ? 3.4 : 2.7;
+  const floorY = 0.58;
+  const wallH = large ? 1.75 : 1.45;
+  const bamboo = mats.bamboo.clone();
+  const timber = mats.timber.clone();
+  const thatch = mats.thatch.clone();
+  const shadow = mats.shadow.clone();
+
+  for (const x of [-w * 0.42, w * 0.42]) {
+    for (const z of [-d * 0.38, d * 0.38]) {
+      const stilt = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, floorY + 0.18, 7), timber);
+      stilt.position.set(x, (floorY + 0.18) * 0.5, z);
+      stilt.castShadow = true;
+      g.add(stilt);
+    }
+  }
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), timber);
+  floor.position.y = floorY;
+  floor.castShadow = true;
+  floor.receiveShadow = true;
+  g.add(floor);
+
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), bamboo);
+  walls.name = 'buildingWall';
+  walls.position.y = floorY + wallH * 0.5;
+  walls.castShadow = true;
+  walls.receiveShadow = true;
+  g.add(walls);
+
+  for (const x of [-w * 0.24, w * 0.24]) {
+    const window = new THREE.Mesh(new THREE.BoxGeometry(w * 0.2, 0.48, 0.06), shadow);
+    window.name = 'buildingWindow';
+    window.position.set(x, floorY + wallH * 0.58, d * 0.505);
+    g.add(window);
+  }
+  const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.2, wallH * 0.68, 0.07), shadow);
+  door.name = 'buildingDoor';
+  door.position.set(0, floorY + wallH * 0.34, -d * 0.505);
+  g.add(door);
+
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.64, 1.25, 4), thatch);
+  roof.name = 'buildingRoof';
+  roof.position.y = floorY + wallH + 0.54;
+  roof.rotation.y = Math.PI * 0.25;
+  roof.scale.set(w > d ? 1.18 : 1, 0.72, d > w ? 1.15 : 0.9);
+  roof.castShadow = true;
+  roof.receiveShadow = true;
+  g.add(roof);
+
+  g.userData.buildingDimensions = { width: w, depth: d, height: floorY + wallH + 1.1 };
+  return g;
 }
 
 function createFarmMaterials(mapDef) {
@@ -986,7 +1212,15 @@ function addTerrainClutter(mapDef, scene, size, seed, scenery) {
     let g;
     let kind;
 
-    if (mapDef.terrain !== 'desert' && roll < 0.26) {
+    if (mapDef.terrain === 'jungle') {
+      if (roll < 0.34) {
+        g = createFieldFence(mats.wood);
+        kind = 'fieldFence';
+      } else {
+        g = createStumpPatch(mats.darkWood, mats.scrub);
+        kind = 'stump';
+      }
+    } else if (mapDef.terrain !== 'desert' && roll < 0.26) {
       g = createHaystack(mats.hay);
       kind = 'haystack';
     } else if (mapDef.terrain !== 'desert' && roll < 0.54) {

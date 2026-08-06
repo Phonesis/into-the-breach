@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Japanese reinforced cave bunker">
+  <rect width="128" height="64" fill="#d9d4bd"/>
+  <path d="M9 53L19 22 39 9h54l24 16 5 28z" fill="#59563a"/>
+  <path d="M16 31L33 14h64l17 16-7 8H23z" fill="#77704a"/>
+  <path d="M28 29h72v9H28z" fill="#3b3828"/>
+  <rect x="46" y="31" width="38" height="7" rx="1" fill="#141610"/>
+  <path d="M6 54h116v6H6z" fill="#4b4a31"/>
+  <circle cx="24" cy="19" r="7" fill="#4a5535"/><circle cx="106" cy="22" r="8" fill="#465033"/>
+</svg>

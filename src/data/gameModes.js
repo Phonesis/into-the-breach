@@ -1,26 +1,26 @@
 export const GAME_MODES = {
   campaign: {
     id: 'campaign',
-    name: 'Standard',
+    name: 'Frontline Command',
     subtitle:
-      'Destroy the enemy HQ to win — Classic (train at HQ) or Base Building (construct depots for armor & artillery).',
+      'Build combat power, contest key ground, and destroy the enemy headquarters. Choose centralized production or forward base construction.',
   },
   tutorial: {
     id: 'tutorial',
-    name: 'Training Ground',
-    subtitle: 'No enemy AI. Practice selection, movement, capture, production, and attacking the dummy HQ.',
+    name: 'Combat Training',
+    subtitle: 'A live-fire command exercise without enemy AI. Practice movement, capture, production, targeting, and combined-arms control.',
   },
   assault: {
     id: 'assault',
-    name: 'Assault & Defend',
-    subtitle: 'Attackers must seize the frontline; defenders hold until time runs out or repel the assault.',
+    name: 'Breakthrough',
+    subtitle: 'Command the assault force or hold the defensive sector on a Medium or Large battlefield.',
     needsRole: true,
   },
   clearance: {
     id: 'clearance',
-    name: 'Clear Defenses',
+    name: 'Fortified Line',
     subtitle:
-      'Attack dug-in defenses or hold them yourself — timed reinforcements for both sides (Small / Medium / Large) and no HQ economy.',
+      'Break prepared positions within 15 minutes or command the garrison until the attackers are forced to retreat.',
     needsRole: true,
   },
   /** @deprecated Legacy alias; starts as Clear Defenses with Small reinforcements. */
@@ -32,15 +32,15 @@ export const GAME_MODES = {
   },
   towerDefense: {
     id: 'towerDefense',
-    name: 'Tower Defence',
+    name: 'Hold the Line',
     subtitle:
-      'Hold the frontline against escalating waves — Emplacements (build defenses) or HQ Defense (spawn units from HQ). 12-wave victory or endless survival.',
+      'Defend a shrinking frontline against escalating attacks with prepared emplacements or a headquarters-led field force.',
   },
   lastStand: {
     id: 'lastStand',
-    name: 'Battle Simulation',
+    name: 'Force-on-Force',
     subtitle:
-      'Manual deployment (enemy matches your unit count) or preset battle groups on large maps. Pure force-on-force — no HQ or reinforcements.',
+      'Deploy a custom force or a preset combined-arms battle group. No headquarters, production, or reinforcements—only the forces in the field.',
   },
 };
 
@@ -50,7 +50,24 @@ export const LAST_STAND_SUPPLIES = 2000;
 /** Maximum living units deployed per side in Standard mode. */
 export const STANDARD_UNIT_LIMIT = 30;
 
-export const GAME_MODE_LIST = Object.values(GAME_MODES).filter((mode) => !mode.hidden);
+export const ASSAULT_MAP_SIZE_OPTIONS = ['medium', 'large'];
+
+export function canUseAssaultMapSize(sizeId) {
+  return ASSAULT_MAP_SIZE_OPTIONS.includes(sizeId);
+}
+
+export function resolveAssaultMapSize(sizeId = 'medium') {
+  return canUseAssaultMapSize(sizeId) ? sizeId : 'medium';
+}
+
+export const GAME_MODE_LIST = [
+  GAME_MODES.tutorial,
+  GAME_MODES.campaign,
+  GAME_MODES.assault,
+  GAME_MODES.clearance,
+  GAME_MODES.towerDefense,
+  GAME_MODES.lastStand,
+];
 
 /** Clear Defenses always uses timed reinforcements; this sets how large each wave is. */
 export const CLEARANCE_REINFORCEMENT_SIZES = {
@@ -83,12 +100,12 @@ export const DEFAULT_CLEARANCE_REINFORCEMENT_SIZE = 'small';
 export const ASSAULT_ROLES = {
   attack: {
     id: 'attack',
-    name: 'Attack',
+    name: 'Lead the Assault',
     subtitle: 'Break through and capture the frontline, or destroy the enemy HQ.',
   },
   defend: {
     id: 'defend',
-    name: 'Defend',
+    name: 'Hold the Sector',
     subtitle: 'Hold the frontline until the clock runs out, or eliminate the assault force.',
   },
 };
@@ -99,15 +116,15 @@ export const ASSAULT_ROLE_LIST = Object.values(ASSAULT_ROLES);
 export const CLEARANCE_ROLES = {
   attack: {
     id: 'attack',
-    name: 'Attack',
+    name: 'Assault the Position',
     subtitle:
-      'Assault prepared defenses with a fixed force. Timed rear reinforcements; wipe every defender to win.',
+      'Assault prepared defenses with a fixed force. Wipe every defender within 15 minutes to win.',
   },
   defend: {
     id: 'defend',
-    name: 'Defend',
+    name: 'Command the Garrison',
     subtitle:
-      'Hold dug-in positions against an AI assault. Timed reinforcements; destroy the attacking force to win.',
+      'Hold dug-in positions for 15 minutes or destroy the attacking force to win.',
   },
 };
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Type 1 Ho-Ni I">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#282820"><rect x="14" y="46" width="8" height="10"/><rect x="104" y="46" width="8" height="10"/><rect x="18" y="48" width="90" height="6"/></g>
+  <g fill="#66623c"><path d="M26 44 L29 31 L45 24 L96 25 L103 34 L101 44 Z"/><path d="M45 25 L49 14 L78 14 L91 25 Z"/></g>
+  <g fill="#41422b"><rect x="75" y="16" width="47" height="5"/><rect x="116" y="14" width="7" height="9"/></g>
+  <g fill="#82734b" opacity="0.85"><path d="M50 14h27" stroke="#1d1e17" stroke-width="2" opacity="0.75"/></g>
+  <g fill="#c8aa55"><path d="m98 31 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/></g>
+</svg>

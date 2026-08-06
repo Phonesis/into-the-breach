@@ -138,6 +138,29 @@ const atGunRussia = {
   },
 };
 
+const atGunJapan = {
+  antiTankGun: {
+    type: 'antiTankGun',
+    name: 'Type 1 47 mm AT Gun',
+    designation: 'Type 1 mobile anti-tank gun',
+    description: 'Low-profile 47 mm anti-tank gun — effective from concealment against flank armor.',
+    hp: 82,
+    damage: 34,
+    range: 58,
+    rangeMeters: 800,
+    speed: 2.15,
+    attackSpeed: 0.42,
+    shellReload: 4.6,
+    cost: 78,
+    buildTime: 14,
+    caliber: 47,
+    weaponSound: 'at_47_japan',
+    antiArmor: true,
+    antiArmorMult: 1.14,
+    softMult: 0.27,
+  },
+};
+
 const scoutGermany = {
   armoredCar: {
     type: 'armoredCar',
@@ -270,6 +293,39 @@ const scoutUK = {
   },
 };
 
+const scoutJapan = {
+  armoredCar: {
+    type: 'armoredCar',
+    name: 'Type 92 Chiyoda',
+    designation: 'Type 92 six-wheeled armoured car',
+    description: 'Fast road reconnaissance car — twin Type 91 machine guns for close support.',
+    hp: 104,
+    damage: 9,
+    range: 46,
+    rangeMeters: 850,
+    speed: 9.4,
+    attackSpeed: 2.3,
+    cost: 84,
+    buildTime: 13,
+    weaponSound: 'mg_japan',
+  },
+  sniper: {
+    type: 'sniper',
+    name: 'Sogekihei',
+    designation: 'Type 97 sniper rifle',
+    description: 'Concealed marksman with an offset 2.5× optic — precision fire to ~800 m.',
+    hp: 48,
+    damage: 34,
+    range: 72,
+    rangeMeters: 800,
+    speed: 4.2,
+    attackSpeed: 0.48,
+    cost: 70,
+    buildTime: 11,
+    weaponSound: 'rifle_japan',
+  },
+};
+
 const medicGermany = {
   medic: {
     type: 'medic',
@@ -335,6 +391,24 @@ const medicUK = {
     range: 0,
     rangeMeters: 0,
     speed: 4.5,
+    attackSpeed: 0,
+    cost: 55,
+    buildTime: 9,
+    nonCombat: true,
+  },
+};
+
+const medicJapan = {
+  medic: {
+    type: 'medic',
+    name: 'Eiseihei',
+    designation: 'Imperial Japanese Army medical orderly',
+    description: 'Field medical team — treats nearby infantry and steadies withdrawing troops.',
+    hp: 56,
+    damage: 0,
+    range: 0,
+    rangeMeters: 0,
+    speed: 4.6,
     attackSpeed: 0,
     cost: 55,
     buildTime: 9,
@@ -419,6 +493,26 @@ const engineerUK = {
     buildTime: 10,
     usesMG: true,
     weaponSound: 'rifle_uk',
+  },
+};
+
+const engineerJapan = {
+  engineer: {
+    type: 'engineer',
+    name: 'Kohei Squad',
+    designation: 'Imperial Japanese Army engineer section',
+    description:
+      'Combat engineers with Arisaka rifles and Type 100 SMGs; repair vehicles and erect field works.',
+    hp: 70,
+    damage: 10,
+    range: 38,
+    rangeMeters: 380,
+    speed: 4.4,
+    attackSpeed: 1.22,
+    cost: 62,
+    buildTime: 10,
+    usesMG: true,
+    weaponSound: 'rifle_japan',
   },
 };
 
@@ -562,6 +656,40 @@ const mgMortarUK = {
   },
 };
 
+const mgMortarJapan = {
+  machineGun: {
+    type: 'machineGun',
+    name: 'Type 92 HMG Team',
+    designation: 'Type 92 7.7 mm heavy machine gun',
+    description: 'Tripod-mounted heavy machine gun — deliberate sustained fire to ~800 m.',
+    hp: 70,
+    damage: 9,
+    range: 48,
+    rangeMeters: 800,
+    speed: 2.45,
+    attackSpeed: 2.15,
+    cost: 64,
+    buildTime: 10,
+    weaponSound: 'mg_japan',
+  },
+  mortar: {
+    type: 'mortar',
+    name: 'Type 97 Mortar Team',
+    designation: 'Type 97 81 mm infantry mortar',
+    description: 'Battalion mortar — high-angle jungle support to ~2,850 m.',
+    hp: 56,
+    damage: 36,
+    range: 66,
+    rangeMeters: 2850,
+    speed: 2.2,
+    attackSpeed: 0.24,
+    cost: 74,
+    buildTime: 12,
+    caliber: 81,
+    weaponSound: 'mortar_japan',
+  },
+};
+
 function commanderDef(factionId) {
   const identity = {
     germany: {
@@ -582,6 +710,11 @@ function commanderDef(factionId) {
     russia: {
       name: 'Komandir',
       designation: 'Red Army Command Group',
+      description: 'Field commander with four-man headquarters guard.',
+    },
+    japan: {
+      name: 'Shikikan',
+      designation: 'Imperial Japanese Army field headquarters',
       description: 'Field commander with four-man headquarters guard.',
     },
   }[factionId];
@@ -624,6 +757,11 @@ function radioOperatorDef(factionId) {
       designation: 'RKKA Signals — RB / 12-RP field set',
       description: 'Red Army signals operator with a portable RB-series field radio and rifle.',
     },
+    japan: {
+      name: 'Musenhei',
+      designation: 'IJA Signals — Type 94 Mark 5 radio',
+      description: 'Signals operator carrying a Type 94 backpack radio and Type 99 Arisaka rifle.',
+    },
   }[factionId];
   return {
     type: 'radioOperator',
@@ -648,7 +786,7 @@ export const FACTIONS = {
   germany: {
     id: 'germany',
     name: 'Germany',
-    flag: publicUrl('flags/germany.jpg'),
+    flag: publicUrl('flags/germany.svg'),
     era: 'Wehrmacht, 1943–1945',
     color: 0x3d3d3d,
     accent: 0xc8102e,
@@ -1107,6 +1245,122 @@ export const FACTIONS = {
         caliber: 122,
         weaponSound: 'howitzer_122_russia',
         crewSmallArms: artilleryCrewSmallArms('russia'),
+      },
+    },
+  },
+  japan: {
+    id: 'japan',
+    name: 'Japan',
+    flag: publicUrl('flags/japan.svg'),
+    era: 'Imperial Japanese Army, 1941–1945',
+    color: 0x5b5635,
+    accent: 0xbc002d,
+    enemyDefault: 'usa',
+    units: {
+      commander: commanderDef('japan'),
+      radioOperator: radioOperatorDef('japan'),
+      vehicleCrew: vehicleCrewDef('japan'),
+      infantry: {
+        type: 'infantry',
+        name: 'Rifle Squad',
+        designation: 'Imperial Japanese Army rifle section',
+        description: 'Type 99 Arisaka rifles and Type 96 LMG — effective to ~450 m.',
+        hp: 82,
+        damage: 10,
+        range: 38,
+        rangeMeters: 450,
+        speed: 4.4,
+        attackSpeed: 1.22,
+        cost: 49,
+        buildTime: 8,
+        usesMG: true,
+        weaponSound: 'rifle_japan',
+      },
+      ...medicJapan,
+      ...engineerJapan,
+      ...mgMortarJapan,
+      ...scoutJapan,
+      ...atGunJapan,
+      tank: {
+        type: 'tank',
+        name: 'Shinhoto Chi-Ha',
+        designation: 'Type 97 Kai — Type 1 47 mm gun',
+        description: 'Improved-turret Chi-Ha with high-velocity 47 mm gun and hull Type 97 MG.',
+        hp: 168,
+        damage: 29,
+        range: 56,
+        rangeMeters: 900,
+        speed: 5.4,
+        attackSpeed: 0.55,
+        shellReload: 5.8,
+        turretTraverseDeg: 14,
+        cost: 108,
+        buildTime: 17,
+        caliber: 47,
+        weaponSound: 'tank_47_japan',
+        coaxMG: { ...TANK_COAX_MG, damage: 8, range: 48, rangeMeters: 480 },
+      },
+      tankDestroyer: {
+        type: 'tankDestroyer',
+        name: 'Type 1 Ho-Ni I',
+        designation: 'Type 1 75 mm self-propelled gun',
+        description: 'Open-backed casemate on a Chi-Ha chassis; powerful Type 90 gun but vulnerable crew.',
+        hp: 180,
+        damage: 43,
+        range: 61,
+        rangeMeters: 1200,
+        speed: 4.9,
+        attackSpeed: 0.4,
+        shellReload: 7.4,
+        turretTraverseDeg: 5,
+        cost: 150,
+        buildTime: 21,
+        caliber: 75,
+        weaponSound: 'td_75_japan',
+        antiArmor: true,
+        antiArmorMult: 1.2,
+        softMult: 0.43,
+      },
+      // Japan fielded no super-heavy tank. The late-war Chi-Nu fills the
+      // game's top armor tier while remaining explicitly identified as a medium tank.
+      superHeavyTank: {
+        type: 'superHeavyTank',
+        name: 'Type 3 Chi-Nu',
+        designation: 'Late-war medium tank — Type 3 75 mm gun',
+        description: 'Japan’s strongest production tank; improved armor and a 75 mm gun, reserved for home defense.',
+        hp: 285,
+        damage: 44,
+        range: 58,
+        rangeMeters: 1000,
+        speed: 4.8,
+        attackSpeed: 0.43,
+        shellReload: 7.8,
+        turretTraverseDeg: 12,
+        cost: 220,
+        buildTime: 25,
+        caliber: 75,
+        weaponSound: 'tank_75_japan',
+        coaxMG: { ...SUPER_HEAVY_COAX_MG, damage: 9, range: 48, rangeMeters: 480 },
+      },
+      artillery: {
+        type: 'artillery',
+        name: 'Type 91 Howitzer',
+        designation: 'Type 91 10 cm field howitzer',
+        description: 'Compact 105 mm divisional howitzer — indirect fire to ~10.8 km.',
+        hp: 56,
+        damage: 52,
+        range: 89,
+        rangeMeters: 10800,
+        minRange: 22,
+        minRangeMeters: 220,
+        speed: 2.6,
+        attackSpeed: 0.08,
+        shellReload: 12.8,
+        cost: 88,
+        buildTime: 14,
+        caliber: 105,
+        weaponSound: 'howitzer_105_japan',
+        crewSmallArms: artilleryCrewSmallArms('japan'),
       },
     },
   },

@@ -1,5 +1,6 @@
 import { spawnUnitAt } from './Spawner.js';
 import { sounds } from '../audio/SoundManager.js';
+import { getClearanceAttackerSpawnBase } from './ClearanceMode.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
@@ -19,9 +20,7 @@ export function isCommanderAlive(game, team) {
   return !!commander && !commander.dead;
 }
 
-function rearEdgeAnchor(mapDef, team) {
-  const own = team === PLAYER ? mapDef.playerBase : mapDef.enemyBase;
-  const foe = team === PLAYER ? mapDef.enemyBase : mapDef.playerBase;
+function rearEdgeAnchorFromPositions(mapDef, own, foe) {
   let dx = own.x - foe.x;
   let dz = own.z - foe.z;
   const len = Math.hypot(dx, dz) || 1;
@@ -44,9 +43,57 @@ function rearEdgeAnchor(mapDef, team) {
   };
 }
 
-function faceEnemy(unit, mapDef, team) {
-  if (!unit?.mesh) return;
+function rearEdgeAnchor(mapDef, team) {
+  const own = team === PLAYER ? mapDef.playerBase : mapDef.enemyBase;
   const foe = team === PLAYER ? mapDef.enemyBase : mapDef.playerBase;
+  return rearEdgeAnchorFromPositions(mapDef, own, foe);
+}
+
+function isClearanceAttacker(game, team) {
+  if (!game?.clearance) return false;
+  const playerAttacks = game.clearanceRole !== 'defend';
+  return team === PLAYER ? playerAttacks : !playerAttacks;
+}
+
+/**
+ * Fortified Line assigns the map's player-side assembly to whichever team is
+ * attacking. The normal faction base is therefore not always a commander's
+ * rear: use the assault assembly for attackers and the enemy-side rear edge
+ * for the dug-in garrison.
+ */
+function commanderRearAnchor(game, team) {
+  if (game?.assault && game.mapDef) {
+    const ownHq = game.hqs?.find((hq) => hq.team === team);
+    const foeHq = game.hqs?.find((hq) => hq.team !== team);
+    if (ownHq?.position && foeHq?.position) {
+      return rearEdgeAnchorFromPositions(game.mapDef, ownHq.position, foeHq.position);
+    }
+  }
+  if (!game?.clearance || !game.mapDef) {
+    return rearEdgeAnchor(game.mapDef, team);
+  }
+  if (isClearanceAttacker(game, team)) {
+    return getClearanceAttackerSpawnBase(game.mapDef);
+  }
+  return rearEdgeAnchor(game.mapDef, ENEMY);
+}
+
+function commanderFacingTarget(game, team) {
+  if (game?.assault) {
+    const foeHq = game.hqs?.find((hq) => hq.team !== team);
+    if (foeHq?.position) return foeHq.position;
+  }
+  if (game?.clearance) {
+    return isClearanceAttacker(game, team)
+      ? game.mapDef.enemyBase
+      : game.mapDef.playerBase;
+  }
+  return team === PLAYER ? game.mapDef.enemyBase : game.mapDef.playerBase;
+}
+
+function faceEnemy(unit, game, team) {
+  if (!unit?.mesh) return;
+  const foe = commanderFacingTarget(game, team);
   unit.mesh.rotation.y = Math.atan2(foe.x - unit.position.x, foe.z - unit.position.z);
 }
 
@@ -55,7 +102,7 @@ function spawnCommander(game, team) {
   const def = faction?.units?.commander;
   if (!def || !game.mapDef) return null;
 
-  const requested = rearEdgeAnchor(game.mapDef, team);
+  const requested = commanderRearAnchor(game, team);
   const unit = spawnUnitAt({
     def,
     faction,
@@ -76,7 +123,7 @@ function spawnCommander(game, team) {
   if (team === ENEMY) {
     unit.defensiveHold = { ...unit._commanderRearAnchor, radius: RETURN_RADIUS };
   }
-  faceEnemy(unit, game.mapDef, team);
+  faceEnemy(unit, game, team);
   game.units.push(unit);
   return unit;
 }
@@ -87,7 +134,7 @@ export function ensureFieldCommanders(game) {
     if (!commander) commander = spawnCommander(game, team);
     if (!commander) continue;
     commander._fieldCommander = true;
-    commander._commanderRearAnchor ??= rearEdgeAnchor(game.mapDef, team);
+    commander._commanderRearAnchor ??= commanderRearAnchor(game, team);
     if (team === ENEMY && !commander.dead) {
       commander.engagementStance = 'hold';
       commander.defensiveHold ??= {

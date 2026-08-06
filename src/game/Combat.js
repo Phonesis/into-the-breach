@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
 import {
+  spawnBulletImpact,
   spawnHandGrenade,
   spawnSmokeShellImpact,
   triggerParatrooperAtRecoil,
@@ -95,6 +96,118 @@ const SMALL_ARMS_TYPES = new Set([
   'paratrooper',
   'vehicleCrew',
 ]);
+
+export function isSmallArmsFireType(type) {
+  return SMALL_ARMS_TYPES.has(type);
+}
+
+function smallArmsImpactScale(vfxType, coax = false) {
+  if (coax || vfxType === 'armoredCar') return 1.4;
+  if (vfxType === 'machineGun') return 1.36;
+  if (vfxType === 'sniper') return 1.16;
+  return 1.24;
+}
+
+function smallArmsGroundImpactPattern(vfxType, coax = false) {
+  if (coax || vfxType === 'armoredCar') return { count: 5, radius: 4.2 };
+  if (vfxType === 'machineGun') return { count: 6, radius: 4.8 };
+  if (vfxType === 'sniper') return { count: 1, radius: 0.35 };
+  return { count: 2, radius: 1.8 };
+}
+
+function smallArmsImpactSurface(target) {
+  if (!target || target.isGround) return 'soil';
+  const typeId = target.entry?.typeId ?? target.entry?.def?.id ?? '';
+  if (
+    typeId.includes('bunker') ||
+    typeId.includes('mgNest') ||
+    typeId.includes('mortarNest')
+  ) {
+    return 'sandbag';
+  }
+  if (
+    typeId.includes('wire') ||
+    typeId.includes('tankTrap') ||
+    typeId.includes('atGun') ||
+    typeId.includes('artillery')
+  ) {
+    return 'stone';
+  }
+  if (
+    typeId.includes('garrison') ||
+    typeId.includes('hospital') ||
+    typeId.includes('motorPool') ||
+    typeId.includes('ordnanceYard')
+  ) {
+    return 'wood';
+  }
+  return 'stone';
+}
+
+function spawnSmallArmsWorldImpact(
+  scene,
+  mapDef,
+  point,
+  { target = null, from = null, vfxType = 'infantry', coax = false } = {}
+) {
+  if (!scene || !Number.isFinite(point?.x) || !Number.isFinite(point?.z)) return false;
+  const surface = smallArmsImpactSurface(target);
+  const groundLevel = mapDef ? sampleTerrainHeight(point.x, point.z, mapDef) : 0;
+  const y =
+    surface === 'soil'
+      ? groundLevel + 0.045
+      : Number.isFinite(point.y)
+        ? point.y
+        : groundLevel + 0.72;
+  const normal = {
+    x: (from?.x ?? point.x) - point.x,
+    z: (from?.z ?? point.z + 1) - point.z,
+  };
+  return spawnBulletImpact(
+    scene,
+    { x: point.x, y, z: point.z },
+    {
+      surface,
+      scale: smallArmsImpactScale(vfxType, coax),
+      normal,
+    }
+  );
+}
+
+function spawnSmallArmsGroundImpactPattern(
+  scene,
+  mapDef,
+  point,
+  { from = null, vfxType = 'infantry', coax = false } = {}
+) {
+  const pattern = smallArmsGroundImpactPattern(vfxType, coax);
+  let spawned = false;
+  for (let i = 0; i < pattern.count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    // Area-uniform scatter keeps the burst broad instead of bunching every
+    // secondary strike around the exact order marker.
+    const distance =
+      i === 0
+        ? Math.random() * Math.min(0.45, pattern.radius)
+        : Math.sqrt(Math.random()) * pattern.radius;
+    spawned =
+      spawnSmallArmsWorldImpact(
+        scene,
+        mapDef,
+        {
+          x: point.x + Math.cos(angle) * distance,
+          z: point.z + Math.sin(angle) * distance,
+        },
+        {
+          target: { isGround: true },
+          from,
+          vfxType,
+          coax,
+        }
+      ) || spawned;
+  }
+  return spawned;
+}
 
 // Coax fire cannot harm tanks, but a crew may still fire a short, occasional
 // burst to suppress exposed crew or mark the target for nearby friendlies.
@@ -1047,6 +1160,7 @@ function fire(
     // Combat engineers and bailed crews use the standard small-arms VFX.
     vfxType = 'infantry';
   }
+  const smallArmsShot = !paratrooperAt && (coax || SMALL_ARMS_TYPES.has(attacker.def.type));
 
   const map = attacker._mapDef || mapDef;
   const isGroundShot = target.isGround || isSmokeShellTarget(target);
@@ -1112,6 +1226,13 @@ function fire(
         const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
         const to = { x: missImpact.x, y: toY, z: missImpact.z };
         spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
+        if (smallArmsShot) {
+          spawnSmallArmsGroundImpactPattern(scene, map, missImpact, {
+            from,
+            vfxType,
+            coax,
+          });
+        }
         if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
       }
       if (onFire) {
@@ -1370,7 +1491,21 @@ function fire(
   }
 
   if (target.isGround) {
-    applySplashDamage(attacker, impact, damage, allTargets, coverSystem, scenery, hqs, options, livingUnits);
+    applySplashDamage(
+      attacker,
+      impact,
+      damage,
+      allTargets,
+      coverSystem,
+      scenery,
+      hqs,
+      {
+        ...options,
+        smallArmsGroundFire: smallArmsShot,
+        smallArmsWeaponType: coax ? 'machineGun' : attackerType,
+      },
+      livingUnits
+    );
   } else if (
     isSceneryTarget(target) ||
     isDefenseTarget(target) ||
@@ -1502,6 +1637,28 @@ function fire(
     }
     const to = { x: impact.x, y: toY, z: impact.z };
     spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
+    if (
+      smallArmsShot &&
+      (target.isGround ||
+        isDefenseTarget(target) ||
+        isBaseBuildingTarget(target) ||
+        isHqTarget(target))
+    ) {
+      if (target.isGround) {
+        spawnSmallArmsGroundImpactPattern(scene, map, to, {
+          from,
+          vfxType,
+          coax,
+        });
+      } else {
+        spawnSmallArmsWorldImpact(scene, map, to, {
+          target,
+          from,
+          vfxType,
+          coax,
+        });
+      }
+    }
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
     if (
       attacker.def.type === 'infantry' ||
@@ -1546,8 +1703,16 @@ function applySplashDamage(
   options = {},
   units = []
 ) {
+  const smallArmsGroundFire = options.smallArmsGroundFire === true;
+  const impactWeaponType = smallArmsGroundFire
+    ? options.smallArmsWeaponType ?? 'infantry'
+    : attacker.def.type;
   const splash =
-    attacker.def.type === 'artillery'
+    smallArmsGroundFire
+      ? impactWeaponType === 'machineGun' || impactWeaponType === 'armoredCar'
+        ? 2.5
+        : 1.9
+      : attacker.def.type === 'artillery'
       ? 9
       : attacker.def.type === 'mortar'
         ? 6.5
@@ -1558,19 +1723,26 @@ function applySplashDamage(
           : 2.5;
 
   if (scenery) {
-    scenery.damageAt(point.x, point.z, splash + 1, baseDamage * 0.85, {
-      weaponType: attacker.def.type,
-      impact: { x: point.x, z: point.z },
-      impactFrom: { x: attacker.position.x, z: attacker.position.z },
-      explosive: true,
-    });
+    scenery.damageAt(
+      point.x,
+      point.z,
+      splash + (smallArmsGroundFire ? 0.25 : 1),
+      baseDamage * (smallArmsGroundFire ? 0.45 : 0.85),
+      {
+        weaponType: impactWeaponType,
+        impact: { x: point.x, z: point.z },
+        impactFrom: { x: attacker.position.x, z: attacker.position.z },
+        explosive: !smallArmsGroundFire,
+      }
+    );
   }
   const shellDetonator =
-    attacker.def.type === 'artillery' ||
-    attacker.def.type === 'mortar' ||
-    attacker.def.type === 'antiTankGun' ||
-    attacker.def.type === 'armoredCar' ||
-    isTankType(attacker.def.type);
+    !smallArmsGroundFire &&
+    (attacker.def.type === 'artillery' ||
+      attacker.def.type === 'mortar' ||
+      attacker.def.type === 'antiTankGun' ||
+      attacker.def.type === 'armoredCar' ||
+      isTankType(attacker.def.type));
   if (shellDetonator) {
     const mineHitRadius = Math.max(1.5, splash * 0.45);
     options.engineerSandbags?.detonateMinesAt?.(
@@ -1596,21 +1768,24 @@ function applySplashDamage(
     const t = 1 - d / splash;
     let splashDmg = baseDamage * t * t * 0.65;
     splashDmg *= getIncomingDamageMultiplier(other, coverSystem, {
-      def: attacker.def,
+      def: smallArmsGroundFire ? { type: impactWeaponType } : attacker.def,
       // Blast shielding depends on whether the cover lies between the unit and
       // the detonation, not the distant gun that fired the shell.
       position: point,
     });
-    splashDmg *= getArmorDamageMultiplier(attacker.def.type, other);
+    splashDmg *= getArmorDamageMultiplier(impactWeaponType, other);
     if (!other.surrendered) {
       markUnderFire(other);
       const appliedDamage = scalePracticeHqDamage(other, splashDmg, options);
-      other.takeDamage(appliedDamage, {
-        explosive: true,
-        // Fling bodies away from the detonation, not the distant gun.
-        blastOrigin: { x: point.x, z: point.z },
+      const damageOptions = {
+        explosive: !smallArmsGroundFire,
         impactFrom: { x: point.x, z: point.z },
-      });
+      };
+      if (!smallArmsGroundFire) {
+        // Fling bodies away from the detonation, not the distant gun.
+        damageOptions.blastOrigin = { x: point.x, z: point.z };
+      }
+      other.takeDamage(appliedDamage, damageOptions);
       if (appliedDamage > 0 && !other.dead && !other.surrendered) {
         if (!maybeTriggerSurrender(other, units, options, attacker) && hqs) {
           maybeTriggerRetreat(other, hqs, units, attacker, {

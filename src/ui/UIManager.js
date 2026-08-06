@@ -15,6 +15,8 @@ import {
   CLEARANCE_ROLE_LIST,
   DEFAULT_CLEARANCE_ROLE,
   STANDARD_UNIT_LIMIT,
+  canUseAssaultMapSize,
+  resolveAssaultMapSize,
   getProducibleUnits,
 } from '../data/gameModes.js';
 import { DIFFICULTY_LIST, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
@@ -97,7 +99,7 @@ const PRODUCE_LABELS = {
   armoredCar: 'AC',
   tank: 'Tk',
   tankDestroyer: 'TD',
-  superHeavyTank: 'Super Heavy Tank',
+  superHeavyTank: 'Top-Tier Armor',
   artillery: 'Arty',
 };
 
@@ -169,7 +171,7 @@ const FACTION_ROSTER_LABELS = {
   armoredCar: 'Armored car',
   tank: 'Tank',
   tankDestroyer: 'Tank destroyer',
-  superHeavyTank: 'Super Heavy Tank',
+  superHeavyTank: 'Top-Tier Armor',
   artillery: 'Artillery',
 };
 
@@ -233,102 +235,126 @@ export class UIManager {
   updateFactionScreenBg(factionId = null) {
     const screen = this.root.querySelector('#screen-faction');
     if (!screen) return;
-    screen.classList.remove('faction-bg-germany', 'faction-bg-usa', 'faction-bg-uk', 'faction-bg-russia');
-    if (factionId && ['germany', 'usa', 'uk', 'russia'].includes(factionId)) {
+    screen.classList.remove('faction-bg-germany', 'faction-bg-usa', 'faction-bg-uk', 'faction-bg-russia', 'faction-bg-japan');
+    if (factionId && ['germany', 'usa', 'uk', 'russia', 'japan'].includes(factionId)) {
       screen.classList.add(`faction-bg-${factionId}`);
     }
   }
 
   render() {
     this.root.innerHTML = `
-      <div id="screen-title" class="screen interactive">
-        <div class="title-block">
-          <h1>Into the Breach</h1>
-          <p>Command historically accurate forces. Capture strategic points, build your army, and break the enemy line.</p>
-        </div>
-        <div class="title-actions">
-          <button class="btn btn-primary interactive" id="btn-start">Begin</button>
-          <button class="btn btn-secondary interactive" id="btn-load-saves">Load Saved Game</button>
-          <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
-          <button class="btn btn-secondary interactive" id="btn-about">About</button>
+      <div id="screen-title" class="screen menu-screen title-screen interactive">
+        <div class="title-hero">
+          <div class="title-block">
+            <span class="menu-kicker">World War II · Real-Time Tactics</span>
+            <h1><span>Into the</span><span>Breach</span></h1>
+            <p>Take command of a historically grounded combined-arms force. Seize vital ground, outmanoeuvre the enemy, and break their ability to fight.</p>
+          </div>
+          <div class="title-actions title-screen-actions">
+            <button class="btn btn-primary interactive" id="btn-start">New Operation</button>
+            <button class="btn btn-secondary interactive" id="btn-load-saves">Continue Saved Battle</button>
+            <button class="btn btn-secondary interactive" id="btn-guide-title">Open Field Manual</button>
+            <button class="btn btn-secondary interactive" id="btn-about">Credits &amp; Information</button>
+          </div>
+          <p class="title-footnote">Plan the operation. Choose your command. Fight the battle.</p>
         </div>
       </div>
 
-      <div id="screen-saves" class="screen interactive hidden">
+      <div id="screen-saves" class="screen menu-screen saves-screen interactive hidden">
         <div class="title-block">
-          <h1>Saved Battles</h1>
-          <p>Resume a battle from where you left off. Saves are stored in this browser.</p>
+          <span class="menu-kicker">Operations Archive</span>
+          <h1>Saved Operations</h1>
+          <p>Return to a battle in progress. Your field saves remain stored in this browser.</p>
         </div>
-        <div class="panel">
-          <h2>Your Saves</h2>
+        <div class="panel menu-panel saves-panel">
+          <h2>Available Field Saves</h2>
           <div class="save-list" id="save-list"></div>
-          <p class="save-list-empty hidden" id="save-list-empty">No saved battles yet. Use <strong>Save</strong> in the HUD during a fight.</p>
+          <p class="save-list-empty hidden" id="save-list-empty">No field saves are available. Use <strong>Save Battle</strong> from the command bar during an engagement.</p>
           <div class="actions">
-            <button class="btn btn-secondary interactive" id="btn-back-saves">Back</button>
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-saves">Return to Headquarters</button>
           </div>
         </div>
       </div>
 
-      <div id="screen-mode" class="screen interactive hidden">
+      <div id="screen-mode" class="screen menu-screen setup-screen interactive hidden">
+        <nav class="menu-progress" aria-label="Operation setup progress">
+          <span class="active"><b>01</b> Operation</span><i></i><span><b>02</b> Command</span><i></i><span><b>03</b> Battlefield</span>
+        </nav>
         <div class="title-block">
-          <h1>Game Mode</h1>
+          <span class="menu-kicker">Step 01 · Rules of Engagement</span>
+          <h1>Choose Operation</h1>
+          <p>Select the mission structure, victory conditions, and command experience you want.</p>
         </div>
-        <div class="panel">
-          <h2>Select Mode</h2>
+        <div class="panel menu-panel">
+          <h2>Operational Doctrine</h2>
           <div class="mode-grid" id="mode-grid"></div>
           <div class="actions">
-            <button class="btn btn-secondary interactive" id="btn-back-title">Back</button>
-            <button class="btn btn-primary interactive" id="btn-to-faction" disabled>Continue</button>
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-title">Headquarters</button>
+            <button class="btn btn-primary interactive" id="btn-to-faction" disabled>Next: Choose Command</button>
           </div>
         </div>
       </div>
 
-      <div id="screen-assault-role" class="screen interactive hidden">
+      <div id="screen-assault-role" class="screen menu-screen setup-screen interactive hidden">
+        <nav class="menu-progress" aria-label="Operation setup progress">
+          <span class="active"><b>01</b> Operation</span><i></i><span><b>02</b> Command</span><i></i><span><b>03</b> Battlefield</span>
+        </nav>
         <div class="title-block">
-          <h1 id="role-screen-title">Your Mission</h1>
-          <p id="role-screen-blurb">Attackers must capture and hold the frontline. Defenders must hold until time expires.</p>
+          <span class="menu-kicker">Step 01 · Mission Assignment</span>
+          <h1 id="role-screen-title">Choose Your Role</h1>
+          <p id="role-screen-blurb">Lead the breakthrough or take command of the defensive line.</p>
         </div>
-        <div class="panel">
-          <h2 id="role-screen-heading">Attack or Defend</h2>
+        <div class="panel menu-panel">
+          <h2 id="role-screen-heading">Field Orders</h2>
           <div class="mode-grid" id="role-grid"></div>
           <div class="actions">
-            <button class="btn btn-secondary interactive" id="btn-back-mode-role">Back</button>
-            <button class="btn btn-primary interactive" id="btn-to-faction-role" disabled>Continue</button>
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-mode-role">Previous</button>
+            <button class="btn btn-primary interactive" id="btn-to-faction-role" disabled>Next: Choose Command</button>
           </div>
         </div>
       </div>
 
-      <div id="screen-faction" class="screen interactive hidden">
+      <div id="screen-faction" class="screen menu-screen setup-screen interactive hidden">
+        <nav class="menu-progress" aria-label="Operation setup progress">
+          <span class="complete"><b>01</b> Operation</span><i class="complete"></i><span class="active"><b>02</b> Command</span><i></i><span><b>03</b> Battlefield</span>
+        </nav>
         <div class="title-block">
-          <h1>Select Your Nation</h1>
+          <span class="menu-kicker">Step 02 · Field Command</span>
+          <h1>Choose Your Command</h1>
+          <p>Select a national force, doctrine, and historically grounded unit roster.</p>
         </div>
-        <div class="panel">
-          <h2>Choose Side</h2>
+        <div class="panel menu-panel faction-panel">
+          <h2>Field Army</h2>
           <div class="faction-grid" id="faction-grid"></div>
           <div class="actions">
-            <button class="btn btn-secondary interactive" id="btn-back-mode">Back</button>
-            <button class="btn btn-primary interactive" id="btn-to-maps" disabled>Continue</button>
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-mode">Previous</button>
+            <button class="btn btn-primary interactive" id="btn-to-maps" disabled>Next: Prepare Battlefield</button>
           </div>
         </div>
       </div>
 
-      <div id="screen-map" class="screen interactive hidden">
+      <div id="screen-map" class="screen menu-screen setup-screen interactive hidden">
+        <nav class="menu-progress" aria-label="Operation setup progress">
+          <span class="complete"><b>01</b> Operation</span><i class="complete"></i><span class="complete"><b>02</b> Command</span><i class="complete"></i><span class="active"><b>03</b> Battlefield</span>
+        </nav>
         <div class="title-block">
-          <h1>Select Theater</h1>
+          <span class="menu-kicker">Step 03 · Final Briefing</span>
+          <h1>Prepare Battlefield</h1>
+          <p>Choose the theater, battlefield scale, enemy competence, and mission-specific deployment rules.</p>
         </div>
-        <div class="panel">
-          <h2>Choose Map</h2>
+        <div class="panel menu-panel battlefield-panel">
+          <h2>Theater of Operations</h2>
           <div class="map-grid" id="map-grid"></div>
           <div class="map-size-block" id="map-size-block">
-            <h2>Map Size</h2>
+            <h2>Battlefield Scale</h2>
             <div class="map-size-grid" id="map-size-grid"></div>
           </div>
           <div class="difficulty-block" id="difficulty-block">
-            <h2>AI Difficulty</h2>
+            <h2>Enemy Experience</h2>
             <div class="difficulty-grid" id="difficulty-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="campaign-style-block">
-            <h2>Standard Style</h2>
+            <h2>Command Structure</h2>
             <div class="campaign-style-grid" id="campaign-style-grid"></div>
             <p class="campaign-style-note hidden" id="campaign-style-note">
               Base Building requires a <strong>Large</strong> map.
@@ -343,11 +369,11 @@ export class UIManager {
             <div class="campaign-style-grid" id="clearance-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
-            <h2>Wave Mode</h2>
+            <h2>Battle Duration</h2>
             <div class="campaign-style-grid" id="td-wave-mode-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="td-style-block">
-            <h2>Defence Style</h2>
+            <h2>Defensive Doctrine</h2>
             <div class="campaign-style-grid" id="td-style-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="laststand-deploy-block">
@@ -362,8 +388,8 @@ export class UIManager {
             </div>
           </div>
           <div class="actions">
-            <button class="btn btn-secondary interactive" id="btn-back-faction">Back</button>
-            <button class="btn btn-primary interactive" id="btn-launch" disabled>Deploy Forces</button>
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-faction">Previous</button>
+            <button class="btn btn-primary btn-deploy interactive" id="btn-launch" disabled>Confirm &amp; Deploy Forces</button>
           </div>
         </div>
       </div>
@@ -1119,15 +1145,16 @@ export class UIManager {
     const title = this.root.querySelector('#role-screen-title');
     const blurb = this.root.querySelector('#role-screen-blurb');
     const heading = this.root.querySelector('#role-screen-heading');
-    if (title) title.textContent = 'Your Mission';
+    if (title) title.textContent = 'Choose Your Role';
     if (blurb) {
       blurb.textContent =
-        'Attackers must capture and hold the frontline. Defenders must hold until time expires.';
+        'Lead the breakthrough or take command of the defensive line.';
     }
-    if (heading) heading.textContent = 'Attack or Defend';
+    if (heading) heading.textContent = 'Field Orders';
     grid.innerHTML = roles.map(
-      (r) => `
+      (r, index) => `
       <button class="card-btn interactive role-card${r.id === selectedId ? ' selected' : ''}" data-id="${r.id}">
+        <span class="card-index">Order ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${r.name}</span>
         <span class="meta">${r.subtitle}</span>
       </button>
@@ -1140,8 +1167,9 @@ export class UIManager {
   renderModes() {
     const grid = this.root.querySelector('#mode-grid');
     grid.innerHTML = GAME_MODE_LIST.map(
-      (m) => `
+      (m, index) => `
       <button class="card-btn interactive mode-card" data-id="${m.id}">
+        <span class="card-index">Operation ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
       </button>
@@ -1151,7 +1179,7 @@ export class UIManager {
 
   renderFactions() {
     const grid = this.root.querySelector('#faction-grid');
-    grid.innerHTML = FACTION_LIST.map((f) => {
+    grid.innerHTML = FACTION_LIST.map((f, index) => {
       const roster = getProducibleUnits(f)
         .map((key) => {
           const def = f.units[key];
@@ -1162,6 +1190,7 @@ export class UIManager {
       return `
       <button class="card-btn interactive faction-card" data-id="${f.id}">
         <img class="faction-flag" src="${f.flag}" alt="" loading="lazy" draggable="false" />
+        <span class="card-index">Field Army ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${f.name}</span>
         <span class="meta">${f.era}</span>
         <span class="units-preview-label">Units</span>
@@ -1174,8 +1203,9 @@ export class UIManager {
   renderMaps() {
     const grid = this.root.querySelector('#map-grid');
     grid.innerHTML = MAP_LIST.map(
-      (m) => `
+      (m, index) => `
       <button class="card-btn interactive map-card" data-id="${m.id}">
+        <span class="card-index">Theater ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
         <span class="units-preview">${m.features.join(' · ')}</span>
@@ -1194,17 +1224,30 @@ export class UIManager {
     if (mapBase) {
       this.selectedMapSize = resolveMapSizeId(mapBase, this.selectedMapSize);
     }
+    if (
+      this.selectedGameMode === 'assault' &&
+      !canUseAssaultMapSize(this.selectedMapSize)
+    ) {
+      this.selectedMapSize =
+        mapAllowed.find((sizeId) => canUseAssaultMapSize(sizeId)) ?? 'medium';
+    }
     grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
       const selected = preset.id === this.selectedMapSize;
       const mapBlocks = !mapAllowed.includes(preset.id);
+      const assaultBlocks =
+        this.selectedGameMode === 'assault' && !canUseAssaultMapSize(preset.id);
       const disabled =
-        mapBlocks || (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
+        mapBlocks ||
+        assaultBlocks ||
+        (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE);
       let meta = preset.subtitle;
       if (mapBlocks) {
         meta =
           mapAllowed.length === 1
             ? `${mapBase?.name ?? 'This map'} is fixed at ${MAP_SIZE_LIST.find((p) => p.id === mapAllowed[0])?.name ?? mapAllowed[0]}`
             : 'Not available on this map';
+      } else if (assaultBlocks) {
+        meta = 'Breakthrough requires a Medium or Large battlefield';
       } else if (lockBaseBuilding && preset.id !== BASE_BUILDING_MIN_MAP_SIZE) {
         meta = 'Base Building needs a large theater';
       }
@@ -1468,9 +1511,15 @@ export class UIManager {
           this.selectedGameMode === 'campaign' &&
           this.selectedCampaignStyle === 'baseBuilding';
         const mapBase = MAPS[this.selectedMap];
+        const resolvedMapSize = resolveMapSizeId(
+          mapBase,
+          this.selectedMapSize ?? 'medium'
+        );
         const mapSize = baseBuildingStyle
           ? BASE_BUILDING_MIN_MAP_SIZE
-          : resolveMapSizeId(mapBase, this.selectedMapSize ?? 'medium');
+          : this.selectedGameMode === 'assault'
+            ? resolveAssaultMapSize(resolvedMapSize)
+            : resolvedMapSize;
         const lastStandPreset =
           this.selectedGameMode === 'lastStand' &&
           isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
@@ -1803,7 +1852,7 @@ export class UIManager {
     const btn = this.root.querySelector('#btn-load-saves');
     if (!btn) return;
     const count = listBattleSaves().length;
-    btn.textContent = count > 0 ? `Load Saved Game (${count})` : 'Load Saved Game';
+    btn.textContent = count > 0 ? `Continue Saved Battle (${count})` : 'Continue Saved Battle';
     btn.title =
       count > 0
         ? `${count} saved battle${count === 1 ? '' : 's'} in this browser`
@@ -1908,8 +1957,8 @@ export class UIManager {
             : 'Small';
       const roleLabel = options.clearanceRole === 'defend' ? 'Defend' : 'Attack';
       clearanceBanner.textContent = clearanceReinforced
-        ? `Clear Defenses · ${roleLabel} · ${sizeLabel} reinforcements every 3 minutes`
-        : `Clear Defenses · ${roleLabel}`;
+        ? `Fortified Line · ${roleLabel} · 15-minute assault · ${sizeLabel} reinforcements every 3 minutes`
+        : `Fortified Line · ${roleLabel} · 15-minute assault`;
     }
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
@@ -1975,10 +2024,10 @@ export class UIManager {
       } else if (clearance) {
         this._defaultHudHint =
           options.clearanceRole === 'defend'
-            ? 'Clear Defenses (Defend): hold prepared positions · destroy the assault force · both sides reinforce every 3 minutes'
+            ? 'Fortified Line (Defend): hold for 15 minutes or destroy the assault force · attackers retreat when time expires'
             : clearanceReinforced
-              ? 'Clear Defenses (Attack): wipe all defenders · both sides reinforce every 3 minutes · expect defender probing attacks'
-              : 'Clear Defenses (Attack): wipe all defenders · no HQ or sector economy';
+              ? 'Fortified Line (Attack): wipe all defenders within 15 minutes · both sides reinforce every 3 minutes'
+              : 'Fortified Line (Attack): wipe all defenders within 15 minutes · no HQ or sector economy';
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
@@ -3237,14 +3286,24 @@ export class UIManager {
     if (tutorial) {
       el.textContent = `Your forces: ${playerAlive} · Practice mode`;
     } else if (clearance) {
+      const playerDefends = opts.clearanceRole === 'defend';
+      const timeLeft = Math.max(
+        0,
+        Math.ceil((opts.clearanceTimeLimit ?? 15 * 60) - (opts.matchTime ?? 0))
+      );
+      const timeMins = Math.floor(timeLeft / 60);
+      const timeSecs = String(timeLeft % 60).padStart(2, '0');
+      const forceText = playerDefends
+        ? `Garrison: ${playerAlive} · Attackers: ${enemyAlive}`
+        : `Assault force: ${playerAlive} · Defenders: ${enemyAlive}`;
       const reinforcement = opts.clearanceReinforcements;
       if (reinforcement?.enabled) {
         const seconds = Math.max(0, Math.ceil(reinforcement.nextAt - (opts.matchTime ?? 0)));
         const mins = Math.floor(seconds / 60);
         const secs = String(seconds % 60).padStart(2, '0');
-        el.textContent = `Your forces: ${playerAlive} · Defenders: ${enemyAlive} · Reinforcements ${mins}:${secs}`;
+        el.textContent = `${forceText} · Assault time ${timeMins}:${timeSecs} · Reinforcements ${mins}:${secs}`;
       } else {
-        el.textContent = `Your forces: ${playerAlive} · Defenders left: ${enemyAlive}`;
+        el.textContent = `${forceText} · Assault time ${timeMins}:${timeSecs}`;
       }
     } else if (opts.towerDefense && opts.tdHqDefense) {
       el.textContent = `Your forces: ${playerAlive} · Assault force: ${enemyAlive}`;
@@ -3491,15 +3550,17 @@ export class UIManager {
     }
   }
 
-  updateBattleOpening(secondsLeft) {
+  updateBattleOpening(secondsLeft, phase = null) {
     if (this._hudLastStand) return;
     const hint = this.root.querySelector('#hud-hint');
     if (!hint || !this._defaultHudHint) return;
     if (secondsLeft > 0.5) {
       const s = Math.ceil(secondsLeft);
-      hint.textContent = this._hudStandardCampaign
-        ? `Destroy the enemy HQ to win — staging ${s}s (stay inside your HQ ring)`
-        : `Staging only — ${s}s until combat (stay inside HQ ring)`;
+      hint.textContent = phase?.hint
+        ? phase.hint.replace('{seconds}', String(s))
+        : this._hudStandardCampaign
+          ? `Destroy the enemy HQ to win — staging ${s}s (stay inside your HQ ring)`
+          : `Staging only — ${s}s until combat (stay inside HQ ring)`;
       hint.classList.add('hud-hint-opening');
     } else {
       hint.textContent = this._defaultHudHint;

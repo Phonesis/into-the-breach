@@ -1,6 +1,9 @@
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { BATTLE_OPENING_TIME } from '../data/gameModes.js';
-import { CLEARANCE_CEASEFIRE_TIME } from './ClearanceMode.js';
+import {
+  CLEARANCE_CEASEFIRE_TIME,
+  CLEARANCE_DEFENDER_PREP_TIME,
+} from './ClearanceMode.js';
 
 /** Max distance from team HQ during opening / clearance ceasefire (world units). */
 export const HQ_DEPLOY_RADIUS = 32;
@@ -12,10 +15,16 @@ export function isPlayerStagingPhase(game) {
   return game.matchTime < BATTLE_OPENING_TIME;
 }
 
-/** True while the enemy must stay in the HQ ring (Standard / Assault quiet sector). */
+/** True while the enemy must wait in the quiet sector or defender preparation phase. */
 export function isEnemyStagingPhase(game) {
-  if (!game || game.tutorial || game.towerDefense || game.lastStand || game.clearance) {
+  if (!game || game.tutorial || game.towerDefense || game.lastStand) {
     return false;
+  }
+  if (game.clearance) {
+    return (
+      game.clearanceRole === 'defend' &&
+      game.matchTime < CLEARANCE_DEFENDER_PREP_TIME
+    );
   }
   return game.matchTime < BATTLE_OPENING_TIME;
 }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Shinhoto Chi-Ha">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#282820"><rect x="15" y="46" width="8" height="10"/><rect x="104" y="46" width="8" height="10"/><rect x="19" y="48" width="89" height="6"/></g>
+  <g fill="#66623c"><path d="M27 44 L30 31 L44 25 L92 25 L101 33 L99 44 Z"/><path d="M44 25 L57 18 L80 18 L92 25 Z"/></g>
+  <g fill="#41422b"><rect x="84" y="21" width="35" height="4" rx="1"/><rect x="77" y="19" width="11" height="8"/></g>
+  <g fill="#82734b" opacity="0.85"><rect x="53" y="16" width="20" height="9" rx="2"/></g>
+  <g fill="#c8aa55"><path d="m96 30 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/></g>
+</svg>

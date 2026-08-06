@@ -190,7 +190,7 @@ function markingMaterial(color) {
   });
 }
 
-function starGeometry(outer = 0.2, inner = 0.082) {
+function starShape(outer = 0.2, inner = 0.082) {
   const shape = new THREE.Shape();
   for (let i = 0; i < 10; i++) {
     const angle = Math.PI / 2 + i * Math.PI / 5;
@@ -201,7 +201,52 @@ function starGeometry(outer = 0.2, inner = 0.082) {
     else shape.lineTo(x, y);
   }
   shape.closePath();
-  return new THREE.ShapeGeometry(shape);
+  return shape;
+}
+
+function starGeometry(outer = 0.2, inner = 0.082) {
+  return new THREE.ShapeGeometry(starShape(outer, inner));
+}
+
+const JAPANESE_ARMY_ARMORED_MODELS = new Set([
+  'shinhotoChiHa',
+  'hoNi1',
+  'chiNu',
+  'chiyoda',
+]);
+
+function addJapaneseArmyStar(parent, d, {
+  x = 0,
+  y,
+  z,
+  rx = 0,
+  size = 0.115,
+}) {
+  if (!JAPANESE_ARMY_ARMORED_MODELS.has(d.model)) return;
+
+  const star = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(starShape(size, size * 0.42), {
+      depth: 0.02,
+      bevelEnabled: true,
+      bevelSegments: 1,
+      bevelSize: 0.006,
+      bevelThickness: 0.005,
+      steps: 1,
+    }),
+    new THREE.MeshStandardMaterial({
+      color: 0xc8aa55,
+      metalness: 0.34,
+      roughness: 0.58,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    })
+  );
+  star.name = 'ijaArmyStar';
+  star.position.set(x, y, z);
+  star.rotation.x = rx;
+  star.userData.tankPart = 'hull';
+  parent.add(star);
 }
 
 function addNationalMarkings(parent, d, { width, y, z, part }) {
@@ -783,6 +828,10 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
       { y: h.y, z: h.z, part: 'hull' }
     );
   }
+  addJapaneseArmyStar(group, d, {
+    y: h.y + h.h * 0.02,
+    z: h.z + h.d * 0.5 + 0.012,
+  });
   trackRun(group, dark, -1, d.track);
   trackRun(group, dark, 1, d.track);
 
@@ -923,6 +972,13 @@ export function buildTankDestroyerFromDesign(group, body, detail, dark, d) {
       z: g.z,
       rx: g.tilt ?? 0,
       part: 'hull',
+    });
+    const tilt = g.tilt ?? 0;
+    const faceOffset = g.d * 0.5 + 0.012;
+    addJapaneseArmyStar(group, d, {
+      y: g.y - Math.sin(tilt) * faceOffset,
+      z: g.z + Math.cos(tilt) * faceOffset,
+      rx: tilt,
     });
   }
   trackRun(group, dark, -1, d.track);
@@ -1130,6 +1186,14 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
       z: n.z,
       rx: n.tilt ?? 0,
       part: 'hull',
+    });
+    const tilt = n.tilt ?? 0;
+    const faceOffset = n.d * 0.5 + 0.012;
+    addJapaneseArmyStar(group, d, {
+      y: n.y - Math.sin(tilt) * faceOffset,
+      z: n.z + Math.cos(tilt) * faceOffset,
+      rx: tilt,
+      size: 0.1,
     });
   }
   if (d.rear) {

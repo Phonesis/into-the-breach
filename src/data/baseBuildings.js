@@ -3,14 +3,14 @@
 export const CAMPAIGN_STYLES = {
   classic: {
     id: 'classic',
-    name: 'Classic',
-    subtitle: 'Single HQ per side — all unit types available from headquarters.',
+    name: 'Central Command',
+    subtitle: 'A single headquarters controls reinforcement and production for the entire field force.',
   },
   baseBuilding: {
     id: 'baseBuilding',
-    name: 'Base Building',
+    name: 'Forward Bases',
     subtitle:
-      'Large map — train infantry at the garrison; build forward bases at captured sectors.',
+      'A large battlefield with infantry garrisons, specialist depots, and forward construction at captured sectors.',
   },
 };
 

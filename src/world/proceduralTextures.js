@@ -80,6 +80,8 @@ export function createGroundTexture(mapDef) {
       ? [rgba(c2, 0.22), 'rgba(126,123,114,0.12)', 'rgba(45,43,39,0.12)', 'rgba(105,89,69,0.08)']
     : terrain === 'steppe'
       ? [rgba(c2, 0.16), 'rgba(133,119,67,0.13)', 'rgba(50,75,39,0.11)', 'rgba(91,73,39,0.08)']
+      : terrain === 'jungle'
+        ? [rgba(c2, 0.2), 'rgba(30,72,35,0.15)', 'rgba(85,67,43,0.14)', 'rgba(18,52,29,0.12)']
       : [rgba(c2, 0.16), 'rgba(73,98,47,0.12)', 'rgba(33,58,29,0.1)', 'rgba(112,91,57,0.07)'];
   for (let i = 0; i < 170; i++) {
     const x = random() * size;
@@ -153,6 +155,28 @@ export function createGroundTexture(mapDef) {
       ctx.fillStyle = random() > 0.2 ? 'rgba(184,181,170,0.055)' : 'rgba(66,58,48,0.08)';
       ctx.fillRect(x, y, w, 0.7 + random() * 1.4);
     }
+  } else if (terrain === 'jungle') {
+    for (let i = 0; i < 180; i++) {
+      const x = random() * size;
+      const y = random() * size;
+      const r = 8 + random() * 34;
+      const mud = ctx.createRadialGradient(x, y, 0, x, y, r);
+      mud.addColorStop(0, 'rgba(73,56,38,0.18)');
+      mud.addColorStop(0.65, 'rgba(42,72,37,0.07)');
+      mud.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = mud;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    for (let i = 0; i < 3200; i++) {
+      const x = random() * size;
+      const y = random() * size;
+      ctx.strokeStyle = random() > 0.2 ? 'rgba(20,66,30,0.18)' : 'rgba(129,109,61,0.13)';
+      ctx.lineWidth = 0.55 + random() * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.5) * 4, y - 4 - random() * 8);
+      ctx.stroke();
+    }
   } else if (terrain === 'bocage' || terrain === 'hills') {
     ctx.strokeStyle = 'rgba(25,45,20,0.12)';
     ctx.lineWidth = 1.5;
@@ -225,7 +249,14 @@ export function createRoughnessMap(mapDef) {
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(size, size);
   const seed = (mapDef?.id?.length ?? 1) * 7;
-  const base = mapDef?.terrain === 'desert' ? 200 : mapDef?.terrain === 'urban' ? 214 : 175;
+  const base =
+    mapDef?.terrain === 'desert'
+      ? 200
+      : mapDef?.terrain === 'urban'
+        ? 214
+        : mapDef?.terrain === 'jungle'
+          ? 188
+          : 175;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {

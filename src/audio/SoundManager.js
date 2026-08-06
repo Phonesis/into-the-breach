@@ -28,12 +28,31 @@ const SAMPLE_URLS = {
   engine_tank_destroyer_usa: publicUrl('sounds/engine-tank-destroyer-usa.wav'),
   engine_tank_destroyer_uk: publicUrl('sounds/engine-tank-destroyer-uk.wav'),
   engine_tank_destroyer_russia: publicUrl('sounds/engine-tank-destroyer-russia.wav'),
+  engine_tank_destroyer_japan: publicUrl('sounds/engine-tank-destroyer-japan.wav'),
   engine_armored_car: publicUrl('sounds/engine-armored-car.wav'),
   engine_armored_car_exhaust: publicUrl('sounds/engine-armored-car-exhaust.wav'),
   aircraft_flyby: publicUrl('sounds/aircraft-flyby.wav'),
   aircraft_flyby_exhaust: publicUrl('sounds/aircraft-flyby-exhaust.wav'),
   aircraft_flyby_prop: publicUrl('sounds/aircraft-flyby-prop.wav'),
 };
+
+// Faction-specific engine beds. Generic loops remain fallback paths while
+// these ElevenLabs masters are being added or if a file fails to load.
+for (const faction of ['germany', 'usa', 'uk', 'russia', 'japan']) {
+  SAMPLE_URLS[`engine_tank_${faction}`] = publicUrl(`sounds/engine-tank-${faction}.wav`);
+  SAMPLE_URLS[`engine_tank_${faction}_exhaust`] = publicUrl(
+    `sounds/engine-tank-${faction}-exhaust.wav`
+  );
+  SAMPLE_URLS[`engine_tank_${faction}_pivot_tracks`] = publicUrl(
+    `sounds/engine-tank-${faction}-pivot-tracks.wav`
+  );
+  SAMPLE_URLS[`engine_armored_car_${faction}`] = publicUrl(
+    `sounds/engine-armored-car-${faction}.wav`
+  );
+  SAMPLE_URLS[`engine_armored_car_${faction}_exhaust`] = publicUrl(
+    `sounds/engine-armored-car-${faction}-exhaust.wav`
+  );
+}
 
 /** Extra one-shot pools (ElevenLabs extras) — loaded into arrays for random pick. */
 const EXPLOSION_SAMPLE_FILES_FULL = [
@@ -54,7 +73,26 @@ const IMPACT_SAMPLE_FILES_FULL = [
   'impact-d.wav',
   'impact-e.wav',
 ];
-const ARMOR_RICOCHET_FILES = ['armor-ricochet-01.wav', 'armor-ricochet-02.wav'];
+const ARMOR_RICOCHET_FILES = Array.from(
+  { length: 6 },
+  (_, index) => `armor-ricochet-${String(index + 1).padStart(2, '0')}.wav`
+);
+const BULLET_IMPACT_FILES = Array.from(
+  { length: 4 },
+  (_, index) => `bullet-impact-dirt-${String(index + 1).padStart(2, '0')}.wav`
+);
+const BULLET_STRUCTURE_IMPACT_FILES = Array.from(
+  { length: 3 },
+  (_, index) => `bullet-impact-structure-${String(index + 1).padStart(2, '0')}.wav`
+);
+const BULLET_METAL_IMPACT_FILES = Array.from(
+  { length: 3 },
+  (_, index) => `bullet-impact-metal-${String(index + 1).padStart(2, '0')}.wav`
+);
+const BULLET_WHIZ_FILES = Array.from(
+  { length: 4 },
+  (_, index) => `bullet-whiz-${String(index + 1).padStart(2, '0')}.wav`
+);
 const ATMOS_SAMPLE_FILES_FULL = ['battle-atmos.wav', 'battle-atmos-close.wav'];
 const RADIO_STATIC_FILES = ['radio-static-a.wav', 'radio-static-b.wav', 'radio-static-c.wav'];
 const ARTILLERY_IMPACT_FILES = Array.from(
@@ -88,9 +126,12 @@ const ATMOS_SAMPLE_FILES = ATMOS_SAMPLE_FILES_FULL;
 
 const INFANTRY_DEATH_COUNT = 8;
 const INFANTRY_DEATH_FACTIONS = {
-  default: { prefix: 'infantry-death', factions: new Set(['usa', 'uk']) },
+  default: { prefix: 'infantry-death', factions: new Set() },
+  usa: { prefix: 'infantry-death-usa', factions: new Set(['usa']) },
+  uk: { prefix: 'infantry-death-uk', factions: new Set(['uk']) },
   germany: { prefix: 'infantry-death-germany', factions: new Set(['germany']) },
   russia: { prefix: 'infantry-death-russia', factions: new Set(['russia']) },
+  japan: { prefix: 'infantry-death-japan', factions: new Set(['japan']) },
 };
 const INFANTRY_TYPES = new Set([
   'radioOperator',
@@ -105,13 +146,13 @@ const INFANTRY_TYPES = new Set([
 ]);
 
 const UNIT_SELECT_COUNT = 6;
-const UNIT_SELECT_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_SELECT_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 const UNIT_UNDERFIRE_COUNT = 12;
-const UNIT_UNDERFIRE_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_UNDERFIRE_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 const UNIT_RETREAT_COUNT = 6;
-const UNIT_RETREAT_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_RETREAT_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 const UNIT_ATTACK_COUNT = 4;
-const UNIT_ATTACK_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const UNIT_ATTACK_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 /** Fire-support + general-order commander radio lines (baked edge-tts). */
 const COMMANDER_ORDER_KINDS = [
   'strafe',
@@ -122,17 +163,20 @@ const COMMANDER_ORDER_KINDS = [
   'holdGround',
   'lostCommander',
 ];
-const COMMANDER_ORDER_FACTIONS = ['usa', 'uk', 'germany', 'russia'];
+const COMMANDER_ORDER_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 
 function infantryDeathVoiceKey(factionId) {
+  if (factionId === 'usa') return 'usa';
+  if (factionId === 'uk') return 'uk';
   if (factionId === 'germany') return 'germany';
   if (factionId === 'russia') return 'russia';
+  if (factionId === 'japan') return 'japan';
   return 'default';
 }
 
 function unitSelectVoiceKey(factionId) {
   const id = String(factionId ?? '').toLowerCase();
-  if (id === 'germany' || id === 'russia' || id === 'uk' || id === 'usa') {
+  if (id === 'germany' || id === 'russia' || id === 'uk' || id === 'usa' || id === 'japan') {
     return id;
   }
   return 'usa';
@@ -141,7 +185,7 @@ function unitSelectVoiceKey(factionId) {
 function unitUnderFireVoiceKey(factionId) {
   const id = String(factionId ?? '').toLowerCase();
   // Only return a language pack that exists — never map DE/RU onto English
-  if (id === 'germany' || id === 'russia' || id === 'uk' || id === 'usa') {
+  if (id === 'germany' || id === 'russia' || id === 'uk' || id === 'usa' || id === 'japan') {
     return id;
   }
   // Unknown faction: prefer silence over wrong language (handled by empty buffer check)
@@ -172,6 +216,14 @@ export class SoundManager {
     this.impactBuffers = [];
     /** @type {AudioBuffer[]} */
     this.armorRicochetBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.bulletImpactBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.bulletStructureImpactBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.bulletMetalImpactBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.bulletWhizBuffers = [];
     /** @type {AudioBuffer[]} */
     this.atmosBuffers = [];
     /** @type {AudioBuffer[]} */
@@ -211,15 +263,22 @@ export class SoundManager {
     this._htmlPool = [];
     this._htmlPoolBusy = 0;
     /** @type {Record<string, AudioBuffer[]>} */
-    this.infantryDeathBuffers = { default: [], germany: [], russia: [] };
+    this.infantryDeathBuffers = {
+      default: [],
+      usa: [],
+      uk: [],
+      germany: [],
+      russia: [],
+      japan: [],
+    };
     /** @type {Record<string, AudioBuffer[]>} */
-    this.unitSelectBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    this.unitSelectBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
     /** @type {Record<string, AudioBuffer[]>} */
-    this.unitUnderFireBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    this.unitUnderFireBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
     /** @type {Record<string, AudioBuffer[]>} */
-    this.unitRetreatBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    this.unitRetreatBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
     /** @type {Record<string, AudioBuffer[]>} */
-    this.unitAttackBuffers = { usa: [], uk: [], germany: [], russia: [] };
+    this.unitAttackBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
     /**
      * Commander order lines: buffers[faction][kind] = AudioBuffer
      * @type {Record<string, Record<string, AudioBuffer>>}
@@ -229,6 +288,7 @@ export class SoundManager {
       uk: {},
       germany: {},
       russia: {},
+      japan: {},
     };
   }
 
@@ -334,8 +394,10 @@ export class SoundManager {
       this.vehicleEngines = new VehicleEngineAudio(this);
       this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
-      this._loadPromise = this._loadSamples();
+      // Put the small menu theme ahead of the large combat sample batch so a
+      // cold cache can start music promptly after the first user gesture.
       this.menuMusic.ensureLoaded();
+      this._loadPromise = this._loadSamples();
       if (this.menuMusicVisible && !this.inBattle) {
         this.menuMusic.setMenuActive(true);
       }
@@ -568,6 +630,10 @@ export class SoundManager {
     this.explosionBuffers = [];
     this.impactBuffers = [];
     this.armorRicochetBuffers = [];
+    this.bulletImpactBuffers = [];
+    this.bulletStructureImpactBuffers = [];
+    this.bulletMetalImpactBuffers = [];
+    this.bulletWhizBuffers = [];
     this.atmosBuffers = [];
     this.radioStaticBuffers = [];
     this.artilleryImpactBuffers = [];
@@ -576,6 +642,10 @@ export class SoundManager {
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
     loadPool(ARMOR_RICOCHET_FILES, this.armorRicochetBuffers);
+    loadPool(BULLET_IMPACT_FILES, this.bulletImpactBuffers);
+    loadPool(BULLET_STRUCTURE_IMPACT_FILES, this.bulletStructureImpactBuffers);
+    loadPool(BULLET_METAL_IMPACT_FILES, this.bulletMetalImpactBuffers);
+    loadPool(BULLET_WHIZ_FILES, this.bulletWhizBuffers);
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
@@ -652,11 +722,13 @@ export class SoundManager {
 
   _resumeContext() {
     if (!this.ctx || this.ctx.state === 'running') return Promise.resolve(true);
-    if (this.ctx.state !== 'suspended') return Promise.resolve(false);
+    if (this.ctx.state === 'closed') return Promise.resolve(false);
     if (!this._resumePromise) {
       try {
         // Call resume synchronously before any sample-loading await so a user
         // gesture's transient activation is still available to the browser.
+        // Safari can report "interrupted" after tab/app restoration; resume it
+        // just like a suspended context.
         const resumeResult = this.ctx.resume();
         this._resumePromise = Promise.resolve(resumeResult)
           .then(() => this._isRunning())
@@ -793,7 +865,15 @@ export class SoundManager {
 
   resumeContext() {
     return this._resumeContext().then((result) => {
-      if (this._isRunning()) this._flushPendingPlays();
+      if (this._isRunning()) {
+        this._flushPendingPlays();
+        if (this.inBattle) {
+          this._startBattleAudioLock();
+          this._startBattleAtmos();
+        } else if (this.menuMusicVisible) {
+          this.menuMusic?.setMenuActive(true);
+        }
+      }
       return result;
     });
   }
@@ -1207,39 +1287,100 @@ export class SoundManager {
     this._runWhenReady(() => {
       const now = performance.now();
       const isRicochet = type === 'armor_ricochet';
-      const cooldownKey = isRicochet ? '_armorRicochetImpact' : '_impact';
-      if (now - (this._lastByType[cooldownKey] ?? 0) < (type === 'bullet' ? 120 : 80)) return;
+      const isBulletWhiz = type === 'bullet_whiz';
+      const isBulletStructure = type === 'bullet_structure';
+      const isBulletMetal = type === 'bullet_metal';
+      const isBulletImpact = type === 'bullet';
+      const isBulletEffect = isBulletWhiz || isBulletStructure || isBulletMetal || isBulletImpact;
+      const cooldownKey = isRicochet
+        ? '_armorRicochetImpact'
+        : isBulletWhiz
+          ? '_bulletWhizImpact'
+          : isBulletEffect
+            ? '_bulletImpact'
+            : '_impact';
+      const cooldownMs = isBulletWhiz ? 95 : isBulletImpact ? 120 : isBulletEffect ? 105 : 80;
+      if (now - (this._lastByType[cooldownKey] ?? 0) < cooldownMs) return;
       const useExplosion =
         type === 'shell' || type === 'tank_round' || type === 'explosion';
-      const buf = isRicochet
-        ? this._pickFromPool(this.armorRicochetBuffers, '_lastArmorRicochetFile') ??
-          this._pickFromPool(this.impactBuffers, '_lastImpactFile') ??
-          this.buffers.impact
-        : useExplosion
-          ? this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
-            this.buffers.explosion
-          : this._pickFromPool(this.impactBuffers, '_lastImpactFile') ?? this.buffers.impact;
+      const pool = isRicochet
+        ? this.armorRicochetBuffers
+        : isBulletWhiz
+          ? this.bulletWhizBuffers
+          : isBulletStructure
+            ? this.bulletStructureImpactBuffers
+            : isBulletMetal
+              ? this.bulletMetalImpactBuffers
+              : isBulletImpact
+                ? this.bulletImpactBuffers
+                : null;
+      const poolLastKey = isRicochet
+        ? '_lastArmorRicochetFile'
+        : isBulletWhiz
+          ? '_lastBulletWhizFile'
+          : isBulletStructure
+            ? '_lastBulletStructureImpactFile'
+            : isBulletMetal
+              ? '_lastBulletMetalImpactFile'
+              : '_lastBulletImpactFile';
+      let buf = pool ? this._pickFromPool(pool, poolLastKey) : null;
+      // New pools are optional assets: retain a useful generic impact while a
+      // partial bake is in progress or if a deployment omits one of the WAVs.
+      if (!buf && (isBulletStructure || isBulletMetal)) {
+        buf = this._pickFromPool(this.bulletImpactBuffers, '_lastBulletImpactFile');
+      }
+      if (!buf && (isRicochet || isBulletEffect)) {
+        buf = this._pickFromPool(this.impactBuffers, '_lastImpactFile') ?? this.buffers.impact;
+      }
+      if (!buf && useExplosion) {
+        buf = this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ?? this.buffers.explosion;
+      }
+      if (!buf && !isBulletEffect && !isRicochet) {
+        buf = this._pickFromPool(this.impactBuffers, '_lastImpactFile') ?? this.buffers.impact;
+      }
       if (!buf) return;
       this._lastByType[cooldownKey] = now;
 
       const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
       const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-      const gain = isRicochet
-        ? 1.35
-        : useExplosion
-          ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
-          : 0.85;
+      const gain = isBulletWhiz
+        ? 0.52
+        : isRicochet
+          ? 1.35
+          : isBulletMetal
+            ? 0.82
+            : isBulletStructure
+              ? 0.76
+              : isBulletImpact
+                ? 0.7
+                : useExplosion
+                  ? (EXPLOSION_IMPACT_GAIN[type] ?? 1.4)
+                  : 0.85;
       const vol = this._distanceGain(dist) * gain;
 
       this._playBuffer(buf, {
         pan,
         vol,
-        rate: isRicochet
-          ? 0.96 + Math.random() * 0.09
-          : useExplosion
-            ? 0.88 + Math.random() * 0.12
-            : 0.9 + Math.random() * 0.14,
-        wet: isRicochet ? 0.24 : useExplosion ? 0.28 + Math.random() * 0.1 : 0.4,
+        rate: isBulletWhiz
+          ? 0.94 + Math.random() * 0.12
+          : isRicochet
+            ? 0.94 + Math.random() * 0.1
+            : useExplosion
+              ? 0.88 + Math.random() * 0.12
+              : isBulletEffect
+                ? 0.92 + Math.random() * 0.14
+                : 0.9 + Math.random() * 0.14,
+        wet: isBulletWhiz
+          ? 0.16
+          : isRicochet
+            ? 0.24
+            : isBulletMetal
+              ? 0.22
+              : isBulletEffect
+                ? 0.3
+                : useExplosion
+                  ? 0.28 + Math.random() * 0.1
+                  : 0.4,
         delay: delaySec,
       });
     });

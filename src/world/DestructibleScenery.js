@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   spawnBuildingDamageDust,
+  spawnBulletImpact,
   spawnCollapseDust,
   spawnExplosion,
   spawnSmokePuff,
@@ -115,6 +116,22 @@ const BUILDING_KINDS = new Set([
   'factory',
   'church',
   'urbanWall',
+]);
+const FIELD_IMPACT_MARK_KINDS = new Set([
+  'bunker',
+  'stoneWall',
+  'fieldFence',
+  'cart',
+  'haystack',
+]);
+const SMALL_ARMS_REMAINS_KINDS = new Set([
+  'tree',
+  'hedge',
+  'bush',
+  'bunker',
+  'haystack',
+  'fieldFence',
+  'stump',
 ]);
 const GARRISON_BUILDING_KINDS = new Set([
   'farmHouse',
@@ -249,6 +266,25 @@ function collapseSfxSizeForBuilding(obj) {
   if (radius >= 6.5) return 'large';
   if (radius <= 3.8) return 'small';
   return 'medium';
+}
+
+function bulletSurfaceForKind(kind) {
+  if (kind === 'bunker' || kind === 'haystack') return 'sandbag';
+  if (
+    kind === 'stoneWall' ||
+    kind === 'urbanWall' ||
+    kind === 'urbanHouse' ||
+    kind === 'apartmentBlock' ||
+    kind === 'factory' ||
+    kind === 'church' ||
+    kind === 'rock'
+  ) {
+    return 'stone';
+  }
+  if (kind === 'fieldFence' || kind === 'cart' || kind === 'tree' || kind === 'stump') {
+    return 'wood';
+  }
+  return 'soil';
 }
 
 /** Map gen shares one material across all trees/bushes — clone per prop so damage tints stay local. */
@@ -882,13 +918,25 @@ export class DestructibleScenery {
     const buildingImpact = BUILDING_KINDS.has(obj.kind)
       ? this._addBuildingImpactMark(obj, damage, options)
       : null;
-    if (buildingImpact) this._spawnBuildingHitEffects(obj, buildingImpact, options);
+    const bulletImpact = !isExplosiveImpact(options) && options.collision !== true;
+    const fieldImpact =
+      !buildingImpact && bulletImpact && FIELD_IMPACT_MARK_KINDS.has(obj.kind)
+        ? this._addFieldImpactMark(obj, damage, options)
+        : null;
+    if (buildingImpact) {
+      this._spawnBuildingHitEffects(obj, buildingImpact, options);
+    } else if (fieldImpact) {
+      this._spawnFieldHitEffects(obj, fieldImpact);
+    } else if (bulletImpact) {
+      this._spawnGenericHitEffects(obj, options);
+    }
     obj.hp = Math.max(0, obj.hp - damage);
     this._updateDamageVisual(obj);
     if (obj.hp <= 0) {
       const source = options.impactFrom ?? options.impact;
       this.destroyObject(obj, {
         effects: isExplosiveImpact(options),
+        smallArms: bulletImpact,
         directionX: source ? obj.x - source.x : 0,
         directionZ: source ? obj.z - source.z : 0,
       });
@@ -1269,6 +1317,120 @@ export class DestructibleScenery {
     }
   }
 
+  _resolveSurfaceImpact(obj, options = {}) {
+    const source = options.impactFrom ?? options.impact;
+    const normal = new THREE.Vector3(
+      (source?.x ?? obj.x + 1) - obj.x,
+      0,
+      (source?.z ?? obj.z) - obj.z
+    );
+    if (normal.lengthSq() < 0.001) normal.set(0, 0, 1);
+    else normal.normalize();
+    const radius = obj.radius ?? 2;
+    const reach = Math.min(radius * 0.72, obj.kind === 'bunker' ? 2.85 : 1.45);
+    const yOffset =
+      obj.kind === 'bunker'
+        ? 0.46
+        : obj.kind === 'fieldFence' || obj.kind === 'cart' || obj.kind === 'haystack'
+          ? 0.62
+          : Math.min(0.9, radius * 0.5);
+    return {
+      worldPosition: new THREE.Vector3(
+        obj.x + normal.x * reach,
+        (obj.group?.position?.y ?? 0) + yOffset,
+        obj.z + normal.z * reach
+      ),
+      worldNormal: normal,
+      radius: THREE.MathUtils.clamp(0.09 + (options.damage ?? 0) * 0.002, 0.09, 0.2),
+      surface: bulletSurfaceForKind(obj.kind),
+    };
+  }
+
+  _spawnGenericHitEffects(obj, options) {
+    const impact = this._resolveSurfaceImpact(obj, options);
+    spawnBulletImpact(this.scene, impact.worldPosition, {
+      surface: impact.surface,
+      normal: impact.worldNormal,
+      scale: obj.kind === 'bunker' ? 1.2 : 1.05,
+    });
+  }
+
+  _addFieldImpactMark(obj, damage, options) {
+    const counts = obj._impactMarkCounts ?? (obj._impactMarkCounts = {});
+    const marks = obj._impactMarks ?? (obj._impactMarks = []);
+    const maxMarks = obj.kind === 'bunker' ? 22 : 14;
+    const canAddMark = (counts.fieldBullet ?? 0) < maxMarks;
+    const surface = this._resolveSurfaceImpact(obj, { ...options, damage });
+    obj.group.updateMatrixWorld(true);
+    const position = obj.group.worldToLocal(surface.worldPosition.clone());
+    const normal = surface.worldNormal
+      .clone()
+      .applyQuaternion(obj.group.quaternion.clone().invert())
+      .normalize();
+    const impact = {
+      position,
+      normal,
+      worldPosition: surface.worldPosition,
+      worldNormal: surface.worldNormal,
+      radius: THREE.MathUtils.clamp(0.075 + damage * 0.0025, 0.09, 0.19),
+      surface,
+    };
+    if (!canAddMark) return impact;
+
+    const mark = new THREE.Group();
+    mark.name = obj.kind === 'bunker' ? 'sandbagPuncture' : 'fieldBulletChip';
+    mark.position.copy(position);
+    mark.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    mark.rotateZ(Math.random() * Math.PI * 2);
+    mark.userData.damageMark = true;
+    const chipColor = surface.surface === 'sandbag' ? 0x9b8563 : 0x80664b;
+    const holeColor = surface.surface === 'sandbag' ? 0x3b3024 : 0x30251d;
+    const chipMat = new THREE.MeshBasicMaterial({
+      color: chipColor,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+    const holeMat = new THREE.MeshBasicMaterial({
+      color: holeColor,
+      transparent: true,
+      opacity: 0.84,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5,
+    });
+    const chip = new THREE.Mesh(
+      new THREE.RingGeometry(impact.radius * 0.62, impact.radius, 7),
+      chipMat
+    );
+    const hole = new THREE.Mesh(
+      new THREE.CircleGeometry(impact.radius * 0.58, 7),
+      holeMat
+    );
+    chip.userData.damageMark = true;
+    hole.userData.damageMark = true;
+    hole.position.z = 0.004;
+    mark.add(chip, hole);
+    obj.group.add(mark);
+    marks.push(mark);
+    counts.fieldBullet = (counts.fieldBullet ?? 0) + 1;
+    return impact;
+  }
+
+  _spawnFieldHitEffects(obj, impact) {
+    spawnBulletImpact(this.scene, impact.worldPosition, {
+      surface: impact.surface.surface,
+      normal: impact.worldNormal,
+      scale: obj.kind === 'bunker' ? 1.2 : 1.05,
+    });
+  }
+
   _addBuildingImpactMark(obj, damage, options) {
     const explosive = isExplosiveImpact(options);
     const collision = options.collision === true;
@@ -1487,7 +1649,13 @@ export class DestructibleScenery {
     const worldPosition = obj.group.localToWorld(impact.position.clone());
     const worldNormal = impact.normal.clone().applyQuaternion(obj.group.quaternion).normalize();
     worldPosition.addScaledVector(worldNormal, impact.radius * 0.34);
-    if (impact.collision) {
+    if (!impact.collision && !impact.explosive && !impact.roofHit) {
+      spawnBulletImpact(this.scene, worldPosition, {
+        surface: bulletSurfaceForKind(obj.kind),
+        normal: worldNormal,
+        scale: 1,
+      });
+    } else if (impact.collision) {
       spawnBuildingDamageDust(
         this.scene,
         worldPosition,
@@ -1527,9 +1695,20 @@ export class DestructibleScenery {
     obj._impactDebrisBursts++;
 
     const group = new THREE.Group();
-    group.name = 'buildingImpactDebris';
+    group.name = BUILDING_KINDS.has(obj.kind) ? 'buildingImpactDebris' : 'propImpactDebris';
+    const surface = bulletSurfaceForKind(obj.kind);
+    const debrisColor =
+      surface === 'sandbag'
+        ? 0x796248
+        : surface === 'wood'
+          ? 0x59402d
+          : surface === 'stone'
+            ? obj.kind === 'factory'
+              ? 0x815a47
+              : 0x777064
+            : 0x65503a;
     const masonry = new THREE.MeshStandardMaterial({
-      color: obj.kind === 'factory' ? 0x815a47 : 0x8b8171,
+      color: debrisColor,
       roughness: 0.98,
       envMapIntensity: 0.18,
     });
@@ -1578,7 +1757,14 @@ export class DestructibleScenery {
 
   destroyObject(
     obj,
-    { effects = true, crushed = false, directionX = 0, directionZ = 0, instant = false } = {}
+    {
+      effects = true,
+      crushed = false,
+      smallArms = false,
+      directionX = 0,
+      directionZ = 0,
+      instant = false,
+    } = {}
   ) {
     if (obj.destroyed) return;
     obj.destroyed = true;
@@ -1612,6 +1798,11 @@ export class DestructibleScenery {
       return;
     }
 
+    if (smallArms) {
+      this._destroyPropBySmallArms(obj, directionX, directionZ);
+      return;
+    }
+
     this.scene.remove(obj.group);
     obj.group.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
@@ -1620,6 +1811,42 @@ export class DestructibleScenery {
         else c.material.dispose();
       }
     });
+  }
+
+  _destroyPropBySmallArms(obj, directionX = 0, directionZ = 0) {
+    if (SMALL_ARMS_REMAINS_KINDS.has(obj.kind)) {
+      this._leaveCrushedProp(obj, directionX, directionZ);
+      return;
+    }
+
+    const direction = new THREE.Vector3(directionX, 0, directionZ);
+    if (direction.lengthSq() < 0.001) {
+      const angle = Math.random() * Math.PI * 2;
+      direction.set(Math.cos(angle), 0, Math.sin(angle));
+    } else {
+      direction.normalize();
+    }
+    const radius = THREE.MathUtils.clamp((obj.radius ?? 2) * 0.28, 0.34, 0.78);
+    const pieceCount =
+      obj.kind === 'stoneWall'
+        ? 14
+        : obj.kind === 'cart'
+          ? 12
+          : obj.kind === 'rock'
+            ? 10
+            : 8;
+    this._spawnImpactDebris(
+      obj,
+      new THREE.Vector3(
+        obj.x,
+        obj.group.position.y + Math.max(0.24, radius * 0.72),
+        obj.z
+      ),
+      direction,
+      radius,
+      pieceCount
+    );
+    this._removeAndDisposeGroup(obj.group);
   }
 
   /** Leave flattened vegetation / props behind so a vehicle impact reads as weight, not deletion. */

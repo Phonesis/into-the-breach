@@ -25,7 +25,7 @@ const promptLimit = 450;
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TMP, { recursive: true });
 
-const CATALOG = [
+const BASE_CATALOG = [
   // —— Medium tank (Sherman / Panzer / T-34 class) ——
   {
     file: 'engine-tank.wav',
@@ -95,6 +95,89 @@ const CATALOG = [
       'Seamless loop of heavy military truck exhaust rumble, dark continuous low frequency exhaust, outdoor, no music, no voices, not synthetic',
   },
 ];
+
+const FACTION_ENGINE_SPECS = {
+  germany: {
+    tank: 'German Panzer IV and Tiger tracked tanks',
+    armoredCar: 'German Sd.Kfz. 222 armoured car',
+  },
+  usa: {
+    tank: 'American M4 Sherman and M26 Pershing tracked tanks',
+    armoredCar: 'American M8 Greyhound armoured car',
+  },
+  uk: {
+    tank: 'British Churchill and Black Prince tracked tanks',
+    armoredCar: 'British Daimler armoured car',
+  },
+  russia: {
+    tank: 'Soviet T-34-85 and IS-2 tracked tanks',
+    armoredCar: 'Soviet BA-64 armoured car',
+  },
+  japan: {
+    tank: 'Japanese Shinhoto Chi-Ha and Type 3 Chi-Nu tracked tanks',
+    armoredCar: 'Japanese Type 92 Chiyoda armoured car',
+  },
+};
+
+const FACTION_ENGINE_CATALOG = Object.entries(FACTION_ENGINE_SPECS).flatMap(
+  ([faction, spec]) => [
+    {
+      file: `engine-tank-${faction}.wav`,
+      duration: 4.5,
+      influence: 0.44,
+      loop: true,
+      kind: 'main',
+      text:
+        `Seamless loop of ${spec.tank} moving under load, faction-specific World War Two engine ` +
+        `rumble, steel track clatter and drivetrain vibration, outdoor field recording, no music, ` +
+        `no voices, no horns, not synthetic, not cinematic trailer`,
+    },
+    {
+      file: `engine-tank-${faction}-exhaust.wav`,
+      duration: 4.2,
+      influence: 0.4,
+      loop: true,
+      kind: 'exhaust',
+      text:
+        `Seamless loop of ${spec.tank} exhaust rumble only, low frequency muffler pulses and ` +
+        `dark continuous engine exhaust bed, outdoor vehicle recording, no music, no voices, not synthetic`,
+    },
+    {
+      file: `engine-tank-${faction}-pivot-tracks.wav`,
+      duration: 4.5,
+      influence: 0.62,
+      loop: true,
+      kind: 'pivot',
+      text:
+        `Seamless loop of ${spec.tank} pivoting in place, heavy faction-specific steel tracks ` +
+        `grinding and clanking over packed earth, sprocket strain and short metallic track slaps, ` +
+        `realistic outdoor field recording, no cannon, no voices, no music`,
+    },
+    {
+      file: `engine-armored-car-${faction}.wav`,
+      duration: 4.0,
+      influence: 0.45,
+      loop: true,
+      kind: 'main',
+      text:
+        `Seamless loop of ${spec.armoredCar} moving under load, faction-specific gasoline engine ` +
+        `rumble, transmission hum, tire noise and light suspension rattle, outdoor recording, no music, ` +
+        `no voices, not synthetic`,
+    },
+    {
+      file: `engine-armored-car-${faction}-exhaust.wav`,
+      duration: 3.8,
+      influence: 0.42,
+      loop: true,
+      kind: 'exhaust',
+      text:
+        `Seamless loop of ${spec.armoredCar} exhaust burble, continuous faction-specific low-mid ` +
+        `engine pulses, outdoor vehicle recording, no music, no voices, not synthetic`,
+    },
+  ]
+);
+
+const CATALOG = [...BASE_CATALOG, ...FACTION_ENGINE_CATALOG];
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));

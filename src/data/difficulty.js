@@ -3,8 +3,8 @@
 export const DIFFICULTIES = {
   easy: {
     id: 'easy',
-    name: 'Easy',
-    subtitle: 'Softer AI, weaker attacks, slower enemy reinforcements.',
+    name: 'Recruit',
+    subtitle: 'A forgiving enemy command with reduced firepower, slower reinforcement tempo, and less coordinated attacks.',
     enemyDamageMult: 0.62,
     enemyResourceMult: 0.7,
     enemyIncomeMult: 0.65,
@@ -16,8 +16,8 @@ export const DIFFICULTIES = {
   },
   medium: {
     id: 'medium',
-    name: 'Medium',
-    subtitle: 'Balanced opponent — previous default challenge.',
+    name: 'Regular',
+    subtitle: 'A balanced field opponent using the full command model, standard resources, and coordinated combined-arms pressure.',
     enemyDamageMult: 0.88,
     enemyResourceMult: 1,
     enemyIncomeMult: 1,
@@ -29,8 +29,8 @@ export const DIFFICULTIES = {
   },
   hard: {
     id: 'hard',
-    name: 'Hard',
-    subtitle: 'Aggressive AI, stronger firepower, faster production.',
+    name: 'Veteran',
+    subtitle: 'An aggressive enemy command with stronger firepower, faster production, and greater operational pressure.',
     enemyDamageMult: 1.08,
     enemyResourceMult: 1.3,
     enemyIncomeMult: 1.25,

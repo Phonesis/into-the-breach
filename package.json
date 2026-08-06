@@ -12,6 +12,7 @@
     "preview:pages": "npm run build:pages && vite preview --base /into-the-breach/",
     "bake-sounds": "node scripts/bake-gun-sounds.mjs",
     "bake-elevenlabs-sfx": "node scripts/bake-elevenlabs-sfx.mjs",
+    "bake-elevenlabs-combat-effects": "node scripts/bake-elevenlabs-sfx.mjs --only combat-effects",
     "bake-elevenlabs-extra": "node scripts/bake-elevenlabs-extra.mjs",
     "bake-elevenlabs-atmos": "node scripts/bake-elevenlabs-atmos.mjs",
     "bake-elevenlabs-smallarms": "node scripts/bake-elevenlabs-smallarms.mjs",
@@ -25,8 +26,10 @@
     "bake-elevenlabs-artillery": "node scripts/bake-elevenlabs-artillery.mjs",
     "bake-elevenlabs-tank-cannons": "node scripts/bake-elevenlabs-tank-cannons.mjs",
     "bake-elevenlabs-engines": "node scripts/bake-elevenlabs-engines.mjs",
+    "bake-elevenlabs-faction-death": "node scripts/bake-elevenlabs-faction-death.mjs",
     "bake-elevenlabs-attack-orders": "node scripts/bake-elevenlabs-attack-orders.mjs",
     "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
+    "bake-elevenlabs-japan": "node scripts/bake-elevenlabs-japan.mjs",
     "bake-elevenlabs-building-collapse": "node scripts/bake-elevenlabs-building-collapse.mjs",
     "bake-engines": "node scripts/bake-engine-sounds.mjs",
     "bake-infantry-death": "node scripts/bake-infantry-death.mjs",
@@ -35,7 +38,7 @@
     "bake-commander-order": "node scripts/bake-commander-order.mjs",
     "extend-battle-atmos": "node scripts/extend-battle-atmos.mjs",
     "expand-gun-variety": "node scripts/expand-gun-variety.mjs",
-    "generate-menu-music": "python3 scripts/generate-menu-music.py && ffmpeg -y -i public/music/menu-theme.wav -c:a libvorbis -q:a 6 public/music/menu-theme.ogg"
+    "generate-menu-music": "node scripts/bake-elevenlabs-menu-music.mjs"
   },
   "dependencies": {
     "three": "^0.172.0"

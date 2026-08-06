@@ -15,6 +15,7 @@ const PAL = {
   usa: { hull: '#4a5c4a', track: '#2a2a28', gun: '#3a4538', accent: '#5a6e58' },
   uk: { hull: '#4a5568', track: '#2a2a28', gun: '#384552', accent: '#5a6578' },
   russia: { hull: '#4f5a42', track: '#2a2a28', gun: '#384438', accent: '#5c6848' },
+  japan: { hull: '#66623c', track: '#282820', gun: '#41422b', accent: '#82734b' },
 };
 
 function wrap(id, nation, body) {
@@ -25,7 +26,8 @@ function wrap(id, nation, body) {
   <g fill="${p.track}">${body.tracks}</g>
   <g fill="${p.hull}">${body.hull}</g>
   <g fill="${p.gun}">${body.gun}</g>
-  <g fill="${p.accent}" opacity="0.85">${body.detail || ''}</g>
+  <g fill="${p.accent}" opacity="0.85">${body.detail || ''}</g>${body.markings ? `
+  <g fill="#c8aa55">${body.markings}</g>` : ''}
 </svg>`;
 }
 
@@ -181,6 +183,49 @@ const SVGS = {
       tracks: `<circle cx="37" cy="52" r="7"/><circle cx="89" cy="52" r="7"/><path d="M19 54 L9 42 L15 40 L25 52 Z M107 54 L117 42 L111 40 L101 52 Z"/>`,
       hull: `<rect x="44" y="22" width="10" height="22" rx="1"/>`,
       gun: `<rect x="54" y="17" width="58" height="4"/>`,
+    }),
+  'tank-medium-japan': () =>
+    wrap('Shinhoto Chi-Ha', 'japan', {
+      tracks: `<rect x="15" y="46" width="8" height="10"/><rect x="104" y="46" width="8" height="10"/><rect x="19" y="48" width="89" height="6"/>`,
+      hull: `<path d="M27 44 L30 31 L44 25 L92 25 L101 33 L99 44 Z"/><path d="M44 25 L57 18 L80 18 L92 25 Z"/>`,
+      gun: `<rect x="84" y="21" width="35" height="4" rx="1"/><rect x="77" y="19" width="11" height="8"/>`,
+      detail: `<rect x="53" y="16" width="20" height="9" rx="2"/>`,
+      markings: `<path d="m96 30 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/>`,
+    }),
+  'tank-destroyer-japan': () =>
+    wrap('Type 1 Ho-Ni I', 'japan', {
+      tracks: `<rect x="14" y="46" width="8" height="10"/><rect x="104" y="46" width="8" height="10"/><rect x="18" y="48" width="90" height="6"/>`,
+      hull: `<path d="M26 44 L29 31 L45 24 L96 25 L103 34 L101 44 Z"/><path d="M45 25 L49 14 L78 14 L91 25 Z"/>`,
+      gun: `<rect x="75" y="16" width="47" height="5"/><rect x="116" y="14" width="7" height="9"/>`,
+      detail: `<path d="M50 14h27" stroke="#1d1e17" stroke-width="2" opacity="0.75"/>`,
+      markings: `<path d="m98 31 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/>`,
+    }),
+  'tank-super-japan': () =>
+    wrap('Type 3 Chi-Nu', 'japan', {
+      tracks: `<rect x="13" y="46" width="8" height="10"/><rect x="106" y="46" width="8" height="10"/><rect x="17" y="48" width="93" height="6"/>`,
+      hull: `<path d="M25 44 L28 29 L42 23 L96 23 L104 31 L102 44 Z"/><path d="M42 23 L56 16 L84 16 L96 23 Z"/>`,
+      gun: `<rect x="89" y="18" width="34" height="5"/><rect x="82" y="16" width="11" height="9"/>`,
+      detail: `<rect x="51" y="14" width="26" height="10" rx="2"/>`,
+      markings: `<path d="m99 29 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/>`,
+    }),
+  'armored-car-japan': () =>
+    wrap('Type 92 Chiyoda', 'japan', {
+      tracks: `<circle cx="25" cy="50" r="8"/><circle cx="52" cy="50" r="8"/><circle cx="100" cy="50" r="8"/>`,
+      hull: `<path d="M27 44 L29 31 L96 31 L108 37 L106 44 Z"/><path d="M47 31 L55 22 L86 22 L94 31 Z"/>`,
+      gun: `<rect x="84" y="25" width="25" height="3"/><rect x="70" y="20" width="17" height="11" rx="2"/>`,
+      markings: `<path d="m101 34 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/>`,
+    }),
+  'artillery-japan': () =>
+    wrap('Type 91 10 cm Howitzer', 'japan', {
+      tracks: `<circle cx="35" cy="52" r="8"/><circle cx="91" cy="52" r="8"/><path d="M17 54 L7 41 L13 39 L23 52 Z M109 54 L119 41 L113 39 L103 52 Z"/>`,
+      hull: `<rect x="41" y="28" width="17" height="18" rx="1"/>`,
+      gun: `<rect x="56" y="12" width="51" height="5" transform="rotate(-10 56 12)"/><rect x="102" y="8" width="7" height="8"/>`,
+    }),
+  'at-gun-japan': () =>
+    wrap('Type 1 47 mm AT Gun', 'japan', {
+      tracks: `<circle cx="37" cy="52" r="7"/><circle cx="88" cy="52" r="7"/><path d="M19 54 L9 42 L15 40 L25 52 Z M106 54 L116 42 L110 40 L100 52 Z"/>`,
+      hull: `<path d="M42 44 L44 22 L55 25 L54 44 Z"/>`,
+      gun: `<rect x="52" y="18" width="59" height="4"/><rect x="107" y="16" width="6" height="8"/>`,
     }),
 };
 

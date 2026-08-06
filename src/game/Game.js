@@ -15,6 +15,7 @@ import {
   ASSAULT_STARTING_RESOURCES,
   ASSAULT_ENEMY_RESOURCES,
   isAssaultMode,
+  resolveAssaultMapSize,
   isClearanceMode,
   isReinforcedClearanceMode,
   resolveClearanceReinforcementSize,
@@ -67,6 +68,8 @@ import {
   getClearanceAttackerSpawnBase,
   getClearanceStagingAnchor,
   CLEARANCE_CEASEFIRE_TIME,
+  CLEARANCE_DEFENDER_PREP_TIME,
+  CLEARANCE_TIME_LIMIT,
   createClearanceReinforcementState,
   updateClearanceReinforcements,
   updateClearanceCounterattacks,
@@ -236,6 +239,7 @@ import {
   updateMovement,
   tickUnitCooldowns,
   clearPendingMortarImpacts,
+  isSmallArmsFireType,
 } from './Combat.js';
 import {
   updateAI,
@@ -952,6 +956,9 @@ export class Game {
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
     let mapSizeId = startOptions.mapSize ?? 'medium';
+    if (isAssaultMode(gameMode)) {
+      mapSizeId = resolveAssaultMapSize(mapSizeId);
+    }
     // Preset battle groups no longer force a large theater — any map size works.
     if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
       mapSizeId = 'large';
@@ -1471,7 +1478,10 @@ export class Game {
     } else {
       const deployPhase = this._getDeployPhase();
       this.ui.updateDeployCountdown(deployPhase);
-      this.ui.updateBattleOpening(deployPhase ? deployPhase.secondsLeft : 0);
+      this.ui.updateBattleOpening(
+        deployPhase ? deployPhase.secondsLeft : 0,
+        deployPhase
+      );
     }
     this._syncDeployZoneVisuals();
     this._syncPlacementCapture();
@@ -1606,6 +1616,20 @@ export class Game {
 
   _getDeployPhase() {
     if (this.tutorial || this.towerDefense || this.lastStand || !this.running) return null;
+    if (
+      this.clearance &&
+      this.clearanceRole === 'defend' &&
+      this.matchTime < CLEARANCE_DEFENDER_PREP_TIME
+    ) {
+      return {
+        secondsLeft: CLEARANCE_DEFENDER_PREP_TIME - this.matchTime,
+        total: CLEARANCE_DEFENDER_PREP_TIME,
+        title: 'Enemy attack will commence in',
+        subtitle: 'Arrange the garrison — the assault begins when the timer expires',
+        hint: 'Enemy attack will commence in {seconds}s — arrange the garrison',
+        canLaunchEarly: false,
+      };
+    }
     if (this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME) {
       return {
         secondsLeft: CLEARANCE_CEASEFIRE_TIME - this.matchTime,
@@ -1728,7 +1752,11 @@ export class Game {
     }
     if (!this._getDeployPhase()) return;
 
-    this.matchTime = this.clearance ? CLEARANCE_CEASEFIRE_TIME : BATTLE_OPENING_TIME;
+    this.matchTime = this.clearance
+      ? this.clearanceRole === 'defend'
+        ? CLEARANCE_DEFENDER_PREP_TIME
+        : CLEARANCE_CEASEFIRE_TIME
+      : BATTLE_OPENING_TIME;
     disposeDeployZoneRings(this._deployZoneRings, this.scene);
     this._deployZoneRings = [];
     this.ui?.updateDeployCountdown(null);
@@ -2279,16 +2307,31 @@ export class Game {
     this.ui?.updateGeneralOrders(this.generalOrders);
   }
 
+  _orderClearanceDeadlineRetreat(team) {
+    const manager = team === PLAYER_TEAM ? this.generalOrders : this.enemyGeneralOrders;
+    if (!manager?.forceFullRetreat?.()) return false;
+    this._playTeamCommanderOrder('fullRetreat', team);
+    if (team === PLAYER_TEAM) this.ui?.updateGeneralOrders(this.generalOrders);
+    return true;
+  }
+
   /** Faction command-net acknowledgement for fire support / general orders. */
   _playCommanderOrder(kind) {
-    const factionId = this.playerFaction?.id ?? null;
-    const radioOperator = getRadioOperators(this.units, PLAYER_TEAM)[0];
-    const commander = getFieldCommander(this, PLAYER_TEAM);
-    const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
+    this._playTeamCommanderOrder(kind, PLAYER_TEAM);
+  }
+
+  _playTeamCommanderOrder(kind, team) {
+    const faction = team === PLAYER_TEAM ? this.playerFaction : this.enemyFaction;
+    const factionId = faction?.id ?? null;
+    const radioOperator = getRadioOperators(this.units, team)[0];
+    const commander = getFieldCommander(this, team);
+    const hq = this.hqs.find((h) => h.team === team && !h.dead);
+    const teamUnit = this.units.find((u) => u.team === team && !u.dead);
     const pos = radioOperator?.position
       ?? (!commander?.dead ? commander?.position : null)
       ?? hq?.position
-      ?? (this.clearance && this.mapDef
+      ?? teamUnit?.position
+      ?? (team === PLAYER_TEAM && this.clearance && this.mapDef
         ? getClearanceStagingAnchor(this.mapDef, this.clearanceRole).position
         : this.cameraTarget
           ? { x: this.cameraTarget.x, z: this.cameraTarget.z }
@@ -3027,6 +3070,8 @@ export class Game {
       tutorial: this.tutorial,
       assault: this.assault,
       clearance: this.clearance,
+      clearanceRole: this.clearanceRole,
+      clearanceTimeLimit: CLEARANCE_TIME_LIMIT,
       clearanceReinforcements: this.clearanceReinforcements,
       matchTime: this.matchTime,
       towerDefense: this.towerDefense,
@@ -3092,6 +3137,9 @@ export class Game {
     if (this.clearance) {
       const result = checkClearanceVictory(this);
       if (result) {
+        if (result.retreatTeam) {
+          this._orderClearanceDeadlineRetreat(result.retreatTeam);
+        }
         this.endGame(result.victory, result.detail);
       }
       return;
@@ -3332,6 +3380,7 @@ export class Game {
     targetIsHQ,
     targetIsScenery,
     groundImpact,
+    smokeMiss,
     smokeDeployed,
     from,
     to,
@@ -3355,6 +3404,17 @@ export class Game {
     }
     const pos = { x: from.x, z: from.z };
     const factionId = attacker?.faction?.id;
+    const smallArmsFire = coaxFire || isSmallArmsFireType(def?.type);
+    const smallArmsImpactType =
+      smallArmsFire && target?.def && isArmoredCombatVehicle(target.def.type)
+        ? 'bullet_metal'
+        : smallArmsFire && targetIsScenery
+          ? 'bullet_structure'
+          : smallArmsFire && (target?.isDefense || target?.isBaseBuilding)
+            ? 'bullet_structure'
+            : smallArmsFire && groundImpact
+              ? 'bullet'
+              : null;
 
     if (handGrenade) {
       sounds.playImpact('explosion', { x: to.x, z: to.z }, 0);
@@ -3393,13 +3453,26 @@ export class Game {
         rate: 0.995 + Math.random() * 0.02,
         volume: 0.82,
       });
+      if (smokeMiss) {
+        const missDelay = 0.04 + Math.min(dist ?? 0, 520) / 360;
+        sounds.playImpact('bullet_whiz', { x: to.x, z: to.z }, missDelay);
+        sounds.playImpact('bullet', { x: to.x, z: to.z }, missDelay + 0.06);
+        return;
+      }
+      if (smallArmsImpactType) {
+        sounds.playImpact(
+          smallArmsImpactType,
+          { x: to.x, z: to.z },
+          0.03 + (dist ?? 0) / 350
+        );
+      }
       if (killed && target?.def && isInfantryUnitType(target.def.type)) {
         sounds.playInfantryDeath(
           { x: to.x, z: to.z },
           target.faction?.id,
           { team: target.team }
         );
-      } else if (killed) {
+      } else if (killed && !smallArmsImpactType) {
         sounds.playImpact('bullet', { x: to.x, z: to.z }, 0.03 + dist / 320);
       }
       return;
@@ -3443,6 +3516,18 @@ export class Game {
 
     sounds.playWeapon(profile, pos, { rate, volume });
 
+    // A smoke-obscured small-arms shot still gets a passing-round cue and a
+    // delayed dust hit at its sampled miss point. Heavy shells retain their
+    // existing muzzle-only behavior here.
+    if (smokeMiss) {
+      if (smallArmsFire) {
+        const missDelay = 0.04 + Math.min(dist ?? 0, 520) / 360;
+        sounds.playImpact('bullet_whiz', { x: to.x, z: to.z }, missDelay);
+        sounds.playImpact('bullet', { x: to.x, z: to.z }, missDelay + 0.06);
+      }
+      return;
+    }
+
     // Mortar / artillery loft: muzzle report only. Detonation VFX/audio wait for
     // flight and land at the aim point locked when the shell left the tube.
     // Building intercepts still resolve impact VFX below (no loft flag).
@@ -3455,6 +3540,12 @@ export class Game {
         armorHit?.deflected ? 'armor_ricochet' : 'tank_round',
         armorHit?.impactPosition ?? { x: to.x, z: to.z },
         0.08 + dist / 180
+      );
+    } else if (smallArmsImpactType) {
+      sounds.playImpact(
+        smallArmsImpactType,
+        { x: to.x, z: to.z },
+        0.03 + (dist ?? 0) / 350
       );
     } else if (killed) {
       if (target?.def && isInfantryUnitType(target.def.type)) {
@@ -3521,7 +3612,7 @@ export class Game {
         directShellHitOnInfantry ||
         targetIsArmored ||
         destroyedGunByShell ||
-        targetIsScenery ||
+        (targetIsScenery && !smallArmsFire) ||
         def.type === 'mortar' ||
         (groundImpact &&
           (def.type === 'artillery' ||
@@ -3622,6 +3713,18 @@ export class Game {
         }
 
         this.matchTime += dt;
+        // Resolve the Fortified Line deadline before the reinforcement cycle
+        // also scheduled at 15:00. A defender killed just before the horn stays
+        // dead for the decisive check instead of being replaced first.
+        if (this.clearance && this.matchTime >= CLEARANCE_TIME_LIMIT) {
+          this._rebuildUnitCaches();
+          this.checkVictory();
+          if (this.gameOver) {
+            this.updateCamera(dt);
+            this._renderFrame();
+            return;
+          }
+        }
         const clearanceArrival = updateClearanceReinforcements(this);
         if (clearanceArrival) {
           this._rebuildUnitCaches();
@@ -3872,7 +3975,10 @@ export class Game {
                 !this.lastStand &&
                 !this.clearance &&
                 this.matchTime < BATTLE_OPENING_TIME,
-              enemyCeasefire: this.clearance && this.matchTime < CLEARANCE_CEASEFIRE_TIME,
+              enemyCeasefire:
+                this.clearance &&
+                this.clearanceRole === 'defend' &&
+                this.matchTime < CLEARANCE_DEFENDER_PREP_TIME,
               paceDamageMult: this.campaign ? CAMPAIGN_BALANCE.damageMult : 1,
               defenseTargets: this.defenses?.getAttackTargets() ?? [],
               baseBuildingTargets: combatBuildings,
@@ -4028,7 +4134,8 @@ export class Game {
             const deployPhase = this._getDeployPhase();
             this.ui?.updateDeployCountdown(deployPhase);
             this.ui?.updateBattleOpening(
-              deployPhase ? deployPhase.secondsLeft : 0
+              deployPhase ? deployPhase.secondsLeft : 0,
+              deployPhase
             );
           }
 

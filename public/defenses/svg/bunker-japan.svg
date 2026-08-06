@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Japanese log and earth bunker">
+  <rect width="128" height="64" fill="#d9d4bd"/>
+  <path d="M18 50V27l14-13h64l14 13v23z" fill="#59563a"/>
+  <path d="M13 29l17-19h70l15 19-8 5H21z" fill="#79724a"/>
+  <path d="M27 29h74v6H27zm0 10h74v5H27z" fill="#3d3627"/>
+  <rect x="48" y="30" width="34" height="8" rx="1" fill="#171914"/>
+  <path d="M12 52h104v6H12z" fill="#605a39"/>
+</svg>

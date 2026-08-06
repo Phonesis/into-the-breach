@@ -1,25 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Germany — WWII Reichskriegsflagge (Balkenkreuz, no party emblem)">
-  <!-- Naval / war ensign: hoist B-W-R, red field, iron cross in disc -->
-  <rect width="1200" height="800" fill="#CE1126"/>
-  <rect width="480" height="800" fill="#000"/>
-  <rect y="133" width="480" height="133" fill="#fff"/>
-  <rect y="400" width="480" height="133" fill="#fff"/>
-  <rect y="533" width="480" height="133" fill="#000"/>
-  <!-- Canton: iron cross (substitute for party emblem on historical ensign) -->
-  <rect width="200" height="200" fill="#000"/>
-  <g transform="translate(100,100)" fill="#fff">
-    <rect x="-14" y="-55" width="28" height="110"/>
-    <rect x="-55" y="-14" width="110" height="28"/>
-  </g>
-  <g transform="translate(700,400)">
-    <circle r="155" fill="#fff"/>
-    <g fill="#1a1a1a">
-      <rect x="-22" y="-95" width="44" height="190"/>
-      <rect x="-95" y="-22" width="190" height="44"/>
-      <rect x="-95" y="-95" width="55" height="55"/>
-      <rect x="40" y="-95" width="55" height="55"/>
-      <rect x="-95" y="40" width="55" height="55"/>
-      <rect x="40" y="40" width="55" height="55"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 5000 3000" role="img" aria-labelledby="title desc">
+  <title id="title">German Reich war flag, 1938–1945</title>
+  <desc id="desc">Historical Wehrmacht war flag used during the game’s 1943–1945 setting.</desc>
+
+  <defs>
+    <path id="iron-cross" d="M725.617 821.5c-32.269-70.889-52.181-148.591-56.975-230.358C750.408 595.937 828.111 615.848 899 648.117V456.883c-70.889 32.269-148.592 52.181-230.358 56.975 4.794-81.767 24.706-159.469 56.975-230.358H534.383c32.269 70.889 52.181 148.591 56.975 230.358C509.592 509.063 431.889 489.152 361 456.883v191.234c70.889-32.269 148.592-52.18 230.358-56.975-4.794 81.767-24.707 159.469-56.975 230.358h191.234z"/>
+    <path id="swastika-arm" d="M1480 975v525h600" transform="rotate(45 1900 1500)"/>
+    <g id="swastika">
+      <use href="#swastika-arm"/>
+      <use href="#swastika-arm" transform="rotate(90 1900 1500)"/>
+      <use href="#swastika-arm" transform="rotate(180 1900 1500)"/>
+      <use href="#swastika-arm" transform="rotate(270 1900 1500)"/>
     </g>
+  </defs>
+
+  <rect width="5000" height="3000" fill="#d00"/>
+
+  <!-- Iron Cross in the upper hoist, with the period four-line edging. -->
+  <use href="#iron-cross" fill="#000" stroke="#fff" stroke-width="132"/>
+  <use href="#iron-cross" fill="#000" stroke="#000" stroke-width="72"/>
+  <use href="#iron-cross" fill="#000" stroke="#fff" stroke-width="34"/>
+  <use href="#iron-cross" fill="#000"/>
+
+  <!-- Offset white-edged black cross and disc of the 1938 pattern. -->
+  <g fill="#fff">
+    <rect y="1125" width="5000" height="750"/>
+    <rect x="1525" width="750" height="3000"/>
+    <circle cx="1900" cy="1500" r="1000"/>
+  </g>
+  <g fill="#000">
+    <rect y="1200" width="5000" height="600"/>
+    <rect x="1600" width="600" height="3000"/>
+    <circle cx="1900" cy="1500" r="925"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="1900" cy="1500" r="850"/>
+    <circle cx="1900" cy="1500" r="782" stroke="#000" stroke-width="46"/>
+  </g>
+
+  <!-- Narrow white keylines remain visible between the black cross and central disc. -->
+  <g fill="none" stroke="#fff" stroke-width="76">
+    <rect x="-248" y="1310" width="5500" height="376"/>
+    <rect x="1712" y="-1250" width="376" height="5500"/>
+  </g>
+
+  <!-- Historical insignia, retained for documentary accuracy in the WWII setting. -->
+  <g fill="none" stroke-linejoin="miter">
+    <use href="#swastika" stroke="#000" stroke-width="210"/>
+    <use href="#swastika" stroke="#fff" stroke-width="180"/>
+    <use href="#swastika" stroke="#000" stroke-width="150"/>
   </g>
 </svg>

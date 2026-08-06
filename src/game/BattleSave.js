@@ -384,15 +384,20 @@ export function captureBattleSave(game, { id = null } = {}) {
     generalOrders: {
       cooldowns: { ...game.generalOrders.cooldowns },
       active: game.generalOrders.active
-        ? { type: game.generalOrders.active.type, remaining: game.generalOrders.active.remaining }
+        ? {
+            type: game.generalOrders.active.type,
+            remaining: game.generalOrders.active.remaining,
+            forced: !!game.generalOrders.active.forced,
+          }
         : null,
     },
     enemyGeneralOrders: {
       cooldowns: { ...game.enemyGeneralOrders?.cooldowns },
       active: game.enemyGeneralOrders?.active
-        ? {
+          ? {
             type: game.enemyGeneralOrders.active.type,
             remaining: game.enemyGeneralOrders.active.remaining,
+            forced: !!game.enemyGeneralOrders.active.forced,
           }
         : null,
     },

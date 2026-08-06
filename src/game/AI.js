@@ -1494,6 +1494,23 @@ export function updateAI({
     aiProdTimer -= dt;
   }
 
+  if (enemyStagingPhase) {
+    // The opening pause is a genuine planning phase: do not leave an older
+    // attack order or move target active while the enemy is meant to wait.
+    for (const unit of enemyUnits) {
+      if (
+        !unit ||
+        unit.dead ||
+        unit.retreating ||
+        unit.surrendered ||
+        unit._captureExit
+      ) continue;
+      unit.clearAttackOrder();
+      unit.moveTarget = null;
+    }
+    return;
+  }
+
   if (!enemyStagingPhase && !clearance && aiProdTimer <= 0 && production && enemyResources !== undefined) {
     const prodDelayMult = Math.min(d.aiProdMult ?? 1, 1.25);
     aiProdTimer =

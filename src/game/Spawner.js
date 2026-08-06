@@ -1,5 +1,6 @@
 import { Unit } from '../units/Unit.js';
 import { isVehicleUnit } from '../units/VehicleTypes.js';
+import { snapUnitYaw } from '../units/VehicleRotation.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { BASE_BUILDING_STARTING_ARMY } from '../data/baseBuildings.js';
 
@@ -118,6 +119,104 @@ const CLEARANCE_DEPLOYMENT = {
   mortar: [{ forward: 1, lateral: -9 }],
   artillery: [{ forward: 0, lateral: 8 }],
 };
+
+/**
+ * Training begins as a field exercise rather than an HQ parking area. Spread
+ * the force across a shallow frontage, with rifle squads screening the support
+ * line, armor covering the shoulders, and indirect fire protected at the rear.
+ */
+const TRAINING_DEPLOYMENT = {
+  infantry: [
+    { forward: 18, lateral: -18 },
+    { forward: 20, lateral: 0 },
+    { forward: 18, lateral: 18 },
+  ],
+  machineGun: [{ forward: 13, lateral: -10 }],
+  sniper: [{ forward: 15, lateral: 12 }],
+  armoredCar: [{ forward: 9, lateral: -23 }],
+  tank: [{ forward: 8, lateral: 23 }],
+  antiTankGun: [{ forward: 7, lateral: 5 }],
+  engineer: [{ forward: 3, lateral: -12 }],
+  radioOperator: [{ forward: 1, lateral: 13 }],
+  mortar: [{ forward: -3, lateral: -10 }],
+  artillery: [{ forward: -9, lateral: 17 }],
+};
+
+/**
+ * Breakthrough deployment is role-based rather than team-based because the
+ * player can command either physical side of the map. Attackers form a broad
+ * assault echelon; defenders cover a wider frontage with crew-served weapons.
+ */
+const ASSAULT_DEPLOYMENT = {
+  attack: {
+    machineGun: [{ forward: 15, lateral: -14 }],
+    sniper: [{ forward: 17, lateral: 15 }],
+    mortar: [{ forward: -2, lateral: -12 }],
+    armoredCar: [{ forward: 10, lateral: -29 }],
+    antiTankGun: [{ forward: 8, lateral: 4 }],
+    radioOperator: [{ forward: 1, lateral: 13 }],
+    artillery: [{ forward: -10, lateral: 18 }],
+  },
+  defend: {
+    machineGun: [{ forward: 13, lateral: -11 }],
+    sniper: [{ forward: 15, lateral: 14 }],
+    mortar: [{ forward: -4, lateral: -12 }],
+    armoredCar: [{ forward: 7, lateral: 29 }],
+    tank: [{ forward: 5, lateral: -29 }],
+    radioOperator: [{ forward: 0, lateral: 10 }],
+    artillery: [{ forward: -12, lateral: 18 }],
+  },
+};
+
+function centeredLineOffset(index, count, spacing, forwardA, forwardB = forwardA) {
+  return {
+    forward: index % 2 ? forwardB : forwardA,
+    lateral: (index - (count - 1) / 2) * spacing,
+  };
+}
+
+function getAssaultDeploymentOffset(role, type, index, count) {
+  if (type === 'infantry') {
+    return role === 'attack'
+      ? centeredLineOffset(index, count, 16, 20, 23)
+      : centeredLineOffset(index, count, 22, 17, 19);
+  }
+  if (role === 'attack' && type === 'tank') {
+    return centeredLineOffset(index, count, 40, 10);
+  }
+  if (role === 'defend' && type === 'antiTankGun') {
+    return centeredLineOffset(index, count, 38, 10);
+  }
+
+  const rolePositions = ASSAULT_DEPLOYMENT[role]?.[type];
+  if (rolePositions?.length) {
+    const position = rolePositions[index % rolePositions.length];
+    const repeat = Math.floor(index / rolePositions.length);
+    return {
+      forward: position.forward - repeat * 3,
+      lateral: position.lateral + repeat * (repeat % 2 ? -8 : 8),
+    };
+  }
+
+  return centeredLineOffset(index, count, 11, 8, 11);
+}
+
+function getTrainingDeploymentOffset(type, index, count) {
+  const rolePositions = TRAINING_DEPLOYMENT[type];
+  if (rolePositions?.length) {
+    const position = rolePositions[index % rolePositions.length];
+    const repeat = Math.floor(index / rolePositions.length);
+    return {
+      forward: position.forward - repeat * 3,
+      lateral: position.lateral + repeat * (repeat % 2 ? -7 : 7),
+    };
+  }
+
+  return {
+    forward: 8 + (index % 2) * 4,
+    lateral: (index - (count - 1) / 2) * 10,
+  };
+}
 
 function getClearanceDeploymentOffset(type, index, count) {
   const rolePositions = CLEARANCE_DEPLOYMENT[type];
@@ -369,6 +468,12 @@ export function spawnArmy({
   baseBuilding = false,
   scenery = null,
 }) {
+  const assaultDeployment =
+    roster === 'assaultAttack'
+      ? 'attack'
+      : roster === 'assaultDefend'
+        ? 'defend'
+        : null;
   let layout = ensureRadioOperatorLayout(
     resolveLayout({ roster, tutorial, team, campaign, baseBuilding })
   );
@@ -381,12 +486,22 @@ export function spawnArmy({
   let forwardZ = 0;
   let lateralX = 0;
   let lateralZ = 0;
-  if (clearanceSpawn && mapDef?.playerBase && mapDef?.enemyBase) {
-    const pb = mapDef.playerBase;
-    const eb = mapDef.enemyBase;
-    const len = Math.hypot(eb.x - pb.x, eb.z - pb.z) || 1;
-    forwardX = (eb.x - pb.x) / len;
-    forwardZ = (eb.z - pb.z) / len;
+  if (assaultDeployment && mapDef && base) {
+    const target = mapDef.frontline ?? {
+      x: ((mapDef.playerBase?.x ?? 0) + (mapDef.enemyBase?.x ?? 0)) * 0.5,
+      z: ((mapDef.playerBase?.z ?? 0) + (mapDef.enemyBase?.z ?? 0)) * 0.5,
+    };
+    const len = Math.hypot(target.x - base.x, target.z - base.z) || 1;
+    forwardX = (target.x - base.x) / len;
+    forwardZ = (target.z - base.z) / len;
+    lateralX = -forwardZ;
+    lateralZ = forwardX;
+  } else if ((clearanceSpawn || tutorial) && mapDef?.playerBase && mapDef?.enemyBase) {
+    const own = team === 'enemy' ? mapDef.enemyBase : mapDef.playerBase;
+    const foe = team === 'enemy' ? mapDef.playerBase : mapDef.enemyBase;
+    const len = Math.hypot(foe.x - own.x, foe.z - own.z) || 1;
+    forwardX = (foe.x - own.x) / len;
+    forwardZ = (foe.z - own.z) / len;
     lateralX = -forwardZ;
     lateralZ = forwardX;
   }
@@ -407,6 +522,19 @@ export function spawnArmy({
         const deployment = getClearanceDeploymentOffset(slot.type, i, slot.count);
         x = base.x + forwardX * deployment.forward + lateralX * deployment.lateral;
         z = base.z + forwardZ * deployment.forward + lateralZ * deployment.lateral;
+      } else if (tutorial) {
+        const deployment = getTrainingDeploymentOffset(slot.type, i, slot.count);
+        x = base.x + forwardX * deployment.forward + lateralX * deployment.lateral;
+        z = base.z + forwardZ * deployment.forward + lateralZ * deployment.lateral;
+      } else if (assaultDeployment) {
+        const deployment = getAssaultDeploymentOffset(
+          assaultDeployment,
+          slot.type,
+          i,
+          slot.count
+        );
+        x = base.x + forwardX * deployment.forward + lateralX * deployment.lateral;
+        z = base.z + forwardZ * deployment.forward + lateralZ * deployment.lateral;
       } else if (slot.type === 'artillery' && urban && axis) {
         // Howitzers assemble well behind the HQ line on open streets — never in
         // the front ranks and never tucked into a tenement block.
@@ -425,26 +553,30 @@ export function spawnArmy({
         x = base.x + Math.cos(angle) * dist * 0.4 + offsetSign * (row * 3 + 2);
         z = base.z + Math.sin(angle) * dist + (i - slot.count / 2) * 2.5;
       }
-      if (clearanceSpawn && mapDef) {
+      if ((clearanceSpawn || tutorial || assaultDeployment) && mapDef) {
         const half = (mapDef.size ?? 120) * 0.5 - 5;
         x = Math.max(-half, Math.min(half, x));
         z = Math.max(-half, Math.min(half, z));
       }
       const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef, {
-        team,
+        // Breakthrough can swap the teams' physical map sides. Let urban
+        // artillery infer its rear from the requested formation position.
+        team: assaultDeployment ? null : team,
         forceAssemblyRear: true,
       });
       if (!position) continue;
 
-      units.push(
-        new Unit({
-          def,
-          faction,
-          team,
-          position,
-          scene,
-        })
-      );
+      const unit = new Unit({
+        def,
+        faction,
+        team,
+        position,
+        scene,
+      });
+      if (tutorial || assaultDeployment) {
+        snapUnitYaw(unit, Math.atan2(forwardX, forwardZ));
+      }
+      units.push(unit);
     }
     row++;
   }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { publicUrl } from '../lib/publicUrl.js';
 
-const FACTIONS = ['germany', 'usa', 'uk', 'russia'];
+const FACTIONS = ['germany', 'usa', 'uk', 'russia', 'japan'];
 
 const TEXTURE_PATHS = {
   vehicle: {
@@ -57,24 +57,35 @@ const THEATRE_CAMO = {
     usa: { base: '#4c5634', accents: ['#333a28', '#6a6548'], pattern: 'mottle' },
     uk: { base: '#4e563b', accents: ['#2e3428', '#716748'], pattern: 'mottle' },
     russia: { base: '#53623d', accents: ['#3a472f', '#75684b'], pattern: 'mottle' },
+    japan: { base: '#6b663d', accents: ['#464a2c', '#82734b'], pattern: 'mottle' },
   },
   northAfrica: {
     germany: { base: '#b8945d', accents: ['#735f3f', '#d1b77d'], pattern: 'bands' },
     usa: { base: '#8a7b51', accents: ['#4c5235', '#b9a16c'], pattern: 'mottle' },
     uk: { base: '#c4aa72', accents: ['#514b3a', '#8f7650'], pattern: 'bands' },
     russia: { base: '#a18a59', accents: ['#596044', '#c5ab73'], pattern: 'mottle' },
+    japan: { base: '#9b8651', accents: ['#5c5634', '#bd9d62'], pattern: 'mottle' },
   },
   easternFront: {
     germany: { base: '#a79558', accents: ['#4e5a39', '#6d4935'], pattern: 'bands' },
     usa: { base: '#4a5435', accents: ['#303828', '#6b6444'], pattern: 'mottle' },
     uk: { base: '#596044', accents: ['#343b2d', '#71644a'], pattern: 'mottle' },
     russia: { base: '#4d5f3a', accents: ['#34452e', '#72664a'], pattern: 'mottle' },
+    japan: { base: '#66623c', accents: ['#3d472d', '#81704b'], pattern: 'mottle' },
   },
   italy: {
     germany: { base: '#aa955d', accents: ['#566044', '#75523c'], pattern: 'bands' },
     usa: { base: '#555b3b', accents: ['#373d2d', '#817052'], pattern: 'mottle' },
     uk: { base: '#625f43', accents: ['#3d4332', '#8b7753'], pattern: 'bands' },
     russia: { base: '#596044', accents: ['#39452f', '#806d4d'], pattern: 'mottle' },
+    japan: { base: '#716641', accents: ['#42482e', '#8e7750'], pattern: 'mottle' },
+  },
+  farEast: {
+    germany: { base: '#505637', accents: ['#2e3d28', '#716445'], pattern: 'mottle' },
+    usa: { base: '#465334', accents: ['#2d3927', '#6c6846'], pattern: 'mottle' },
+    uk: { base: '#4d5838', accents: ['#303b2b', '#746848'], pattern: 'mottle' },
+    russia: { base: '#4b5937', accents: ['#2f402d', '#746548'], pattern: 'mottle' },
+    japan: { base: '#615f39', accents: ['#34432b', '#806d45'], pattern: 'mottle' },
   },
 };
 
@@ -216,6 +227,7 @@ const FACTION_WEBBING = {
   usa: 0x5a4a38,
   uk: 0x4a4438,
   russia: 0x3d3830,
+  japan: 0x5a4d32,
 };
 
 const FACTION_HELMETS = {
@@ -223,6 +235,15 @@ const FACTION_HELMETS = {
   usa: 0x555b38,
   uk: 0x666044,
   russia: 0x50583b,
+  japan: 0x6a683f,
+};
+
+const FACTION_UNIFORM_COLOR = {
+  germany: 0x4b5143,
+  usa: 0x52583a,
+  uk: 0x5d5940,
+  russia: 0x536044,
+  japan: 0x6b6842,
 };
 
 function configureTexture(tex, repeat) {
@@ -248,16 +269,22 @@ export function preloadUnitTextures() {
 
   const tasks = [];
   for (const faction of FACTIONS) {
-    tasks.push(
-      loadTexture(TEXTURE_PATHS.vehicle[faction], [2, 1.5]).then((tex) =>
-        cache.set(`vehicle:${faction}`, tex)
-      )
-    );
-    tasks.push(
-      loadTexture(TEXTURE_PATHS.infantry[faction], [1.5, 1.5]).then((tex) =>
-        cache.set(`infantry:${faction}`, tex)
-      )
-    );
+    const vehiclePath = TEXTURE_PATHS.vehicle[faction];
+    const infantryPath = TEXTURE_PATHS.infantry[faction];
+    if (vehiclePath) {
+      tasks.push(
+        loadTexture(vehiclePath, [2, 1.5]).then((tex) =>
+          cache.set(`vehicle:${faction}`, tex)
+        )
+      );
+    }
+    if (infantryPath) {
+      tasks.push(
+        loadTexture(infantryPath, [1.5, 1.5]).then((tex) =>
+          cache.set(`infantry:${faction}`, tex)
+        )
+      );
+    }
   }
   tasks.push(loadTexture(TEXTURE_PATHS.ghillie, [2, 2]).then((tex) => cache.set('ghillie', tex)));
 
@@ -464,7 +491,7 @@ export function getInfantryMaterials(factionId) {
   const globals = getSharedInfantryGlobals();
 
   const body = new THREE.MeshStandardMaterial({
-    color: uniformTex ? 0xffffff : 0x4a5a38,
+    color: uniformTex ? 0xffffff : (FACTION_UNIFORM_COLOR[factionId] ?? 0x4a5a38),
     map: uniformTex ?? undefined,
     normalMap: normal,
     normalScale: new THREE.Vector2(0.32, 0.32),

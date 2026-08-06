@@ -12,6 +12,7 @@ const MAX_EFFECTS = 64;
 // smoke happened to fill the shared transient pool first.
 const EXPLOSION_RESERVED_SLOTS = 8;
 const MAX_LAYERED_EXPLOSIONS = 8;
+const MAX_BULLET_IMPACTS = 22;
 const ROUTINE_EFFECT_LIMIT = MAX_EFFECTS - EXPLOSION_RESERVED_SLOTS;
 const EXPLOSION_EVICTABLE_TYPES = new Set([
   'tracerBullet',
@@ -21,6 +22,7 @@ const EXPLOSION_EVICTABLE_TYPES = new Set([
   'tankMuzzle',
   'collapseDust',
   'buildingDamageDust',
+  'bulletImpact',
   'waterImpact',
   'smokeShellImpact',
 ]);
@@ -155,6 +157,18 @@ function toVec3(v) {
 
 function canSpawnEffect(slots = 1) {
   return active.length + slots <= ROUTINE_EFFECT_LIMIT;
+}
+
+function reserveBulletImpactSlot() {
+  let count = 0;
+  let oldestIndex = -1;
+  for (let i = 0; i < active.length; i++) {
+    if (active[i].type !== 'bulletImpact') continue;
+    count++;
+    if (oldestIndex < 0) oldestIndex = i;
+  }
+  if (count >= MAX_BULLET_IMPACTS) disposeActiveAt(oldestIndex);
+  return canSpawnEffect(2);
 }
 
 function disposeActiveAt(index) {
@@ -600,6 +614,26 @@ export function updateCombatEffects(dt) {
       fx.mesh.scale.multiplyScalar(1 + dt * 2.5);
       fx.material.opacity = Math.max(0, fx.material.opacity - dt * 1.8);
       fx.mesh.position.y += dt * 0.8;
+    } else if (fx.type === 'bulletImpact') {
+      fx.elapsed += dt;
+      const t = THREE.MathUtils.clamp(fx.elapsed / fx.maxLife, 0, 1);
+      const appear = THREE.MathUtils.smoothstep(t, 0, 0.06);
+      const fade = 1 - THREE.MathUtils.smoothstep(t, 0.42, 1);
+      for (const puff of fx.puffs) {
+        puff.velocity.multiplyScalar(Math.max(0, 1 - dt * 2.1));
+        puff.sprite.position.addScaledVector(puff.velocity, dt);
+        puff.sprite.position.y += dt * puff.rise;
+        const grow = 1 + t * puff.growth;
+        puff.sprite.scale.set(
+          puff.baseScale * puff.width * grow,
+          puff.baseScale * (puff.height ?? 1) * grow,
+          1
+        );
+        puff.material.opacity = puff.opacity * appear * fade;
+        puff.material.rotation += dt * puff.rotationSpeed;
+      }
+      updateExplosionPoints(fx.debris, fx.debrisVelocities, 10.5, dt);
+      fx.debrisMaterial.opacity = fx.debrisOpacity * (1 - THREE.MathUtils.smoothstep(t, 0.48, 1));
     } else if (fx.type === 'collapseDust') {
       const fade = Math.max(0, fx.life / fx.maxLife);
       for (const puff of fx.puffs) {
@@ -1181,6 +1215,177 @@ export function spawnSmokePuff(scene, pos, scale) {
     life: 0.45,
     maxLife: 0.45,
   });
+}
+
+const BULLET_IMPACT_PROFILES = {
+  soil: {
+    smokeColor: 0x8c795d,
+    debrisColor: 0x543a27,
+    puffCount: 3,
+    earthCount: 3,
+    debrisCount: 9,
+    opacity: 0.54,
+    debrisOpacity: 0.86,
+    sizeScale: 1.15,
+  },
+  sandbag: {
+    smokeColor: 0x8d7659,
+    debrisColor: 0x725438,
+    puffCount: 3,
+    earthCount: 2,
+    debrisCount: 8,
+    opacity: 0.5,
+    debrisOpacity: 0.84,
+  },
+  wood: {
+    smokeColor: 0x78634d,
+    debrisColor: 0x64452e,
+    puffCount: 2,
+    earthCount: 1,
+    debrisCount: 7,
+    opacity: 0.42,
+    debrisOpacity: 0.8,
+  },
+  stone: {
+    smokeColor: 0x7d7b70,
+    debrisColor: 0x69655a,
+    puffCount: 3,
+    earthCount: 2,
+    debrisCount: 8,
+    opacity: 0.46,
+    debrisOpacity: 0.82,
+  },
+};
+
+/** Small-arms impact: dirty dust and fragments, deliberately no white flash. */
+export function spawnBulletImpact(
+  scene,
+  pos,
+  { surface = 'soil', scale = 1, normal = null } = {}
+) {
+  if (!scene || !reserveBulletImpactSlot()) return false;
+  const profile = BULLET_IMPACT_PROFILES[surface] ?? BULLET_IMPACT_PROFILES.soil;
+  const resolvedScale =
+    THREE.MathUtils.clamp(scale, 0.45, 1.45) * (profile.sizeScale ?? 1);
+  const group = new THREE.Group();
+  group.name = `bulletImpact_${surface}`;
+  group.position.copy(toVec3(pos));
+
+  const outward = new THREE.Vector3(normal?.x ?? 0, 0, normal?.z ?? 0);
+  if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
+  else outward.normalize();
+  const tangent = new THREE.Vector3(-outward.z, 0, outward.x);
+  const smokeTexture = getSmokeTexture();
+  const materials = [];
+  const puffs = [];
+
+  for (let i = 0; i < profile.puffCount; i++) {
+    const material = new THREE.SpriteMaterial({
+      map: smokeTexture,
+      color: profile.smokeColor,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: true,
+      rotation: Math.random() * Math.PI * 2,
+    });
+    const sprite = new THREE.Sprite(material);
+    const lateral = (Math.random() - 0.5) * resolvedScale * 0.22;
+    const forward = resolvedScale * (0.04 + Math.random() * 0.18);
+    sprite.position.copy(outward).multiplyScalar(forward).addScaledVector(tangent, lateral);
+    sprite.position.y = resolvedScale * (0.04 + Math.random() * 0.16);
+    const baseScale = resolvedScale * (0.16 + Math.random() * 0.12);
+    const width = 1.05 + Math.random() * 0.5;
+    sprite.scale.set(baseScale * width, baseScale, 1);
+    sprite.renderOrder = 11;
+    group.add(sprite);
+    materials.push(material);
+    puffs.push({
+      sprite,
+      material,
+      baseScale,
+      width,
+      height: 1,
+      opacity: profile.opacity * (0.78 + Math.random() * 0.22),
+      growth: 0.9 + Math.random() * 0.8,
+      rise: resolvedScale * (0.2 + Math.random() * 0.22),
+      rotationSpeed: (Math.random() - 0.5) * 1.4,
+      velocity: outward
+        .clone()
+        .multiplyScalar(resolvedScale * (0.28 + Math.random() * 0.42))
+        .addScaledVector(tangent, (Math.random() - 0.5) * resolvedScale * 0.32),
+    });
+  }
+
+  const earthTexture = getEarthSprayTexture();
+  for (let i = 0; i < profile.earthCount; i++) {
+    const material = new THREE.SpriteMaterial({
+      map: earthTexture,
+      color: profile.debrisColor,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: true,
+      rotation: (Math.random() - 0.5) * 0.28,
+    });
+    const sprite = new THREE.Sprite(material);
+    const lateral = (Math.random() - 0.5) * resolvedScale * 0.28;
+    sprite.position.copy(outward).multiplyScalar(resolvedScale * (0.03 + Math.random() * 0.1));
+    sprite.position.addScaledVector(tangent, lateral);
+    sprite.position.y = resolvedScale * (0.03 + Math.random() * 0.08);
+    const baseScale = resolvedScale * (0.34 + Math.random() * 0.22);
+    const width = 0.28 + Math.random() * 0.18;
+    sprite.scale.set(baseScale * width, baseScale, 1);
+    sprite.renderOrder = 11;
+    group.add(sprite);
+    materials.push(material);
+    puffs.push({
+      sprite,
+      material,
+      baseScale,
+      width,
+      height: 1,
+      opacity: profile.opacity * (0.82 + Math.random() * 0.18),
+      growth: 0.25 + Math.random() * 0.35,
+      rise: resolvedScale * (0.06 + Math.random() * 0.1),
+      rotationSpeed: (Math.random() - 0.5) * 0.45,
+      velocity: outward
+        .clone()
+        .multiplyScalar(resolvedScale * (0.18 + Math.random() * 0.25))
+        .addScaledVector(tangent, (Math.random() - 0.5) * resolvedScale * 0.22),
+    });
+  }
+
+  const debrisBurst = createExplosionPointBurst(profile.debrisCount, resolvedScale * 0.22, false);
+  debrisBurst.points.name = 'bulletImpactDebris';
+  debrisBurst.points.renderOrder = 12;
+  debrisBurst.material.map = getEarthSprayTexture();
+  debrisBurst.material.alphaMap = debrisBurst.material.map;
+  debrisBurst.material.color.setHex(profile.debrisColor);
+  debrisBurst.material.size = resolvedScale * 0.12;
+  for (const velocity of debrisBurst.velocities) {
+    velocity.addScaledVector(outward, resolvedScale * (0.8 + Math.random() * 0.8));
+  }
+  group.add(debrisBurst.points);
+  materials.push(debrisBurst.material);
+  scene.add(group);
+
+  const life = 0.62 + Math.random() * 0.18;
+  registerEffect({
+    type: 'bulletImpact',
+    group,
+    puffs,
+    debris: debrisBurst.points,
+    debrisMaterial: debrisBurst.material,
+    debrisVelocities: debrisBurst.velocities,
+    debrisOpacity: profile.debrisOpacity,
+    elapsed: 0,
+    geometries: [debrisBurst.geometry],
+    materials,
+    life,
+    maxLife: life,
+  });
+  return true;
 }
 
 /** One capped effect for a heavy, ground-hugging building-collapse dust sheet. */

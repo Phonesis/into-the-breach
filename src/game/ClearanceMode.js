@@ -25,6 +25,12 @@ export const CLEARANCE_STARTING_RESOURCES = 160;
 /** Clear Defenses begins live; safe deployment spacing replaces an opening ceasefire. */
 export const CLEARANCE_CEASEFIRE_TIME = 0;
 
+/** Give a player commanding the garrison a short planning window before contact. */
+export const CLEARANCE_DEFENDER_PREP_TIME = 15;
+
+/** Attackers must clear the fortified line within fifteen live-combat minutes. */
+export const CLEARANCE_TIME_LIMIT = 15 * 60;
+
 export const CLEARANCE_REINFORCEMENT_INTERVAL = 180;
 
 /** Packages by size — rotate each wave. Small matches the original two-unit groups. */
@@ -810,6 +816,15 @@ export function checkClearanceVictory(game) {
       detail: playerAttacks
         ? 'All your units have been lost!'
         : 'Defenses overrun — your garrison has been wiped out!',
+    };
+  }
+  if (game.matchTime >= CLEARANCE_TIME_LIMIT) {
+    return {
+      victory: !playerAttacks,
+      retreatTeam: playerAttacks ? 'player' : 'enemy',
+      detail: playerAttacks
+        ? 'The 15-minute assault window expired — the fortified line held and a general retreat was ordered.'
+        : 'The fortified line held for 15 minutes — the enemy assault has been ordered into general retreat!',
     };
   }
   return null;

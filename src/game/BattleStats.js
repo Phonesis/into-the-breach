@@ -23,7 +23,7 @@ export const UNIT_LOSS_LABELS = {
   armoredCar: 'Armored cars',
   tank: 'Tanks',
   tankDestroyer: 'Tank destroyers',
-  superHeavyTank: 'Super heavy tanks',
+  superHeavyTank: 'Top-tier tanks',
   artillery: 'Artillery',
 };
 

@@ -89,19 +89,38 @@ export class HQ {
     const flagMat = new THREE.MeshStandardMaterial({
       color: faction?.flag ? 0xffffff : flagColor,
       side: THREE.DoubleSide,
-      roughness: 0.7,
+      roughness: 0.9,
+      metalness: 0,
       emissive: flagColor,
       emissiveIntensity: faction?.flag ? 0.05 : 0.15,
     });
+    const flagWidth = 2.8;
+    const flagHeight = 1.6;
+    const flagGeometry = new THREE.PlaneGeometry(flagWidth, flagHeight, 8, 4);
+    const flagPositions = flagGeometry.attributes.position;
+    for (let i = 0; i < flagPositions.count; i += 1) {
+      const x = flagPositions.getX(i);
+      const y = flagPositions.getY(i);
+      const alongCloth = (x + flagWidth * 0.5) / flagWidth;
+      const fold = Math.sin(alongCloth * Math.PI * 2.4 + y * 1.6);
+      flagPositions.setZ(i, fold * (0.025 + alongCloth * 0.055));
+    }
+    flagPositions.needsUpdate = true;
+    flagGeometry.computeVertexNormals();
+    const flag = new THREE.Mesh(flagGeometry, flagMat);
+    flag.position.set(flagWidth * 0.5, 6.2, 0);
+    flag.castShadow = true;
     if (faction?.flag) {
       new THREE.TextureLoader().load(faction.flag, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
+        const imageAspect = tex.image?.width / tex.image?.height;
+        if (Number.isFinite(imageAspect) && imageAspect > 0) {
+          flag.scale.y = flagWidth / imageAspect / flagHeight;
+        }
         flagMat.map = tex;
         flagMat.needsUpdate = true;
       });
     }
-    const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6, 4, 2), flagMat);
-    flag.position.set(1.4, 6.2, 0);
     this._flagMesh = flag;
     group.add(flag);
 
