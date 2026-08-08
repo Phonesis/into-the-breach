@@ -1,4 +1,7 @@
-export const AIRBORNE_CLOUD_COVER_SECONDS = 5 * 60;
+/** TEMP: set true to test airborne immediately (no cloud cover, no cooldown, unlimited uses). */
+export const TEMP_AIRBORNE_TEST = true;
+
+export const AIRBORNE_CLOUD_COVER_SECONDS = TEMP_AIRBORNE_TEST ? 0 : 5 * 60;
 
 export const FIRE_SUPPORT_TYPES = {
   strafe: {
@@ -72,13 +75,18 @@ export const FIRE_SUPPORT_TYPES = {
     id: 'airborneDrop',
     label: 'Airborne Drop',
     short: 'Airborne',
-    cooldown: 180,
+    // TEMP_AIRBORNE_TEST: no recharge while testing transports / disembark
+    cooldown: TEMP_AIRBORNE_TEST ? 0 : 180,
     warnTime: 3.4,
     squadCount: 5,
     dropRadius: 11,
-    dropHeight: 48,
-    descentRate: 12,
-    planeAltitude: 38,
+    dropHeight: 62,
+    /** Canopy descent speed (world units / s) — slower reads as silk under load */
+    descentRate: 8.2,
+    /** Transport cruise height above terrain */
+    planeAltitude: 58,
+    /** Troop transport cruise speed (world units / s) — slower than fighters */
+    planeSpeed: 28,
   },
 };
 

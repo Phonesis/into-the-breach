@@ -8,67 +8,144 @@ const EXHAUST_DOPPLER_MAX = 1.12;
 const DEFAULT_LEAD_UNITS = 52;
 const DEFAULT_TRAIL_UNITS = 68;
 
-/** Per-faction mix so each aircraft's engine character reads differently. */
+/** Per-faction mix — light touch so ElevenLabs masters keep natural piston tone. */
 const FACTION_ENGINE_PROFILE = {
   germany: {
-    // Bf 109 DB 605 — harsh, high-rev inverted V
-    mainGain: 1.05,
-    exhaustGain: 0.62,
-    propGain: 0.48,
-    mainRate: 1.04,
-    exhaustRate: 0.9,
-    propRate: 0.98,
-    lowpassBase: 260,
-    bodyBoost: 8.2,
+    // Bf 109 DB 605 — harsh inverted V
+    mainGain: 1.02,
+    exhaustGain: 0.55,
+    propGain: 0.42,
+    mainRate: 1.0,
+    exhaustRate: 0.92,
+    propRate: 0.97,
+    lowpassBase: 320,
+    bodyBoost: 5.5,
   },
   usa: {
-    // P-51 Packard Merlin — smooth powerful V12
+    // P-51 Packard Merlin
     mainGain: 1.0,
-    exhaustGain: 0.52,
-    propGain: 0.55,
-    mainRate: 0.98,
-    exhaustRate: 0.86,
-    propRate: 0.96,
-    lowpassBase: 280,
-    bodyBoost: 7.6,
-  },
-  uk: {
-    // Spitfire RR Merlin — bright, singing exhaust
-    mainGain: 1.02,
-    exhaustGain: 0.56,
-    propGain: 0.58,
-    mainRate: 1.01,
-    exhaustRate: 0.88,
-    propRate: 1.0,
-    lowpassBase: 290,
-    bodyBoost: 7.2,
-  },
-  russia: {
-    // Il-2 AM-38 — rough, lower growl
-    mainGain: 1.08,
-    exhaustGain: 0.7,
-    propGain: 0.42,
-    mainRate: 0.92,
-    exhaustRate: 0.8,
-    propRate: 0.9,
-    lowpassBase: 220,
-    bodyBoost: 8.8,
-  },
-  japan: {
-    // A6M Sakae radial — full body continuous roar (match germany weight)
-    mainGain: 1.08,
-    exhaustGain: 0.68,
+    exhaustGain: 0.5,
     propGain: 0.48,
     mainRate: 0.98,
-    exhaustRate: 0.88,
+    exhaustRate: 0.9,
     propRate: 0.96,
-    lowpassBase: 255,
-    bodyBoost: 8.6,
+    lowpassBase: 340,
+    bodyBoost: 5.0,
+  },
+  uk: {
+    // Spitfire RR Merlin
+    mainGain: 1.0,
+    exhaustGain: 0.52,
+    propGain: 0.5,
+    mainRate: 1.0,
+    exhaustRate: 0.91,
+    propRate: 0.98,
+    lowpassBase: 350,
+    bodyBoost: 4.8,
+  },
+  russia: {
+    // Il-2 AM-38
+    mainGain: 1.04,
+    exhaustGain: 0.58,
+    propGain: 0.4,
+    mainRate: 0.95,
+    exhaustRate: 0.88,
+    propRate: 0.94,
+    lowpassBase: 300,
+    bodyBoost: 5.8,
+  },
+  japan: {
+    // A6M Sakae radial
+    mainGain: 1.02,
+    exhaustGain: 0.56,
+    propGain: 0.44,
+    mainRate: 0.98,
+    exhaustRate: 0.9,
+    propRate: 0.96,
+    lowpassBase: 330,
+    bodyBoost: 5.4,
   },
 };
 
-function engineProfile(factionId) {
+/**
+ * Multi-engine troop transports.
+ * Keep body, but open the filter and prop layer so the pass reads as engines
+ * + props — not a muted glider whoosh.
+ */
+const TRANSPORT_ENGINE_PROFILE = {
+  germany: {
+    // Ju 52 trimotor — match good C-47 mix weight, slightly denser
+    mainGain: 1.16,
+    exhaustGain: 0.68,
+    propGain: 0.78,
+    mainRate: 0.94,
+    exhaustRate: 0.88,
+    propRate: 0.97,
+    lowpassBase: 440,
+    bodyBoost: 6.2,
+  },
+  usa: {
+    // C-47 twin radial
+    mainGain: 1.16,
+    exhaustGain: 0.66,
+    propGain: 0.74,
+    mainRate: 0.95,
+    exhaustRate: 0.88,
+    propRate: 0.97,
+    lowpassBase: 440,
+    bodyBoost: 6.2,
+  },
+  uk: {
+    // Dakota
+    mainGain: 1.16,
+    exhaustGain: 0.66,
+    propGain: 0.76,
+    mainRate: 0.95,
+    exhaustRate: 0.89,
+    propRate: 0.98,
+    lowpassBase: 450,
+    bodyBoost: 6.0,
+  },
+  russia: {
+    // Li-2
+    mainGain: 1.18,
+    exhaustGain: 0.72,
+    propGain: 0.7,
+    mainRate: 0.93,
+    exhaustRate: 0.86,
+    propRate: 0.95,
+    lowpassBase: 400,
+    bodyBoost: 6.8,
+  },
+  japan: {
+    // L2D twin radial — same family as C-47 / USA mix
+    mainGain: 1.16,
+    exhaustGain: 0.66,
+    propGain: 0.76,
+    mainRate: 0.95,
+    exhaustRate: 0.88,
+    propRate: 0.98,
+    lowpassBase: 440,
+    bodyBoost: 6.2,
+  },
+};
+
+function engineProfile(factionId, kind = 'fighter') {
+  if (kind === 'transport') {
+    return TRANSPORT_ENGINE_PROFILE[factionId] ?? TRANSPORT_ENGINE_PROFILE.germany;
+  }
   return FACTION_ENGINE_PROFILE[factionId] ?? FACTION_ENGINE_PROFILE.germany;
+}
+
+function pickTransportOrFighterBuffer(buffers, factionId, baseKey, kind) {
+  if (kind === 'transport') {
+    const transportKey = baseKey.replace('aircraft_flyby', 'aircraft_transport');
+    const t = pickFactionBuffer(buffers, factionId, transportKey);
+    if (t) return t;
+    // Fallback: generic transport then fighter
+    if (buffers?.[transportKey]) return buffers[transportKey];
+  }
+  return pickFactionBuffer(buffers, factionId, baseKey);
 }
 
 function calcPan(wx, listenerX) {
@@ -110,9 +187,9 @@ function pickFactionBuffer(buffers, factionId, baseKey) {
 }
 
 class FlybyVoice {
-  constructor(manager, { x, z, velX, velZ, duration, factionId = 'germany' }) {
+  constructor(manager, { x, z, velX, velZ, duration, factionId = 'germany', kind = 'fighter' }) {
     const { ctx, dryBus, wetBus, buffers } = manager;
-    const mainBuf = pickFactionBuffer(buffers, factionId, 'aircraft_flyby');
+    const mainBuf = pickTransportOrFighterBuffer(buffers, factionId, 'aircraft_flyby', kind);
     if (!ctx || !mainBuf) {
       this.alive = false;
       return;
@@ -127,7 +204,8 @@ class FlybyVoice {
     this.life = 0;
     this.maxLife = duration;
     this.sources = [];
-    this.profile = engineProfile(factionId);
+    this.kind = kind;
+    this.profile = engineProfile(factionId, kind);
     this._peakProximity = 0;
 
     this.master = ctx.createGain();
@@ -171,17 +249,21 @@ class FlybyVoice {
     this._addLoop(mainBuf, p.mainGain, 'main', t0, offset);
 
     const exhaustBuf =
-      pickFactionBuffer(buffers, factionId, 'aircraft_flyby_exhaust') ??
+      pickTransportOrFighterBuffer(buffers, factionId, 'aircraft_flyby_exhaust', kind) ??
       buffers.aircraft_flyby_exhaust;
     if (exhaustBuf) {
-      this._addLoop(exhaustBuf, p.exhaustGain, 'exhaust', t0, offset * 1.07);
+      // Transports: keep all layers phase-locked so mismatched loop wraps
+      // don't cause a mid-pass “cut out” when prop/exhaust recycle first.
+      const exOff = kind === 'transport' ? offset : offset * 1.07;
+      this._addLoop(exhaustBuf, p.exhaustGain, 'exhaust', t0, exOff);
     }
 
     const propBuf =
-      pickFactionBuffer(buffers, factionId, 'aircraft_flyby_prop') ??
+      pickTransportOrFighterBuffer(buffers, factionId, 'aircraft_flyby_prop', kind) ??
       buffers.aircraft_flyby_prop;
     if (propBuf) {
-      this._addLoop(propBuf, p.propGain, 'prop', t0, offset * 0.93);
+      const propOff = kind === 'transport' ? offset : offset * 0.93;
+      this._addLoop(propBuf, p.propGain, 'prop', t0, propOff);
     }
   }
 
@@ -246,21 +328,27 @@ class FlybyVoice {
     const propRate = dopplerRate(radialVel, 0.94 * p.propRate, 1.28);
 
     // Far = muffled; overhead = open and present.
-    const filterHz = p.lowpassBase + proximity * 4800;
-    const exhaustFilterHz = 130 + proximity * 520;
+    // Transports open wider so engine/prop mids aren't lost under the lowpass.
+    const isTransport = this.kind === 'transport';
+    const filterOpen = isTransport ? 6200 : 4800;
+    const filterHz = p.lowpassBase + proximity * filterOpen;
+    const exhaustFilterHz = (isTransport ? 180 : 130) + proximity * (isTransport ? 900 : 520);
     const bodyBoost = proximity * p.bodyBoost;
     const exhaustShelf = 3.5 + proximity * 4.2;
     const wetMix = 0.48 - proximity * 0.34;
 
     // Layers open up as the plane comes in, thin out as it leaves.
-    const propGain = (0.12 + proximity * 0.95) * p.propGain;
+    // Transports keep prop thrash audible on the pass (not just distant rumble).
+    const propOpen = isTransport ? 0.35 + proximity * 0.9 : 0.12 + proximity * 0.95;
+    const propGain = propOpen * p.propGain;
     const exhaustGain = (0.16 + proximity * 0.5) * p.exhaustGain;
     const mainGain = p.mainGain * (0.55 + proximity * 0.5);
+    const masterBoost = isTransport ? 1.35 : 1.12;
 
     const t = this.ctx.currentTime;
     // Slightly snappier pan so the pass sweeps L→R / R→L clearly
     this.panner.pan.setTargetAtTime(pan, t, 0.028);
-    this.master.gain.setTargetAtTime(vol * 1.12, t, 0.04);
+    this.master.gain.setTargetAtTime(vol * masterBoost, t, 0.04);
     this.wet.gain.setTargetAtTime(vol * wetMix, t, 0.05);
     this.lowpass.frequency.setTargetAtTime(filterHz, t, 0.06);
     this.exhaustLowpass.frequency.setTargetAtTime(exhaustFilterHz, t, 0.07);
@@ -340,6 +428,7 @@ export class StrafeAircraftAudio {
     velZ,
     duration = 2.5,
     factionId = 'germany',
+    kind = 'fighter',
     leadUnits = DEFAULT_LEAD_UNITS,
     trailUnits = DEFAULT_TRAIL_UNITS,
   }) {
@@ -356,7 +445,8 @@ export class StrafeAircraftAudio {
 
     const begin = () => {
       const main =
-        pickFactionBuffer(buffers, factionId, 'aircraft_flyby') ?? buffers.aircraft_flyby;
+        pickTransportOrFighterBuffer(buffers, factionId, 'aircraft_flyby', kind) ??
+        buffers.aircraft_flyby;
       if (!main || this.manager.muted) return;
       if (ctx.state === 'suspended') void this.manager.resumeContext();
       const voice = new FlybyVoice(this.manager, {
@@ -366,12 +456,14 @@ export class StrafeAircraftAudio {
         velZ,
         duration: audioDuration,
         factionId,
+        kind,
       });
       if (voice.alive) this.voices.push(voice);
     };
 
     const main =
-      pickFactionBuffer(buffers, factionId, 'aircraft_flyby') ?? buffers.aircraft_flyby;
+      pickTransportOrFighterBuffer(buffers, factionId, 'aircraft_flyby', kind) ??
+      buffers.aircraft_flyby;
     if (main) {
       begin();
       return;

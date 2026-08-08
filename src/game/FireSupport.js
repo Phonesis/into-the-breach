@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   AIRBORNE_CLOUD_COVER_SECONDS,
   FIRE_SUPPORT_TYPES,
+  TEMP_AIRBORNE_TEST,
 } from '../data/fireSupport.js';
 import { PRACTICE_TARGET_HQ_DAMAGE_MULT } from '../data/gameModes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
@@ -9,12 +10,14 @@ import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import {
   spawnStrikeWarning,
   spawnStrafePlane,
+  spawnTransportPlane,
   planeFlightEntry,
+  transportDoorWorldAt,
   spawnFallingBomb,
   spawnStrikeImpact,
   prewarmStrikeImpacts,
 } from '../effects/FireSupportEffects.js';
-import { spawnParatrooperSquad } from '../effects/ParachuteEffects.js';
+import { spawnParatrooperExit } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
@@ -124,8 +127,12 @@ export class FireSupportManager {
     this.targetRejectReason = null;
     this.airborneCloudCoverRemaining = AIRBORNE_CLOUD_COVER_SECONDS;
     // Clear Defenses & Battle Simulation: one airborne drop per side per match.
-    this.airborneUsesLeft =
-      this.game?.clearance || this.game?.lastStand ? 1 : null;
+    // TEMP_AIRBORNE_TEST: unlimited so you can re-drop while testing.
+    this.airborneUsesLeft = TEMP_AIRBORNE_TEST
+      ? null
+      : this.game?.clearance || this.game?.lastStand
+        ? 1
+        : null;
   }
 
   getDef(type) {
@@ -610,24 +617,30 @@ export class FireSupportManager {
       const len = Math.hypot(dx, dz) || 1;
       dx /= len;
       dz /= len;
+      // Drop run perpendicular to HQ→target so the transport crosses the DZ
       const perpX = -dz;
       const perpZ = dx;
-      const runLen = def.dropRadius * 2.8;
+      const runLen = def.dropRadius * 3.4;
       const startX = tx - perpX * runLen * 0.5;
       const startZ = tz - perpZ * runLen * 0.5;
-      const planeSpeed = 34;
+      // Transports are slower / heavier than fighters
+      const planeSpeed = def.planeSpeed ?? 28;
+      const planeAlt = def.planeAltitude ?? 38;
       const factionId = this.ownerFaction?.id ?? 'germany';
-      const entry = planeFlightEntry(mapDef, startX, startZ, perpX, perpZ);
-      // Arrive at the drop run when jumpers leave the aircraft
+      const entry = planeFlightEntry(mapDef, startX, startZ, perpX, perpZ, 28);
       const approachTime = entry.approachDist / planeSpeed;
       const spawnAt = Math.max(0.05, def.warnTime - approachTime);
-      const dropAt = spawnAt + approachTime + (runLen * 0.5) / planeSpeed;
-      const flyDuration = approachTime + runLen / planeSpeed + 1.5;
+      const flyDuration = approachTime + runLen / planeSpeed + 2.2;
+      const squadCount = def.squadCount ?? 5;
+      const dropRadius = def.dropRadius ?? 11;
+
+      // Capture flight params for staggered door exits (no live plane ref needed)
+      let flight = null;
 
       this.events.push({
         at: spawnAt,
         fn: () => {
-          spawnStrafePlane(
+          flight = spawnTransportPlane(
             scene,
             mapDef,
             startX,
@@ -635,38 +648,68 @@ export class FireSupportManager {
             perpX,
             perpZ,
             flyDuration,
-            def.planeAltitude ?? 38,
+            planeAlt,
             factionId,
             planeSpeed
           );
           sounds.startStrafeFlyby({
-            x: entry.x,
-            z: entry.z,
-            velX: perpX * planeSpeed,
-            velZ: perpZ * planeSpeed,
+            x: flight.entryX,
+            z: flight.entryZ,
+            velX: flight.nx * planeSpeed,
+            velZ: flight.nz * planeSpeed,
             duration: flyDuration,
             factionId,
+            kind: 'transport',
             leadUnits: 0,
-            trailUnits: 24,
+            trailUnits: 32,
           });
         },
       });
 
-      this.events.push({
-        at: Math.max(def.warnTime, dropAt),
-        fn: () => {
-          spawnParatrooperSquad(this.game, tx, tz, {
-            def: getParatrooperDef(this.ownerFaction?.id),
-            faction: this.ownerFaction,
-            team: this.ownerTeam,
-            squadCount: def.squadCount,
-            dropRadius: def.dropRadius,
-            dropHeight: def.dropHeight,
-            descentRate: def.descentRate,
-          });
-          sounds.play('spawn');
-        },
-      });
+      // Stagger jumps along the run so squads visibly leave the cargo door
+      for (let i = 0; i < squadCount; i++) {
+        const tAlong = 0.18 + (i / Math.max(1, squadCount - 1 || 1)) * 0.58;
+        const jumpAt = spawnAt + approachTime + (runLen * tAlong) / planeSpeed;
+        const landAngle = (i / squadCount) * Math.PI * 2 + Math.random() * 0.4;
+        const landR = Math.sqrt(Math.random()) * dropRadius * 0.88;
+        const landX = tx + Math.cos(landAngle) * landR;
+        const landZ = tz + Math.sin(landAngle) * landR;
+
+        this.events.push({
+          at: Math.max(def.warnTime * 0.85, jumpAt),
+          fn: () => {
+            const age = approachTime + (runLen * tAlong) / planeSpeed;
+            const doorLocal = flight?.doorLocal ?? { x: -1, y: -0.2, z: -1.1 };
+            const yaw = flight?.yaw ?? Math.atan2(perpX, perpZ);
+            const entryX = flight?.entryX ?? entry.x;
+            const entryZ = flight?.entryZ ?? entry.z;
+            const baseY = sampleTerrainHeight(entryX, entryZ, mapDef) + planeAlt;
+            const exit = transportDoorWorldAt({
+              entryX,
+              entryZ,
+              baseY,
+              nx: flight?.nx ?? perpX,
+              nz: flight?.nz ?? perpZ,
+              speed: planeSpeed,
+              age,
+              doorLocal,
+              yaw,
+            });
+            spawnParatrooperExit(this.game, {
+              def: getParatrooperDef(this.ownerFaction?.id),
+              faction: this.ownerFaction,
+              team: this.ownerTeam,
+              exit,
+              landX,
+              landZ,
+              velX: (flight?.nx ?? perpX) * planeSpeed,
+              velZ: (flight?.nz ?? perpZ) * planeSpeed,
+              descentRate: def.descentRate,
+            });
+            if (i === 0) sounds.play('spawn');
+          },
+        });
+      }
     }
   }
 

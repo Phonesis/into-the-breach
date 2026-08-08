@@ -1,5 +1,5 @@
 /**
- * Bake faction fighter engine loops + air-bomb one-shots via ElevenLabs SFX.
+ * Bake faction fighter + transport engine loops + air-bomb one-shots via ElevenLabs SFX.
  *
  * Requires ELEVENLABS_API_KEY + ffmpeg.
  *
@@ -7,6 +7,7 @@
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --force
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=bomb
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=engines
+ *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=transport
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --validate
  */
 import { spawnSync } from 'child_process';
@@ -29,162 +30,346 @@ const onlyArg =
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TMP, { recursive: true });
 
+// Sound-design language works better than long aircraft model lists for EL SFX.
+// Emphasize: real piston prop plane, steady RPM, outdoor mono field recording.
 const REAL =
-  'authentic outdoor field recording, natural acoustic, full low-end body, dry short natural decay, no music, no voices, no speech, not synthetic, not electronic, not cinematic trailer';
+  'real outdoor mono field recording of a living airplane, steady constant RPM, natural mechanical texture, no music, no voices, no speech, no siren, no electronic drone';
 
-/** @type {{ file: string, duration: number, influence: number, loop?: boolean, kind: string, group: string, text: string }[]} */
+/**
+ * @type {{
+ *   file: string, duration: number, influence: number, loop?: boolean,
+ *   kind: string, group: string, text: string, takes?: number, altTexts?: string[]
+ * }[]}
+ */
 const CATALOG = [
-  // —— Faction fighter main engines (seamless loops) ——
+  // —— Fighters: acoustic character first, model names light ——
   {
     file: 'aircraft-flyby-germany.wav',
-    duration: 4.2,
-    influence: 0.55,
+    duration: 4.5,
+    influence: 0.45,
     loop: true,
     kind: 'engine',
     group: 'engines',
-    text: `Seamless loop of a World War Two Messerschmitt Bf 109 Daimler-Benz DB 605 inverted V twelve cylinder engine at full throttle flyby, harsh high-rev growl and raspy exhaust crackle, propeller wash, outdoor airfield recording, continuous cruise power, ${REAL}`,
+    takes: 4,
+    text: `Seamless loop of a real vintage single-engine propeller fighter at full throttle, outdoor ground recording. Harsh inverted-V piston roar, raspy exhaust crackle, valve tick, and propeller thrash mixed as one continuous engine note. Steady RPM like a Bf 109 flyby. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real WWII fighter piston engine at combat power, continuous mechanical roar with sharp exhaust stacks and prop wash, outdoor airfield, constant throttle. ${REAL}`,
+    ],
   },
   {
     file: 'aircraft-flyby-germany-exhaust.wav',
-    duration: 3.8,
-    influence: 0.5,
+    duration: 4.0,
+    influence: 0.42,
     loop: true,
     kind: 'exhaust',
     group: 'engines',
-    text: `Seamless loop of Bf 109 DB 605 exhaust only, sharp raspy stacked exhaust pulses and dark low mid engine burble, continuous, outdoor, no propeller slap, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of vintage fighter engine exhaust stacks only, continuous raspy popping pulses and dark low burble, outdoor, no propeller thrash. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-germany-prop.wav',
-    duration: 3.6,
-    influence: 0.48,
+    duration: 3.8,
+    influence: 0.4,
     loop: true,
     kind: 'prop',
     group: 'engines',
-    text: `Seamless loop of World War Two fighter propeller wash and blade whoosh only, continuous air chopping thrash without engine tone, outdoor, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of a real airplane propeller chopping air only, continuous blade thrash and wind whoosh, no engine tone, outdoor. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-usa.wav',
-    duration: 4.2,
-    influence: 0.55,
+    duration: 4.5,
+    influence: 0.45,
     loop: true,
     kind: 'engine',
     group: 'engines',
-    text: `Seamless loop of a World War Two North American P-51 Mustang Packard Merlin V-1650 engine at combat power flyby, smooth powerful deep V12 roar and strong continuous propeller thrash, outdoor, ${REAL}`,
+    takes: 4,
+    text: `Seamless loop of a real vintage single-engine propeller fighter at combat power, outdoor ground recording. Smooth deep V12 piston roar, powerful continuous propeller thrash, steady Merlin-like howl. Constant RPM. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real P-51 style warbird engine flyby at full power, continuous deep piston rumble and prop thrash, outdoor field recording. ${REAL}`,
+    ],
   },
   {
     file: 'aircraft-flyby-usa-exhaust.wav',
-    duration: 3.8,
-    influence: 0.5,
+    duration: 4.0,
+    influence: 0.42,
     loop: true,
     kind: 'exhaust',
     group: 'engines',
-    text: `Seamless loop of Packard Merlin fighter exhaust only, smooth deep continuous V12 exhaust pulses, outdoor, no voices, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of V12 fighter exhaust only, smooth continuous deep exhaust pulses, outdoor, no propeller. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-usa-prop.wav',
-    duration: 3.6,
-    influence: 0.48,
+    duration: 3.8,
+    influence: 0.4,
     loop: true,
     kind: 'prop',
     group: 'engines',
-    text: `Seamless loop of four-blade fighter propeller thrash and airflow whoosh only, continuous, outdoor, no engine growl, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of a four-blade warbird propeller thrash only, continuous air chop, outdoor, no engine. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-uk.wav',
-    duration: 4.2,
-    influence: 0.55,
+    duration: 4.5,
+    influence: 0.45,
     loop: true,
     kind: 'engine',
     group: 'engines',
-    text: `Seamless loop of a World War Two Supermarine Spitfire Rolls-Royce Merlin engine at full throttle flyby, bright singing V12 howl and continuous prop thrash, outdoor British fighter, ${REAL}`,
+    takes: 4,
+    text: `Seamless loop of a real vintage British single-engine fighter at full throttle, outdoor recording. Bright singing V12 piston howl, continuous prop thrash, Spitfire-like engine note at steady RPM. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real Merlin-powered warbird at combat power, continuous bright piston roar and propeller wash, outdoor airfield. ${REAL}`,
+    ],
   },
   {
     file: 'aircraft-flyby-uk-exhaust.wav',
-    duration: 3.8,
-    influence: 0.5,
+    duration: 4.0,
+    influence: 0.42,
     loop: true,
     kind: 'exhaust',
     group: 'engines',
-    text: `Seamless loop of Rolls-Royce Merlin Spitfire exhaust only, bright mid-forward continuous exhaust song and low body, outdoor, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of Merlin-style fighter exhaust only, bright mid-forward continuous exhaust song with low body, outdoor, no prop. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-uk-prop.wav',
-    duration: 3.6,
-    influence: 0.48,
+    duration: 3.8,
+    influence: 0.4,
     loop: true,
     kind: 'prop',
     group: 'engines',
-    text: `Seamless loop of Spitfire propeller blade thrash and air whoosh only, continuous, outdoor, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of fighter propeller blade thrash only, continuous air whoosh, outdoor, no engine. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-russia.wav',
-    duration: 4.2,
-    influence: 0.55,
+    duration: 4.5,
+    influence: 0.45,
     loop: true,
     kind: 'engine',
     group: 'engines',
-    text: `Seamless loop of a World War Two Soviet Il-2 Shturmovik AM-38 engine at full power flyby, rough lower growling inline engine and heavy continuous prop thrash, outdoor, ${REAL}`,
+    takes: 4,
+    text: `Seamless loop of a real vintage single-engine attack plane at full power, outdoor ground recording. Rough lower growling inline piston engine, heavy continuous prop thrash, Il-2-like thick engine note. Steady RPM. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real heavy WWII attack aircraft piston engine, continuous rough deep roar and prop thrash, outdoor field recording. ${REAL}`,
+    ],
   },
   {
     file: 'aircraft-flyby-russia-exhaust.wav',
-    duration: 3.8,
-    influence: 0.5,
+    duration: 4.0,
+    influence: 0.42,
     loop: true,
     kind: 'exhaust',
     group: 'engines',
-    text: `Seamless loop of Il-2 attack aircraft exhaust only, rough deep continuous growling exhaust pulses, outdoor, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of rough attack-plane exhaust only, deep continuous growling exhaust pulses, outdoor, no propeller. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-russia-prop.wav',
-    duration: 3.6,
-    influence: 0.48,
+    duration: 3.8,
+    influence: 0.4,
     loop: true,
     kind: 'prop',
     group: 'engines',
-    text: `Seamless loop of heavy Soviet attack aircraft propeller thrash only, continuous air chopping, outdoor, ${REAL}`,
+    takes: 3,
+    text: `Seamless loop of heavy aircraft propeller thrash only, continuous air chopping, outdoor, no engine. ${REAL}`,
   },
-  // Japan: multi-take + body EQ. Prior "radial buzz/cyclic" prompts made gated, thin,
-  // harmonic takes (half silence). Mirror Germany-style continuous full-throttle language.
   {
     file: 'aircraft-flyby-japan.wav',
-    duration: 4.2,
-    influence: 0.5,
+    duration: 4.5,
+    influence: 0.45,
     loop: true,
     kind: 'engine',
     group: 'engines',
     takes: 5,
-    text: `Seamless continuous loop of a World War Two Japanese fighter air-cooled radial engine at full throttle flyby, powerful deep continuous engine roar and raspy exhaust crackle, strong propeller wash, outdoor airfield recording, unbroken cruise power, ${REAL}`,
+    text: `Seamless loop of a real vintage single-engine air-cooled radial fighter at full throttle, outdoor ground recording. Deep continuous radial piston roar, cylinder bark, exhaust crackle, and propeller thrash as one steady engine note. Constant RPM. ${REAL}`,
     altTexts: [
-      `Seamless continuous loop of a Mitsubishi A6M Zero fighter engine flyby, full power Nakajima Sakae radial roar with deep low-end body and continuous propeller thrash, outdoor combat airfield, no music no voices, not synthetic`,
-      `Seamless continuous loop of a World War Two Pacific fighter radial engine at combat power, thick continuous engine growl and prop thrash, full low frequency body, outdoor field recording, no gaps no music no speech`,
+      `Seamless loop of a real WWII radial-engine fighter flyby, continuous throaty piston rumble and prop wash, outdoor airfield, no thin buzz. ${REAL}`,
+      `Seamless loop of a real air-cooled radial airplane engine at combat power, thick continuous mechanical roar with prop thrash, outdoor mono recording. ${REAL}`,
     ],
   },
   {
     file: 'aircraft-flyby-japan-exhaust.wav',
-    duration: 3.8,
-    influence: 0.48,
+    duration: 4.0,
+    influence: 0.42,
     loop: true,
     kind: 'exhaust',
     group: 'engines',
-    takes: 5,
-    text: `Seamless continuous loop of World War Two Japanese fighter radial exhaust only, deep continuous stacked exhaust pulses and dark low mid engine burble, outdoor, no propeller slap, ${REAL}`,
-    altTexts: [
-      `Seamless continuous loop of Sakae radial fighter exhaust only, rough deep continuous exhaust roar and low body, outdoor airfield, no prop thrash no music no voices`,
-      `Seamless continuous loop of air-cooled radial fighter muffler and exhaust only, dark continuous low-mid pulses, outdoor, no propeller, ${REAL}`,
-    ],
+    takes: 4,
+    text: `Seamless loop of air-cooled radial fighter exhaust only, continuous deep stacked exhaust pulses and dark burble, outdoor, no propeller. ${REAL}`,
   },
   {
     file: 'aircraft-flyby-japan-prop.wav',
-    duration: 3.6,
-    influence: 0.48,
+    duration: 3.8,
+    influence: 0.4,
     loop: true,
     kind: 'prop',
     group: 'engines',
+    takes: 3,
+    text: `Seamless loop of fighter propeller thrash only, continuous blade air chop, outdoor, no engine. ${REAL}`,
+  },
+
+  // —— Transports: multi-engine beds with CLEAR engine roar + prop thrash ——
+  // (Prior “bass only” prompts produced mute glider-like whooshes.)
+  {
+    file: 'aircraft-transport-germany.wav',
+    duration: 4.8,
+    influence: 0.5,
+    loop: true,
+    kind: 'engine',
+    group: 'transport',
     takes: 4,
-    text: `Seamless continuous loop of World War Two fighter propeller wash and blade whoosh only, continuous air chopping thrash without engine tone, outdoor, ${REAL}`,
+    text: `Seamless loop of a real vintage three-engine propeller transport flying overhead, outdoor ground recording. Loud continuous multi-radial piston engines, clear mechanical roar, raspy exhaust, strong propeller thrash like a Ju 52. Audible engines not wind, steady RPM. ${REAL}`,
     altTexts: [
-      `Seamless continuous loop of fighter propeller thrash and airflow whoosh only, steady continuous blade slap, outdoor, no engine growl, ${REAL}`,
+      `Seamless loop of a real trimotor cargo plane flyby, continuous loud piston engines and chopping propellers, outdoor field recording, clear engine noise. ${REAL}`,
     ],
+  },
+  {
+    file: 'aircraft-transport-germany-exhaust.wav',
+    duration: 4.2,
+    influence: 0.46,
+    loop: true,
+    kind: 'exhaust',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of multi-radial transport engine exhaust stacks only, continuous audible popping exhaust pulses and low-mid engine burble, outdoor, no propeller thrash. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-germany-prop.wav',
+    duration: 4.0,
+    influence: 0.48,
+    loop: true,
+    kind: 'prop',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of three large transport propellers chopping air hard, continuous loud blade thrash and prop wash, outdoor, no engine tone. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-usa.wav',
+    duration: 4.8,
+    influence: 0.5,
+    loop: true,
+    kind: 'engine',
+    group: 'transport',
+    takes: 4,
+    text: `Seamless loop of a real vintage twin-engine cargo plane flying overhead, outdoor ground recording. Loud continuous twin radial piston engines, clear mechanical roar, exhaust crackle, and strong propeller thrash like a C-47. Audible engines not wind, steady RPM. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real DC-3 style transport flyby, continuous loud twin piston engines and propellers thrashing, outdoor field recording. ${REAL}`,
+    ],
+  },
+  {
+    file: 'aircraft-transport-usa-exhaust.wav',
+    duration: 4.2,
+    influence: 0.46,
+    loop: true,
+    kind: 'exhaust',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of twin radial cargo-plane exhaust only, continuous audible exhaust roar and pulses, outdoor, no propeller. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-usa-prop.wav',
+    duration: 4.0,
+    influence: 0.48,
+    loop: true,
+    kind: 'prop',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of twin large transport propellers chopping air hard, continuous loud blade thrash, outdoor, no engine. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-uk.wav',
+    duration: 4.8,
+    influence: 0.5,
+    loop: true,
+    kind: 'engine',
+    group: 'transport',
+    takes: 4,
+    text: `Seamless loop of a real RAF Dakota twin-engine transport flying overhead, outdoor recording. Loud continuous twin piston engines, clear mechanical roar and strong propeller thrash. Audible engines not wind, steady RPM. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-uk-exhaust.wav',
+    duration: 4.2,
+    influence: 0.46,
+    loop: true,
+    kind: 'exhaust',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of Dakota twin-engine exhaust only, continuous audible exhaust pulses, outdoor, no propeller. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-uk-prop.wav',
+    duration: 4.0,
+    influence: 0.48,
+    loop: true,
+    kind: 'prop',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of twin transport propellers chopping air hard, continuous loud blade thrash, outdoor, no engine. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-russia.wav',
+    duration: 4.8,
+    influence: 0.5,
+    loop: true,
+    kind: 'engine',
+    group: 'transport',
+    takes: 4,
+    text: `Seamless loop of a real Soviet twin-engine transport flying overhead, outdoor ground recording. Loud continuous rough twin piston engines, clear mechanical roar and heavy propeller thrash. Audible engines not wind, steady RPM. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-russia-exhaust.wav',
+    duration: 4.2,
+    influence: 0.46,
+    loop: true,
+    kind: 'exhaust',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of rough twin transport exhaust only, continuous audible growling exhaust pulses, outdoor, no propeller. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-russia-prop.wav',
+    duration: 4.0,
+    influence: 0.48,
+    loop: true,
+    kind: 'prop',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of heavy transport propellers chopping air hard, continuous loud blade thrash, outdoor, no engine. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-japan.wav',
+    duration: 4.8,
+    influence: 0.5,
+    loop: true,
+    kind: 'engine',
+    group: 'transport',
+    takes: 4,
+    text: `Seamless loop of a real twin-engine propeller transport flying overhead, outdoor ground recording. Loud continuous twin radial piston engines, clear mechanical roar, exhaust, and strong propeller thrash. Audible engines not wind, steady RPM. ${REAL}`,
+    altTexts: [
+      `Seamless loop of a real Pacific twin-engine cargo plane flyby, continuous loud piston engines and propellers thrashing air, outdoor field recording. ${REAL}`,
+    ],
+  },
+  {
+    file: 'aircraft-transport-japan-exhaust.wav',
+    duration: 4.2,
+    influence: 0.46,
+    loop: true,
+    kind: 'exhaust',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of twin radial transport exhaust only, continuous audible exhaust pulses, outdoor, no propeller. ${REAL}`,
+  },
+  {
+    file: 'aircraft-transport-japan-prop.wav',
+    duration: 4.0,
+    influence: 0.48,
+    loop: true,
+    kind: 'prop',
+    group: 'transport',
+    takes: 3,
+    text: `Seamless loop of twin transport propellers chopping air hard, continuous loud blade thrash, outdoor, no engine. ${REAL}`,
   },
 
   // —— Air bomb detonation (no freefall whistle — intentionally omitted).
@@ -282,68 +467,119 @@ for i in range(0, fr-win, win):
   db=20*math.log10(rms+1e-12)
   if db < -40: quiet += 1
   n += 1
-print(f'{quiet/n if n else 1:.4f}')
+print(f'{(quiet/n if n else 1):.4f}')
 `;
   const quietR = spawnSync('python3', ['-c', py, wavPath], { encoding: 'utf8' });
-  const quietRatio = Number((quietR.stdout || '1').trim()) || 1;
+  const quietLine = (quietR.stdout || '').trim().split(/\s+/).pop();
+  const quietRatio = Number(quietLine);
+  const quietSafe = Number.isFinite(quietRatio) ? quietRatio : 1;
 
-  // Prefer continuous (low quiet), loud, body-forward (low/mid), not shrill (high << mid).
+  // Prefer continuous, loud, with real engine midrange — not pure sub (glider).
+  // Penalize takes that are only low-end with dead mids/highs.
+  const lowV = low ?? -60;
+  const midV = mid ?? -60;
+  const highV = high ?? -60;
+  const midGap = Math.max(0, midV - lowV); // more negative mid vs low = bad (pure bass)
+  // midGap is mid - low; if mid is much quieter, mid - low is large negative... wait
+  // low=-15, mid=-30 → mid-low = -15. We want to penalize when mid is much quieter than low.
+  const midTooQuiet = Math.max(0, lowV - midV); // positive when mid weaker than low
   const score =
-    -quietRatio * 80 +
-    (overall + 40) * 1.4 +
-    ((low ?? -60) + 40) * 1.6 +
-    ((mid ?? -60) + 40) * 1.1 -
-    Math.max(0, (high ?? -60) - (mid ?? -60)) * 0.8;
+    -quietSafe * 90 +
+    (overall + 40) * 1.35 +
+    (lowV + 40) * 1.2 +
+    (midV + 40) * 1.9 +
+    (highV + 40) * 0.55 -
+    midTooQuiet * 1.4 -
+    Math.max(0, highV - midV) * 0.8;
 
-  return { score, overall, low, mid, high, quietRatio };
+  return { score, overall, low, mid, high, quietRatio: quietSafe };
 }
 
+/**
+ * Light mastering. Transports get extra low-end / darker EQ for a deeper bed.
+ */
 function engineAf(job) {
   const kind = job.kind;
+  const deep = job.group === 'transport';
   if (kind === 'explosion') {
-    // Format only for bombs — intentional (match existing loud takes).
     return job.reverse ? 'areverse' : null;
   }
   if (kind === 'exhaust') {
-    return [
-      'highpass=f=40',
-      'lowpass=f=900',
-      'equalizer=f=75:t=q:w=0.7:g=4',
-      'equalizer=f=160:t=q:w=0.8:g=3',
-      'equalizer=f=400:t=q:w=1.0:g=-1.5',
-      'afade=t=in:st=0:d=0.06',
-      'areverse,afade=t=in:st=0:d=0.06,areverse',
-      'loudnorm=I=-14:TP=-1.2:LRA=8',
-      'alimiter=limit=0.94',
-    ].join(',');
+    return deep
+      ? [
+          // Keep mid exhaust crackle audible (not pure sub)
+          'highpass=f=40',
+          'lowpass=f=2200',
+          'equalizer=f=80:t=q:w=0.7:g=2.5',
+          'equalizer=f=220:t=q:w=0.85:g=2',
+          'equalizer=f=700:t=q:w=1.0:g=1.5',
+          'equalizer=f=4500:t=q:w=1.0:g=-2',
+          'afade=t=in:st=0:d=0.05',
+          'areverse,afade=t=in:st=0:d=0.05,areverse',
+          'loudnorm=I=-14:TP=-1.3:LRA=9',
+          'alimiter=limit=0.95',
+        ].join(',')
+      : [
+          'highpass=f=45',
+          'lowpass=f=1400',
+          'equalizer=f=90:t=q:w=0.8:g=1.5',
+          'equalizer=f=3500:t=q:w=1.0:g=-2',
+          'afade=t=in:st=0:d=0.05',
+          'areverse,afade=t=in:st=0:d=0.05,areverse',
+          'loudnorm=I=-16:TP=-1.5:LRA=9',
+          'alimiter=limit=0.95',
+        ].join(',');
   }
   if (kind === 'prop') {
-    return [
-      'highpass=f=80',
-      'lowpass=f=7000',
-      'equalizer=f=220:t=q:w=0.9:g=1.5',
-      'equalizer=f=1200:t=q:w=1.0:g=1',
-      'equalizer=f=4500:t=q:w=1.0:g=-2',
-      'afade=t=in:st=0:d=0.06',
-      'areverse,afade=t=in:st=0:d=0.06,areverse',
-      'loudnorm=I=-16:TP=-1.5:LRA=8',
-      'alimiter=limit=0.94',
-    ].join(',');
+    return deep
+      ? [
+          // Bright thrash so props read on the fly-by
+          'highpass=f=100',
+          'lowpass=f=9000',
+          'equalizer=f=350:t=q:w=0.9:g=1.5',
+          'equalizer=f=1200:t=q:w=1.0:g=2.5',
+          'equalizer=f=2800:t=q:w=1.0:g=2',
+          'afade=t=in:st=0:d=0.05',
+          'areverse,afade=t=in:st=0:d=0.05,areverse',
+          'loudnorm=I=-14:TP=-1.3:LRA=9',
+          'alimiter=limit=0.95',
+        ].join(',')
+      : [
+          'highpass=f=90',
+          'lowpass=f=8000',
+          'equalizer=f=5000:t=q:w=1.0:g=-1.5',
+          'afade=t=in:st=0:d=0.05',
+          'areverse,afade=t=in:st=0:d=0.05,areverse',
+          'loudnorm=I=-17:TP=-1.5:LRA=9',
+          'alimiter=limit=0.95',
+        ].join(',');
   }
   // main engine
-  return [
-    'highpass=f=40',
-    'lowpass=f=5200',
-    'equalizer=f=85:t=q:w=0.75:g=4',
-    'equalizer=f=200:t=q:w=0.85:g=2.5',
-    'equalizer=f=550:t=q:w=1.0:g=1.5',
-    'equalizer=f=2800:t=q:w=1.0:g=-3',
-    'equalizer=f=4500:t=q:w=1.0:g=-4',
-    'afade=t=in:st=0:d=0.06',
-    'areverse,afade=t=in:st=0:d=0.06,areverse',
-    'loudnorm=I=-14:TP=-1.2:LRA=8',
-    'alimiter=limit=0.94',
-  ].join(',');
+  return deep
+    ? [
+        // Body + clear mid engine roar (must not become a mute whoosh)
+        'highpass=f=35',
+        'lowpass=f=10000',
+        'equalizer=f=90:t=q:w=0.7:g=2.5',
+        'equalizer=f=220:t=q:w=0.85:g=2',
+        'equalizer=f=550:t=q:w=0.9:g=2.5',
+        'equalizer=f=1400:t=q:w=1.0:g=1.5',
+        'equalizer=f=3200:t=q:w=1.0:g=0.5',
+        'afade=t=in:st=0:d=0.05',
+        'areverse,afade=t=in:st=0:d=0.05,areverse',
+        'loudnorm=I=-13:TP=-1.2:LRA=10',
+        'alimiter=limit=0.95',
+      ].join(',')
+    : [
+        'highpass=f=35',
+        'lowpass=f=9000',
+        'equalizer=f=110:t=q:w=0.7:g=1.2',
+        'equalizer=f=5500:t=q:w=1.0:g=-2',
+        'afade=t=in:st=0:d=0.05',
+        'areverse,afade=t=in:st=0:d=0.05,areverse',
+        'loudnorm=I=-15:TP=-1.4:LRA=10',
+        'alimiter=limit=0.95',
+      ].join(',');
 }
 
 /**

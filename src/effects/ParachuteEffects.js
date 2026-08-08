@@ -313,6 +313,8 @@ function disposeRig(rig) {
 }
 
 function cleanupDrop(drop, scene) {
+  if (drop.jumpGroup?.parent) scene.remove(drop.jumpGroup);
+  drop.jumpGroup = null;
   if (drop.rig?.group?.parent) scene.remove(drop.rig.group);
   disposeRig(drop.rig);
 }
@@ -322,9 +324,14 @@ function landParatrooper(drop, scene, mapDef) {
   unit._dropping = false;
 
   const groundY = sampleTerrainHeight(drop.x, drop.z, mapDef);
-  drop.rig.group.remove(unit.mesh);
+  if (drop.rig?.group && unit.mesh?.parent === drop.rig.group) {
+    drop.rig.group.remove(unit.mesh);
+  }
   scene.add(unit.mesh);
   unit.mesh.position.set(drop.x, groundY, drop.z);
+  unit.mesh.rotation.set(0, 0, 0);
+  unit.position.x = drop.x;
+  unit.position.z = drop.z;
   unit.position.y = groundY;
 
   createGroundedParachute(
@@ -334,10 +341,22 @@ function landParatrooper(drop, scene, mapDef) {
     drop.z + (Math.random() - 0.5) * 1.8
   );
 
-  scene.remove(drop.rig.group);
+  if (drop.rig?.group?.parent) scene.remove(drop.rig.group);
   disposeRig(drop.rig);
 }
 
+function landingScatter(tx, tz, index, count, dropRadius) {
+  const angle = (index / Math.max(1, count)) * Math.PI * 2 + Math.random() * 0.45;
+  const r = Math.sqrt(Math.random()) * dropRadius * 0.88;
+  return {
+    x: tx + Math.cos(angle) * r,
+    z: tz + Math.sin(angle) * r,
+  };
+}
+
+/**
+ * Instant full-canopy drop (legacy / no transport). Squads appear under open chutes.
+ */
 export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
   const faction = opts.faction ?? game.playerFaction;
   const team = opts.team ?? 'player';
@@ -348,10 +367,7 @@ export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
   const descentRate = opts.descentRate ?? 12;
 
   for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.45;
-    const r = Math.sqrt(Math.random()) * dropRadius * 0.88;
-    const x = tx + Math.cos(angle) * r;
-    const z = tz + Math.sin(angle) * r;
+    const { x, z } = landingScatter(tx, tz, i, count, dropRadius);
     const groundY = sampleTerrainHeight(x, z, game.mapDef);
 
     const unit = new Unit({
@@ -367,6 +383,7 @@ export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
 
     const rig = createParachuteRig(game.scene, unit);
     activeDrops.push({
+      phase: 'canopy',
       unit,
       x,
       z,
@@ -381,19 +398,143 @@ export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
   game._rebuildUnitCaches?.();
 }
 
+/**
+ * One squad exits the transport door, freefalls briefly, then opens a chute
+ * and drifts to a scatter landing near the drop zone.
+ *
+ * @param {object} opts
+ * @param {{x:number,y:number,z:number}} opts.exit — world door position
+ * @param {number} opts.landX
+ * @param {number} opts.landZ
+ * @param {number} [opts.velX] — plane horizontal velocity at exit
+ * @param {number} [opts.velZ]
+ */
+export function spawnParatrooperExit(game, opts = {}) {
+  const faction = opts.faction ?? game.playerFaction;
+  const team = opts.team ?? 'player';
+  const def = opts.def ?? getParatrooperDef(faction?.id);
+  const exit = opts.exit ?? { x: 0, y: 40, z: 0 };
+  const landX = opts.landX ?? exit.x;
+  const landZ = opts.landZ ?? exit.z;
+  const velX = opts.velX ?? 0;
+  const velZ = opts.velZ ?? 0;
+  const freefallTime = opts.freefallTime ?? 0.7 + Math.random() * 0.3;
+  const descentRate = opts.descentRate ?? 8.2;
+
+  const unit = new Unit({
+    def,
+    faction,
+    team,
+    position: { x: landX, z: landZ },
+    scene: game.scene,
+  });
+  unit._mapDef = game.mapDef;
+  unit._dropping = true;
+  grantEliteStatus(unit);
+
+  // During freefall the squad hangs in a simple jump group (no canopy yet)
+  const jumpGroup = new THREE.Group();
+  jumpGroup.name = 'paratrooperExit';
+  if (unit.mesh.parent) unit.mesh.parent.remove(unit.mesh);
+  unit.mesh.position.set(0, 0, 0);
+  unit.mesh.rotation.set(0.35, 0, 0.08);
+  jumpGroup.add(unit.mesh);
+  jumpGroup.position.set(exit.x, exit.y, exit.z);
+  game.scene.add(jumpGroup);
+
+  const groundY = sampleTerrainHeight(landX, landZ, game.mapDef);
+  const altitude = Math.max(8, exit.y - groundY);
+
+  activeDrops.push({
+    phase: 'freefall',
+    unit,
+    // Horizontal state (lerps toward landing during freefall + canopy)
+    x: exit.x,
+    z: exit.z,
+    landX,
+    landZ,
+    velX: velX * 0.55 + (landX - exit.x) * 0.08,
+    velZ: velZ * 0.55 + (landZ - exit.z) * 0.08,
+    altitude,
+    freefallLeft: freefallTime,
+    descentRate: descentRate * (0.9 + Math.random() * 0.18),
+    swayPhase: Math.random() * Math.PI * 2,
+    rig: { group: jumpGroup, geometries: [], materials: [] },
+    jumpGroup,
+  });
+
+  game.units.push(unit);
+  game._rebuildUnitCaches?.();
+  return unit;
+}
+
+function deployCanopy(drop, scene, mapDef) {
+  const unit = drop.unit;
+  if (drop.jumpGroup) {
+    drop.jumpGroup.remove(unit.mesh);
+    if (drop.jumpGroup.parent) scene.remove(drop.jumpGroup);
+    drop.jumpGroup = null;
+  }
+  const rig = createParachuteRig(scene, unit);
+  drop.rig = rig;
+  drop.phase = 'canopy';
+  // Kill most of the plane speed once the silk opens
+  drop.velX *= 0.22;
+  drop.velZ *= 0.22;
+  const groundY = sampleTerrainHeight(drop.x, drop.z, mapDef);
+  rig.group.position.set(drop.x, groundY + drop.altitude, drop.z);
+}
+
 export function updateParachuteDrops(dt, scene, mapDef) {
   for (let i = activeDrops.length - 1; i >= 0; i--) {
     const drop = activeDrops[i];
     const unit = drop.unit;
 
     if (unit.dead || !unit.mesh) {
+      if (drop.jumpGroup?.parent) scene.remove(drop.jumpGroup);
       cleanupDrop(drop, scene);
       activeDrops.splice(i, 1);
       continue;
     }
 
+    if (drop.phase === 'freefall') {
+      drop.freefallLeft -= dt;
+      // Brief exit fall — still faster than canopy, but not a brick
+      drop.altitude -= (drop.descentRate * 1.65 + 3.5) * dt;
+      drop.x += drop.velX * dt;
+      drop.z += drop.velZ * dt;
+      // Soft pull toward landing scatter while still in freefall
+      drop.x += (drop.landX - drop.x) * Math.min(1, dt * 0.55);
+      drop.z += (drop.landZ - drop.z) * Math.min(1, dt * 0.55);
+      drop.velX *= 1 - Math.min(0.5, dt * 0.35);
+      drop.velZ *= 1 - Math.min(0.5, dt * 0.35);
+
+      const groundY = sampleTerrainHeight(drop.x, drop.z, mapDef);
+      const y = groundY + Math.max(0, drop.altitude);
+      drop.rig.group.position.set(drop.x, y, drop.z);
+      drop.rig.group.rotation.x = 0.4;
+      drop.rig.group.rotation.z = Math.sin(drop.freefallLeft * 9) * 0.12;
+      drop.rig.group.rotation.y += dt * 0.8;
+
+      if (drop.freefallLeft <= 0 || drop.altitude < 18) {
+        deployCanopy(drop, scene, mapDef);
+      }
+      continue;
+    }
+
+    // Canopy descent
     drop.altitude -= drop.descentRate * dt;
     drop.swayPhase += dt * 1.4;
+    if (drop.landX != null) {
+      drop.x += (drop.landX - drop.x) * Math.min(1, dt * 0.65);
+      drop.z += (drop.landZ - drop.z) * Math.min(1, dt * 0.65);
+      drop.x += (drop.velX ?? 0) * dt;
+      drop.z += (drop.velZ ?? 0) * dt;
+      if (drop.velX != null) {
+        drop.velX *= 1 - Math.min(0.8, dt * 1.2);
+        drop.velZ *= 1 - Math.min(0.8, dt * 1.2);
+      }
+    }
     const swayX = Math.sin(drop.swayPhase) * 0.6;
     const swayZ = Math.cos(drop.swayPhase * 0.88) * 0.5;
     const groundY = sampleTerrainHeight(drop.x, drop.z, mapDef);

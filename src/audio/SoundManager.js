@@ -52,7 +52,7 @@ for (const faction of ['germany', 'usa', 'uk', 'russia', 'japan']) {
   SAMPLE_URLS[`engine_armored_car_${faction}_exhaust`] = publicUrl(
     `sounds/engine-armored-car-${faction}-exhaust.wav`
   );
-  // Faction fighter engine loops for strafe / bomb / airborne fly-bys
+  // Faction fighter engine loops for strafe / bomb fly-bys
   SAMPLE_URLS[`aircraft_flyby_${faction}`] = publicUrl(
     `sounds/aircraft-flyby-${faction}.wav`
   );
@@ -61,6 +61,16 @@ for (const faction of ['germany', 'usa', 'uk', 'russia', 'japan']) {
   );
   SAMPLE_URLS[`aircraft_flyby_prop_${faction}`] = publicUrl(
     `sounds/aircraft-flyby-${faction}-prop.wav`
+  );
+  // Multi-engine troop transports for airborne drops
+  SAMPLE_URLS[`aircraft_transport_${faction}`] = publicUrl(
+    `sounds/aircraft-transport-${faction}.wav`
+  );
+  SAMPLE_URLS[`aircraft_transport_exhaust_${faction}`] = publicUrl(
+    `sounds/aircraft-transport-${faction}-exhaust.wav`
+  );
+  SAMPLE_URLS[`aircraft_transport_prop_${faction}`] = publicUrl(
+    `sounds/aircraft-transport-${faction}-prop.wav`
   );
 }
 
@@ -104,7 +114,28 @@ const BULLET_WHIZ_FILES = Array.from(
   (_, index) => `bullet-whiz-${String(index + 1).padStart(2, '0')}.wav`
 );
 const ATMOS_SAMPLE_FILES_FULL = ['battle-atmos.wav', 'battle-atmos-close.wav'];
-const RADIO_STATIC_FILES = ['radio-static-a.wav', 'radio-static-b.wav', 'radio-static-c.wav'];
+/** Looped channel noise under speech (static / crackle / hum beds). */
+const RADIO_STATIC_FILES = [
+  'radio-static-a.wav',
+  'radio-static-b.wav',
+  'radio-static-c.wav',
+  'radio-static-d.wav',
+  'radio-static-e.wav',
+  'radio-crackle-bed-a.wav',
+  'radio-crackle-bed-b.wav',
+  'radio-hum-a.wav',
+];
+/** Short pre-speak openers (PTT key, squelch, crackle burst) before VO. */
+const RADIO_OPEN_FILES = [
+  'radio-open-01.wav',
+  'radio-open-02.wav',
+  'radio-open-03.wav',
+  'radio-open-04.wav',
+  'radio-open-05.wav',
+  'radio-open-06.wav',
+  'radio-open-07.wav',
+  'radio-open-08.wav',
+];
 const ARTILLERY_IMPACT_FILES = Array.from(
   { length: 6 },
   (_, index) => `artillery-impact-el-${String(index + 1).padStart(2, '0')}.wav`
@@ -244,6 +275,8 @@ export class SoundManager {
     this.atmosBuffers = [];
     /** @type {AudioBuffer[]} */
     this.radioStaticBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.radioOpenBuffers = [];
     /** @type {AudioBuffer[]} */
     this.artilleryImpactBuffers = [];
     /** @type {Record<string, AudioBuffer[]>} */
@@ -654,6 +687,7 @@ export class SoundManager {
     this.bulletWhizBuffers = [];
     this.atmosBuffers = [];
     this.radioStaticBuffers = [];
+    this.radioOpenBuffers = [];
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this.bombExplosionBuffers = [];
@@ -667,6 +701,7 @@ export class SoundManager {
     loadPool(BULLET_WHIZ_FILES, this.bulletWhizBuffers);
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
+    loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
@@ -1611,8 +1646,7 @@ export class SoundManager {
 
   /**
    * Play a voice line as a single radio transmission:
-   * speech + quiet channel noise share one pan, filter chain, and envelope.
-   * Avoids the "two clips layered" feel of a loud static one-shot under VO.
+   * pre-speak key/squelch/crackle → speech + quiet channel noise, one pan/envelope.
    *
    * @param {AudioBuffer} buffer
    * @param {object} [opts]
@@ -1635,18 +1669,29 @@ export class SoundManager {
 
     const t0 = this.ctx.currentTime + delay;
     const voiceDur = buffer.duration / Math.max(0.05, rate);
-    // Slight pad so the channel opens/closes around the speech
-    const openPad = 0.04;
-    const closePad = 0.1;
+
+    // Varied pre-speak opener (PTT / squelch / crackle) — longer when we have baked opens
+    let openBuf = null;
+    let openDur = 0.05;
+    if (this.radioOpenBuffers?.length) {
+      openBuf =
+        this.radioOpenBuffers[Math.floor(Math.random() * this.radioOpenBuffers.length)];
+      if (openBuf) {
+        // Slight rate jitter for more variety
+        openDur = Math.min(0.48, openBuf.duration / (0.94 + Math.random() * 0.12));
+      }
+    }
+    const openPad = Math.max(0.06, openDur * 0.85);
+    const closePad = 0.12;
     const totalDur = voiceDur + openPad + closePad;
 
-    // Mix bus: speech + noise + click sum here, then share one envelope + pan
+    // Mix bus: open + speech + noise sum here, then share one envelope + pan
     const mix = this.ctx.createGain();
     mix.gain.value = 1;
 
     const master = this.ctx.createGain();
     master.gain.setValueAtTime(0.0001, t0);
-    master.gain.linearRampToValueAtTime(vol, t0 + 0.03);
+    master.gain.linearRampToValueAtTime(vol, t0 + 0.025);
     master.gain.setValueAtTime(vol, t0 + openPad + voiceDur * 0.92);
     master.gain.linearRampToValueAtTime(0.0001, t0 + totalDur);
     mix.connect(master);
@@ -1697,7 +1742,62 @@ export class SoundManager {
     peaking.connect(lp);
     voiceOut.connect(mix);
 
-    // Voice
+    // Pre-speak: baked key / squelch / crackle (prefer over synthetic click)
+    if (openBuf) {
+      try {
+        const open = this.ctx.createBufferSource();
+        open.buffer = openBuf;
+        open.playbackRate.value = 0.94 + Math.random() * 0.12;
+        const openHp = this.ctx.createBiquadFilter();
+        openHp.type = 'highpass';
+        openHp.frequency.value = 280;
+        const openLp = this.ctx.createBiquadFilter();
+        openLp.type = 'lowpass';
+        openLp.frequency.value = 4200;
+        const openG = this.ctx.createGain();
+        // Audible key-up without overpowering the first word
+        openG.gain.setValueAtTime(0.0001, t0);
+        openG.gain.linearRampToValueAtTime(0.55 + Math.random() * 0.2, t0 + 0.012);
+        openG.gain.linearRampToValueAtTime(0.12, t0 + openPad * 0.85);
+        openG.gain.linearRampToValueAtTime(0.0001, t0 + openPad + 0.04);
+        open.connect(openHp);
+        openHp.connect(openLp);
+        openLp.connect(openG);
+        openG.connect(mix);
+        open.start(t0);
+        open.stop(t0 + openPad + 0.06);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      // Fallback synthetic PTT if open samples missing
+      try {
+        const clickLen = Math.floor(this.ctx.sampleRate * 0.018);
+        const clickBuf = this.ctx.createBuffer(1, clickLen, this.ctx.sampleRate);
+        const data = clickBuf.getChannelData(0);
+        for (let i = 0; i < clickLen; i++) {
+          const t = i / clickLen;
+          data[i] = (Math.random() * 2 - 1) * (1 - t) * (1 - t);
+        }
+        const click = this.ctx.createBufferSource();
+        click.buffer = clickBuf;
+        const clickF = this.ctx.createBiquadFilter();
+        clickF.type = 'bandpass';
+        clickF.frequency.value = 1800;
+        clickF.Q.value = 0.8;
+        const clickG = this.ctx.createGain();
+        clickG.gain.value = 0.22;
+        click.connect(clickF);
+        clickF.connect(clickG);
+        clickG.connect(mix);
+        click.start(t0);
+        click.stop(t0 + 0.025);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Voice — starts after the open pad
     const voice = this.ctx.createBufferSource();
     voice.buffer = buffer;
     voice.playbackRate.value = rate;
@@ -1714,24 +1814,23 @@ export class SoundManager {
         const noise = this.ctx.createBufferSource();
         noise.buffer = noiseBuf;
         noise.loop = true;
-        noise.playbackRate.value = 0.92 + Math.random() * 0.12;
+        noise.playbackRate.value = 0.9 + Math.random() * 0.16;
 
         const noiseHp = this.ctx.createBiquadFilter();
         noiseHp.type = 'highpass';
-        noiseHp.frequency.value = 500;
+        noiseHp.frequency.value = 450 + Math.random() * 120;
         const noiseLp = this.ctx.createBiquadFilter();
         noiseLp.type = 'lowpass';
-        noiseLp.frequency.value = 3400;
+        noiseLp.frequency.value = 3000 + Math.random() * 600;
 
         const noiseG = this.ctx.createGain();
-        // Open → audible bed under VO → slight rise on close (still under speech)
-        // Levels relative to mix (master applies overall vol)
+        // Louder on open, settle under VO, slight rise on close
         const bed = staticLevel;
         noiseG.gain.setValueAtTime(0.0001, t0);
-        noiseG.gain.linearRampToValueAtTime(bed * 1.35, t0 + 0.02);
-        noiseG.gain.linearRampToValueAtTime(bed * 0.85, t0 + openPad + 0.1);
-        noiseG.gain.setValueAtTime(bed * 0.85, t0 + openPad + voiceDur * 0.85);
-        noiseG.gain.linearRampToValueAtTime(bed * 1.15, t0 + openPad + voiceDur);
+        noiseG.gain.linearRampToValueAtTime(bed * 1.55, t0 + 0.018);
+        noiseG.gain.linearRampToValueAtTime(bed * 0.82, t0 + openPad + 0.08);
+        noiseG.gain.setValueAtTime(bed * 0.82, t0 + openPad + voiceDur * 0.85);
+        noiseG.gain.linearRampToValueAtTime(bed * 1.2, t0 + openPad + voiceDur);
         noiseG.gain.linearRampToValueAtTime(0.0001, t0 + totalDur);
 
         noise.connect(noiseHp);
@@ -1744,32 +1843,6 @@ export class SoundManager {
       }
     }
 
-    // Tiny key-click / squelch so it reads as PTT, not a second sample
-    try {
-      const clickLen = Math.floor(this.ctx.sampleRate * 0.018);
-      const clickBuf = this.ctx.createBuffer(1, clickLen, this.ctx.sampleRate);
-      const data = clickBuf.getChannelData(0);
-      for (let i = 0; i < clickLen; i++) {
-        const t = i / clickLen;
-        data[i] = (Math.random() * 2 - 1) * (1 - t) * (1 - t);
-      }
-      const click = this.ctx.createBufferSource();
-      click.buffer = clickBuf;
-      const clickF = this.ctx.createBiquadFilter();
-      clickF.type = 'bandpass';
-      clickF.frequency.value = 1800;
-      clickF.Q.value = 0.8;
-      const clickG = this.ctx.createGain();
-      clickG.gain.value = 0.22;
-      click.connect(clickF);
-      clickF.connect(clickG);
-      clickG.connect(mix);
-      click.start(t0);
-      click.stop(t0 + 0.025);
-    } catch {
-      /* ignore */
-    }
-
     // Almost dry — radio is already band-limited; reverb would unglue the mix
     const dry = this.ctx.createGain();
     dry.gain.value = 0.96;
@@ -1780,7 +1853,7 @@ export class SoundManager {
     dry.connect(this.dryBus);
     wetG.connect(this.wetBus);
 
-    voice.start(t0 + openPad * 0.5);
+    voice.start(t0 + openPad * 0.72);
     voice.stop(t0 + openPad + voiceDur + 0.05);
   }
 

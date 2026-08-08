@@ -10,6 +10,7 @@ import {
   spawnWaterImpact,
 } from './CombatEffects.js';
 import { createStrafeAircraftMesh } from './StrafeAircraftMesh.js';
+import { createTransportAircraftMesh } from './TransportAircraftMesh.js';
 
 const active = [];
 const MAX_ACTIVE_WARNINGS = 2;
@@ -59,17 +60,22 @@ export function updateFireSupportEffects(dt, scene) {
   for (let i = active.length - 1; i >= 0; i--) {
     const fx = active[i];
 
-    if (fx.type === 'plane') {
+    if (fx.type === 'plane' || fx.type === 'transport') {
       fx.age = (fx.age ?? 0) + dt;
       fx.group.position.x += fx.velX * dt;
       fx.group.position.z += fx.velZ * dt;
-      fx.group.position.y = fx.baseY + Math.sin(fx.age * 8) * 0.3;
-      // Slight banking pulse + prop spin for a living fly-by
-      const bank = Math.sin(fx.age * 1.6) * 0.08;
+      // Transports lumber; fighters bob more
+      const bob = fx.type === 'transport' ? 0.18 : 0.3;
+      const bobRate = fx.type === 'transport' ? 4.2 : 8;
+      fx.group.position.y = fx.baseY + Math.sin(fx.age * bobRate) * bob;
+      const bank = Math.sin(fx.age * (fx.type === 'transport' ? 0.9 : 1.6)) * (fx.type === 'transport' ? 0.04 : 0.08);
       fx.group.rotation.z = bank;
-      if (fx.prop) fx.prop.rotation.z += dt * 48;
+      const propSpin = fx.type === 'transport' ? 36 : 48;
+      if (fx.prop) fx.prop.rotation.z += dt * propSpin;
+      if (fx.props?.length) {
+        for (const p of fx.props) p.rotation.z += dt * propSpin;
+      }
 
-      // Stay visible until past the map edge (or a long safety timeout)
       const offMap = isPlaneOffMap(fx);
       const timedOut = fx.age >= (fx.maxAge ?? 45);
       if (offMap || timedOut) {
@@ -185,13 +191,13 @@ export function planeFlightEntry(mapDef, throughX, throughZ, dirX, dirZ, margin 
 }
 
 /**
- * Low-poly faction fighter for strafe / bomb / airborne fly-bys.
+ * Low-poly faction fighter for strafe / bomb fly-bys.
  * Spawns off the near map edge and stays visible until past the far edge.
  * `x,z` is a through-point on the run (plane is placed off-map along -dir).
  * @param {string} [factionId]
  * @param {number} [speed]
  * @param {number} [_life] — ignored; kept for call-site compatibility
- * @returns {{ entryX: number, entryZ: number, approachDist: number, approachTime: number, speed: number }}
+ * @returns {{ entryX: number, entryZ: number, approachDist: number, approachTime: number, speed: number, nx: number, nz: number }}
  */
 export function spawnStrafePlane(
   scene,
@@ -238,7 +244,100 @@ export function spawnStrafePlane(
     approachDist: entry.approachDist,
     approachTime: entry.approachDist / Math.max(1, speed),
     speed,
+    nx: entry.nx,
+    nz: entry.nz,
   };
+}
+
+/**
+ * Faction troop transport for airborne drops (Ju 52 / C-47 / Li-2 / L2D).
+ * Larger, slower multi-engine airframe with open cargo door for jumps.
+ * @returns {{ entryX: number, entryZ: number, approachDist: number, approachTime: number, speed: number, nx: number, nz: number, doorLocal: {x:number,y:number,z:number}, yaw: number }}
+ */
+export function spawnTransportPlane(
+  scene,
+  mapDef,
+  x,
+  z,
+  dirX,
+  dirZ,
+  _life = 4,
+  altitude = 38,
+  factionId = 'germany',
+  speed = 28
+) {
+  const entry = planeFlightEntry(mapDef, x, z, dirX, dirZ, 28);
+  const y = sampleTerrainHeight(entry.x, entry.z, mapDef) + altitude;
+  const { group, props, doorLocal, geometries, materials, model } =
+    createTransportAircraftMesh(factionId);
+  group.position.set(entry.x, y, entry.z);
+  const yaw = Math.atan2(entry.nx, entry.nz);
+  group.rotation.y = yaw;
+  scene.add(group);
+
+  const clearDist = entry.approachDist + entry.mapHalf * 2.6 + entry.margin + 36;
+  const maxAge = Math.max(18, clearDist / Math.max(1, speed) + 2.5);
+
+  active.push({
+    type: 'transport',
+    group,
+    props,
+    prop: props[0] ?? null,
+    velX: entry.nx * speed,
+    velZ: entry.nz * speed,
+    baseY: y,
+    age: 0,
+    maxAge,
+    mapHalf: entry.mapHalf,
+    offMapMargin: entry.margin + 8,
+    doorLocal,
+    model,
+    geometries,
+    materials,
+  });
+
+  return {
+    entryX: entry.x,
+    entryZ: entry.z,
+    approachDist: entry.approachDist,
+    approachTime: entry.approachDist / Math.max(1, speed),
+    speed,
+    nx: entry.nx,
+    nz: entry.nz,
+    doorLocal,
+    yaw,
+  };
+}
+
+/**
+ * World-space cargo door position for a transport on a straight flight path.
+ * Used to schedule jump exits without holding a live plane reference.
+ */
+export function transportDoorWorldAt({
+  entryX,
+  entryZ,
+  baseY,
+  nx,
+  nz,
+  speed,
+  age,
+  doorLocal,
+  yaw,
+}) {
+  const px = entryX + nx * speed * age;
+  const pz = entryZ + nz * speed * age;
+  const py = baseY;
+  // Local door offset rotated by yaw (plane +Y yaw around vertical)
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const lx = doorLocal?.x ?? -1;
+  const ly = doorLocal?.y ?? -0.2;
+  const lz = doorLocal?.z ?? -1.1;
+  // Local +Z = nose = flight dir; rotate around Y
+  const wx = px + lx * cos + lz * sin;
+  const wz = pz - lx * sin + lz * cos;
+  const wy = py + ly;
+  return { x: wx, y: wy, z: wz };
 }
 
 /**
