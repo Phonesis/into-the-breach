@@ -7,12 +7,38 @@ export const FIRE_SUPPORT_TYPES = {
     short: 'Strafe',
     cooldown: 72,
     warnTime: 2.2,
-    hitInterval: 0.14,
-    hitCount: 10,
+    /** MG impacts along the fly-by (timed to plane position over the gun run). */
+    hitCount: 15,
+    /** Aim-mark corridor length (warning ring / centre of the gun run). */
     runLength: 32,
+    /**
+     * Extra distance before the aim corridor where guns open, and past the
+     * corridor where they keep firing — ties the burst to the full fly-by.
+     */
+    fireLead: 12,
+    fireTrail: 14,
     hitRadius: 3.5,
     damage: 42,
     hqDamage: 120,
+  },
+  airBomb: {
+    id: 'airBomb',
+    label: 'Air Bomb',
+    short: 'Bomb',
+    cooldown: 118,
+    warnTime: 2.0,
+    /** Fighter altitude at release (world units). */
+    planeAltitude: 30,
+    runLength: 42,
+    planeSpeed: 36,
+    /** Fraction along the run when the bomb leaves the rack (0–1). */
+    releaseRatio: 0.44,
+    /** Free-fall duration from release to impact. */
+    fallTime: 1.28,
+    hitRadius: 9.5,
+    damage: 118,
+    hqDamage: 280,
+    craterRadius: 5.4,
   },
   barrage: {
     id: 'barrage',

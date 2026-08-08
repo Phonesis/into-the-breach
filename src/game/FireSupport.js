@@ -9,6 +9,8 @@ import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import {
   spawnStrikeWarning,
   spawnStrafePlane,
+  planeFlightEntry,
+  spawnFallingBomb,
   spawnStrikeImpact,
   prewarmStrikeImpacts,
 } from '../effects/FireSupportEffects.js';
@@ -20,6 +22,7 @@ import {
   getRadioOperators,
   hasRadioOperator,
   isRadioOperatorPointObserved,
+  finishRadioBinocularsAfterSupportCall,
 } from './RadioOperatorBehavior.js';
 import { WEAPON_RANGE_SLACK } from './Targeting.js';
 
@@ -193,6 +196,9 @@ export class FireSupportManager {
     if (type === 'airborneDrop') {
       return { scale: def.dropRadius ?? 11 };
     }
+    if (type === 'airBomb') {
+      return { scale: def.hitRadius ?? 9.5 };
+    }
     return { scale: def.runLength * 0.5 };
   }
 
@@ -297,6 +303,8 @@ export class FireSupportManager {
     this.cooldowns[type] = this.getDef(type).cooldown;
     this._consumeAirborneUse(type);
     this.scheduleStrike(type, x, z);
+    // Calling support while glassing ends the scan and starts the 3 min cooldown
+    finishRadioBinocularsAfterSupportCall(this.game, this.ownerTeam, x, z);
     sounds.play('order');
     return true;
   }
@@ -312,6 +320,7 @@ export class FireSupportManager {
     this.cooldowns[type] = this.getDef(type).cooldown;
     this._consumeAirborneUse(type);
     this.scheduleStrike(type, x, z);
+    finishRadioBinocularsAfterSupportCall(this.game, this.ownerTeam, x, z);
     return true;
   }
 
@@ -342,41 +351,186 @@ export class FireSupportManager {
 
       const startX = tx - perpX * (def.runLength * 0.5);
       const startZ = tz - perpZ * (def.runLength * 0.5);
+      const planeSpeed = 38;
+      const factionId = this.ownerFaction?.id ?? 'germany';
+      // Enter from off-map so the fighter is already approaching when the run begins
+      const entry = planeFlightEntry(mapDef, startX, startZ, perpX, perpZ);
+      const approachTime = entry.approachDist / planeSpeed;
+      const spawnAt = Math.max(0.05, def.warnTime - approachTime);
+      const runStartAt = spawnAt + approachTime;
+      // Guns open before the aim corridor and keep firing past it so the burst
+      // feels like a continuous fly-by rather than a short snap over the mark.
+      const fireLead = def.fireLead ?? 10;
+      const fireTrail = def.fireTrail ?? 12;
+      const fireLength = def.runLength + fireLead + fireTrail;
+      const gunsOpenAt = runStartAt - fireLead / planeSpeed;
+      const flyDuration =
+        approachTime + (def.runLength + fireTrail) / planeSpeed + 1.2;
 
       spawnStrikeWarning(scene, mapDef, tx, tz, def.runLength * 0.5, false);
+
+      // Impacts track the fighter along the extended gun run (lead → corridor → trail).
+      // Light lateral scatter so the scar trail reads as a spray, not a dotted line.
+      const hitCount = def.hitCount;
+      const strafeImpacts = [];
+      for (let i = 0; i < hitCount; i++) {
+        const ratio = i / Math.max(1, hitCount - 1);
+        const along = -fireLead + fireLength * ratio;
+        const lateral = (Math.random() - 0.5) * 2.4;
+        strafeImpacts.push({
+          t: runStartAt + along / planeSpeed,
+          x: startX + perpX * along + dx * lateral,
+          z: startZ + perpZ * along + dz * lateral,
+        });
+      }
+      prewarmStrikeImpacts(this.game.renderer, mapDef, strafeImpacts, false);
+
       this.events.push({
-        at: def.warnTime,
+        at: spawnAt,
         fn: () => {
-          const planeSpeed = 38;
-          const flyDuration = def.runLength / planeSpeed + 0.55;
-          spawnStrafePlane(scene, mapDef, startX, startZ, perpX, perpZ, flyDuration);
+          spawnStrafePlane(
+            scene,
+            mapDef,
+            startX,
+            startZ,
+            perpX,
+            perpZ,
+            flyDuration,
+            22,
+            factionId,
+            planeSpeed
+          );
           sounds.startStrafeFlyby({
-            x: startX,
-            z: startZ,
+            x: entry.x,
+            z: entry.z,
             velX: perpX * planeSpeed,
             velZ: perpZ * planeSpeed,
             duration: flyDuration,
-          });
-          sounds.playWeapon(mgProfileForFaction(this.ownerFaction?.id), { x: tx, z: tz }, {
-            rate: 0.85,
-            volume: 0.9,
+            factionId,
+            leadUnits: 0,
+            trailUnits: 24,
           });
         },
       });
 
-      for (let i = 0; i < def.hitCount; i++) {
-        const t = def.warnTime + 0.35 + i * def.hitInterval;
-        const ratio = i / Math.max(1, def.hitCount - 1);
-        const ix = startX + perpX * def.runLength * ratio;
-        const iz = startZ + perpZ * def.runLength * ratio;
+      // Staggered MG bursts across the gun run so audio covers the full fly-by.
+      const fireDuration = fireLength / planeSpeed;
+      for (const frac of [0, 0.34, 0.68]) {
+        const at = gunsOpenAt + fireDuration * frac;
         this.events.push({
-          at: t,
+          at: Math.max(0.05, at),
+          fn: () => {
+            sounds.playWeapon(mgProfileForFaction(factionId), { x: tx, z: tz }, {
+              rate: 0.85,
+              volume: 0.9,
+            });
+          },
+        });
+      }
+
+      for (const impact of strafeImpacts) {
+        const { t, x: ix, z: iz } = impact;
+        this.events.push({
+          at: Math.max(0.05, t),
           fn: () => {
             spawnStrikeImpact(scene, mapDef, ix, iz, 'strafe', this.game._terrainMesh);
             this.applyDamage(ix, iz, def.hitRadius, def.damage, def.hqDamage * 0.15, 'strafe');
           },
         });
       }
+    } else if (type === 'airBomb') {
+      const hq = this.ownerHq;
+      const hx = hq?.position?.x ?? this.ownerBase.x;
+      const hz = hq?.position?.z ?? this.ownerBase.z;
+      let dx = tx - hx;
+      let dz = tz - hz;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len;
+      dz /= len;
+      const perpX = -dz;
+      const perpZ = dx;
+
+      const runLen = def.runLength;
+      const planeSpeed = def.planeSpeed ?? 36;
+      const altitude = def.planeAltitude ?? 30;
+      const fallTime = def.fallTime ?? 1.28;
+      const releaseRatio = def.releaseRatio ?? 0.44;
+      const startX = tx - perpX * (runLen * 0.5);
+      const startZ = tz - perpZ * (runLen * 0.5);
+      const factionId = this.ownerFaction?.id ?? 'germany';
+
+      // Release slightly before the aim point so the bomb carries forward onto target.
+      const releaseAlong = runLen * releaseRatio;
+      const releaseX = startX + perpX * releaseAlong;
+      const releaseZ = startZ + perpZ * releaseAlong;
+
+      // Enter from off-map; time bomb release for when the plane reaches the rack point
+      const entry = planeFlightEntry(mapDef, startX, startZ, perpX, perpZ);
+      const approachTime = entry.approachDist / planeSpeed;
+      const spawnAt = Math.max(0.05, def.warnTime - approachTime);
+      const releaseDist = Math.hypot(releaseX - entry.x, releaseZ - entry.z);
+      const releaseAt = spawnAt + releaseDist / planeSpeed;
+      const flyDuration = approachTime + runLen / planeSpeed + 1.4;
+
+      spawnStrikeWarning(scene, mapDef, tx, tz, def.hitRadius, true);
+      prewarmStrikeImpacts(this.game.renderer, mapDef, [{ x: tx, z: tz }], true);
+
+      this.events.push({
+        at: spawnAt,
+        fn: () => {
+          spawnStrafePlane(
+            scene,
+            mapDef,
+            startX,
+            startZ,
+            perpX,
+            perpZ,
+            flyDuration,
+            altitude,
+            factionId,
+            planeSpeed
+          );
+          sounds.startStrafeFlyby({
+            x: entry.x,
+            z: entry.z,
+            velX: perpX * planeSpeed,
+            velZ: perpZ * planeSpeed,
+            duration: flyDuration,
+            factionId,
+            leadUnits: 0,
+            trailUnits: 24,
+          });
+        },
+      });
+
+      this.events.push({
+        at: Math.max(0.1, releaseAt),
+        fn: () => {
+          const releaseY = sampleTerrainHeight(releaseX, releaseZ, mapDef) + altitude - 0.8;
+          const impactY = sampleTerrainHeight(tx, tz, mapDef) + 0.15;
+          spawnFallingBomb(
+            scene,
+            { x: releaseX, y: releaseY, z: releaseZ },
+            { x: tx, y: impactY, z: tz },
+            fallTime,
+            () => {
+              spawnStrikeImpact(scene, mapDef, tx, tz, 'bomb', this.game._terrainMesh, {
+                craterRadius: def.craterRadius,
+              });
+              this.applyDamage(
+                tx,
+                tz,
+                def.hitRadius,
+                def.damage,
+                def.hqDamage,
+                'airBomb'
+              );
+              sounds.playBombExplosion({ x: tx, z: tz });
+            }
+          );
+        },
+      });
+
     } else if (type === 'barrage') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.radius, true);
       sounds.playFireSupportSalvo('barrage', { x: tx, z: tz });
@@ -462,10 +616,16 @@ export class FireSupportManager {
       const startX = tx - perpX * runLen * 0.5;
       const startZ = tz - perpZ * runLen * 0.5;
       const planeSpeed = 34;
-      const flyDuration = runLen / planeSpeed + 0.8;
+      const factionId = this.ownerFaction?.id ?? 'germany';
+      const entry = planeFlightEntry(mapDef, startX, startZ, perpX, perpZ);
+      // Arrive at the drop run when jumpers leave the aircraft
+      const approachTime = entry.approachDist / planeSpeed;
+      const spawnAt = Math.max(0.05, def.warnTime - approachTime);
+      const dropAt = spawnAt + approachTime + (runLen * 0.5) / planeSpeed;
+      const flyDuration = approachTime + runLen / planeSpeed + 1.5;
 
       this.events.push({
-        at: def.warnTime * 0.35,
+        at: spawnAt,
         fn: () => {
           spawnStrafePlane(
             scene,
@@ -475,20 +635,25 @@ export class FireSupportManager {
             perpX,
             perpZ,
             flyDuration,
-            def.planeAltitude ?? 38
+            def.planeAltitude ?? 38,
+            factionId,
+            planeSpeed
           );
           sounds.startStrafeFlyby({
-            x: startX,
-            z: startZ,
+            x: entry.x,
+            z: entry.z,
             velX: perpX * planeSpeed,
             velZ: perpZ * planeSpeed,
             duration: flyDuration,
+            factionId,
+            leadUnits: 0,
+            trailUnits: 24,
           });
         },
       });
 
       this.events.push({
-        at: def.warnTime,
+        at: Math.max(def.warnTime, dropAt),
         fn: () => {
           spawnParatrooperSquad(this.game, tx, tz, {
             def: getParatrooperDef(this.ownerFaction?.id),
@@ -540,8 +705,9 @@ export class FireSupportManager {
     }
 
     const strafe = attackerType === 'strafe';
+    const airBomb = attackerType === 'airBomb';
     if (!strafe) {
-      const mineHitRadius = Math.max(1.5, radius * 0.55);
+      const mineHitRadius = Math.max(1.5, radius * (airBomb ? 0.7 : 0.55));
       this.game.engineerSandbags?.detonateMinesAt?.(
         x,
         z,
@@ -558,8 +724,9 @@ export class FireSupportManager {
     // Forward every visible impact so a shell that lands on a roof always leaves
     // a matching mark. The old path forwarded one in four impacts at 1.1x damage;
     // 0.275x per impact preserves that structural damage budget.
-    this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * 0.275, {
-      weaponType: attackerType,
+    // Air bombs are single large HE — stronger structural damage than a shelllet.
+    this.game.scenery?.damageAt(x, z, radius + 2, unitDamage * (airBomb ? 0.55 : 0.275), {
+      weaponType: airBomb ? 'artillery' : attackerType,
       impact: { x, z },
       explosive: !strafe,
     });

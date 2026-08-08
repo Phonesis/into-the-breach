@@ -37,6 +37,10 @@ import {
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { canDigTrenchType } from '../game/InfantryTrench.js';
 import {
+  MAX_RADIO_OPERATORS_PER_SIDE,
+  canAddRadioOperator,
+} from '../game/RadioOperatorBehavior.js';
+import {
   canDismountRiders,
   canHostRiders,
   getTankRiderIds,
@@ -710,6 +714,16 @@ export class UIManager {
               </div>
               <p class="engineer-build-hint" id="infantry-trench-hint">
                 Commanders, radio operators, infantry, airborne, MGs, and snipers dig a fighting trench (~14 s).
+              </p>
+            </div>
+            <div class="radio-binocular-actions hidden" id="radio-binocular-actions">
+              <div class="engineer-build-btns">
+                <button type="button" class="btn btn-primary interactive" id="btn-radio-binoculars">
+                  Binoculars
+                </button>
+              </div>
+              <p class="engineer-build-hint" id="radio-binocular-hint">
+                Glass the front — extends fire-support observation range for 45 s (3 min cooldown).
               </p>
             </div>
             <div class="medic-tent-actions hidden" id="medic-tent-actions">
@@ -1613,6 +1627,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-dig-trench')?.addEventListener('click', () => {
       this.callbacks.onArmTrenchDig?.();
+    });
+    this.root.querySelector('#btn-radio-binoculars')?.addEventListener('click', () => {
+      this.callbacks.onUseRadioBinoculars?.();
     });
     this.root.querySelector('#btn-deploy-field-tent')?.addEventListener('click', () => {
       this.callbacks.onArmMedicTent?.();
@@ -2759,7 +2776,7 @@ export class UIManager {
 
     panel.classList.toggle('hidden', !show);
     if (!show) {
-      this.updateMedicTent(game);
+      this.updateRadioBinoculars(game);
       return;
     }
 
@@ -2778,6 +2795,67 @@ export class UIManager {
       } else {
         hint.textContent =
           'Commanders, radio operators, infantry, airborne, MGs, and snipers dig a fighting trench (~14 s). Move onto a trench to dig in for cover.';
+      }
+    }
+    this.updateRadioBinoculars(game);
+  }
+
+  updateRadioBinoculars(game) {
+    const panel = this.root.querySelector('#radio-binocular-actions');
+    const btn = this.root.querySelector('#btn-radio-binoculars');
+    const hint = this.root.querySelector('#radio-binocular-hint');
+    if (!panel || !btn) return;
+
+    const operators =
+      game?.units?.filter(
+        (u) =>
+          u.selected &&
+          u.team === 'player' &&
+          !u.dead &&
+          !u.surrendered &&
+          u.def?.type === 'radioOperator'
+      ) ?? [];
+    const show = operators.length > 0 && game?.running && !game?.gameOver;
+    panel.classList.toggle('hidden', !show);
+    if (!show) {
+      this.updateMedicTent(game);
+      return;
+    }
+
+    const ready = operators.filter(
+      (u) => (u._binocularActive ?? 0) <= 0 && (u._binocularCooldown ?? 0) <= 0
+    );
+    const scanning = operators.filter((u) => (u._binocularActive ?? 0) > 0);
+    const onCd = operators.filter(
+      (u) => (u._binocularActive ?? 0) <= 0 && (u._binocularCooldown ?? 0) > 0
+    );
+
+    btn.disabled = ready.length === 0;
+    if (scanning.length > 0) {
+      const rem = Math.ceil(Math.max(...scanning.map((u) => u._binocularActive ?? 0)));
+      btn.textContent = `Scanning… ${rem}s`;
+      btn.classList.add('btn-armed');
+    } else if (ready.length > 0) {
+      btn.textContent = 'Binoculars';
+      btn.classList.remove('btn-armed');
+    } else {
+      const cd = Math.ceil(Math.min(...onCd.map((u) => u._binocularCooldown ?? 0)));
+      const m = Math.floor(cd / 60);
+      const s = String(cd % 60).padStart(2, '0');
+      btn.textContent = `Binoculars ${m}:${s}`;
+      btn.classList.remove('btn-armed');
+    }
+
+    if (hint) {
+      if (scanning.length > 0) {
+        hint.textContent =
+          'Binoculars raised — observation to ~1120 m. Call fire support now; the scan ends and a 3 min cooldown starts when you do.';
+      } else if (ready.length > 0) {
+        hint.textContent =
+          'Glass the front for up to 45 s of extended fire-support range (~1120 m). Calling support while scanning starts a 3 min cooldown.';
+      } else {
+        hint.textContent =
+          'Binoculars on cooldown — 3 minutes after calling fire support while scanning.';
       }
     }
     this.updateMedicTent(game);
@@ -3040,6 +3118,8 @@ export class UIManager {
         hint.textContent = manager.targetRejectReason;
       } else if (manager.pending === 'strafe') {
         hint.textContent = 'Click the map to call fighter strafe (Esc to cancel)';
+      } else if (manager.pending === 'airBomb') {
+        hint.textContent = 'Click the map to call air bomb drop (Esc to cancel)';
       } else if (manager.pending === 'barrage') {
         hint.textContent = 'Click the map for artillery barrage (Esc to cancel)';
       } else if (manager.pending === 'creepingBarrage') {
@@ -3502,12 +3582,17 @@ export class UIManager {
         const type = btn.dataset.type;
         const def = game.playerFaction?.units?.[type];
         if (!def) return;
-        const can =
-          game.cheatMode ||
-          game.lastStand.supplies.player >= def.cost;
+        const radioCap =
+          type === 'radioOperator' && !canAddRadioOperator(game.units, 'player');
+        const canAfford =
+          game.cheatMode || game.lastStand.supplies.player >= def.cost;
+        const can = canAfford && !radioCap;
         btn.disabled = !can;
         btn.classList.toggle('armed', game.lastStand.pendingType === type);
         btn.querySelector('.produce-cost').textContent = game.cheatMode ? '—' : String(def.cost);
+        if (radioCap) {
+          btn.title = `${def.name} — max ${MAX_RADIO_OPERATORS_PER_SIDE} radio operators per side`;
+        }
       });
     }
 
@@ -3820,9 +3905,13 @@ export class UIManager {
       const def = game.playerFaction.units[type];
       if (!def) return;
       const locked = unlocked && !unlocked.has(type);
+      const radioCap =
+        type === 'radioOperator' ? game.production.getRadioOperatorCap?.('player') : null;
+      const atRadioCap = !!radioCap?.atCap;
       const can =
         !staging &&
         !locked &&
+        !atRadioCap &&
         game.production.canEnqueue('player', type, game.resources.player) &&
         game.running;
       btn.disabled = !can;
@@ -3836,6 +3925,8 @@ export class UIManager {
         btn.title = buildingName
           ? `Requires ${buildingName} — click that structure on the map`
           : `${def.name} — locked until required structure is built`;
+      } else if (atRadioCap) {
+        btn.title = `${def.name} — max ${MAX_RADIO_OPERATORS_PER_SIDE} radio operators per side`;
       } else if (atUnitLimit) {
         btn.title = `${def.name} — ${STANDARD_UNIT_LIMIT}-unit limit reached`;
       } else {
@@ -4077,7 +4168,20 @@ export class UIManager {
       } else if (u.def?.type === 'commander') {
         coverBlock = '<p class="unit-support-status">Field commander — can dig a fighting trench or move into a building/bunker for heavy cover.</p>';
       } else if (u.def?.type === 'radioOperator') {
-        coverBlock = '<p class="unit-support-status">Signals operator — rifle only; keeps off-map fire support and airborne calls available within ~72 m, with clear line of sight. Can dig a fighting trench. Multiple radio operators can cover separate positions.</p>';
+        const binActive = (u._binocularActive ?? 0) > 0;
+        const binCd = u._binocularCooldown ?? 0;
+        let binLine = '';
+        if (binActive) {
+          binLine = ` <strong>Binoculars</strong> raised (${Math.ceil(u._binocularActive)}s) — support to ~1120 m; calling a strike ends the scan (3 min cooldown).`;
+        } else if (binCd > 0) {
+          const m = Math.floor(binCd / 60);
+          const s = String(Math.ceil(binCd % 60)).padStart(2, '0');
+          binLine = ` Binoculars ready in <strong>${m}:${s}</strong>.`;
+        } else {
+          binLine =
+            ' Can raise <strong>binoculars</strong> (up to 45 s extended range; 3 min cooldown after calling support while scanning).';
+        }
+        coverBlock = `<p class="unit-support-status">Signals operator — rifle only; keeps off-map fire support and airborne calls available within ~720 m, with clear line of sight.${binLine} Can dig a fighting trench. Multiple radio operators can cover separate positions.</p>`;
       } else if (
         u.def?.type === 'infantry' ||
         u.def?.type === 'paratrooper' ||

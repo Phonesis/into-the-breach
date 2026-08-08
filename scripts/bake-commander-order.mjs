@@ -17,6 +17,7 @@ const SR = 44100;
 /** Order kinds match fire-support ids and general-order ids. */
 const ORDER_KINDS = [
   'strafe',
+  'airBomb',
   'barrage',
   'creepingBarrage',
   'airborneDrop',
@@ -36,6 +37,7 @@ const FACTION_COMMANDER = {
     pitch: '-10Hz',
     lines: {
       strafe: 'Air support authorized. Strafe that sector!',
+      airBomb: 'Bomber inbound. Drop on that target!',
       barrage: 'Artillery, fire for effect!',
       creepingBarrage: 'Creeping barrage — advance behind the fire!',
       airborneDrop: 'Airborne drop authorized. Mark the DZ!',
@@ -50,6 +52,7 @@ const FACTION_COMMANDER = {
     pitch: '-8Hz',
     lines: {
       strafe: 'Aircraft on station. Strafe the target!',
+      airBomb: 'Bomb run authorized. One heavy on the target!',
       barrage: 'Artillery, fire for effect!',
       creepingBarrage: 'Creeping barrage — keep close to the curtain!',
       airborneDrop: 'Airborne drop authorised. Mark the DZ!',
@@ -64,6 +67,7 @@ const FACTION_COMMANDER = {
     pitch: '-10Hz',
     lines: {
       strafe: 'Luftunterstützung! Tiefangriff auf das Ziel!',
+      airBomb: 'Bombenangriff! Eine schwere Bombe auf das Ziel!',
       barrage: 'Artillerie, Feuer frei!',
       creepingBarrage: 'Feuerwalze — vorrücken hinter dem Feuer!',
       airborneDrop: 'Luftlandung genehmigt! Absprungzone markieren!',
@@ -78,6 +82,7 @@ const FACTION_COMMANDER = {
     pitch: '-10Hz',
     lines: {
       strafe: 'Авиация! Атакуйте цель!',
+      airBomb: 'Бомбардировка! Сбросить бомбу на цель!',
       barrage: 'Артиллерия, огонь по цели!',
       creepingBarrage: 'Огневой вал — двигаться за огнём!',
       airborneDrop: 'Десант разрешён! Зона выброски!',

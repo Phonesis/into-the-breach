@@ -233,6 +233,10 @@ import {
   ensureStartingRadioOperators,
   getRadioOperators,
   hasRadioOperator,
+  activateRadioBinoculars,
+  canUseRadioBinoculars,
+  updateRadioOperatorBinoculars,
+  canAddRadioOperator,
 } from './RadioOperatorBehavior.js';
 import {
   updateCombat,
@@ -342,6 +346,8 @@ export class Game {
     this._captureUiAccum = 0;
     this._selectionUiAccum = 0;
     this._selectionUiKey = '';
+    /** After an order, hide the selection info panel but keep units selected. */
+    this._selectionPanelDismissed = false;
     this._healMarkerAccum = 0;
     this._combatBuildingTargets = [];
     this._hoverUiId = '';
@@ -442,6 +448,7 @@ export class Game {
       getUnitLimit: () => (this.gameMode === 'campaign' ? STANDARD_UNIT_LIMIT : null),
       getDeployedUnitCount: (team) =>
         this.units.reduce((count, unit) => count + (!unit.dead && unit.team === team ? 1 : 0), 0),
+      getUnits: () => this.units,
       getSpawnPos: (team, unitType) => {
         if (isBaseBuildingCampaign(this)) {
           const need = getSpawnBuildingForUnit(unitType);
@@ -553,6 +560,8 @@ export class Game {
       onBaseBuildingPlacement: (mode, x, z) => this.handleBaseBuildingPlacement(mode, x, z),
       onMoveOrder: (selected) => this.cancelPendingConstructionPlacement(selected),
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
+        // Explicit re-select (click unit / box / HQ) brings the info panel back.
+        this._selectionPanelDismissed = false;
         this.selectedHq = hq;
         this.selectedBaseBuilding = baseBuilding;
         if (sel.length > 0) {
@@ -574,6 +583,7 @@ export class Game {
       },
       onHoverTarget: (target) => {
         this.targetIndicators?.setHoverTarget(target);
+        if (this._selectionPanelDismissed) return;
         const sel = this._playerAlive.filter((u) => u.selected);
         if (sel.length === 0) return;
         const hoverId = target
@@ -594,11 +604,11 @@ export class Game {
             : null;
           sounds.playAttackOrder(factionId, pos, { radio: true });
         }
-        if ((type === 'attack' || type === 'fire') && selected?.length) {
-          this.ui?.updateSelection(selected, this.controller.hoveredTarget, this.selectedHq, this);
-        }
-        if (type === 'fire' || type === 'attack' || type === 'smoke' || type === 'move') {
-          this._selectionUiKey = '';
+        // Hide the unit info panel after an order, but keep units selected so
+        // follow-up move/attack orders still apply. Clicking a selected unit
+        // re-shows the panel via onSelectionChange.
+        this._dismissSelectionPanelAfterOrder();
+        if (type === 'fire' || type === 'attack' || type === 'smoke' || type === 'move' || type === 'mount') {
           this.ui?.updateFireMissionControls(this._countActiveFireMissions());
           this.ui?.updateSmokeShell(this);
         }
@@ -1596,6 +1606,11 @@ export class Game {
   }
 
   _maybeUpdateSelectionPanel(selected, dt) {
+    if (this._selectionPanelDismissed) {
+      // Panel stays empty after orders; drop the flag if selection is gone.
+      if (!selected.length && !this.selectedHq) this._selectionPanelDismissed = false;
+      return;
+    }
     if ((!selected.length && !this.selectedHq) || !this.ui) return;
     const hover = this.controller?.hoveredTarget;
     const key = this._selectionUiKeyFor(selected, hover);
@@ -1967,8 +1982,49 @@ export class Game {
       this.selectedBaseBuilding = null;
     }
     unit.setSelected(true);
-    const sel = teamUnits.filter((u) => u.selected && !u.dead);
+    this.panCameraTo(unit.position.x, unit.position.z);
     this.controller?._notifySelection(teamUnits, null);
+  }
+
+  /**
+   * Hide the selection info panel after an order without clearing unit selection,
+   * so follow-up orders still go to the same units.
+   */
+  _dismissSelectionPanelAfterOrder() {
+    this._selectionPanelDismissed = true;
+    this._selectionUiKey = '';
+    this._selectionUiAccum = 0;
+    this._hoverUiId = '';
+    this.hqs?.forEach((h) => {
+      if (h.selected) h.setSelected(false);
+    });
+    this.selectedHq = null;
+    this.selectedBaseBuilding = null;
+    this.ui?.updateSelection([], null, null, this);
+    const teamUnits = this.units.filter((u) => u.team === PLAYER_TEAM);
+    const sel = teamUnits.filter((u) => u.selected && !u.dead);
+    this.targetIndicators?.update(
+      sel,
+      this._playerAlive ?? teamUnits.filter((u) => !u.dead)
+    );
+    this._syncUnitRoster();
+  }
+
+  /** Deselect all player units and clear HQ/base selection so the info panel empties. */
+  _clearPlayerUnitSelection() {
+    this._selectionPanelDismissed = false;
+    const teamUnits = this.units.filter((u) => u.team === PLAYER_TEAM);
+    for (const u of teamUnits) {
+      if (u.selected) u.setSelected(false);
+    }
+    this.hqs?.forEach((h) => {
+      if (h.selected) h.setSelected(false);
+    });
+    this.selectedHq = null;
+    this.selectedBaseBuilding = null;
+    this._selectionUiKey = '';
+    this.controller?._notifySelection(teamUnits, null, null);
+    this.targetIndicators?.update([], this._playerAlive ?? teamUnits.filter((u) => !u.dead));
   }
 
   /**
@@ -2059,8 +2115,7 @@ export class Game {
     const target = this.controller?.hoveredTarget;
     if (target && this.controller.issueAttackOn(target)) {
       this.controller.clearTabletTargetConfirm();
-      const sel = this.units.filter((u) => u.team === PLAYER_TEAM && u.selected && !u.dead);
-      this.ui?.updateSelection(sel, target, this.selectedHq, this);
+      // Info panel is dismissed in onOrder; units stay selected for follow-ups.
     }
   }
 
@@ -2546,6 +2601,33 @@ export class Game {
     this._syncBattleCursor();
   }
 
+  /** Selected radio operators use binoculars to extend fire-support observation range. */
+  useRadioBinoculars() {
+    if (!this.running || this.gameOver || this.paused) return false;
+    if (this._isPlayerDeployZoneActive()) return false;
+    const operators = (this._playerAlive ?? this.units).filter(
+      (u) => u.selected && canUseRadioBinoculars(u)
+    );
+    if (!operators.length) return false;
+    sounds.unlock();
+    let used = 0;
+    for (const unit of operators) {
+      if (activateRadioBinoculars(unit)) used += 1;
+    }
+    if (used > 0) {
+      sounds.play('order');
+      this.ui?.updateRadioBinoculars?.(this);
+      this.ui?.updateFireSupport?.(this.fireSupport);
+      this.ui?.updateSelection?.(
+        this._playerAlive?.filter((u) => u.selected) ?? [],
+        this.controller?.hoveredTarget,
+        this.selectedHq,
+        this
+      );
+    }
+    return used > 0;
+  }
+
   _clearDirectionalPlacement(kind = null) {
     if (kind && this._directionalPlacement?.kind !== kind) return;
     const marker = this._directionalPlacementMarker;
@@ -2920,6 +3002,12 @@ export class Game {
       if (this.lastStand.phase !== 'deploy') return false;
       const def = this.playerFaction?.units?.[unitType];
       if (!def) return false;
+      if (
+        unitType === 'radioOperator' &&
+        !canAddRadioOperator(this.units, PLAYER_TEAM)
+      ) {
+        return false;
+      }
       if (!this.cheatMode && this.lastStand.supplies.player < def.cost) return false;
       this.lastStand.pendingType = this.lastStand.pendingType === unitType ? null : unitType;
       sounds.play('select');
@@ -4055,6 +4143,7 @@ export class Game {
         this.enemyFireSupport.update(dt);
         this.generalOrders.update(dt);
         this.enemyGeneralOrders.update(dt);
+        updateRadioOperatorBinoculars(this.units, dt);
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
         updateParachuteDrops(dt, this.scene, this.mapDef);

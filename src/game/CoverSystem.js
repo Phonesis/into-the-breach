@@ -376,6 +376,7 @@ export function getIncomingDamageMultiplier(target, coverSystem, attackerOrType 
   const explosiveAttack =
     attackerType === 'mortar' ||
     attackerType === 'artillery' ||
+    attackerType === 'airBomb' ||
     attackerType === 'tank' ||
     attackerType === 'superHeavyTank' ||
     attackerType === 'antiTankGun';

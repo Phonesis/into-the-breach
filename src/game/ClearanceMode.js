@@ -6,6 +6,7 @@ import {
   nearestUrbanRoadCenter,
 } from '../world/UrbanLayout.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
+import { canAddRadioOperator } from './RadioOperatorBehavior.js';
 
 /** Defender layout scaled by difficulty.enemyArmyMult in spawn. */
 export const CLEARANCE_DEFENDER_LAYOUT = [
@@ -446,7 +447,11 @@ function spawnReinforcementPackage(game, team, types, wave) {
   // Radio operators are ordinary reinforcement rolls: they can add a second
   // support net or replace a lost operator without making every package a
   // guaranteed signals detachment.
-  if (faction.units.radioOperator && Math.random() < 0.22) {
+  if (
+    faction.units.radioOperator &&
+    Math.random() < 0.22 &&
+    canAddRadioOperator(game.units, team)
+  ) {
     spawnTypes.push('radioOperator');
   }
   const isAttacker = teamIsClearanceAttacker(game, team);

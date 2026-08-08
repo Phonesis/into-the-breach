@@ -8,5 +8,5 @@ Spoken via Microsoft Edge neural TTS (edge-tts):
   russia — ru-RU DmitryNeural
 
 Files: commander-{faction}-{kind}.wav
-  kinds: strafe, barrage, creepingBarrage, airborneDrop, fullRetreat, holdGround, lostCommander
+  kinds: strafe, airBomb, barrage, creepingBarrage, airborneDrop, fullRetreat, holdGround, lostCommander
 Regenerate: npm run bake-commander-order

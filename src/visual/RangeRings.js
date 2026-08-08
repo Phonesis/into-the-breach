@@ -3,66 +3,143 @@ import * as THREE from 'three';
 const SEGMENTS = 64;
 /** Lift above unit feet so flat rings clear local terrain; depthTest off handles slopes. */
 const RING_Y_OFFSET = 0.35;
+const WEAPON_RING_COLOR = 0x4ade80;
+/** Binoculars active — gold observation ring (radio only). */
+const RADIO_BINOCULAR_RING_COLOR = 0xfbbf24;
+const MIN_RANGE_RING_COLOR = 0xf59e0b;
+
+/** Keep visual module free of game-behavior imports (avoids load/runtime breakage). */
+const RADIO_SUPPORT_BASE = 72;
+const RADIO_SUPPORT_BINOCULAR = 112;
+
+function radioBinocularRange(unit) {
+  const base = Number.isFinite(unit?.def?.supportRange)
+    ? unit.def.supportRange
+    : RADIO_SUPPORT_BASE;
+  return Math.max(base, RADIO_SUPPORT_BINOCULAR);
+}
+
+function isRadioBinocularsActive(unit) {
+  return unit?.def?.type === 'radioOperator' && (unit?._binocularActive ?? 0) > 0;
+}
 
 export class RangeRingManager {
   constructor(scene) {
     this.scene = scene;
+    /** Primary ring: weapon range for all units (including radio rifle). */
     this.rings = new Map();
+    /**
+     * Secondary ring: artillery min-range, or radio binocular observation
+     * (only while binocs are raised).
+     */
     this.minimumRings = new Map();
   }
 
+  /** Primary ring = combat weapon range (radio operators use rifle range). */
+  _displayRange(unit) {
+    const r = unit?.def?.range;
+    return Number.isFinite(r) && r > 0 ? r : 10;
+  }
+
+  _syncRing(map, unitId, range, color, name, x, y, z, opacity = 0.38) {
+    const safeRange = Number.isFinite(range) && range > 0 ? range : 10;
+    let ring = map.get(unitId);
+    if (!ring) {
+      ring = this._createRing(safeRange, color, name, opacity);
+      this.scene.add(ring);
+      map.set(unitId, ring);
+    } else if (
+      Math.abs((ring.userData.range ?? 0) - safeRange) > 0.01 ||
+      ring.userData.color !== color ||
+      Math.abs((ring.userData.opacity ?? 0.38) - opacity) > 0.01
+    ) {
+      this._removeRing(ring);
+      ring = this._createRing(safeRange, color, name, opacity);
+      this.scene.add(ring);
+      map.set(unitId, ring);
+    }
+    ring.position.set(x, y, z);
+    ring.visible = true;
+    return ring;
+  }
+
   updateForUnits(units) {
-    const selected = units.filter((u) => !u.dead && u.selected);
+    try {
+      this._updateForUnitsInner(units);
+    } catch (err) {
+      // Never let ring visuals break the battle loop (movement, combat, etc.)
+      console.warn('[RangeRings]', err);
+    }
+  }
+
+  _updateForUnitsInner(units) {
+    const list = units ?? [];
+    const selected = list.filter((u) => u && !u.dead && u.selected);
     const activeIds = new Set();
 
     for (const unit of selected) {
+      if (unit.id == null || !unit.position) continue;
       activeIds.add(unit.id);
-      const range = unit.def?.range ?? 10;
-      let ring = this.rings.get(unit.id);
-      if (!ring) {
-        ring = this._createRing(range);
-        this.scene.add(ring);
-        this.rings.set(unit.id, ring);
-      } else if (Math.abs((ring.userData.range ?? 0) - range) > 0.01) {
-        // Unit type/range changed — rebuild geometry
-        this.scene.remove(ring);
-        ring.geometry.dispose();
-        ring.material.dispose();
-        ring = this._createRing(range);
-        this.scene.add(ring);
-        this.rings.set(unit.id, ring);
-      }
-      // Always sit on unit height; material ignores depth so slopes don't bury the ring
-      const y = (unit.position.y ?? 0) + RING_Y_OFFSET;
-      ring.position.set(unit.position.x, y, unit.position.z);
-      ring.visible = true;
 
-      const minRange = unit.def?.minRange ?? 0;
-      let minimumRing = this.minimumRings.get(unit.id);
-      if (minRange > 0) {
-        if (!minimumRing) {
-          minimumRing = this._createRing(minRange, 0xf59e0b, 'minimumRangeRing');
-          this.scene.add(minimumRing);
-          this.minimumRings.set(unit.id, minimumRing);
-        } else if (Math.abs((minimumRing.userData.range ?? 0) - minRange) > 0.01) {
-          this._removeRing(minimumRing);
-          minimumRing = this._createRing(minRange, 0xf59e0b, 'minimumRangeRing');
-          this.scene.add(minimumRing);
-          this.minimumRings.set(unit.id, minimumRing);
+      const range = this._displayRange(unit);
+      const x = unit.position.x;
+      const y = (unit.position.y ?? 0) + RING_Y_OFFSET;
+      const z = unit.position.z;
+
+      // Primary: weapon range (green) for every unit type
+      this._syncRing(
+        this.rings,
+        unit.id,
+        range,
+        WEAPON_RING_COLOR,
+        'rangeRing',
+        x,
+        y,
+        z,
+        0.38
+      );
+
+      // Secondary: artillery min-range, OR radio binocular observation only while scanning
+      let secondaryRange = 0;
+      let secondaryColor = MIN_RANGE_RING_COLOR;
+      let secondaryName = 'minimumRangeRing';
+      let secondaryOpacity = 0.38;
+
+      if (unit.def?.type === 'radioOperator') {
+        if (isRadioBinocularsActive(unit)) {
+          secondaryRange = radioBinocularRange(unit);
+          secondaryColor = RADIO_BINOCULAR_RING_COLOR;
+          secondaryName = 'radioBinocularRangeRing';
+          secondaryOpacity = 0.52;
         }
-        minimumRing.position.set(unit.position.x, y + 0.01, unit.position.z);
-        minimumRing.visible = true;
-      } else if (minimumRing) {
-        this._removeRing(minimumRing);
-        this.minimumRings.delete(unit.id);
+      } else {
+        secondaryRange = unit.def?.minRange ?? 0;
+      }
+
+      if (secondaryRange > 0) {
+        this._syncRing(
+          this.minimumRings,
+          unit.id,
+          secondaryRange,
+          secondaryColor,
+          secondaryName,
+          x,
+          y + 0.01,
+          z,
+          secondaryOpacity
+        );
+      } else {
+        const old = this.minimumRings.get(unit.id);
+        if (old) {
+          this._removeRing(old);
+          this.minimumRings.delete(unit.id);
+        }
       }
     }
 
     for (const [id, ring] of this.rings) {
       if (!activeIds.has(id)) {
-        this.scene.remove(ring);
-        ring.geometry.dispose();
-        ring.material.dispose();
+        this._removeRing(ring);
         this.rings.delete(id);
       }
     }
@@ -74,13 +151,14 @@ export class RangeRingManager {
     }
   }
 
-  _createRing(radius, color = 0x4ade80, name = 'rangeRing') {
-    const geo = new THREE.RingGeometry(radius * 0.98, radius, SEGMENTS);
+  _createRing(radius, color = WEAPON_RING_COLOR, name = 'rangeRing', opacity = 0.38) {
+    const r = Number.isFinite(radius) && radius > 0 ? radius : 10;
+    const geo = new THREE.RingGeometry(r * 0.98, r, SEGMENTS);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.38,
+      opacity,
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,
@@ -88,17 +166,20 @@ export class RangeRingManager {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = name;
     mesh.renderOrder = 20;
-    mesh.userData.range = radius;
-    // Don't cast/receive shadows that would hide it
+    mesh.userData.range = r;
+    mesh.userData.color = color;
+    mesh.userData.opacity = opacity;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     return mesh;
   }
 
   _removeRing(ring) {
-    this.scene.remove(ring);
-    ring.geometry.dispose();
-    ring.material.dispose();
+    if (!ring) return;
+    if (ring.parent) ring.parent.remove(ring);
+    else this.scene?.remove(ring);
+    ring.geometry?.dispose?.();
+    ring.material?.dispose?.();
   }
 
   clear() {

@@ -8,6 +8,34 @@ const STARTING_REAR_OFFSET = 8;
 /** Tactical support radius in game metres (the game map uses roughly 10 m/unit). */
 export const RADIO_OPERATOR_SUPPORT_RANGE = 72;
 
+/** Hard cap on living radio operators per side in every mode. */
+export const MAX_RADIO_OPERATORS_PER_SIDE = 3;
+
+/** Living (non-dead) radio operators on a team. */
+export function countRadioOperators(units, team) {
+  let n = 0;
+  for (const unit of units ?? []) {
+    if (!unit || unit.dead || unit.team !== team) continue;
+    if (unit.def?.type === 'radioOperator') n += 1;
+  }
+  return n;
+}
+
+/**
+ * Whether another radio operator may be trained/placed for this team.
+ * `queued` counts radio jobs already in the production queue.
+ */
+export function canAddRadioOperator(units, team, { queued = 0 } = {}) {
+  return countRadioOperators(units, team) + Math.max(0, queued) < MAX_RADIO_OPERATORS_PER_SIDE;
+}
+
+/** Binocular scan: extended observation for calling fire support. */
+export const RADIO_BINOCULAR_SUPPORT_RANGE = 112;
+/** Active scan duration (seconds). */
+export const RADIO_BINOCULAR_DURATION = 45;
+/** Cooldown after activating binoculars (seconds). */
+export const RADIO_BINOCULAR_COOLDOWN = 180;
+
 export function isRadioOperator(unit) {
   return unit?.def?.type === 'radioOperator';
 }
@@ -34,13 +62,79 @@ export function hasRadioOperator(game, team) {
   return getRadioOperators(game?.units, team).length > 0;
 }
 
+export function isRadioOperatorUsingBinoculars(unit) {
+  return isRadioOperatorOperational(unit) && (unit._binocularActive ?? 0) > 0;
+}
+
+export function getRadioOperatorBinocularCooldown(unit) {
+  return Math.max(0, unit?._binocularCooldown ?? 0);
+}
+
+export function canUseRadioBinoculars(unit) {
+  return (
+    isRadioOperatorOperational(unit) &&
+    (unit._binocularActive ?? 0) <= 0 &&
+    (unit._binocularCooldown ?? 0) <= 0
+  );
+}
+
+/**
+ * Raise binoculars: extended support observation for RADIO_BINOCULAR_DURATION.
+ * The 3-minute cooldown starts only after a fire-support order is called while
+ * the scan is active (see finishRadioBinocularsAfterSupportCall).
+ */
+export function activateRadioBinoculars(unit) {
+  if (!canUseRadioBinoculars(unit)) return false;
+  unit._binocularActive = RADIO_BINOCULAR_DURATION;
+  unit._binocularCooldown = 0;
+  return true;
+}
+
+/**
+ * After a successful fire-support call: any team radio that was scanning and
+ * could observe the aim point ends its scan and starts the 3-minute cooldown.
+ * Returns how many operators were locked out.
+ */
+export function finishRadioBinocularsAfterSupportCall(game, team, x, z) {
+  if (!game || !Number.isFinite(x) || !Number.isFinite(z)) return 0;
+  let used = 0;
+  for (const unit of getRadioOperators(game.units, team)) {
+    if ((unit._binocularActive ?? 0) <= 0) continue;
+    // Only operators that actually covered this target with the extended scan
+    if (!isRadioOperatorPointObserved(game, unit, x, z)) continue;
+    unit._binocularActive = 0;
+    unit._binocularCooldown = RADIO_BINOCULAR_COOLDOWN;
+    used += 1;
+  }
+  return used;
+}
+
+/** Tick binocular active windows and cooldowns for all radio operators. */
+export function updateRadioOperatorBinoculars(units, dt) {
+  if (!units?.length || !(dt > 0)) return;
+  for (const unit of units) {
+    if (!isRadioOperator(unit) || unit.dead) continue;
+    if ((unit._binocularActive ?? 0) > 0) {
+      unit._binocularActive = Math.max(0, unit._binocularActive - dt);
+      // Scan window ended without a support call — no cooldown; can raise again
+    }
+    if ((unit._binocularCooldown ?? 0) > 0) {
+      unit._binocularCooldown = Math.max(0, unit._binocularCooldown - dt);
+    }
+  }
+}
+
 export function getRadioOperatorSupportRange(unit) {
-  return Math.max(
+  const base = Math.max(
     1,
     Number.isFinite(unit?.def?.supportRange)
       ? unit.def.supportRange
       : RADIO_OPERATOR_SUPPORT_RANGE
   );
+  if (isRadioOperatorUsingBinoculars(unit)) {
+    return Math.max(base, RADIO_BINOCULAR_SUPPORT_RANGE);
+  }
+  return base;
 }
 
 /**
@@ -70,7 +164,13 @@ export function isRadioOperatorPointObserved(game, unit, x, z, origin = unit?.po
     def: { type: 'infantry' },
     _garrisonBunkerId: unit._garrisonBunkerId,
   };
-  const pointTarget = { position: { x, z } };
+  // Aiming on a roof/building is a valid fire-support call. Pass the building as
+  // the ordered target so LOS does not self-block on that structure (same rule as
+  // Shift-fire on scenery). Buildings *between* radio and aim still block.
+  const targetBuilding = game?.scenery?.findBlockingBuildingAt?.(x, z) ?? null;
+  const pointTarget = targetBuilding
+    ? { position: { x, z }, entry: targetBuilding }
+    : { position: { x, z } };
   return !game?.scenery?.isLineOfFireBlocked?.(observer, pointTarget);
 }
 

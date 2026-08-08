@@ -228,6 +228,7 @@ const voiceGroups = {
 
 const commanderLines = {
   strafe: '航空支援を要請する。目標を掃射せよ！',
+  airBomb: '爆撃を許可する。目標に大型爆弾を投下せよ！',
   barrage: '砲兵隊、指定地点に集中砲火！',
   creepingBarrage: '移動弾幕を開始、歩兵の前進を援護せよ！',
   airborneDrop: '挺進部隊、降下を開始せよ！',

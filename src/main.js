@@ -147,6 +147,9 @@ const ui = new UIManager(uiRoot, {
   onArmTrenchDig() {
     game?.armTrenchDig();
   },
+  onUseRadioBinoculars() {
+    game?.useRadioBinoculars();
+  },
   onArmMedicTent() {
     game?.armMedicTent();
   },

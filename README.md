@@ -261,7 +261,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **Launch Battle Now** | Skip quiet-sector staging (countdown banner) |
 | **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
 | **Production buttons** | Queue unit at your HQ (when HQ is alive) |
-| **Strafe / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
+| **Strafe / Bomb / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
 | **Tablet / touch** | **Camera pad** (bottom-right): pan, rotate, zoom · **pinch** on battlefield to zoom · **long-press** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
 | **Cheat mode** | Type **`iddqd`** during a battle, or open the game with **`?cheat=1`** in the URL (unlimited supplies, instant builds) |
 
@@ -344,10 +344,13 @@ Fire support requires a living field commander. If the commander is killed, pend
 
 | Strike | Cooldown | Effect |
 |--------|----------|--------|
-| **Strafing run** | ~72 s | Fighter passes along the target line with spatial fly-by audio; MG bursts |
+| **Strafing run** | ~72 s | Faction fighter pass with nation-specific engine fly-by; MG bursts along the line |
+| **Air bomb** | ~118 s | Fighter releases a large GP bomb (heavy blast/crater) on the aim point |
 | **Artillery barrage** | ~95 s | ~14 shells with warning markers, then impacts |
+| **Creeping barrage** | ~148 s | Shells lift toward the aim point along the attack axis |
+| **Airborne drop** | ~180 s | Paratrooper squads descend after opening cloud cover clears |
 
-Click **Strafe** or **Barrage** → **LMB** on valid ground → brief warning → strike. Not available in **Battle Simulation** or **Tower Defence**.
+Click a strike type → **LMB** on valid observed ground → brief warning → strike. Requires a living radio operator.
 
 ---
 
@@ -394,7 +397,7 @@ The manual includes a section nav, control reference table, illustrated **unit c
 - `SoundManager` plays **faction-specific** weapon samples from `public/sounds/` when available (`WeaponSounds.js` — rifles, MGs, tank guns, mortars, howitzers per nation).
 - Looping **vehicle engine** audio (main + exhaust layers) for tanks, super heavies, armored cars, and artillery while moving, plus dedicated track audio for stationary tank pivots (`VehicleEngineAudio.js`).
 - Faction-specific radio acknowledgements confirm accepted attack orders.
-- **Strafe fly-by** spatial audio when a fighter passes overhead (`StrafeAircraftAudio.js`).
+- **Strafe / bomb fly-by** spatial audio with **per-faction fighter engines** when aircraft pass overhead (`StrafeAircraftAudio.js`); air bombs also play heavy detonation clips.
 - **Infantry death** one-shots (baked pool under `public/sounds/infantry-death-*.wav`).
 - **Menu music** (`MenuMusic.js`) on title/menu screens; stops on battle deploy.
 - Spatial pan, distance attenuation, and light reverb from the camera listener.
@@ -462,8 +465,8 @@ src/
     WeaponSounds.js       # Faction weapon profile → WAV mapping
     MenuMusic.js          # Title-screen theme
     VehicleEngineAudio.js # Per-type engine loops
-    StrafeAircraftAudio.js # Spatial fighter fly-by
-  effects/                # Tracers, wrecks, fire support VFX
+    StrafeAircraftAudio.js # Spatial fighter fly-by (faction engines)
+  effects/                # Tracers, wrecks, fire support VFX, air bomb
   visual/
     HealMarkers.js        # Medic cross / engineer spanner icons
     UnitHealthBars.js     # Floating HP bars (tied to field-icons toggle)

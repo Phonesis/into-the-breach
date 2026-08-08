@@ -10,6 +10,7 @@ import { buildLastStandBriefing } from '../data/lastStandBriefing.js';
 export { isLastStandMode, LAST_STAND_SUPPLIES };
 import { resolveUnitSpawnPosition, spawnUnitAt } from './Spawner.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import { canAddRadioOperator } from './RadioOperatorBehavior.js';
 
 /** Minimum gap between placed units (game meters). */
 export const LAST_STAND_MIN_SPACING = 3.8;
@@ -299,12 +300,19 @@ function pickEnemyDeployType(game, { ignoreSupplies = false } = {}) {
   if (!faction?.units) return null;
   const supplies = ignoreSupplies ? Infinity : game.lastStand?.supplies?.enemy ?? 0;
   const weights = enemyTypeWeightsForTactic(game.lastStand?.enemyTactic?.id);
-  const types = getProducibleUnits(faction).filter(
-    (type) => (faction.units[type]?.cost ?? Infinity) <= supplies
-  );
+  const types = getProducibleUnits(faction).filter((type) => {
+    if ((faction.units[type]?.cost ?? Infinity) > supplies) return false;
+    if (type === 'radioOperator' && !canAddRadioOperator(game.units, 'enemy')) return false;
+    return true;
+  });
   if (!types.length) {
     // Budget exhausted: still allow any producible type when matching count for free.
-    return ignoreSupplies ? getProducibleUnits(faction)[0] ?? null : null;
+    if (!ignoreSupplies) return null;
+    return (
+      getProducibleUnits(faction).find(
+        (type) => type !== 'radioOperator' || canAddRadioOperator(game.units, 'enemy')
+      ) ?? null
+    );
   }
 
   let total = 0;
@@ -334,6 +342,7 @@ function placeEnemyUnit(game, unitType, { free = false } = {}) {
   const faction = game.enemyFaction;
   const def = faction?.units?.[unitType];
   if (!def) return false;
+  if (unitType === 'radioOperator' && !canAddRadioOperator(game.units, 'enemy')) return false;
   if (!free && state.supplies.enemy < def.cost) return false;
 
   const pos = pickDeployPosition(
@@ -383,6 +392,9 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
   const faction = game.playerFaction;
   const def = faction?.units?.[unitType];
   if (!def) return { ok: false, reason: 'invalid_type' };
+  if (unitType === 'radioOperator' && !canAddRadioOperator(game.units, 'player')) {
+    return { ok: false, reason: 'radio_cap' };
+  }
 
   const cheatFree = game.cheatMode;
   if (!cheatFree && state.supplies.player < def.cost) return { ok: false, reason: 'no_supplies' };

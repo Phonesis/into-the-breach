@@ -22,7 +22,7 @@ const EXPLOSIVE_WEAPON_TYPES = new Set([
   'antiTankGun',
   'handGrenade',
 ]);
-const ROOF_DIRECT_HIT_WEAPON_TYPES = new Set(['artillery', 'mortar', 'strafe']);
+const ROOF_DIRECT_HIT_WEAPON_TYPES = new Set(['artillery', 'mortar', 'strafe', 'airBomb']);
 const GARRISON_WINDOW_ENGAGEMENT_TYPES = new Set([
   'infantry',
   'engineer',
@@ -524,6 +524,28 @@ export class DestructibleScenery {
     const localX = (frame.cos * dx - frame.sin * dz) / frame.scaleX;
     const localZ = (frame.sin * dx + frame.cos * dz) / frame.scaleZ;
     return Math.abs(localX) <= frame.halfW && Math.abs(localZ) <= frame.halfD;
+  }
+
+  /**
+   * Intact LOS-blocking building under a ground point (e.g. fire-support aim on a roof).
+   * Prefers the closest centre among footprints that contain the point.
+   */
+  findBlockingBuildingAt(x, z, margin = 0.35) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+    let best = null;
+    let bestD = Infinity;
+    for (const obj of this.objects) {
+      if (!LINE_OF_FIRE_BLOCKING_BUILDING_KINDS.has(obj.kind)) continue;
+      if (obj.lineOfFireReleased) continue;
+      if (obj.destroyed && !obj.group?.parent) continue;
+      if (!this._pointNearBuildingFootprint(obj, x, z, margin)) continue;
+      const d = Math.hypot(obj.x - x, obj.z - z);
+      if (d < bestD) {
+        bestD = d;
+        best = obj;
+      }
+    }
+    return best;
   }
 
   /** Combat targets for ordered attacks on cover. */

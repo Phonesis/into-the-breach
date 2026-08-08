@@ -52,6 +52,16 @@ for (const faction of ['germany', 'usa', 'uk', 'russia', 'japan']) {
   SAMPLE_URLS[`engine_armored_car_${faction}_exhaust`] = publicUrl(
     `sounds/engine-armored-car-${faction}-exhaust.wav`
   );
+  // Faction fighter engine loops for strafe / bomb / airborne fly-bys
+  SAMPLE_URLS[`aircraft_flyby_${faction}`] = publicUrl(
+    `sounds/aircraft-flyby-${faction}.wav`
+  );
+  SAMPLE_URLS[`aircraft_flyby_exhaust_${faction}`] = publicUrl(
+    `sounds/aircraft-flyby-${faction}-exhaust.wav`
+  );
+  SAMPLE_URLS[`aircraft_flyby_prop_${faction}`] = publicUrl(
+    `sounds/aircraft-flyby-${faction}-prop.wav`
+  );
 }
 
 /** Extra one-shot pools (ElevenLabs extras) — loaded into arrays for random pick. */
@@ -106,6 +116,11 @@ const FIRE_SUPPORT_SALVO_FILES = {
     'creeping-barrage-salvo-el-02.wav',
   ],
 };
+const BOMB_EXPLOSION_FILES = [
+  'bomb-explosion-01.wav',
+  'bomb-explosion-02.wav',
+  'bomb-explosion-03.wav',
+];
 
 /** Scenery / structure collapse one-shots (ElevenLabs) by building scale. */
 const BUILDING_COLLAPSE_FILES = {
@@ -156,6 +171,7 @@ const UNIT_ATTACK_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 /** Fire-support + general-order commander radio lines (baked edge-tts). */
 const COMMANDER_ORDER_KINDS = [
   'strafe',
+  'airBomb',
   'barrage',
   'creepingBarrage',
   'airborneDrop',
@@ -232,6 +248,8 @@ export class SoundManager {
     this.artilleryImpactBuffers = [];
     /** @type {Record<string, AudioBuffer[]>} */
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
+    /** @type {AudioBuffer[]} */
+    this.bombExplosionBuffers = [];
     /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     this._atmosSrc = null;
@@ -638,6 +656,7 @@ export class SoundManager {
     this.radioStaticBuffers = [];
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
+    this.bombExplosionBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
@@ -649,6 +668,7 @@ export class SoundManager {
     loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
+    loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
     }
@@ -974,6 +994,38 @@ export class SoundManager {
 
   startStrafeFlyby(opts) {
     this.strafeAircraft?.startFlyby(opts);
+  }
+
+  /** Large aerial bomb detonation (deeper / longer than artillery shelllets). */
+  playBombExplosion(worldPos = null) {
+    this._runWhenReady(() => {
+      const buf =
+        this._pickFromPool(this.bombExplosionBuffers, '_lastBombExplosionFile') ??
+        this._pickFromPool(this.artilleryImpactBuffers, '_lastArtilleryImpactFile') ??
+        this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
+        this.buffers.explosion;
+      if (!buf) return;
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * 1.85,
+        rate: 0.88 + Math.random() * 0.08,
+        wet: 0.38 + Math.random() * 0.08,
+      });
+      // Secondary rumble layer from the general explosion pool
+      const rumble =
+        this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ?? this.buffers.explosion;
+      if (rumble && rumble !== buf) {
+        this._playBuffer(rumble, {
+          pan: pan * 0.7,
+          vol: this._distanceGain(dist) * 0.95,
+          rate: 0.78 + Math.random() * 0.06,
+          wet: 0.45,
+          delay: 0.05,
+        });
+      }
+    });
   }
 
   /** Play a weapon profile (faction-specific ids from WeaponSounds.js). */

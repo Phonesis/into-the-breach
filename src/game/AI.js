@@ -27,6 +27,10 @@ import {
   getRadioOperators,
   getRadioOperatorSupportRange,
   isRadioOperatorPointObserved,
+  canUseRadioBinoculars,
+  activateRadioBinoculars,
+  RADIO_OPERATOR_SUPPORT_RANGE,
+  RADIO_BINOCULAR_SUPPORT_RANGE,
 } from './RadioOperatorBehavior.js';
 
 let aiTimer = 0;
@@ -3478,7 +3482,7 @@ function enforceAiRadioRelayMove(unit, destination, game) {
 
 function isAiRadioSupportReady(support) {
   if (!support?.isReady) return true;
-  return ['strafe', 'barrage', 'creepingBarrage', 'airborneDrop'].some((type) =>
+  return ['strafe', 'airBomb', 'barrage', 'creepingBarrage', 'airborneDrop'].some((type) =>
     support.isReady(type)
   );
 }
@@ -3621,6 +3625,29 @@ export function updateAIOffMapSupport(
   });
 }
 
+/** Raise binoculars when a player cluster sits just past base radio range. */
+function tryAiRadioBinoculars(game, players) {
+  if (!game || !players?.length) return false;
+  const radios = getRadioOperators(game.units, 'enemy');
+  for (const radio of radios) {
+    if (!canUseRadioBinoculars(radio)) continue;
+    let wants = false;
+    for (const p of players) {
+      if (p.dead) continue;
+      const d = Math.hypot(
+        p.position.x - radio.position.x,
+        p.position.z - radio.position.z
+      );
+      if (d > RADIO_OPERATOR_SUPPORT_RANGE && d <= RADIO_BINOCULAR_SUPPORT_RANGE) {
+        wants = true;
+        break;
+      }
+    }
+    if (wants && activateRadioBinoculars(radio)) return true;
+  }
+  return false;
+}
+
 function updateAISupport(support, players, dt, difficulty, options = {}) {
   if (!support || players.length < 2) return;
   aiSupportTimer -= dt;
@@ -3629,6 +3656,9 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
   aiSupportTimer = options.clearance
     ? 18 + Math.random() * 14
     : 24 + Math.random() * 18;
+
+  const game = options.game ?? support?.game ?? null;
+  tryAiRadioBinoculars(game, players);
 
   const target = findSupportTarget(players, support);
   if (!target) {
@@ -3648,6 +3678,16 @@ function updateAISupport(support, players, dt, difficulty, options = {}) {
     Math.random() < Math.min(0.55, 0.32 * aggression)
   ) {
     if (support.tryAiStrike('strafe', target.x, target.z)) return;
+  }
+
+  // Single heavy bomb on a dense cluster — preferred over multi-shell barrage
+  // when the pack is tight and the asset is ready.
+  if (
+    support.isReady('airBomb') &&
+    target.count >= minCluster &&
+    Math.random() < Math.min(0.48, 0.28 * aggression)
+  ) {
+    if (support.tryAiStrike('airBomb', target.x, target.z)) return;
   }
 
   if (support.isReady('barrage') && target.count >= minCluster && Math.random() < barrageChance) {

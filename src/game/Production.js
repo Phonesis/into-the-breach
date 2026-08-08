@@ -1,6 +1,10 @@
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
+import {
+  MAX_RADIO_OPERATORS_PER_SIDE,
+  canAddRadioOperator,
+} from './RadioOperatorBehavior.js';
 
 const MAX_QUEUE = 4;
 const SPAWN_RING_DIST = 11;
@@ -20,6 +24,7 @@ export class ProductionManager {
     isProductionBlocked = null,
     getUnitLimit = null,
     getDeployedUnitCount = null,
+    getUnits = null,
   }) {
     this.getFaction = getFaction;
     this.getTeam = getTeam;
@@ -29,6 +34,7 @@ export class ProductionManager {
     this.isProductionBlocked = isProductionBlocked;
     this.getUnitLimit = getUnitLimit;
     this.getDeployedUnitCount = getDeployedUnitCount;
+    this.getUnits = getUnits;
     this.getScene = getScene;
     this.getMapDef = getMapDef;
     this.getScenery = getScenery;
@@ -91,9 +97,34 @@ export class ProductionManager {
     const q = this.queues[team];
     if (q.length >= MAX_QUEUE) return false;
     if (this.isAtUnitLimit(team)) return false;
+    if (unitType === 'radioOperator' && !this._canAddRadioOperator(team)) return false;
     if (this.cheatMode && team === 'player') return true;
     const supply = typeof resources === 'number' ? resources : 0;
     return supply >= def.cost;
+  }
+
+  /** Living + queued radio operators must stay under MAX_RADIO_OPERATORS_PER_SIDE. */
+  _canAddRadioOperator(team) {
+    const units = this.getUnits?.() ?? [];
+    const queued = (this.queues[team] ?? []).filter((j) => j.unitType === 'radioOperator')
+      .length;
+    return canAddRadioOperator(units, team, { queued });
+  }
+
+  getRadioOperatorCap(team) {
+    const units = this.getUnits?.() ?? [];
+    const queued = (this.queues[team] ?? []).filter((j) => j.unitType === 'radioOperator')
+      .length;
+    const living = units.filter(
+      (u) => u && !u.dead && u.team === team && u.def?.type === 'radioOperator'
+    ).length;
+    return {
+      limit: MAX_RADIO_OPERATORS_PER_SIDE,
+      living,
+      queued,
+      available: Math.max(0, MAX_RADIO_OPERATORS_PER_SIDE - living - queued),
+      atCap: living + queued >= MAX_RADIO_OPERATORS_PER_SIDE,
+    };
   }
 
   canAffordAny(team, resources, options = {}) {
@@ -131,6 +162,7 @@ export class ProductionManager {
     const faction = this.getFaction(team);
     const def = faction?.units[unitType];
     if (!def || this.queues[team].length >= MAX_QUEUE || this.isAtUnitLimit(team)) return false;
+    if (unitType === 'radioOperator' && !this._canAddRadioOperator(team)) return false;
     const playerCheat = this.cheatMode && team === 'player';
     if (!playerCheat && !spendResources(def.cost)) return false;
 
