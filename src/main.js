@@ -186,6 +186,9 @@ const ui = new UIManager(uiRoot, {
   onToggleAutoBuild(enabled) {
     game?.setAutoBuildMode(enabled);
   },
+  onChangeDebrisRetention(seconds) {
+    game?.setDebrisRetentionSeconds(seconds);
+  },
   onDismountTankRiders() {
     game?.dismountSelectedTankRiders();
   },

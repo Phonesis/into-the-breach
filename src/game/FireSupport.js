@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import {
   AIRBORNE_CLOUD_COVER_SECONDS,
   FIRE_SUPPORT_TYPES,
-  TEMP_AIRBORNE_TEST,
 } from '../data/fireSupport.js';
 import { PRACTICE_TARGET_HQ_DAMAGE_MULT } from '../data/gameModes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
@@ -127,12 +126,8 @@ export class FireSupportManager {
     this.targetRejectReason = null;
     this.airborneCloudCoverRemaining = AIRBORNE_CLOUD_COVER_SECONDS;
     // Clear Defenses & Battle Simulation: one airborne drop per side per match.
-    // TEMP_AIRBORNE_TEST: unlimited so you can re-drop while testing.
-    this.airborneUsesLeft = TEMP_AIRBORNE_TEST
-      ? null
-      : this.game?.clearance || this.game?.lastStand
-        ? 1
-        : null;
+    this.airborneUsesLeft =
+      this.game?.clearance || this.game?.lastStand ? 1 : null;
   }
 
   getDef(type) {
@@ -390,7 +385,7 @@ export class FireSupportManager {
           z: startZ + perpZ * along + dz * lateral,
         });
       }
-      prewarmStrikeImpacts(this.game.renderer, mapDef, strafeImpacts, false);
+      prewarmStrikeImpacts(this.game.renderer, mapDef, strafeImpacts, false, this.game.scene);
 
       this.events.push({
         at: spawnAt,
@@ -480,7 +475,7 @@ export class FireSupportManager {
       const flyDuration = approachTime + runLen / planeSpeed + 1.4;
 
       spawnStrikeWarning(scene, mapDef, tx, tz, def.hitRadius, true);
-      prewarmStrikeImpacts(this.game.renderer, mapDef, [{ x: tx, z: tz }], true);
+      prewarmStrikeImpacts(this.game.renderer, mapDef, [{ x: tx, z: tz }], true, this.game.scene);
 
       this.events.push({
         at: spawnAt,
@@ -562,7 +557,7 @@ export class FireSupportManager {
           },
         });
       }
-      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false);
+      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false, this.game.scene);
     } else if (type === 'creepingBarrage') {
       const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz, this.ownerTeam);
       const startX = tx - dx * def.creepLength;
@@ -605,7 +600,7 @@ export class FireSupportManager {
           },
         });
       }
-      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false);
+      prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false, this.game.scene);
     } else if (type === 'airborneDrop') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);
 

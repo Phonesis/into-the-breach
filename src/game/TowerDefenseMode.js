@@ -29,6 +29,9 @@ import {
   tryAssignCrewlessTankRecovery,
   tryAssignSupportCare,
   tryAssignSupportRearMove,
+  diversifyAiMoveOrders,
+  updateAiIncomingFireReactions,
+  maintainAiCommanderScreen,
 } from './AI.js';
 
 const PLAYER = 'player';
@@ -601,11 +604,23 @@ function computeTdEnemyMoveGoal(unit, game) {
 }
 
 export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
+  if (!game?.towerDefense || game.towerDefense.phase === 'active') {
+    updateAiIncomingFireReactions({
+      enemyUnits,
+      game,
+      mapDef: game?.mapDef,
+      clearance: false,
+    });
+  }
   const crewlessTankClaims = new Set();
   const careClaims = new Set();
   for (const unit of enemyUnits) {
     if (unit.def?.type === 'commander' || unit.def?.type === 'radioOperator') continue;
+    if (unit._aiCommanderScreen && maintainAiCommanderScreen(unit, game, game?._playerAlive ?? [])) {
+      continue;
+    }
     if (unit.retreating || unit.surrendered || unit._captureExit) continue;
+    if (unit._aiIncomingFireReaction) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
     if (tryAssignSupportCare(unit, enemyUnits, game, game?.mapDef, careClaims)) continue;
     if (tryAssignSupportRearMove(unit, enemyUnits, game, game?.mapDef)) continue;
@@ -634,6 +649,9 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
     unit._tdGoalStale = false;
     unit.moveTarget = { x: unit._tdMoveGoal.x, z: unit._tdMoveGoal.z };
   }
+
+  // This also repairs older saves whose march goals predate per-unit slots.
+  diversifyAiMoveOrders(enemyUnits, game);
 }
 
 function pickNearestDefenseInRange(unit, defenses) {

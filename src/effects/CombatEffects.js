@@ -27,6 +27,7 @@ const EXPLOSION_EVICTABLE_TYPES = new Set([
   'smokeShellImpact',
 ]);
 const active = [];
+const layeredExplosionLightPools = new WeakMap();
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -232,9 +233,45 @@ function disposeEffect(effect) {
   if (effect.head?.parent) effect.head.parent.remove(effect.head);
   if (effect.trailMesh?.parent) effect.trailMesh.parent.remove(effect.trailMesh);
   if (effect.glowMesh?.parent) effect.glowMesh.parent.remove(effect.glowMesh);
-  if (effect.light?.parent) effect.light.parent.remove(effect.light);
+  if (effect.pooledLight) {
+    effect.light.intensity = 0;
+    effect.light.userData.layeredExplosionInUse = false;
+  } else if (effect.light?.parent) {
+    effect.light.parent.remove(effect.light);
+  }
   effect.geometries?.forEach((g) => g.dispose());
   effect.materials?.forEach((m) => m.dispose());
+}
+
+function ensureLayeredExplosionLightPool(scene) {
+  let pool = layeredExplosionLightPools.get(scene);
+  if (!pool) {
+    pool = Array.from({ length: MAX_LAYERED_EXPLOSIONS }, () => {
+      const light = new THREE.PointLight(0xff8a3a, 0, 17, 2);
+      light.castShadow = false;
+      light.userData.layeredExplosionLight = true;
+      light.userData.layeredExplosionInUse = false;
+      return light;
+    });
+    layeredExplosionLightPools.set(scene, pool);
+  }
+  for (const light of pool) {
+    if (light.parent !== scene) scene.add(light);
+  }
+  return pool;
+}
+
+function acquireLayeredExplosionLight(scene, pos, scale, intensity) {
+  const pool = ensureLayeredExplosionLightPool(scene);
+  const light =
+    pool.find((candidate) => !candidate.userData.layeredExplosionInUse) ?? pool[0];
+  light.userData.layeredExplosionInUse = true;
+  light.color.setHex(0xff8a3a);
+  light.intensity = intensity;
+  light.distance = scale * 17;
+  light.decay = 2;
+  light.position.set(pos.x, pos.y + scale * 0.82, pos.z);
+  return light;
 }
 
 export function clearCombatEffects() {
@@ -243,13 +280,16 @@ export function clearCombatEffects() {
 }
 
 /** Generate and compile shared artillery assets before the first scheduled heavy impact. */
-export function prewarmArtilleryExplosionAssets(renderer = null) {
+export function prewarmArtilleryExplosionAssets(renderer = null, targetScene = null) {
   const textures = [
     getFlameTexture(),
     getSmokeTexture(),
     getEarthSprayTexture(),
     getEmberTexture(),
     getFlashTexture(0xffb250),
+    // Strafe's lighter shell profile uses this separate flash canvas. Warm it
+    // with the shared impact textures so the first gun-run does no canvas work.
+    getFlashTexture(0xffc06a),
   ];
   for (const texture of textures) renderer?.initTexture?.(texture);
   if (!renderer?.compile || artilleryShaderProgramsWarmed) return;
@@ -279,6 +319,13 @@ export function prewarmArtilleryExplosionAssets(renderer = null) {
     }),
     new THREE.SpriteMaterial({
       map: textures[4],
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    }),
+    new THREE.SpriteMaterial({
+      map: textures[5],
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -333,17 +380,54 @@ export function prewarmArtilleryExplosionAssets(renderer = null) {
   });
   warmScene.add(new THREE.Mesh(craterGeometry, craterMaterial));
   warmScene.add(new THREE.AmbientLight(0xffffff, 1));
+  // Every live layered impact adds one of these. Include it while compiling so
+  // the first strafe does not create a new point-light shader permutation.
+  warmScene.add(new THREE.PointLight(0xff8a3a, 7, 17, 2));
+
+  const warmTarget = renderer.render && renderer.setRenderTarget
+    ? new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false })
+    : null;
+  const previousTarget = renderer.getRenderTarget?.() ?? null;
 
   try {
-    renderer.compile(warmScene, warmCamera);
+    // Use the live scene's lighting/environment when available. The temporary
+    // scene supplies the impact light; the target scene supplies the normal
+    // battlefield lights and shadow configuration.
+    renderer.compile(warmScene, warmCamera, targetScene ?? warmScene);
+    if (warmTarget) {
+      // compile() prepares programs; this one-pixel draw also uploads the
+      // sprite, point-burst, and decal buffers before the first visible hit.
+      renderer.setRenderTarget(warmTarget);
+      renderer.render(warmScene, warmCamera);
+    }
     artilleryShaderProgramsWarmed = true;
   } finally {
+    if (warmTarget) {
+      renderer.setRenderTarget(previousTarget);
+      warmTarget.dispose();
+    }
     materials.forEach((material) => material.dispose());
     pointMaterials.forEach((material) => material.dispose());
     craterMaterial.dispose();
     pointGeometry.dispose();
     craterGeometry.dispose();
   }
+}
+
+/**
+ * Compile the live battlefield with its fixed explosion-light pool.
+ *
+ * Three.js bakes the number of point lights into scene material programs. A
+ * strafe can keep all eight reserved layered explosions alive at once, so the
+ * pool keeps that count stable instead of changing it at every impact.
+ */
+export function prewarmImpactLightPrograms(renderer, scene, camera) {
+  if (!renderer?.compile || !scene || !camera) return;
+  // Keep the complete pool in the live scene at zero intensity. Point-light
+  // count therefore stays constant as impacts start and fade, so the renderer
+  // neither compiles nor swaps whole-scene lighting programs mid-strafe.
+  ensureLayeredExplosionLightPool(scene);
+  renderer.compile(scene, camera);
 }
 
 export function triggerParatrooperAtRecoil(unitMesh) {
@@ -2140,11 +2224,13 @@ function spawnLayeredExplosion(scene, pos, profileName = 'medium', scaleMultipli
   geometries.push(sparkBurst.geometry, debrisBurst.geometry);
   materials.push(sparkBurst.material, debrisBurst.material);
 
-  const light = new THREE.PointLight(0xff8a3a, profile.lightIntensity, scale * 17, 2);
-  light.position.y = scale * 0.82;
-  light.castShadow = false;
-  group.add(light);
   scene.add(group);
+  const light = acquireLayeredExplosionLight(
+    scene,
+    group.position,
+    scale,
+    profile.lightIntensity
+  );
 
   const lifeDuration = profile.smokeDelay + profile.smokeDuration;
   registerEffect({
@@ -2166,6 +2252,7 @@ function spawnLayeredExplosion(scene, pos, profileName = 'medium', scaleMultipli
     flashMaterial,
     flashScale,
     light,
+    pooledLight: true,
     lightIntensity: profile.lightIntensity,
     sparks: sparkBurst.points,
     sparkMaterial: sparkBurst.material,

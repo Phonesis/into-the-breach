@@ -38,11 +38,13 @@ const DEFAULT_TURRET_TRAVERSE_DEG = {
   superHeavyTank: 10,
 };
 const STATIONARY_HULL_TRAVERSE_DEG = {
+  armoredCar: 30,
   tank: 18,
   tankDestroyer: 15,
   superHeavyTank: 12,
 };
 const MOVING_HULL_TRAVERSE_DEG = {
+  armoredCar: 52,
   tank: 28,
   tankDestroyer: 24,
   superHeavyTank: 18,
@@ -250,14 +252,14 @@ export function faceUnitTowardMovement(
 ) {
   const yaw = Math.atan2(nx, nz);
   const type = unit?.def?.type;
-  const trackedRateDeg = stationaryTurn
+  const hullRateDeg = stationaryTurn
     ? STATIONARY_HULL_TRAVERSE_DEG[type]
     : MOVING_HULL_TRAVERSE_DEG[type];
-  if (trackedRateDeg != null) {
+  if (hullRateDeg != null) {
     unit.mesh.rotation.y = moveAngleToward(
       unit.mesh.rotation.y,
       yaw,
-      trackedRateDeg * DEG_TO_RAD * Math.max(0, dt)
+      hullRateDeg * DEG_TO_RAD * Math.max(0, dt)
     );
     return;
   }

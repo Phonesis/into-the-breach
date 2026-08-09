@@ -172,8 +172,10 @@ export class InfantryTrenchManager {
     );
   }
 
-  _nearestDigger(x, z, team, selectedOnly = true) {
-    const diggers = this._diggersSelected(team, selectedOnly);
+  _nearestDigger(x, z, team, selectedOnly = true, predicate = null) {
+    const diggers = this._diggersSelected(team, selectedOnly).filter(
+      (unit) => !predicate || predicate(unit)
+    );
     let best = null;
     let bestD = Number.POSITIVE_INFINITY;
     for (const u of diggers) {
@@ -316,14 +318,14 @@ export class InfantryTrenchManager {
     return true;
   }
 
-  tryAiPlace(x, z, team) {
+  tryAiPlace(x, z, team, rotationY = null, diggerPredicate = null) {
     for (const pos of this._aiPlacementCandidates(x, z)) {
       const reason = this.getPlacementRejectReason(pos.x, pos.z, team, {
         selectedOnly: false,
       });
       if (reason) continue;
 
-      const digger = this._nearestDigger(pos.x, pos.z, team, false);
+      const digger = this._nearestDigger(pos.x, pos.z, team, false, diggerPredicate);
       if (!digger) continue;
 
       const y = this.game.mapDef
@@ -336,7 +338,7 @@ export class InfantryTrenchManager {
         y,
         team,
         diggerId: digger.id,
-        rotationY: this._facingYaw(team, pos.x, pos.z),
+        rotationY: rotationY ?? this._facingYaw(team, pos.x, pos.z),
         progress: 0,
         marker: null,
       };
@@ -391,6 +393,8 @@ export class InfantryTrenchManager {
       garrison: [],
       mesh,
       rotationY,
+      _aiDefensiveTrench: !!site._aiDefensiveTrench,
+      _aiTrenchMode: site._aiTrenchMode ?? null,
     };
     this.trenches.push(trench);
     this.game.coverSystem?.addZone(site.x, site.z, 'trench', TRENCH_COVER_RADIUS);
@@ -434,6 +438,12 @@ export class InfantryTrenchManager {
 
   getTrenchById(id) {
     return this.trenches.find((t) => t.id === id && !t.destroyed) ?? null;
+  }
+
+  releaseUnit(unit) {
+    if (!unit?._trenchId) return false;
+    releaseFromTrench(unit, this);
+    return true;
   }
 
   pickTrenchAt(x, z, team, maxDist = TRENCH_ENTER_RANGE) {

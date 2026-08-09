@@ -212,6 +212,8 @@ export class EngineerSandbagManager {
       mesh: null,
       manager: this,
       engineerBuilt: true,
+      _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
+      _aiFieldworkMode: site._aiFieldworkMode ?? null,
     };
 
     const mesh = createCampaignBunkerMesh(this._factionId(site.team));
@@ -314,7 +316,7 @@ export class EngineerSandbagManager {
     return n;
   }
 
-  _nearestSelectedEngineer(x, z, team, selectedOnly = true) {
+  _nearestSelectedEngineer(x, z, team, selectedOnly = true, predicate = null) {
     const engineers = this.game.units.filter(
       (u) =>
         (!selectedOnly || u.selected) &&
@@ -323,7 +325,8 @@ export class EngineerSandbagManager {
         !u.surrendered &&
         !u._captureExit &&
         u.def?.type === 'engineer' &&
-        !u._sandbagSite
+        !u._sandbagSite &&
+        (!predicate || predicate(u))
     );
     let best = null;
     let bestD = Number.POSITIVE_INFINITY;
@@ -491,14 +494,20 @@ export class EngineerSandbagManager {
     return true;
   }
 
-  tryAiPlace(x, z, team, buildType) {
+  tryAiPlace(x, z, team, buildType, rotationY = null, engineerPredicate = null) {
     for (const pos of this._aiPlacementCandidates(x, z)) {
       const reason = this.getPlacementRejectReason(pos.x, pos.z, team, buildType, {
         selectedOnly: false,
       });
       if (reason) continue;
 
-      const engineer = this._nearestSelectedEngineer(pos.x, pos.z, team, false);
+      const engineer = this._nearestSelectedEngineer(
+        pos.x,
+        pos.z,
+        team,
+        false,
+        engineerPredicate
+      );
       if (!engineer) continue;
 
       const y = this.game.mapDef
@@ -512,7 +521,7 @@ export class EngineerSandbagManager {
         y,
         team,
         engineerId: engineer.id,
-        rotationY: this._facingYaw(team, pos.x, pos.z),
+        rotationY: rotationY ?? this._facingYaw(team, pos.x, pos.z),
         progress: 0,
         marker: null,
       };
@@ -572,6 +581,8 @@ export class EngineerSandbagManager {
         damage: def.damage,
         triggerRadius: def.triggerRadius,
         mesh,
+        _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
+        _aiFieldworkMode: site._aiFieldworkMode ?? null,
       });
       this._builtPositions.push({
         id: site.id,
@@ -580,6 +591,8 @@ export class EngineerSandbagManager {
         team: site.team,
         buildType: site.buildType,
         rotationY: site.rotationY,
+        _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
+        _aiFieldworkMode: site._aiFieldworkMode ?? null,
       });
       return;
     }
@@ -606,6 +619,8 @@ export class EngineerSandbagManager {
         team: site.team,
         buildType: site.buildType,
         rotationY: site.rotationY,
+        _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
+        _aiFieldworkMode: site._aiFieldworkMode ?? null,
       });
       this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
       return;
@@ -638,6 +653,8 @@ export class EngineerSandbagManager {
       team: site.team,
       buildType: site.buildType,
       rotationY: site.rotationY,
+      _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
+      _aiFieldworkMode: site._aiFieldworkMode ?? null,
     });
     this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
   }

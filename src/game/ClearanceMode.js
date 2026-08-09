@@ -823,7 +823,7 @@ export function checkClearanceVictory(game) {
         : 'Defenses overrun — your garrison has been wiped out!',
     };
   }
-  if (game.matchTime >= CLEARANCE_TIME_LIMIT) {
+  if (game.clearanceTimeLimitEnabled !== false && game.matchTime >= CLEARANCE_TIME_LIMIT) {
     return {
       victory: !playerAttacks,
       retreatTeam: playerAttacks ? 'player' : 'enemy',

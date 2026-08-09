@@ -10,6 +10,7 @@ const SEEK_COVER_UNIT_TYPES = new Set([
   'medic',
   'engineer',
   'radioOperator',
+  'vehicleCrew',
 ]);
 
 /** Max distance from clicked point to search for cover (m). */

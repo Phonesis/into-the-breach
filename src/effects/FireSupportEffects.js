@@ -16,12 +16,113 @@ const active = [];
 const MAX_ACTIVE_WARNINGS = 2;
 let artilleryAssetsWarmScheduled = false;
 let artilleryAssetsWarmed = false;
+const strafeAircraftTemplates = new Map();
+const strafeAircraftWarmStates = new WeakMap();
+const STRAFE_FACTION_IDS = new Set(['germany', 'usa', 'uk', 'russia', 'japan']);
 
-function scheduleArtilleryAssetWarm(renderer) {
+function resolveStrafeFactionId(factionId) {
+  return STRAFE_FACTION_IDS.has(factionId) ? factionId : 'germany';
+}
+
+function getStrafeAircraftTemplate(factionId = 'germany') {
+  const id = resolveStrafeFactionId(factionId);
+  let template = strafeAircraftTemplates.get(id);
+  if (!template) {
+    template = createStrafeAircraftMesh(id);
+    strafeAircraftTemplates.set(id, template);
+  }
+  return template;
+}
+
+function getStrafeAircraftWarmState(renderer) {
+  let state = strafeAircraftWarmStates.get(renderer);
+  if (!state) {
+    state = {
+      pending: new Set(),
+      warmed: new Set(),
+      scheduled: false,
+    };
+    strafeAircraftWarmStates.set(renderer, state);
+  }
+  return state;
+}
+
+function compileStrafeAircraft(renderer, factionId, targetScene = null) {
+  const template = getStrafeAircraftTemplate(factionId);
+  const warmScene = new THREE.Scene();
+  const warmCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 30);
+  warmCamera.position.set(0, 2, 12);
+  warmCamera.lookAt(0, 0, 0);
+  warmScene.add(template.group);
+  if (!targetScene) {
+    warmScene.add(new THREE.AmbientLight(0xffffff, 1.5));
+    warmScene.add(new THREE.DirectionalLight(0xffffff, 1.5));
+  }
+
+  const warmTarget = renderer.render && renderer.setRenderTarget
+    ? new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false })
+    : null;
+  const previousTarget = renderer.getRenderTarget?.() ?? null;
+  try {
+    renderer.compile(warmScene, warmCamera, targetScene ?? warmScene);
+    if (warmTarget) {
+      // compile() prepares programs; this tiny off-screen render also uploads
+      // the cached aircraft buffers before the first visible flight.
+      renderer.setRenderTarget(warmTarget);
+      renderer.render(warmScene, warmCamera);
+    }
+  } finally {
+    if (warmTarget) {
+      renderer.setRenderTarget(previousTarget);
+      warmTarget.dispose();
+    }
+    // Keep the template and its GPU resources cached, but never put the hidden
+    // warm-up scene into the live battlefield.
+    warmScene.remove(template.group);
+  }
+}
+
+function scheduleStrafeAircraftWarm(renderer, targetScene = null) {
+  const state = getStrafeAircraftWarmState(renderer);
+  if (state.scheduled || state.pending.size === 0) return;
+  state.scheduled = true;
+
+  const run = () => {
+    state.scheduled = false;
+    const factionId = state.pending.values().next().value;
+    if (factionId == null) return;
+    state.pending.delete(factionId);
+    if (!state.warmed.has(factionId)) {
+      try {
+        compileStrafeAircraft(renderer, factionId, targetScene);
+      } catch {
+        // The live strike can still use the cached scene graph if an optional
+        // renderer warm-up is unavailable on a particular browser backend.
+      } finally {
+        // A failed optional compile should not keep retrying every frame; the
+        // cached mesh remains a valid fallback for the next rendered strike.
+        state.warmed.add(factionId);
+      }
+    }
+    scheduleStrafeAircraftWarm(renderer, targetScene);
+  };
+
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 220 });
+  } else {
+    requestAnimationFrame(run);
+  }
+}
+
+function scheduleArtilleryAssetWarm(renderer, targetScene = null) {
   if (artilleryAssetsWarmed || artilleryAssetsWarmScheduled) return;
   artilleryAssetsWarmScheduled = true;
   const run = () => {
-    prewarmArtilleryExplosionAssets(renderer);
+    if (artilleryAssetsWarmed) {
+      artilleryAssetsWarmScheduled = false;
+      return;
+    }
+    prewarmArtilleryExplosionAssets(renderer, targetScene);
     artilleryAssetsWarmed = true;
     artilleryAssetsWarmScheduled = false;
   };
@@ -33,9 +134,57 @@ function scheduleArtilleryAssetWarm(renderer) {
 }
 
 /** Prepare lazy procedural assets across the warning window, before shells land. */
-export function prewarmStrikeImpacts(renderer, mapDef, impacts, heavy = false) {
-  scheduleArtilleryAssetWarm(renderer);
-  prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy);
+export function prewarmStrikeImpacts(
+  renderer,
+  mapDef,
+  impacts,
+  heavy = false,
+  targetScene = null,
+  immediate = false
+) {
+  if (immediate && !artilleryAssetsWarmed) {
+    // This is called while the battlefield is still being assembled, so the
+    // one-time GPU work lands in setup rather than on the first live strike.
+    artilleryAssetsWarmScheduled = false;
+    prewarmArtilleryExplosionAssets(renderer, targetScene);
+    artilleryAssetsWarmed = true;
+  } else {
+    scheduleArtilleryAssetWarm(renderer, targetScene);
+  }
+  prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy, true);
+}
+
+/** Build and compile the faction fighter before a strafe reaches the map. */
+export function prewarmStrafeAircraftAssets(
+  renderer,
+  factionIds = [],
+  targetScene = null,
+  immediate = false
+) {
+  const ids = [...new Set(factionIds.filter(Boolean).map(resolveStrafeFactionId))];
+  for (const factionId of ids) getStrafeAircraftTemplate(factionId);
+  if (!renderer?.compile) return;
+
+  const state = getStrafeAircraftWarmState(renderer);
+  if (immediate) {
+    for (const factionId of ids) {
+      if (state.warmed.has(factionId)) continue;
+      state.pending.delete(factionId);
+      try {
+        compileStrafeAircraft(renderer, factionId, targetScene);
+      } catch {
+        // The cached scene graph remains a valid fallback on backends that do
+        // not support optional compile/render warm-up calls.
+      } finally {
+        state.warmed.add(factionId);
+      }
+    }
+    return;
+  }
+  for (const factionId of ids) {
+    if (!state.warmed.has(factionId)) state.pending.add(factionId);
+  }
+  scheduleStrafeAircraftWarm(renderer, targetScene);
 }
 
 export function clearFireSupportEffects() {
@@ -213,7 +362,12 @@ export function spawnStrafePlane(
 ) {
   const entry = planeFlightEntry(mapDef, x, z, dirX, dirZ, 22);
   const y = sampleTerrainHeight(entry.x, entry.z, mapDef) + altitude;
-  const { group, prop, geometries, materials } = createStrafeAircraftMesh(factionId);
+  const template = getStrafeAircraftTemplate(factionId);
+  // Instances share the prewarmed geometry/material resources. The aircraft
+  // only changes transform/prop rotation at runtime, so cloning the scene graph
+  // preserves the exact model without re-uploading every mesh on first use.
+  const group = template.group.clone(true);
+  const prop = group.getObjectByName('prop');
   group.position.set(entry.x, y, entry.z);
   // Nose (+Z local) points along flight direction
   group.rotation.y = Math.atan2(entry.nx, entry.nz);
@@ -234,8 +388,10 @@ export function spawnStrafePlane(
     maxAge,
     mapHalf: entry.mapHalf,
     offMapMargin: entry.margin,
-    geometries,
-    materials,
+    // Shared template resources stay cached for later strikes and must not be
+    // disposed with this short-lived flight instance.
+    geometries: [],
+    materials: [],
   });
 
   return {

@@ -1,7 +1,4 @@
-/** TEMP: set true to test airborne immediately (no cloud cover, no cooldown, unlimited uses). */
-export const TEMP_AIRBORNE_TEST = true;
-
-export const AIRBORNE_CLOUD_COVER_SECONDS = TEMP_AIRBORNE_TEST ? 0 : 5 * 60;
+export const AIRBORNE_CLOUD_COVER_SECONDS = 5 * 60;
 
 export const FIRE_SUPPORT_TYPES = {
   strafe: {
@@ -75,8 +72,7 @@ export const FIRE_SUPPORT_TYPES = {
     id: 'airborneDrop',
     label: 'Airborne Drop',
     short: 'Airborne',
-    // TEMP_AIRBORNE_TEST: no recharge while testing transports / disembark
-    cooldown: TEMP_AIRBORNE_TEST ? 0 : 180,
+    cooldown: 180,
     warnTime: 3.4,
     squadCount: 5,
     dropRadius: 11,

@@ -123,21 +123,22 @@ export class MedicFieldHospitalManager {
     this.pending = false;
   }
 
-  _medicsSelected(team) {
+  _medicsSelected(team, selectedOnly = true, predicate = null) {
     return this.game.units.filter(
       (u) =>
-        u.selected &&
+        (!selectedOnly || u.selected) &&
         u.team === team &&
         !u.dead &&
         !u.surrendered &&
         !u._captureExit &&
         u.def?.type === 'medic' &&
-        !u._medicTentSite
+        !u._medicTentSite &&
+        (!predicate || predicate(u))
     );
   }
 
-  _nearestMedic(x, z, team) {
-    const medics = this._medicsSelected(team);
+  _nearestMedic(x, z, team, selectedOnly = true, predicate = null) {
+    const medics = this._medicsSelected(team, selectedOnly, predicate);
     let best = null;
     let bestD = Number.POSITIVE_INFINITY;
     for (const u of medics) {
@@ -181,7 +182,7 @@ export class MedicFieldHospitalManager {
     return null;
   }
 
-  getPlacementRejectReason(x, z, team) {
+  getPlacementRejectReason(x, z, team, options = {}) {
     if (!this.canUse()) return 'Field hospitals unavailable.';
     if (this.game._isPlayerDeployZoneActive?.()) {
       return 'Wait for battle launch before deploying a field tent.';
@@ -208,7 +209,7 @@ export class MedicFieldHospitalManager {
     const spacing = this._spacingConflict(px, pz);
     if (spacing) return spacing;
 
-    if (!this._nearestMedic(px, pz, team)) {
+    if (!this._nearestMedic(px, pz, team, options.selectedOnly !== false)) {
       return 'Select a free medic to assign this tent site.';
     }
 
@@ -259,6 +260,66 @@ export class MedicFieldHospitalManager {
     return true;
   }
 
+  /** Nearby open-ground candidates for AI field hospitals. */
+  _aiPlacementCandidates(x, z) {
+    const candidates = [{ x, z }];
+    const clear = this.game.scenery?.findClearVehiclePlacement?.(
+      x,
+      z,
+      1.55,
+      this.game.mapDef
+    );
+    if (clear && (Math.abs(clear.x - x) > 0.05 || Math.abs(clear.z - z) > 0.05)) {
+      candidates.unshift(clear);
+    }
+    for (let ring = 1; ring <= 5; ring++) {
+      const radius = ring * 3.2;
+      const steps = 6 + ring * 2;
+      for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * Math.PI * 2;
+        candidates.push({
+          x: x + Math.cos(angle) * radius,
+          z: z + Math.sin(angle) * radius,
+        });
+      }
+    }
+    return candidates;
+  }
+
+  tryAiPlace(x, z, team, medicPredicate = null) {
+    for (const pos of this._aiPlacementCandidates(x, z)) {
+      const reason = this.getPlacementRejectReason(pos.x, pos.z, team, {
+        selectedOnly: false,
+      });
+      if (reason) continue;
+
+      const medic = this._nearestMedic(pos.x, pos.z, team, false, medicPredicate);
+      if (!medic) continue;
+
+      const y = this.game.mapDef
+        ? sampleTerrainHeight(pos.x, pos.z, this.game.mapDef)
+        : 0;
+      const site = {
+        id: nextTentId++,
+        x: pos.x,
+        z: pos.z,
+        y,
+        team,
+        medicId: medic.id,
+        progress: 0,
+        marker: null,
+      };
+      this.sites.push(site);
+      medic._medicTentSite = site.id;
+      medic.clearAttackOrder?.();
+      medic.moveTo?.(site.x, site.z, this.game.mapDef, true);
+      site.moveOrderIssued = true;
+      this._attachSiteMarker(site);
+      return true;
+    }
+    return false;
+  }
+
   _attachSiteMarker(site) {
     const visual = createFieldConstructionVisual({
       kind: 'bunker',
@@ -302,6 +363,8 @@ export class MedicFieldHospitalManager {
       mesh,
       healRange: TENT_HEAL_RANGE,
       healPerSec: TENT_HEAL_PER_SEC,
+      _aiDefensiveHospital: !!site._aiDefensiveHospital,
+      _aiHospitalMode: site._aiHospitalMode ?? null,
     });
   }
 

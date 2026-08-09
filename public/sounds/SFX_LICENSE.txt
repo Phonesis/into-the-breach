@@ -17,6 +17,10 @@ Faction rifle masters use the same ElevenLabs Sound Effects terms:
   Files: rifle-{germany,usa,uk,russia}-el-01.wav … 06.wav
   Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-rifles
 
+M1 Garand reload cue:
+  File: m1-garand-ping-el-01.wav
+  Source: user-provided M1 Ping.m4a recording, trimmed and converted for the game.
+
 Building collapse SFX (small / medium / large masonry one-shots):
   Files: building-collapse-{small,medium,large}-01.wav / 02.wav
   Regenerate: ELEVENLABS_API_KEY=sk_… npm run bake-elevenlabs-building-collapse

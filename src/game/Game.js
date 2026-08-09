@@ -20,6 +20,7 @@ import {
   isReinforcedClearanceMode,
   resolveClearanceReinforcementSize,
   resolveClearanceRole,
+  resolveClearanceTimeLimitEnabled,
   isTowerDefenseMode,
   isLastStandMode,
   LAST_STAND_SUPPLIES,
@@ -216,7 +217,9 @@ import {
   spawnArtilleryExplosion,
   spawnArmorRicochet,
   spawnShellExplosion,
+  spawnShellExplosionLite,
   spawnWaterImpact,
+  prewarmImpactLightPrograms,
   updateCombatEffects,
   clearCombatEffects,
 } from '../effects/CombatEffects.js';
@@ -227,7 +230,13 @@ import {
 } from '../effects/ShellCasings.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
-import { addExplosionCrater, clearTerrainDamage, flushTerrainNormals } from '../world/TerrainDamage.js';
+import {
+  addExplosionCrater,
+  clearTerrainDamage,
+  flushTerrainNormals,
+  prewarmMapCraterTextures,
+  prewarmTerrainDamage,
+} from '../world/TerrainDamage.js';
 import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
 import {
   ensureStartingRadioOperators,
@@ -283,6 +292,7 @@ import { setActiveVehicleTheatre } from '../units/UnitTextures.js';
 import { snapUnitYaw } from '../units/VehicleRotation.js';
 import {
   applyUnitDeathVisual,
+  applyVehicleWreckCrushVisual,
   updateDetachedCorpseFalls,
   clearDetachedCorpseFalls,
 } from '../units/UnitMeshes.js';
@@ -293,6 +303,7 @@ import {
   updateFireSupportEffects,
   clearFireSupportEffects,
   prewarmStrikeImpacts,
+  prewarmStrafeAircraftAssets,
 } from '../effects/FireSupportEffects.js';
 import {
   updateParachuteDrops,
@@ -307,12 +318,15 @@ import {
   deleteBattleSave,
 } from './BattleSave.js';
 import { updateAutoBuild } from './AutoBuild.js';
+import { getDebrisRetentionSeconds } from './GameSettings.js';
 
 const PLAYER_TEAM = 'player';
 const ENEMY_TEAM = 'enemy';
 const LARGE_BATTLE_SIM_PIXEL_RATIO = 1;
 const LARGE_BATTLE_SIM_MOVEMENT_STEP = 1 / 30;
 const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
+const GARAND_CLIP_SIZE = 8;
+const GARAND_PING_CHANCE = 0.58;
 
 export class Game {
   constructor({ canvas, ui }) {
@@ -388,6 +402,7 @@ export class Game {
     this.autoBuildMode = false;
     this.showFrontline = true;
     this.showCapturePoints = true;
+    this.debrisRetentionSeconds = Infinity;
     this.matchTime = 0;
     this._hqThreat = null;
     this._hqAlertPlayed = false;
@@ -406,6 +421,7 @@ export class Game {
     this.tutorial = false;
     this.clearance = false;
     this.clearanceRole = 'attack';
+    this.clearanceTimeLimitEnabled = true;
     this.clearanceAttackPlan = null;
     this.clearanceOperational = null;
     this.clearanceReinforcements = null;
@@ -926,8 +942,15 @@ export class Game {
     sounds.unlock();
     void sounds.primeForCombat();
     const restoreSnapshot = options.restoreSnapshot ?? null;
+    this.debrisRetentionSeconds = getDebrisRetentionSeconds();
     const startOptions = { ...options };
     delete startOptions.restoreSnapshot;
+    const clearanceTimeLimitEnabled = isClearanceMode(gameMode)
+      ? resolveClearanceTimeLimitEnabled(startOptions)
+      : false;
+    if (isClearanceMode(gameMode)) {
+      startOptions.clearanceTimeLimitEnabled = clearanceTimeLimitEnabled;
+    }
     this.stopGame();
     if (!restoreSnapshot) this.activeSaveId = null;
     this.lastSession = {
@@ -940,6 +963,7 @@ export class Game {
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
     this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
+    this.clearanceTimeLimitEnabled = this.clearance ? clearanceTimeLimitEnabled : false;
     this.clearanceAttackPlan = null;
     this.clearanceOperational = null;
     this.clearanceReinforcements = createClearanceReinforcementState(
@@ -1054,9 +1078,15 @@ export class Game {
     this.scenery.setCoverSystem(this.coverSystem);
     const terrain = buildTerrain(this.mapDef, this.scene, this.scenery);
     this._terrainMesh = terrain?.ground ?? null;
+    prewarmTerrainDamage(this._terrainMesh);
+    prewarmMapCraterTextures(this.renderer, this.mapDef);
     // Warm shared artillery textures and shader programs during general setup;
     // exact crater variants are still queued from known impacts during warning.
-    prewarmStrikeImpacts(this.renderer, this.mapDef, [], false);
+    prewarmStrikeImpacts(this.renderer, this.mapDef, [], false, this.scene, true);
+    prewarmStrafeAircraftAssets(this.renderer, [
+      this.playerFaction?.id,
+      this.enemyFaction?.id,
+    ], this.scene, true);
     const coverZones = buildCoverSites(
       this.mapDef,
       this.scene,
@@ -1429,6 +1459,7 @@ export class Game {
       clearanceReinforced: !!this.clearanceReinforcements,
       clearanceReinforcementSize: this.clearanceReinforcements?.size ?? 'small',
       clearanceRole: this.clearanceRole ?? 'attack',
+      clearanceTimeLimitEnabled: this.clearanceTimeLimitEnabled,
     });
     if (isTabletLikeDevice()) {
       this.setTabletTargetMode(true);
@@ -1502,6 +1533,10 @@ export class Game {
       if (this.running) syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
     });
     this._bootstrapBattleView();
+    // The first strafe can overlap all eight reserved layered bursts. Install
+    // the fixed light pool and compile its live-scene program after every
+    // starting object is present, before the render loop begins.
+    prewarmImpactLightPrograms(this.renderer, this.scene, this.camera);
     this._startRenderLoop();
     return true;
   }
@@ -1947,10 +1982,19 @@ export class Game {
 
   togglePause() {
     if (!this.running || this.gameOver) return;
+    if (this.paused && this.ui?.isPausedSettingsOpen?.()) {
+      this.ui.closePausedSettings();
+    }
     this.paused = !this.paused;
     this.ui?.setGamePaused(this.paused);
     if (this.paused) sounds.clearVehicleEngines();
     this._syncBattleCursor();
+  }
+
+  setDebrisRetentionSeconds(seconds) {
+    this.debrisRetentionSeconds = Number.isFinite(seconds)
+      ? Math.max(10, seconds)
+      : Infinity;
   }
 
   _updateMinimap() {
@@ -2222,6 +2266,24 @@ export class Game {
     if (!this.scene || !this.mapDef) return;
     if (isUrbanCanalWater(x, z, this.mapDef)) return;
     addExplosionCrater(this.scene, this.mapDef, x, z, tier, this._terrainMesh);
+  }
+
+  _handleVehicleWreckCrushed(wreck, vehicle) {
+    if (!wreck?.mesh?.parent || wreck._wreckCrushFxDone) return;
+    wreck._wreckCrushFxDone = true;
+
+    applyVehicleWreckCrushVisual(wreck);
+
+    spawnShellExplosionLite(
+      this.scene,
+      {
+        x: wreck.position.x,
+        y: wreck.position.y + 0.28,
+        z: wreck.position.z,
+      },
+      vehicle?.def?.type === 'superHeavyTank' ? 'heavy' : 'medium'
+    );
+    sounds.playImpact('shell', { x: wreck.position.x, z: wreck.position.z }, 0.02);
   }
 
   stopGame() {
@@ -3160,6 +3222,7 @@ export class Game {
       clearance: this.clearance,
       clearanceRole: this.clearanceRole,
       clearanceTimeLimit: CLEARANCE_TIME_LIMIT,
+      clearanceTimeLimitEnabled: this.clearanceTimeLimitEnabled,
       clearanceReinforcements: this.clearanceReinforcements,
       matchTime: this.matchTime,
       towerDefense: this.towerDefense,
@@ -3604,6 +3667,23 @@ export class Game {
 
     sounds.playWeapon(profile, pos, { rate, volume });
 
+    // U.S. rifle squads carry M1 Garands. Count only their actual rifle shots
+    // (the mixed third-volley SMG remains outside the clip) and let a subset of
+    // empty-clip transitions add the short en-bloc eject cue after the report.
+    if (
+      factionId === 'usa' &&
+      def?.type === 'infantry' &&
+      profile === 'rifle_usa'
+    ) {
+      attacker._garandRoundsFired = (attacker._garandRoundsFired ?? 0) + 1;
+      if (attacker._garandRoundsFired >= GARAND_CLIP_SIZE) {
+        attacker._garandRoundsFired = 0;
+        if (Math.random() < GARAND_PING_CHANCE) {
+          sounds.playGarandPing(pos, { team: attacker.team });
+        }
+      }
+    }
+
     // A smoke-obscured small-arms shot still gets a passing-round cue and a
     // delayed dust hit at its sampled miss point. Heavy shells retain their
     // existing muzzle-only behavior here.
@@ -3804,7 +3884,11 @@ export class Game {
         // Resolve the Fortified Line deadline before the reinforcement cycle
         // also scheduled at 15:00. A defender killed just before the horn stays
         // dead for the decisive check instead of being replaced first.
-        if (this.clearance && this.matchTime >= CLEARANCE_TIME_LIMIT) {
+        if (
+          this.clearance &&
+          this.clearanceTimeLimitEnabled &&
+          this.matchTime >= CLEARANCE_TIME_LIMIT
+        ) {
           this._rebuildUnitCaches();
           this.checkVictory();
           if (this.gameOver) {
@@ -3941,6 +4025,9 @@ export class Game {
         }
         if (updateArmyMovement) {
           updateMovement(this._aliveUnits, movementDt, this.mapDef, this.hqs, {
+            collisionUnits: this.units,
+            onVehicleWreckCrushed: (wreck, vehicle, impact) =>
+              this._handleVehicleWreckCrushed(wreck, vehicle, impact),
             terrainMesh: this._terrainMesh,
             getWireSlowMult: this.defenses
               ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)
@@ -4338,6 +4425,16 @@ export class Game {
 
       if (!u.mesh.userData?.deathVisualApplied) {
         applyUnitDeathVisual(u);
+        cachesDirty = true;
+        continue;
+      }
+
+      if (
+        Number.isFinite(this.debrisRetentionSeconds) &&
+        this.matchTime - u._deathAt >= this.debrisRetentionSeconds
+      ) {
+        removeVehicleWreckCover(this.coverSystem, u);
+        u.dispose(this.scene);
         cachesDirty = true;
         continue;
       }

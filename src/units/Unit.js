@@ -7,7 +7,11 @@ import {
   updateSquadCasualtyVisual,
 } from './UnitMeshes.js';
 import { clearRetreat, removeRetreatMarker } from '../game/RetreatBehavior.js';
-import { clearSurrender, removeSurrenderMarker } from '../game/SurrenderBehavior.js';
+import {
+  clearSurrender,
+  markUnderFire,
+  removeSurrenderMarker,
+} from '../game/SurrenderBehavior.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 import { removeRankMarker } from '../game/EliteBehavior.js';
@@ -73,6 +77,9 @@ export class Unit {
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
     this.wreckFire = null;
+    this._wreckImpactCount = 0;
+    this._wreckCrushed = false;
+    this._wreckCrushFxDone = false;
     this._chasingAttack = false;
     /** Player/AI click-attack that must not be discarded by Hold stance or brief LOS breaks. */
     this._hardAttackOrder = false;
@@ -104,6 +111,9 @@ export class Unit {
     this._mobilityDamaged = false;
     this._mobilityDamageKind = null;
     this._mobilityRepairProgress = 0;
+    // Wheeled vehicles build and shed speed instead of reaching full speed
+    // instantly. This is transient movement state, not saved battle state.
+    this._driveSpeed = 0;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
     this.mesh.position.set(position.x, 0, position.z);
@@ -405,6 +415,9 @@ export class Unit {
   takeDamage(amount, opts = {}) {
     if (this.dead || this.surrendered || this._captureExit) return;
     if (amount <= 0) return;
+    // Keep every damage source — direct fire, splash, mines, emplacements, and
+    // off-map support — visible to morale and AI incoming-fire reactions.
+    markUnderFire(this);
     this.hp -= amount;
     updateSquadCasualtyVisual(this);
 
@@ -524,6 +537,10 @@ export class Unit {
     this._deathCause = null;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
+    this._wreckImpactCount = 0;
+    this._wreckCrushed = false;
+    this._wreckCrushFxDone = false;
+    this._driveSpeed = 0;
     coverSystem?.removeSourceZone?.(`vehicle-wreck:${this.id}`);
     this._wreckCoverRegistered = false;
     return true;

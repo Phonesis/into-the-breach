@@ -152,6 +152,8 @@ const BOMB_EXPLOSION_FILES = [
   'bomb-explosion-02.wav',
   'bomb-explosion-03.wav',
 ];
+/** Occasional US rifle reload cue — M1 Garand en-bloc clip eject. */
+const GARAND_PING_FILES = ['m1-garand-ping-el-01.wav'];
 
 /** Scenery / structure collapse one-shots (ElevenLabs) by building scale. */
 const BUILDING_COLLAPSE_FILES = {
@@ -283,12 +285,15 @@ export class SoundManager {
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     /** @type {AudioBuffer[]} */
     this.bombExplosionBuffers = [];
+    /** @type {AudioBuffer[]} */
+    this.garandPingBuffers = [];
     /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     this._atmosSrc = null;
     this._atmosGain = null;
     this._lastExplosionFile = null;
     this._lastImpactFile = null;
+    this._lastGarandPingFile = null;
     this._lastBuildingCollapseSmall = null;
     this._lastBuildingCollapseMedium = null;
     this._lastBuildingCollapseLarge = null;
@@ -691,6 +696,7 @@ export class SoundManager {
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this.bombExplosionBuffers = [];
+    this.garandPingBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
     loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
@@ -704,6 +710,7 @@ export class SoundManager {
     loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
+    loadPool(GARAND_PING_FILES, this.garandPingBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
     }
@@ -1366,6 +1373,30 @@ export class SoundManager {
         vol: vol * (isEnemy ? 0.95 : 1.08),
         rate: 0.9 + Math.random() * 0.14,
         wet: isEnemy ? 0.32 : 0.18,
+      });
+    });
+  }
+
+  /** Subtle metallic M1 Garand en-bloc clip eject after an occasional reload. */
+  playGarandPing(worldPos = null, opts = {}) {
+    this._runWhenReady(() => {
+      const now = performance.now();
+      const minGapMs = opts.minGapMs ?? 220;
+      if (now - (this._lastByType._garandPing ?? 0) < minGapMs) return;
+
+      const buf = this._pickFromPool(this.garandPingBuffers, '_lastGarandPingFile');
+      if (!buf) return;
+      this._lastByType._garandPing = now;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const teamGain = opts.team === 'enemy' ? 0.72 : 1;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * (opts.volume ?? 0.5) * teamGain,
+        rate: 0.97 + Math.random() * 0.06,
+        wet: 0.2,
+        delay: opts.delaySec ?? 0.04,
       });
     });
   }

@@ -5,12 +5,19 @@ import {
   isSmokeShellReady,
 } from './Targeting.js';
 import { isTankType, isVehicleUnit, isFootSoldier } from '../units/VehicleTypes.js';
+import { unitPathRadius } from './MovePath.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
-import { canSeekCover, resolveSeekCoverDestination } from './CoverSeek.js';
+import { MINE_VEHICLE_TYPES } from '../data/towerDefense.js';
+import {
+  canSeekCover,
+  findNearestCoverPoint,
+  resolveSeekCoverDestination,
+} from './CoverSeek.js';
 import { canGarrisonType, getBunkerEnterRange, getGarrisonBunkerSources, isUnitGarrisoned } from './BunkerGarrison.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { MEDIC_AURA_RANGE } from './MedicBehavior.js';
 import { ENGINEER_AURA_RANGE, ENGINEER_HQ_REPAIR_RANGE } from './EngineerBehavior.js';
+import { canReceiveFieldTentHeal, TENT_MIN_SPACING } from './MedicFieldHospital.js';
 import {
   canSupplyReplacementCrew,
   issueMountOrder,
@@ -84,8 +91,38 @@ const AI_COMMANDER_SUPPORT_MAX_OFFSET = 31;
 const AI_COMMANDER_CRITICAL_DISTANCE = 18;
 const AI_COMMANDER_DANGER_DISTANCE = 27;
 const AI_COMMANDER_SCREEN_RADIUS = 24;
+const AI_COMMANDER_PULLBACK_DISTANCE = 34;
+const AI_COMMANDER_SCREEN_TRIGGER_DISTANCE = 36;
+const AI_COMMANDER_SCREEN_RECRUIT_RADIUS = 48;
+const AI_COMMANDER_SCREEN_REASSESS_SEC = 5.5;
+const AI_COMMANDER_SCREEN_MAX_UNITS = 3;
 const AI_COMMANDER_SHELTER_SEEK_RANGE = 58;
 const AI_COMMANDER_SAFETY_HOLD_SEC = 9;
+const AI_INCOMING_FIRE_COVER_HOLD_SEC = 6.5;
+const AI_INCOMING_FIRE_PRONE_SEC = 2.1;
+const AI_INCOMING_FIRE_RETRY_SEC = 3.6;
+const AI_INCOMING_FIRE_CRITICAL_HP_RATIO = 0.34;
+const AI_INCOMING_FIRE_SUSTAINED_HP_RATIO = 0.56;
+const AI_TRENCH_CAPACITY = 4;
+const AI_TRENCH_MAX_OCCUPATION_DISTANCE = 48;
+const AI_TRENCH_DEFAULT_RESERVE_RATIO = 0.32;
+const AI_TRENCH_OCCUPANT_TYPES = new Set([
+  'commander',
+  'radioOperator',
+  'infantry',
+  'paratrooper',
+  'machineGun',
+  'sniper',
+]);
+const AI_FIELDWORK_MAX_ARMOR_THREAT_DISTANCE = 104;
+const AI_FIELDWORK_MINE_LINE_MIN_DEPTH = 14;
+const AI_FIELDWORK_MINE_LINE_MAX_DEPTH = 30;
+const AI_FIELDWORK_BUNKER_SHELTER_RANGE = 30;
+const AI_FIELDWORK_HOSPITAL_MIN_WOUNDED = 2;
+const AI_FIELDWORK_HOSPITAL_WOUNDED_RATIO = 0.8;
+const AI_FIELDWORK_HOSPITAL_CRITICAL_RATIO = 0.58;
+const AI_FIELDWORK_HOSPITAL_REAR_OFFSET = 10;
+const AI_FIELDWORK_HOSPITAL_MIN_ENEMY_DISTANCE = 24;
 const LAST_STAND_OPERATIONAL_REASSESS_MIN = 11;
 const LAST_STAND_OPERATIONAL_REASSESS_MAX = 16;
 const LAST_STAND_OPENING_REASSESS_DELAY = 13;
@@ -100,6 +137,9 @@ const CLEARANCE_ATTACKER_REGROUP_MIN_DURATION = 9;
 const CLEARANCE_ATTACKER_HOLD_MIN_DURATION = 10;
 const CLEARANCE_DEFENDER_COUNTERATTACK_DURATION = 18;
 const CLEARANCE_DEFENDER_FALLBACK_MIN_DURATION = 10;
+const AI_DUPLICATE_ORDER_RADIUS = 2.75;
+const AI_ORDER_SEPARATION_GAP = 0.4;
+const AI_ORDER_MAX_COLUMNS = 5;
 
 const CLEARANCE_MOBILE_DEFENDER_TYPES = new Set([
   'infantry',
@@ -1471,6 +1511,399 @@ function updateClearanceOperationalPlan(
   return operational.mode;
 }
 
+function getAiOrderGoal(unit) {
+  const target = unit?.moveTarget;
+  if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) {
+    return null;
+  }
+
+  const final = unit._finalMoveGoal;
+  if (!final || !Number.isFinite(final.x) || !Number.isFinite(final.z)) {
+    return { x: target.x, z: target.z };
+  }
+
+  const pathHead = unit._movePath?.[0];
+  const followingPath =
+    pathHead && Math.hypot(target.x - pathHead.x, target.z - pathHead.z) < 0.35;
+  const targetMatchesFinal = Math.hypot(target.x - final.x, target.z - final.z) < 0.35;
+  return followingPath || targetMatchesFinal
+    ? { x: final.x, z: final.z }
+    : { x: target.x, z: target.z };
+}
+
+function canDiversifyAiOrder(unit) {
+  const type = unit?.def?.type;
+  return !!(
+    unit &&
+    unit.moveTarget &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit.retreating &&
+    !unit._captureExit &&
+    !unit._crewless &&
+    !unit._aiTankManeuver &&
+    !unit._aiRadioManeuver &&
+    !unit._aiRadioSafety &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiCommanderScreen &&
+    !unit._aiSupportMode &&
+    !unit._aiTrenchTargetId &&
+    !unit._aiTrenchOccupant &&
+    !unit._trenchId &&
+    !unit._bunkerEntryId &&
+    !unit._garrisonBunkerId &&
+    !isUnitGarrisoned(unit) &&
+    type !== 'commander' &&
+    type !== 'radioOperator' &&
+    !unit.attackOrder?.isSmokeShell
+  );
+}
+
+function getAiOrderGroupKey(unit) {
+  if (unit.attackOrder && !unit.attackOrder.dead) return unit.attackOrder;
+  return unit._tdAttacker ? 'towerDefenseAdvance' : 'sharedAdvance';
+}
+
+function compareAiOrderUnits(a, b) {
+  const aId = Number(a.unit.id);
+  const bId = Number(b.unit.id);
+  if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) {
+    return aId - bId;
+  }
+  return String(a.unit.id ?? '').localeCompare(String(b.unit.id ?? ''));
+}
+
+function clampAiOrderPoint(mapDef, point) {
+  const half = Math.max(4, (mapDef?.size ?? 120) * 0.5 - 8);
+  return {
+    x: clamp(point.x, -half, half),
+    z: clamp(point.z, -half, half),
+  };
+}
+
+/**
+ * Give units distinct destinations when a mode has issued one shared order.
+ * This is deliberately a destination allocation pass rather than target
+ * randomisation: a coordinated attack may still focus the same enemy, while
+ * the individual units approach from separate lanes and cannot stack.
+ */
+export function diversifyAiMoveOrders(enemyUnits, game = null) {
+  const groups = [];
+  for (const unit of enemyUnits ?? []) {
+    if (!canDiversifyAiOrder(unit)) continue;
+    const goal = getAiOrderGoal(unit);
+    if (!goal) continue;
+
+    const key = getAiOrderGroupKey(unit);
+    let group = groups.find(
+      (candidate) =>
+        candidate.key === key &&
+        Math.hypot(candidate.anchor.x - goal.x, candidate.anchor.z - goal.z) <=
+          AI_DUPLICATE_ORDER_RADIUS
+    );
+    if (!group) {
+      group = { key, anchor: goal, members: [] };
+      groups.push(group);
+    }
+    group.members.push({ unit, goal });
+  }
+
+  for (const group of groups) {
+    if (group.members.length < 2) continue;
+    group.members.sort(compareAiOrderUnits);
+
+    let centerX = 0;
+    let centerZ = 0;
+    let positionX = 0;
+    let positionZ = 0;
+    let maxRadius = 0;
+    for (const member of group.members) {
+      centerX += member.goal.x;
+      centerZ += member.goal.z;
+      positionX += member.unit.position.x;
+      positionZ += member.unit.position.z;
+      maxRadius = Math.max(maxRadius, unitPathRadius(member.unit.def?.type));
+    }
+    centerX /= group.members.length;
+    centerZ /= group.members.length;
+    positionX /= group.members.length;
+    positionZ /= group.members.length;
+
+    let forwardX = centerX - positionX;
+    let forwardZ = centerZ - positionZ;
+    const travelLength = Math.hypot(forwardX, forwardZ);
+    if (travelLength > 0.5) {
+      forwardX /= travelLength;
+      forwardZ /= travelLength;
+    } else {
+      const yaw = group.members[0].unit.mesh?.rotation?.y;
+      const fallbackAngle = Number.isFinite(yaw)
+        ? yaw
+        : ((Number(group.members[0].unit.id) || 0) * 0.6180339887) % (Math.PI * 2);
+      forwardX = Math.sin(fallbackAngle);
+      forwardZ = Math.cos(fallbackAngle);
+    }
+    const sideX = -forwardZ;
+    const sideZ = forwardX;
+    // Keep the allocated destinations farther apart than the duplicate-order
+    // test so re-running this pass is stable (important for Tower Defence's
+    // per-frame AI update).
+    const spacing = Math.max(3, maxRadius * 2 + AI_ORDER_SEPARATION_GAP);
+    const columnCount = Math.min(AI_ORDER_MAX_COLUMNS, group.members.length);
+    const rowCount = Math.ceil(group.members.length / columnCount);
+    const depthSpacing = Math.max(2.3, spacing * 0.8);
+
+    for (let index = 0; index < group.members.length; index++) {
+      const { unit } = group.members[index];
+      const row = Math.floor(index / columnCount);
+      const column = index % columnCount;
+      const lateralSlot = column - (columnCount - 1) * 0.5;
+      const depthSlot = row - (rowCount - 1) * 0.5;
+      const destination = clampAiOrderPoint(game?.mapDef, {
+        x:
+          centerX +
+          sideX * lateralSlot * spacing +
+          forwardX * depthSlot * depthSpacing,
+        z:
+          centerZ +
+          sideZ * lateralSlot * spacing +
+          forwardZ * depthSlot * depthSpacing,
+      });
+
+      unit.moveTarget = destination;
+      unit._finalMoveGoal = { ...destination };
+      unit._movePath = null;
+      unit._autoMoveOrderX = null;
+      unit._autoMoveOrderZ = null;
+      unit._pathRepathAttempts = 0;
+      unit._lastPathRepathX = null;
+      unit._lastPathRepathZ = null;
+      unit._urbanCanalRoute = null;
+      unit._reverseMoveOrder = false;
+
+      if (unit._tdMoveGoal) {
+        unit._tdMoveGoal = {
+          ...unit._tdMoveGoal,
+          x: destination.x,
+          z: destination.z,
+        };
+      }
+    }
+  }
+}
+
+function clearAiIncomingFireReaction(unit) {
+  unit._aiIncomingFireReaction = null;
+  if (!unit._garrisonBunkerId) unit._bunkerEntryId = null;
+}
+
+function isAiIncomingFireCandidate(unit) {
+  const type = unit?.def?.type;
+  return !!(
+    unit &&
+    unit.team === 'enemy' &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._mountedOnTankId &&
+    !unit._crewless &&
+    !isVehicleUnit(type) &&
+    type !== 'commander' &&
+    type !== 'radioOperator' &&
+    !isUnitGarrisoned(unit) &&
+    !unit._trenchId &&
+    !unit._diggingTrench &&
+    !unit._trenchDigSite &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite
+  );
+}
+
+function isAiIncomingFireIdle(unit) {
+  return !!(
+    unit &&
+    !unit._userMoveOrder &&
+    !unit._manualFireMission &&
+    (!unit.attackOrder || unit.attackOrder.dead) &&
+    !unit.moveTarget &&
+    !unit._movePath?.length
+  );
+}
+
+function getAiIncomingFireCoverDestination(unit, game) {
+  if (!game || !canSeekCover(unit)) return null;
+
+  if (canGarrisonType(unit.def?.type)) {
+    const bunker = pickFriendlyBunker(unit, getGarrisonBunkerSources(game));
+    if (bunker) {
+      return { x: bunker.x, z: bunker.z, bunkerId: bunker.id ?? null };
+    }
+  }
+
+  if (!game.coverSystem) return null;
+  const cover = findNearestCoverPoint(
+    unit.position.x,
+    unit.position.z,
+    unit.position.x,
+    unit.position.z,
+    game.coverSystem
+  );
+  if (!cover) return null;
+  if (Math.hypot(cover.x - unit.position.x, cover.z - unit.position.z) < 3) {
+    return null;
+  }
+  return { x: cover.x, z: cover.z, bunkerId: null };
+}
+
+function issueAiIncomingFireCoverMove(unit, destination, game, now) {
+  unit.clearAttackOrder();
+  unit._bunkerEntryId = destination.bunkerId ?? null;
+  unit.moveTarget = { x: destination.x, z: destination.z };
+  unit._movePath = null;
+  unit._finalMoveGoal = { x: destination.x, z: destination.z };
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+  unit._pathRepathAttempts = 0;
+  unit._lastPathRepathX = null;
+  unit._lastPathRepathZ = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._aiSupportMode = null;
+  unit._aiIncomingFireReaction = {
+    mode: 'cover',
+    x: destination.x,
+    z: destination.z,
+    bunkerId: destination.bunkerId ?? null,
+    until: now + AI_INCOMING_FIRE_COVER_HOLD_SEC,
+  };
+  unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_COVER_HOLD_SEC;
+  return true;
+}
+
+function canAiIncomingFireRetreat(unit, game, clearance) {
+  if (unit.defensiveHold) return null;
+  // Prepared Clear Defenses defenders are ordered to hold the line. They can
+  // still go prone or seek cover, but must not abandon their prepared position.
+  if (clearance && game?.clearanceRole !== 'defend') return null;
+  return resolveRetreatHq(unit, game?.hqs, {
+    clearance,
+    clearanceRole: game?.clearanceRole,
+    mapDef: game?.mapDef,
+  });
+}
+
+/**
+ * Exposed enemy foot troops react to a hit before the slower strategic AI tick.
+ * A real player move/attack order remains authoritative; idle AI units take
+ * cover when possible, otherwise stay low, and withdraw once badly mauled.
+ * Radio operators and commanders retain their dedicated safety controllers.
+ */
+export function updateAiIncomingFireReactions({
+  enemyUnits = [],
+  game = null,
+  mapDef = null,
+  clearance = false,
+} = {}) {
+  const now = game?.matchTime ?? 0;
+
+  for (const unit of enemyUnits) {
+    if (!unit) continue;
+
+    const reaction = unit._aiIncomingFireReaction;
+    if (reaction) {
+      if (unit.dead || unit.surrendered || unit.retreating || unit._userMoveOrder) {
+        clearAiIncomingFireReaction(unit);
+        continue;
+      }
+
+      if (reaction.mode === 'cover') {
+        const covered = getCoverStatus(unit).inCover;
+        if (covered || now >= reaction.until) {
+          clearAiIncomingFireReaction(unit);
+        } else if (!unit.moveTarget) {
+          issueAiIncomingFireCoverMove(
+            unit,
+            { x: reaction.x, z: reaction.z, bunkerId: reaction.bunkerId },
+            game,
+            now
+          );
+        }
+        if (unit._aiIncomingFireReaction) continue;
+      } else if (now < reaction.until) {
+        continue;
+      } else {
+        clearAiIncomingFireReaction(unit);
+      }
+    }
+
+    if ((unit._underFireTimer ?? 0) <= 0) {
+      unit._aiIncomingFireResponseCount = 0;
+      unit._aiIncomingFireNextAt = 0;
+      continue;
+    }
+    if (!isAiIncomingFireCandidate(unit)) continue;
+
+    // Cover status is refreshed before the AI pass. Do not make a unit leave
+    // protection just because a stray shell refreshed its under-fire timer.
+    if (getCoverStatus(unit).inCover) continue;
+
+    // Prone is the immediate reaction even when the unit is already engaging
+    // an automatically acquired target. Movement/retreat is reserved for idle
+    // units so explicit attack and movement orders are never hijacked.
+    unit._underFireProneTimer = Math.max(
+      unit._underFireProneTimer ?? 0,
+      AI_INCOMING_FIRE_PRONE_SEC
+    );
+    if (!isAiIncomingFireIdle(unit)) continue;
+    if (now < (unit._aiIncomingFireNextAt ?? 0)) continue;
+
+    const responseCount = unit._aiIncomingFireResponseCount ?? 0;
+    const hpRatio = unit.hp / Math.max(1, unit.maxHp);
+    const retreatHq = canAiIncomingFireRetreat(unit, game, clearance);
+    unit._aiIncomingFireResponseCount = responseCount + 1;
+
+    // A critically damaged exposed soldier should stop trading shots and
+    // withdraw. Less damaged units first try to reach nearby shelter.
+    if (retreatHq && hpRatio <= AI_INCOMING_FIRE_CRITICAL_HP_RATIO) {
+      startRetreat(unit, retreatHq, {
+        mapDef: mapDef ?? game?.mapDef ?? null,
+        scenery: game?.scenery ?? null,
+      });
+      unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_COVER_HOLD_SEC;
+      continue;
+    }
+
+    const destination = getAiIncomingFireCoverDestination(unit, game);
+    if (destination) {
+      issueAiIncomingFireCoverMove(unit, destination, game, now);
+      continue;
+    }
+
+    // If there is no usable shelter and the unit has already tried to stay low
+    // once, a second sustained exposure is enough to trigger a withdrawal.
+    if (
+      retreatHq &&
+      responseCount >= 1 &&
+      hpRatio <= AI_INCOMING_FIRE_SUSTAINED_HP_RATIO
+    ) {
+      startRetreat(unit, retreatHq, {
+        mapDef: mapDef ?? game?.mapDef ?? null,
+        scenery: game?.scenery ?? null,
+      });
+      unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_COVER_HOLD_SEC;
+      continue;
+    }
+
+    unit._aiIncomingFireReaction = {
+      mode: 'prone',
+      until: now + AI_INCOMING_FIRE_PRONE_SEC,
+    };
+    unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_RETRY_SEC;
+  }
+}
+
 export function updateAI({
   enemyUnits,
   playerUnits,
@@ -1515,6 +1948,13 @@ export function updateAI({
     return;
   }
 
+  updateAiIncomingFireReactions({
+    enemyUnits,
+    game,
+    mapDef,
+    clearance: !!clearance,
+  });
+
   if (!enemyStagingPhase && !clearance && aiProdTimer <= 0 && production && enemyResources !== undefined) {
     const prodDelayMult = Math.min(d.aiProdMult ?? 1, 1.25);
     aiProdTimer =
@@ -1532,7 +1972,10 @@ export function updateAI({
   }
 
   if (game && !enemyStagingPhase) {
-    updateAIDefenses(game, enemyUnits, dt, assault);
+    updateAIDefenses(game, enemyUnits, playerUnits, dt, assault, {
+      lastStand: !!lastStand,
+      clearance: !!clearance,
+    });
   }
 
   if (aiTimer > 0) return;
@@ -1594,6 +2037,9 @@ export function updateAI({
 
   for (const unit of aliveEnemies) {
     if (unit.def?.type === 'commander') continue;
+    if (unit._aiCommanderScreen) {
+      if (maintainAiCommanderScreen(unit, game, alivePlayers)) continue;
+    }
     if (
       unit.retreating ||
       unit.surrendered ||
@@ -1602,8 +2048,13 @@ export function updateAI({
       unit._trenchDigSite ||
       unit._diggingTrench ||
       unit._medicTentSite ||
-      isUnitGarrisoned(unit)
+      isUnitGarrisoned(unit) ||
+      unit._trenchId ||
+      unit._aiTrenchTargetId ||
+      unit._aiTrenchOccupant
     ) continue;
+
+    if (unit._aiIncomingFireReaction) continue;
 
     if (unit.attackOrder?.isSmokeShell) continue;
 
@@ -1870,6 +2321,11 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+
+  // Apply after every active AI planning tick so all standard, assault,
+  // campaign, Clear Defenses, and Battle Simulation branches share the same
+  // per-unit destination allocation.
+  diversifyAiMoveOrders(aliveEnemies, game);
 }
 
 /**
@@ -2337,27 +2793,857 @@ function tryAiSmokeScreen(enemyUnits, playerUnits, game, difficulty) {
   return true;
 }
 
-function updateAIDefenses(game, enemyUnits, dt, assault) {
+function getAiTrenchPoint(unit) {
+  if (unit?.defensiveHold && Number.isFinite(unit.defensiveHold.x) && Number.isFinite(unit.defensiveHold.z)) {
+    return { x: unit.defensiveHold.x, z: unit.defensiveHold.z };
+  }
+  if (
+    !unit?._userMoveOrder &&
+    !unit?.attackOrder &&
+    unit?.moveTarget &&
+    Number.isFinite(unit.moveTarget.x) &&
+    Number.isFinite(unit.moveTarget.z)
+  ) {
+    return { x: unit.moveTarget.x, z: unit.moveTarget.z };
+  }
+  return {
+    x: unit?.position?.x ?? 0,
+    z: unit?.position?.z ?? 0,
+  };
+}
+
+function getAiTrenchAveragePoint(units, fallback = { x: 0, z: 0 }) {
+  const safeFallback = {
+    x: Number.isFinite(fallback?.x) ? fallback.x : 0,
+    z: Number.isFinite(fallback?.z) ? fallback.z : 0,
+  };
+  let x = 0;
+  let z = 0;
+  let count = 0;
+  for (const unit of units ?? []) {
+    if (!unit) continue;
+    const point = getAiTrenchPoint(unit);
+    x += point.x;
+    z += point.z;
+    count++;
+  }
+  return count > 0 ? { x: x / count, z: z / count } : safeFallback;
+}
+
+function getAiTrenchFacing(game, context, point) {
+  const playerHq = game?.hqs?.find((hq) => hq.team === 'player' && !hq.dead);
+  let attacker = playerHq?.position ?? game?.mapDef?.playerBase ?? null;
+  if (context?.kind === 'clearanceDefend' && game?.mapDef) {
+    attacker = getClearanceAttackerSpawnBase(game.mapDef);
+  }
+  if (!attacker) return Math.PI;
+  return Math.atan2(attacker.x - point.x, attacker.z - point.z);
+}
+
+function getAiDefensiveTrenchContext(
+  game,
+  enemyUnits,
+  playerUnits,
+  assault,
+  { lastStand = false, clearance = false } = {}
+) {
+  if (!game?.infantryTrenches?.canUse?.()) return null;
+
+  const liveEnemies = (enemyUnits ?? []).filter(
+    (unit) =>
+      unit &&
+      unit.team === 'enemy' &&
+      !unit.dead &&
+      !unit.surrendered &&
+      !unit._captureExit
+  );
+  const assaultState = assault ?? game.assault;
+  const enemyHq = game.hqs?.find((hq) => hq.team === 'enemy' && !hq.dead);
+
+  if (lastStand || game.lastStand?.phase === 'battle') {
+    const mode = game.lastStand?.enemyOperational?.mode ?? 'opening';
+    const tactic = game.lastStand?.enemyTactic;
+    const armorMode = tactic?.ai?.armorMode;
+    const mobilityDoctrine = armorMode === 'flank' || armorMode === 'followRecon';
+    const held = liveEnemies.filter(
+      (unit) => unit.lastStandStance === 'defend' && unit.defensiveHold
+    );
+    return {
+      kind: 'lastStand',
+      useTrenches: mode === 'defend' && !mobilityDoctrine,
+      reserveRatio: mobilityDoctrine
+        ? 0.62
+        : tactic?.id === 'defensiveBelt'
+          ? 0.24
+          : AI_TRENCH_DEFAULT_RESERVE_RATIO,
+      anchor: getAiTrenchAveragePoint(held, game.mapDef?.enemyBase),
+      unitFilter: (unit) => unit.lastStandStance === 'defend' && !!unit.defensiveHold,
+    };
+  }
+
+  if (clearance || game.clearance) {
+    const enemyIsDefender = game.clearanceRole !== 'defend';
+    const mode = game.clearanceOperational?.mode ?? 'opening';
+    const held = liveEnemies.filter(
+      (unit) => unit.defensiveHold && !unit._clearanceProbe
+    );
+    return {
+      kind: enemyIsDefender ? 'clearanceDefend' : 'clearanceAttack',
+      useTrenches: enemyIsDefender && (mode === 'hold' || mode === 'opening'),
+      reserveRatio: 0.26,
+      anchor: getAiTrenchAveragePoint(held, game.mapDef?.enemyBase),
+      unitFilter: (unit) => !!unit.defensiveHold && !unit._clearanceProbe,
+    };
+  }
+
+  if (assaultState) {
+    const enemyIsDefender = assaultState.defenderTeam === 'enemy';
+    const frontline = assaultState.frontlineCp;
+    const lineHeld = !frontline || frontline.owner !== 'player';
+    return {
+      kind: enemyIsDefender ? 'assaultDefend' : 'assaultAttack',
+      useTrenches: enemyIsDefender && lineHeld,
+      reserveRatio: 0.34,
+      anchor: frontline ?? enemyHq?.position ?? game.mapDef?.enemyBase ?? { x: 0, z: 0 },
+      unitFilter: (unit) => unit.lastStandStance !== 'attack' && !unit._clearanceProbe,
+    };
+  }
+
+  const hqThreatened = !!(
+    enemyHq &&
+    (playerUnits ?? []).some(
+      (unit) =>
+        unit &&
+        !unit.dead &&
+        !unit.surrendered &&
+        !unit._captureExit &&
+        Math.hypot(unit.position.x - enemyHq.position.x, unit.position.z - enemyHq.position.z) <= 56
+    )
+  );
+  if (hqThreatened) {
+    const defendersNearHq = liveEnemies.filter(
+      (unit) =>
+        Math.hypot(unit.position.x - enemyHq.position.x, unit.position.z - enemyHq.position.z) <= 58
+    );
+    if (defendersNearHq.length > 0) {
+      return {
+        kind: 'hqDefend',
+        useTrenches: true,
+        reserveRatio: 0.42,
+        anchor: { x: enemyHq.position.x, z: enemyHq.position.z },
+        unitFilter: (unit) =>
+          Math.hypot(unit.position.x - enemyHq.position.x, unit.position.z - enemyHq.position.z) <= 64,
+      };
+    }
+  }
+
+  const held = liveEnemies.filter(
+    (unit) => unit.defensiveHold && unit.lastStandStance !== 'attack'
+  );
+  if (held.length >= 2) {
+    return {
+      kind: 'defensiveHold',
+      useTrenches: true,
+      reserveRatio: AI_TRENCH_DEFAULT_RESERVE_RATIO,
+      anchor: getAiTrenchAveragePoint(held, game.mapDef?.enemyBase),
+      unitFilter: (unit) => !!unit.defensiveHold && unit.lastStandStance !== 'attack',
+    };
+  }
+
+  return null;
+}
+
+function isAiLiveEnemyUnit(unit) {
+  return !!(
+    unit &&
+    unit.team === 'enemy' &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping
+  );
+}
+
+function getAiArmoredThreats(playerUnits, anchor) {
+  const point = anchor ?? { x: 0, z: 0 };
+  return (playerUnits ?? [])
+    .filter(
+      (unit) =>
+        unit &&
+        !unit.dead &&
+        !unit.surrendered &&
+        !unit._captureExit &&
+        !unit._crewless &&
+        !unit.retreating &&
+        MINE_VEHICLE_TYPES.has(unit.def?.type)
+    )
+    .map((unit) => {
+      const currentDistance = Math.hypot(
+        unit.position.x - point.x,
+        unit.position.z - point.z
+      );
+      const moveDistance = unit.moveTarget
+        ? Math.hypot(unit.moveTarget.x - point.x, unit.moveTarget.z - point.z)
+        : Infinity;
+      const attackPoint = unit.attackOrder?.position;
+      const attackDistance = attackPoint
+        ? Math.hypot(attackPoint.x - point.x, attackPoint.z - point.z)
+        : Infinity;
+      return {
+        unit,
+        currentDistance,
+        approachDistance: Math.min(currentDistance, moveDistance, attackDistance),
+      };
+    })
+    .filter(
+      ({ currentDistance, approachDistance }) =>
+        currentDistance <= AI_FIELDWORK_MAX_ARMOR_THREAT_DISTANCE ||
+        approachDistance <= AI_FIELDWORK_MAX_ARMOR_THREAT_DISTANCE * 0.82
+    )
+    .sort((a, b) => a.approachDistance - b.approachDistance)
+    .map(({ unit }) => unit);
+}
+
+function getAiDefensiveFieldworkContext(game, enemyUnits, playerUnits, trenchContext) {
+  if (trenchContext?.useTrenches) {
+    const heldUnits = (enemyUnits ?? []).filter(
+      (unit) =>
+        isAiLiveEnemyUnit(unit) &&
+        (!trenchContext.unitFilter || trenchContext.unitFilter(unit))
+    );
+    return {
+      ...trenchContext,
+      useFieldworks: true,
+      heldUnits,
+      armoredThreats: getAiArmoredThreats(playerUnits, trenchContext.anchor),
+    };
+  }
+
+  // Assault attackers, Clear Defenses attackers, Last Stand attack/regroup,
+  // and mobile doctrines deliberately keep engineers and medics moving.
+  if (trenchContext) return null;
+
+  // In an otherwise mobile Standard battle, a tank column closing on the HQ
+  // is enough to justify a short emergency mine/bunker programme.
+  const enemyHq = game?.hqs?.find((hq) => hq.team === 'enemy' && !hq.dead);
+  if (!enemyHq) return null;
+  const anchor = { x: enemyHq.position.x, z: enemyHq.position.z };
+  const armoredThreats = getAiArmoredThreats(playerUnits, anchor);
+  if (!armoredThreats.length) return null;
+
+  return {
+    kind: 'hqArmorDefense',
+    useFieldworks: true,
+    useTrenches: false,
+    anchor,
+    heldUnits: (enemyUnits ?? []).filter(
+      (unit) =>
+        isAiLiveEnemyUnit(unit) &&
+        Math.hypot(unit.position.x - anchor.x, unit.position.z - anchor.z) <= 68
+    ),
+    armoredThreats,
+    unitFilter: (unit) =>
+      Math.hypot(unit.position.x - anchor.x, unit.position.z - anchor.z) <= 84,
+  };
+}
+
+function getAiFieldworkBuildPoint(game, context, buildType) {
+  const anchor = context?.anchor ?? { x: 0, z: 0 };
+  if (buildType !== 'mine' || !context?.armoredThreats?.length) {
+    return clampAiOrderPoint(game?.mapDef, anchor);
+  }
+
+  const threat = context.armoredThreats[0];
+  const dx = threat.position.x - anchor.x;
+  const dz = threat.position.z - anchor.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 0.5) return clampAiOrderPoint(game?.mapDef, anchor);
+
+  const depth = clamp(
+    distance * 0.52,
+    AI_FIELDWORK_MINE_LINE_MIN_DEPTH,
+    AI_FIELDWORK_MINE_LINE_MAX_DEPTH
+  );
+  return clampAiOrderPoint(game?.mapDef, {
+    x: anchor.x + (dx / distance) * depth,
+    z: anchor.z + (dz / distance) * depth,
+  });
+}
+
+function getAiGarrisonBunkerEntries(game) {
+  const entries = [];
+  for (const source of getGarrisonBunkerSources(game)) {
+    const sourceEntries = source.entries ?? source.fieldBunkers ?? source.objects ?? [];
+    for (const entry of sourceEntries) {
+      if (
+        !entry ||
+        entry.destroyed ||
+        entry.team !== 'enemy' ||
+        !entry.def?.garrison
+      ) continue;
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
+function hasAiGarrisonShelterNear(game, x, z, radius = AI_FIELDWORK_BUNKER_SHELTER_RANGE) {
+  return getAiGarrisonBunkerEntries(game).some(
+    (entry) =>
+      Math.hypot(entry.x - x, entry.z - z) <= radius &&
+      (entry.garrison?.length ?? 0) < (entry.def?.garrisonCapacity ?? 2)
+  );
+}
+
+function getAiDefensiveHospitalPoint(game, context, wounded) {
+  const center = wounded?.length
+    ? averagePosition(wounded.slice(0, 6))
+    : context?.anchor ?? { x: 0, z: 0 };
+  const facing = getAiTrenchFacing(game, context, center);
+  const rearX = -Math.sin(facing);
+  const rearZ = -Math.cos(facing);
+  const point = {
+    x: center.x + rearX * AI_FIELDWORK_HOSPITAL_REAR_OFFSET,
+    z: center.z + rearZ * AI_FIELDWORK_HOSPITAL_REAR_OFFSET,
+  };
+  const players = game?._playerAlive ?? [];
+  for (let i = 0; i < 3; i++) {
+    const nearest = players.reduce((best, player) => {
+      if (!player || player.dead || !player.position) return best;
+      return Math.min(
+        best,
+        Math.hypot(point.x - player.position.x, point.z - player.position.z)
+      );
+    }, Infinity);
+    if (nearest >= AI_FIELDWORK_HOSPITAL_MIN_ENEMY_DISTANCE) break;
+    point.x += rearX * 8;
+    point.z += rearZ * 8;
+  }
+  return clampAiOrderPoint(game?.mapDef, point);
+}
+
+function isAiDefensiveEngineerCandidate(unit) {
+  return !!(
+    isAiLiveEnemyUnit(unit) &&
+    unit.def?.type === 'engineer' &&
+    !unit.retreating &&
+    !unit._userMoveOrder &&
+    !unit._mobilityDamaged &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite &&
+    !unit._trenchDigSite &&
+    !unit._diggingTrench &&
+    !unit._garrisonBunkerId &&
+    !unit._trenchId &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiTankManeuver &&
+    unit._aiSupportMode !== 'care' &&
+    !unit._underFireTimer &&
+    !unit.moveTarget &&
+    (!unit.attackOrder || unit.attackOrder.dead)
+  );
+}
+
+function isAiDefensiveMedicCandidate(unit) {
+  return !!(
+    isAiLiveEnemyUnit(unit) &&
+    unit.def?.type === 'medic' &&
+    !unit.retreating &&
+    !unit._userMoveOrder &&
+    !unit._mobilityDamaged &&
+    !unit._medicTentSite &&
+    !unit._sandbagSite &&
+    !unit._trenchDigSite &&
+    !unit._diggingTrench &&
+    !unit._garrisonBunkerId &&
+    !unit._trenchId &&
+    !unit._aiIncomingFireReaction &&
+    unit._aiSupportMode !== 'care' &&
+    !unit._underFireTimer &&
+    !unit.moveTarget &&
+    (!unit.attackOrder || unit.attackOrder.dead)
+  );
+}
+
+function getAiDefensiveHospitalNeed(enemyUnits, context) {
+  const anchor = context?.anchor ?? { x: 0, z: 0 };
+  const wounded = (enemyUnits ?? [])
+    .filter(
+      (unit) =>
+        isAiLiveEnemyUnit(unit) &&
+        canReceiveFieldTentHeal(unit) &&
+        unit.def?.type !== 'medic' &&
+        unit.def?.type !== 'engineer' &&
+        unit.hp / Math.max(1, unit.maxHp) <= AI_FIELDWORK_HOSPITAL_WOUNDED_RATIO &&
+        Math.hypot(unit.position.x - anchor.x, unit.position.z - anchor.z) <= 76
+    )
+    .sort(
+      (a, b) =>
+        a.hp / Math.max(1, a.maxHp) - b.hp / Math.max(1, b.maxHp)
+    );
+  const critical = wounded.some(
+    (unit) => unit.hp / Math.max(1, unit.maxHp) <= AI_FIELDWORK_HOSPITAL_CRITICAL_RATIO
+  );
+  return wounded.length >= AI_FIELDWORK_HOSPITAL_MIN_WOUNDED || critical
+    ? wounded
+    : [];
+}
+
+function getAiDefensiveFieldworkPlans(game, context) {
+  const manager = game?.engineerSandbags;
+  if (!manager?.canUse?.() || !context?.useFieldworks) return [];
+
+  const plans = [];
+  const armoredThreat = (context.armoredThreats?.length ?? 0) > 0;
+  if (armoredThreat && manager.canBuildMine?.()) {
+    plans.push({
+      buildType: 'mine',
+      point: getAiFieldworkBuildPoint(game, context, 'mine'),
+    });
+  }
+
+  const shelteredFoot = (context.heldUnits ?? []).filter(
+    (unit) => canGarrisonType(unit.def?.type) && !isVehicleUnit(unit.def?.type)
+  );
+  const bunkerPoint = getAiFieldworkBuildPoint(game, context, 'bunker');
+  const bunkerGood =
+    manager.canBuildBunker?.() &&
+    shelteredFoot.length >= 2 &&
+    !hasAiGarrisonShelterNear(game, bunkerPoint.x, bunkerPoint.z);
+  if (bunkerGood) {
+    plans.push({ buildType: 'bunker', point: bunkerPoint });
+  }
+
+  if (manager.canBuildSandbags?.()) {
+    plans.push({
+      buildType: 'sandbags',
+      point: getAiFieldworkBuildPoint(game, context, 'sandbags'),
+    });
+  }
+
+  return plans;
+}
+
+function getAiDefensiveHospitalPlan(game, playerUnits, enemyUnits, context) {
+  const manager = game?.medicFieldHospitals;
+  if (!manager?.canUse?.() || !context?.useFieldworks) return null;
+
+  const wounded = getAiDefensiveHospitalNeed(enemyUnits, context);
+  if (!wounded.length) return null;
+  const point = getAiDefensiveHospitalPoint(game, context, wounded);
+  if (
+    manager.tents?.some(
+      (tent) =>
+        !tent.destroyed &&
+        tent.team === 'enemy' &&
+        Math.hypot(tent.x - point.x, tent.z - point.z) < TENT_MIN_SPACING * 1.8
+    )
+  ) return null;
+
+  const nearestEnemy = (playerUnits ?? []).reduce((best, player) => {
+    if (!player || player.dead || !player.position) return best;
+    return Math.min(
+      best,
+      Math.hypot(point.x - player.position.x, point.z - player.position.z)
+    );
+  }, Infinity);
+  if (nearestEnemy < AI_FIELDWORK_HOSPITAL_MIN_ENEMY_DISTANCE) return null;
+
+  const medics = (enemyUnits ?? [])
+    .filter(isAiDefensiveMedicCandidate)
+    .sort(
+      (a, b) =>
+        Math.hypot(a.position.x - point.x, a.position.z - point.z) -
+        Math.hypot(b.position.x - point.x, b.position.z - point.z)
+    );
+  if (!medics.length) return null;
+  return { point, wounded, medics };
+}
+
+function clearAiConstructionMove(unit) {
+  if (!unit) return;
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._finalMoveGoal = null;
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+  unit._userMoveOrder = false;
+}
+
+function cancelAiDefensiveConstruction(game) {
+  const units = game?.units ?? [];
+  const fieldworks = game?.engineerSandbags;
+  for (const site of [...(fieldworks?.sites ?? [])]) {
+    if (site.team !== 'enemy' || !site._aiDefensiveFieldwork) continue;
+    const engineer = units.find((unit) => unit.id === site.engineerId);
+    if (engineer) {
+      fieldworks.cancelForUnit?.(engineer);
+      clearAiConstructionMove(engineer);
+    }
+  }
+
+  const hospitals = game?.medicFieldHospitals;
+  for (const site of [...(hospitals?.sites ?? [])]) {
+    if (site.team !== 'enemy' || !site._aiDefensiveHospital) continue;
+    const medic = units.find((unit) => unit.id === site.medicId);
+    if (medic) {
+      hospitals.cancelForUnit?.(medic);
+      clearAiConstructionMove(medic);
+    }
+  }
+}
+
+function tryAiPlaceDefensiveHospital(game, playerUnits, enemyUnits, context) {
+  const manager = game?.medicFieldHospitals;
+  const plan = getAiDefensiveHospitalPlan(game, playerUnits, enemyUnits, context);
+  if (!manager || !plan) return false;
+
+  const before = new Set((manager.sites ?? []).map((site) => site.id));
+  for (const medic of plan.medics) {
+    if (
+      !manager.tryAiPlace(
+        plan.point.x,
+        plan.point.z,
+        'enemy',
+        (candidate) => candidate.id === medic.id
+      )
+    ) continue;
+    const site = (manager.sites ?? []).find((candidate) => !before.has(candidate.id));
+    if (site) {
+      site._aiDefensiveHospital = true;
+      site._aiHospitalMode = context.kind;
+    }
+    return true;
+  }
+  return false;
+}
+
+function tryAiPlaceDefensiveFieldwork(game, enemyUnits, context) {
+  const manager = game?.engineerSandbags;
+  const plans = getAiDefensiveFieldworkPlans(game, context);
+  if (!manager || !plans.length) return false;
+
+  const engineers = (enemyUnits ?? [])
+    .filter(isAiDefensiveEngineerCandidate)
+    .sort((a, b) => {
+      const aDistance = Math.hypot(a.position.x - context.anchor.x, a.position.z - context.anchor.z);
+      const bDistance = Math.hypot(b.position.x - context.anchor.x, b.position.z - context.anchor.z);
+      return aDistance - bDistance;
+    });
+  if (!engineers.length) return false;
+
+  for (const plan of plans) {
+    const rotationY = getAiTrenchFacing(game, context, plan.point);
+    for (const engineer of engineers) {
+      const before = new Set((manager.sites ?? []).map((site) => site.id));
+      if (
+        !manager.tryAiPlace(
+          plan.point.x,
+          plan.point.z,
+          'enemy',
+          plan.buildType,
+          rotationY,
+          (candidate) => candidate.id === engineer.id
+        )
+      ) continue;
+      const site = (manager.sites ?? []).find((candidate) => !before.has(candidate.id));
+      if (site) {
+        site._aiDefensiveFieldwork = true;
+        site._aiFieldworkMode = context.kind;
+        site.rotationY = rotationY;
+        if (site.marker) site.marker.rotation.y = rotationY;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function isAiDefensiveTrenchBaseCandidate(
+  unit,
+  context,
+  { includeTrench = false, includeAssigned = false } = {}
+) {
+  return !!(
+    unit &&
+    unit.team === 'enemy' &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._mountedOnTankId &&
+    !unit._crewless &&
+    !unit._userMoveOrder &&
+    !unit._manualFireMission &&
+    !unit._trenchDigSite &&
+    !unit._diggingTrench &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite &&
+    !unit._garrisonBunkerId &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiTankManeuver &&
+    !unit._aiRadioManeuver &&
+    !unit._aiRadioSafety &&
+    !unit._aiSupportMode &&
+    (includeAssigned || !unit._aiTrenchTargetId) &&
+    (!unit.attackOrder || unit.attackOrder.dead) &&
+    (includeTrench || !unit._trenchId) &&
+    (!context?.unitFilter || context.unitFilter(unit))
+  );
+}
+
+function isAiDefensiveTrenchDigger(unit, context) {
+  return canDigAiTrenchType(unit?.def?.type) && isAiDefensiveTrenchBaseCandidate(unit, context);
+}
+
+function getAiDefensiveTrenchState(manager) {
+  const trenches = (manager?.trenches ?? []).filter(
+    (trench) => trench.team === 'enemy' && !trench.destroyed
+  );
+  const pending = (manager?.sites ?? []).filter(
+    (site) => site.team === 'enemy' && site._aiDefensiveTrench
+  );
+  const occupied = trenches.reduce(
+    (sum, trench) => sum + (trench.garrison?.length ?? 0),
+    0
+  );
+  const freeSlots = trenches.reduce(
+    (sum, trench) => sum + Math.max(0, AI_TRENCH_CAPACITY - (trench.garrison?.length ?? 0)),
+    0
+  );
+  return {
+    trenches,
+    pending,
+    occupied,
+    freeSlots,
+    capacity: (trenches.length + pending.length) * AI_TRENCH_CAPACITY,
+  };
+}
+
+function getAiDefensiveTrenchDesiredCount(enemyUnits, context) {
+  const potential = (enemyUnits ?? []).filter((unit) =>
+    AI_TRENCH_OCCUPANT_TYPES.has(unit?.def?.type) &&
+    isAiDefensiveTrenchBaseCandidate(unit, context, {
+      includeTrench: true,
+      includeAssigned: true,
+    })
+  );
+  if (potential.length <= 1) return potential.length;
+  const reserve = Math.min(
+    potential.length - 1,
+    Math.max(1, Math.ceil(potential.length * (context?.reserveRatio ?? AI_TRENCH_DEFAULT_RESERVE_RATIO)))
+  );
+  return Math.max(0, potential.length - reserve);
+}
+
+function clearAiDefensiveTrenchTarget(unit) {
+  unit._aiTrenchTargetId = null;
+  if (!unit._trenchId) unit._aiTrenchOccupant = false;
+}
+
+function releaseAiDefensiveTrenches(game, enemyUnits, manager) {
+  for (const site of [...(manager?.sites ?? [])]) {
+    if (site.team !== 'enemy' || !site._aiDefensiveTrench) continue;
+    const digger = game.units?.find((unit) => unit.id === site.diggerId);
+    if (digger) manager.cancelForUnit?.(digger);
+  }
+
+  const trenches = new Map(
+    (manager?.trenches ?? [])
+      .filter((trench) => trench.team === 'enemy' && !trench.destroyed)
+      .map((trench) => [trench.id, trench])
+  );
+  for (const unit of enemyUnits ?? []) {
+    const trench = unit?._trenchId ? trenches.get(unit._trenchId) : null;
+    if (unit?._trenchId && (unit._aiTrenchOccupant || trench?._aiDefensiveTrench)) {
+      manager.releaseUnit?.(unit);
+    }
+    if (unit?._aiTrenchTargetId || unit?._aiTrenchOccupant) {
+      clearAiDefensiveTrenchTarget(unit);
+    }
+  }
+}
+
+function updateAiDefensiveTrenchOccupants(game, enemyUnits, context) {
+  const manager = game?.infantryTrenches;
+  if (!manager) return;
+  if (!context?.useTrenches) {
+    releaseAiDefensiveTrenches(game, enemyUnits, manager);
+    return;
+  }
+
+  const state = getAiDefensiveTrenchState(manager);
+  const trenchById = new Map(state.trenches.map((trench) => [trench.id, trench]));
+  for (const unit of enemyUnits ?? []) {
+    if (!unit) continue;
+    if (
+      (unit.dead || unit.surrendered || unit.retreating || unit._captureExit) &&
+      (unit._aiTrenchTargetId || unit._aiTrenchOccupant)
+    ) {
+      if (unit._trenchId) manager.releaseUnit?.(unit);
+      clearAiDefensiveTrenchTarget(unit);
+      continue;
+    }
+    if (unit._userMoveOrder && (unit._aiTrenchTargetId || unit._aiTrenchOccupant)) {
+      if (unit._trenchId) manager.releaseUnit?.(unit);
+      clearAiDefensiveTrenchTarget(unit);
+      continue;
+    }
+    if (unit._aiTrenchTargetId && !trenchById.has(unit._aiTrenchTargetId) && !unit._trenchId) {
+      clearAiDefensiveTrenchTarget(unit);
+    }
+    if (unit._trenchId && trenchById.has(unit._trenchId)) {
+      unit._aiTrenchOccupant = true;
+      unit._aiTrenchTargetId = unit._trenchId;
+    }
+  }
+
+  const desired = getAiDefensiveTrenchDesiredCount(enemyUnits, context);
+  if (desired <= state.occupied || state.freeSlots <= 0) return;
+
+  const candidates = (enemyUnits ?? [])
+    .filter(
+      (unit) =>
+        AI_TRENCH_OCCUPANT_TYPES.has(unit?.def?.type) &&
+        isAiDefensiveTrenchBaseCandidate(unit, context)
+    )
+    .sort((a, b) => {
+      const aDistance = Math.hypot(a.position.x - context.anchor.x, a.position.z - context.anchor.z);
+      const bDistance = Math.hypot(b.position.x - context.anchor.x, b.position.z - context.anchor.z);
+      return aDistance - bDistance;
+    });
+
+  const planned = new Map();
+  let assigned = 0;
+  for (const unit of candidates) {
+    if (state.occupied + assigned >= desired) break;
+
+    let best = null;
+    let bestDistance = AI_TRENCH_MAX_OCCUPATION_DISTANCE;
+    for (const trench of state.trenches) {
+      const used = (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0);
+      if (used >= AI_TRENCH_CAPACITY) continue;
+      const distance = Math.hypot(unit.position.x - trench.x, unit.position.z - trench.z);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = trench;
+      }
+    }
+    if (!best) continue;
+
+    unit.clearAttackOrder();
+    unit._bunkerEntryId = null;
+    unit.moveTarget = { x: best.x, z: best.z };
+    unit._movePath = null;
+    unit._finalMoveGoal = { x: best.x, z: best.z };
+    unit._autoMoveOrderX = null;
+    unit._autoMoveOrderZ = null;
+    unit._pathRepathAttempts = 0;
+    unit._lastPathRepathX = null;
+    unit._lastPathRepathZ = null;
+    unit._reverseMoveOrder = false;
+    unit._aiTrenchTargetId = best.id;
+    unit._aiTrenchOccupant = true;
+    planned.set(best.id, (planned.get(best.id) ?? 0) + 1);
+    assigned++;
+  }
+}
+
+function tryAiPlaceDefensiveTrench(game, enemyUnits, context) {
+  const manager = game?.infantryTrenches;
+  if (!manager?.canUse?.() || !context?.useTrenches) return false;
+
+  const state = getAiDefensiveTrenchState(manager);
+  const desired = getAiDefensiveTrenchDesiredCount(enemyUnits, context);
+  if (desired <= 0 || state.capacity >= desired) return false;
+
+  const diggers = (enemyUnits ?? [])
+    .filter((unit) => isAiDefensiveTrenchDigger(unit, context))
+    .sort((a, b) => {
+      const aPoint = getAiTrenchPoint(a);
+      const bPoint = getAiTrenchPoint(b);
+      const aDistance = Math.hypot(aPoint.x - context.anchor.x, aPoint.z - context.anchor.z);
+      const bDistance = Math.hypot(bPoint.x - context.anchor.x, bPoint.z - context.anchor.z);
+      return aDistance - bDistance;
+    });
+
+  for (const digger of diggers) {
+    const point = getAiTrenchPoint(digger);
+    const rotationY = getAiTrenchFacing(game, context, point);
+    const before = new Set((manager.sites ?? []).map((site) => site.id));
+    if (
+      !manager.tryAiPlace(
+        point.x,
+        point.z,
+        'enemy',
+        rotationY,
+        (candidate) => candidate.id === digger.id
+      )
+    ) continue;
+
+    const site = (manager.sites ?? []).find((candidate) => !before.has(candidate.id));
+    if (site) {
+      site._aiDefensiveTrench = true;
+      site._aiTrenchMode = context.kind;
+      site.rotationY = rotationY;
+      if (site.marker) site.marker.rotation.y = rotationY;
+      const assignedDigger = enemyUnits.find((unit) => unit.id === site.diggerId);
+      if (assignedDigger) assignedDigger._aiTrenchOccupant = true;
+    }
+    return true;
+  }
+  return false;
+}
+
+function updateAIDefenses(game, enemyUnits, playerUnits, dt, assault, options = {}) {
+  const trenchContext = getAiDefensiveTrenchContext(
+    game,
+    enemyUnits,
+    playerUnits,
+    assault,
+    options
+  );
+  updateAiDefensiveTrenchOccupants(game, enemyUnits, trenchContext);
+  const fieldworkContext = getAiDefensiveFieldworkContext(
+    game,
+    enemyUnits,
+    playerUnits,
+    trenchContext
+  );
+  if (!fieldworkContext?.useFieldworks) {
+    cancelAiDefensiveConstruction(game);
+  }
+
   aiDefenseTimer -= dt;
   if (aiDefenseTimer > 0 || !enemyUnits.length) return;
   aiDefenseTimer = 34 + Math.random() * 22;
+
+  // Defensive lines get a trench before the engineer spends this cycle on a
+  // mine, sandbag, or bunker. Once the line has enough trench capacity, the
+  // existing engineer fortification routine keeps doing its normal work.
+  if (tryAiPlaceDefensiveTrench(game, enemyUnits, trenchContext)) return;
+
+  if (tryAiPlaceDefensiveHospital(game, playerUnits, enemyUnits, fieldworkContext)) return;
+  if (tryAiPlaceDefensiveFieldwork(game, enemyUnits, fieldworkContext)) return;
+
+  // Known mobile/assault postures deliberately do not start new stationary
+  // construction. The fallback below is retained for ordinary Standard play
+  // before a clear defensive or armour-threat context has formed.
+  if (fieldworkContext) return;
 
   const engineers = enemyUnits.filter(
     (unit) =>
       unit.def?.type === 'engineer' &&
       !unit._sandbagSite &&
+      !unit._medicTentSite &&
       !unit.retreating &&
-      !unit._garrisonBunkerId
+      !unit._garrisonBunkerId &&
+      !unit._underFireTimer
   );
   if (engineers.length && game.engineerSandbags?.canUse?.()) {
     const engineer = engineers[Math.floor(Math.random() * engineers.length)];
-    const mineChance = game.engineerSandbags.canBuildMine?.() && Math.random() < 0.24;
-    const buildType = mineChance
-      ? 'mine'
-      : game.engineerSandbags.canBuildSandbags?.()
-        ? (assault?.defenderTeam === 'enemy' || Math.random() < 0.65 ? 'sandbags' : 'bunker')
-        : 'bunker';
-    // tryAiPlace searches nearby open ground so AI does not dig under tenements.
+    const buildType = game.engineerSandbags.canBuildSandbags?.() ? 'sandbags' : 'bunker';
     if (
       game.engineerSandbags.tryAiPlace(
         engineer.position.x,
@@ -2368,19 +3654,6 @@ function updateAIDefenses(game, enemyUnits, dt, assault) {
     ) {
       return;
     }
-  }
-
-  const diggers = enemyUnits.filter(
-    (unit) =>
-      canDigAiTrenchType(unit.def?.type) &&
-      !unit._trenchDigSite &&
-      !unit._trenchId &&
-      !unit.retreating &&
-      !unit._garrisonBunkerId
-  );
-  if (diggers.length && game.infantryTrenches?.canUse?.()) {
-    const digger = diggers[Math.floor(Math.random() * diggers.length)];
-    game.infantryTrenches.tryAiPlace(digger.position.x, digger.position.z, 'enemy');
   }
 }
 
@@ -2478,8 +3751,10 @@ function getAiCommanderThreatProfile(point, commander, playerUnits, scenery, cur
   const x = point?.x ?? commander?.position?.x ?? 0;
   const z = point?.z ?? commander?.position?.z ?? 0;
   let nearest = Infinity;
+  let nearestUnit = null;
   let score = 0;
   let engaged = false;
+  let directUnit = null;
 
   for (const player of playerUnits ?? []) {
     if (
@@ -2494,7 +3769,10 @@ function getAiCommanderThreatProfile(point, commander, playerUnits, scenery, cur
     const dx = player.position.x - x;
     const dz = player.position.z - z;
     const distance = Math.hypot(dx, dz);
-    nearest = Math.min(nearest, distance);
+    if (distance < nearest) {
+      nearest = distance;
+      nearestUnit = player;
+    }
 
     // On the live commander position, do not count a direct-fire unit whose
     // shot is visibly blocked. Indirect fire remains a threat regardless.
@@ -2520,6 +3798,7 @@ function getAiCommanderThreatProfile(point, commander, playerUnits, scenery, cur
     if (hasCommanderOrder && distance <= weaponRange + 6) {
       score += weight * 4;
       engaged = true;
+      directUnit = player;
     }
   }
 
@@ -2535,6 +3814,8 @@ function getAiCommanderThreatProfile(point, commander, playerUnits, scenery, cur
 
   return {
     nearest,
+    nearestUnit,
+    directUnit,
     score,
     engaged,
     danger: nearest <= AI_COMMANDER_CRITICAL_DISTANCE || engaged || score >= 6.5,
@@ -2579,6 +3860,266 @@ function getAiCommanderScreenCount(anchor, focus, troops) {
     if (projection >= 2 && projection <= distance + 9 && lateral <= 15) count++;
   }
   return count;
+}
+
+function clearAiCommanderScreen(unit) {
+  const screen = unit?._aiCommanderScreen;
+  if (!screen) return;
+  unit._aiCommanderScreen = null;
+
+  // A player order always remains authoritative. AI-owned screen orders are
+  // safe to clear when the commander no longer needs protection.
+  if (unit._userMoveOrder || unit._manualFireMission) return;
+  if (
+    screen.mode === 'attack' &&
+    unit.attackOrder &&
+    (!screen.threatId || unit.attackOrder.id === screen.threatId)
+  ) {
+    unit.clearAttackOrder?.();
+    return;
+  }
+
+  const goal = unit._finalMoveGoal;
+  if (
+    screen.mode === 'move' &&
+    goal &&
+    screen.goal &&
+    Math.hypot(goal.x - screen.goal.x, goal.z - screen.goal.z) <= 2.5
+  ) {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._autoMoveOrderX = null;
+    unit._autoMoveOrderZ = null;
+  }
+}
+
+function clearAiCommanderScreens(enemyUnits, commanderId = null) {
+  for (const unit of enemyUnits ?? []) {
+    const screen = unit?._aiCommanderScreen;
+    if (!screen) continue;
+    if (commanderId !== null && screen.commanderId !== commanderId) continue;
+    clearAiCommanderScreen(unit);
+  }
+}
+
+function isAiCommanderScreenCandidate(unit, commander) {
+  const type = unit?.def?.type;
+  return !!(
+    unit &&
+    commander &&
+    unit !== commander &&
+    unit.team === commander.team &&
+    AI_COMMANDER_FRONTLINE_TYPES.has(type) &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._crewless &&
+    !unit._mobilityDamaged &&
+    !unit._userMoveOrder &&
+    !unit._manualFireMission &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiTankManeuver &&
+    !unit._aiRadioManeuver &&
+    !unit._aiRadioSafety &&
+    !unit._aiSupportMode &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite &&
+    !unit._trenchDigSite &&
+    !unit._diggingTrench &&
+    !unit._trenchId &&
+    !unit._aiTrenchTargetId &&
+    !unit._aiTrenchOccupant &&
+    !unit._garrisonBunkerId &&
+    !isUnitGarrisoned(unit) &&
+    !unit.attackOrder?.isSmokeShell
+  );
+}
+
+function isAiCommanderScreenActive(unit, game, playerUnits) {
+  const screen = unit?._aiCommanderScreen;
+  if (!screen) return false;
+  const now = game?.matchTime ?? 0;
+  if (
+    now >= (screen.reassessAt ?? 0) ||
+    unit.dead ||
+    unit.surrendered ||
+    unit.retreating ||
+    unit._userMoveOrder ||
+    unit._manualFireMission ||
+    unit._aiIncomingFireReaction ||
+    unit._mobilityDamaged ||
+    unit._garrisonBunkerId ||
+    unit._trenchId
+  ) return false;
+
+  const threat = (playerUnits ?? []).find(
+    (candidate) =>
+      candidate &&
+      candidate.id === screen.threatId &&
+      !candidate.dead &&
+      !candidate.surrendered &&
+      !candidate._captureExit
+  );
+  if (!threat) return false;
+
+  if (
+    screen.mode === 'move' &&
+    !unit.attackOrder &&
+    Math.hypot(unit.position.x - threat.position.x, unit.position.z - threat.position.z) <=
+      Math.max(12, (unit.def?.range ?? 0) * 1.15)
+  ) {
+    if (unit.setAttackOrder?.(threat)) screen.mode = 'attack';
+  }
+  return true;
+}
+
+/** Keep a commander screen order ahead of mode-specific movement logic. */
+export function maintainAiCommanderScreen(unit, game, playerUnits = []) {
+  if (!unit?._aiCommanderScreen) return false;
+  if (isAiCommanderScreenActive(unit, game, playerUnits)) return true;
+  clearAiCommanderScreen(unit);
+  return false;
+}
+
+function updateAiCommanderScreens(game, commander, enemyUnits, playerUnits, threat, now) {
+  if (!commander || !threat) {
+    clearAiCommanderScreens(enemyUnits, commander?.id ?? null);
+    return false;
+  }
+
+  const commanderCover = getCoverStatus(commander);
+  const protectedInPlace =
+    commanderCover.garrisoned ||
+    commanderCover.inTrench ||
+    !!commander._garrisonBunkerId ||
+    !!commander._trenchId;
+  const commanderHpRatio = commander.hp / Math.max(1, commander.maxHp);
+  const screenTrigger = protectedInPlace
+    ? AI_COMMANDER_CRITICAL_DISTANCE + 5
+    : AI_COMMANDER_SCREEN_TRIGGER_DISTANCE;
+  const shouldScreen =
+    threat.engaged ||
+    threat.nearest <= screenTrigger ||
+    (commander._underFireTimer ?? 0) > 0 ||
+    commanderHpRatio <= 0.58;
+  if (!shouldScreen) {
+    clearAiCommanderScreens(enemyUnits, commander.id);
+    return false;
+  }
+
+  const focus = threat.directUnit ?? threat.nearestUnit;
+  if (!focus?.position) {
+    clearAiCommanderScreens(enemyUnits, commander.id);
+    return false;
+  }
+
+  const desiredCount = Math.min(
+    AI_COMMANDER_SCREEN_MAX_UNITS,
+    threat.engaged || threat.nearest <= AI_COMMANDER_CRITICAL_DISTANCE || commanderHpRatio <= 0.5
+      ? 3
+      : 2
+  );
+  const active = [];
+  for (const unit of enemyUnits ?? []) {
+    if (unit?._aiCommanderScreen?.commanderId !== commander.id) continue;
+    if (
+      isAiCommanderScreenActive(unit, game, playerUnits) &&
+      unit._aiCommanderScreen.threatId === focus.id
+    ) {
+      active.push(unit);
+    } else {
+      clearAiCommanderScreen(unit);
+    }
+  }
+  if (active.length >= desiredCount) return true;
+
+  clearAiCommanderScreens(enemyUnits, commander.id);
+  const candidates = (enemyUnits ?? [])
+    .filter((unit) => isAiCommanderScreenCandidate(unit, commander))
+    .filter(
+      (unit) =>
+        Math.hypot(
+          unit.position.x - commander.position.x,
+          unit.position.z - commander.position.z
+        ) <= AI_COMMANDER_SCREEN_RECRUIT_RADIUS
+    )
+    .sort((a, b) => {
+      const roleScore = (unit) => {
+        if (unit.def?.type === 'machineGun') return 9;
+        if (unit.def?.type === 'antiTankGun') return 7;
+        if (unit.def?.type === 'tank' || unit.def?.type === 'tankDestroyer') return 5;
+        return 0;
+      };
+      const aDistance = Math.hypot(
+        a.position.x - commander.position.x,
+        a.position.z - commander.position.z
+      );
+      const bDistance = Math.hypot(
+        b.position.x - commander.position.x,
+        b.position.z - commander.position.z
+      );
+      const aAttack = a.attackOrder && !a.attackOrder.dead ? 4 : 0;
+      const bAttack = b.attackOrder && !b.attackOrder.dead ? 4 : 0;
+      return (
+        aDistance * 0.65 - roleScore(a) - aAttack -
+        (a.hp / Math.max(1, a.maxHp)) * 3
+      ) - (
+        bDistance * 0.65 - roleScore(b) - bAttack -
+        (b.hp / Math.max(1, b.maxHp)) * 3
+      );
+    });
+  if (!candidates.length) return false;
+
+  const anchor = commander._aiCommanderGoal ?? commander.position;
+  let dx = focus.position.x - anchor.x;
+  let dz = focus.position.z - anchor.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 0.5) {
+    const rear = getAiCommanderRearAxis(game);
+    dx = -rear.x;
+    dz = -rear.z;
+  } else {
+    dx /= distance;
+    dz /= distance;
+  }
+  const sideX = -dz;
+  const sideZ = dx;
+  const screenDepth = clamp(distance * 0.48, 8, AI_COMMANDER_SCREEN_RADIUS - 4);
+  const picked = candidates.slice(0, desiredCount);
+
+  picked.forEach((unit, index) => {
+    const lateral = (index - (picked.length - 1) * 0.5) * 4.5;
+    const goal = clampAiCommanderPoint(
+      game,
+      anchor.x + dx * screenDepth + sideX * lateral,
+      anchor.z + dz * screenDepth + sideZ * lateral
+    );
+    const distanceToThreat = Math.hypot(
+      unit.position.x - focus.position.x,
+      unit.position.z - focus.position.z
+    );
+    const canIntercept =
+      unit.def?.type !== 'artillery' &&
+      distanceToThreat <= Math.max(12, (unit.def?.range ?? 0) * 1.15);
+
+    let mode = 'move';
+    if (canIntercept && unit.setAttackOrder?.(focus)) {
+      mode = 'attack';
+    } else {
+      unit.moveTo?.(goal.x, goal.z, game.mapDef, false, game.scenery);
+    }
+    unit._aiCommanderScreen = {
+      commanderId: commander.id,
+      threatId: focus.id,
+      mode,
+      goal,
+      reassessAt: now + AI_COMMANDER_SCREEN_REASSESS_SEC,
+    };
+  });
+  return true;
 }
 
 function getAiCommanderCoverMultiplier(point, coverSystem) {
@@ -2812,7 +4353,10 @@ function returnAiCommanderToRear(game, commander, { preferShelter = false } = {}
  * request and sends him back to depth/cover. */
 function updateAICommander(game, enemyUnits, playerUnits) {
   const commander = getFieldCommander(game, 'enemy');
-  if (!commander || commander.dead) return false;
+  if (!commander || commander.dead) {
+    clearAiCommanderScreens(enemyUnits);
+    return false;
+  }
 
   const now = game.matchTime ?? 0;
   const troops = enemyUnits.filter(isAiMoraleUnit);
@@ -2827,21 +4371,40 @@ function updateAICommander(game, enemyUnits, playerUnits) {
     game.scenery,
     true
   );
+  const commanderHpRatio = commander.hp / Math.max(1, commander.maxHp);
+  const exposedSafetyThreat =
+    !protectedInPlace &&
+    (
+      currentThreat.danger ||
+      currentThreat.engaged ||
+      currentThreat.nearest <= AI_COMMANDER_PULLBACK_DISTANCE ||
+      commanderHpRatio <= 0.72
+    );
+  const protectedEmergency =
+    protectedInPlace &&
+    (
+      currentThreat.engaged ||
+      currentThreat.nearest <= AI_COMMANDER_CRITICAL_DISTANCE ||
+      commanderHpRatio <= 0.34
+    );
 
   if (
-    currentThreat.danger &&
-    (!protectedInPlace || currentThreat.engaged) &&
+    (exposedSafetyThreat || protectedEmergency) &&
     now >= (commander._aiCommanderSafetyUntil ?? 0)
   ) {
     commander._aiCommanderSafetyUntil = now + AI_COMMANDER_SAFETY_HOLD_SEC;
     returnAiCommanderToRear(game, commander, { preferShelter: true });
+    updateAiCommanderScreens(game, commander, enemyUnits, playerUnits, currentThreat, now);
     return true;
   }
 
   if (now < (commander._aiCommanderSafetyUntil ?? 0)) {
     returnAiCommanderToRear(game, commander, { preferShelter: true });
+    updateAiCommanderScreens(game, commander, enemyUnits, playerUnits, currentThreat, now);
     return true;
   }
+
+  updateAiCommanderScreens(game, commander, enemyUnits, playerUnits, currentThreat, now);
 
   if (!troops.length || !playerUnits.length) {
     if (commander._aiCommanderAnchor && now >= (commander._aiCommanderAnchorUntil ?? 0)) {

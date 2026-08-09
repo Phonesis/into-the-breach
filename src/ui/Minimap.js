@@ -4,8 +4,13 @@ import {
   getUrbanRoadExtent,
   getUrbanStreetSpacing,
 } from '../world/UrbanLayout.js';
+import {
+  GAME_SETTING_KEYS,
+  readBooleanSetting,
+  writeBooleanSetting,
+} from '../game/GameSettings.js';
 
-export const MINIMAP_VISIBLE_KEY = 'ww2-rts-minimap-visible';
+export const MINIMAP_VISIBLE_KEY = GAME_SETTING_KEYS.minimap;
 
 const TERRAIN_RES = 144;
 const PLAYER_TEAM = 'player';
@@ -143,7 +148,7 @@ export class BattleMinimap {
   constructor(root, callbacks = {}) {
     this.root = root;
     this.callbacks = callbacks;
-    this.visible = localStorage.getItem(MINIMAP_VISIBLE_KEY) !== '0';
+    this.visible = readBooleanSetting(MINIMAP_VISIBLE_KEY, true);
     this.mapDef = null;
     this.terrainBitmap = null;
     this._terrainKey = '';
@@ -176,7 +181,7 @@ export class BattleMinimap {
 
   setVisible(on) {
     this.visible = !!on;
-    localStorage.setItem(MINIMAP_VISIBLE_KEY, this.visible ? '1' : '0');
+    writeBooleanSetting(MINIMAP_VISIBLE_KEY, this.visible);
     this._syncVisibility();
     this.callbacks.onToggleMinimap?.(this.visible);
   }

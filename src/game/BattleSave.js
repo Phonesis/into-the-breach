@@ -43,7 +43,11 @@ import { createSmokeShellTarget } from './Targeting.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
-import { applyUnitDeathVisual, updateSquadCasualtyVisual } from '../units/UnitMeshes.js';
+import {
+  applyUnitDeathVisual,
+  applyVehicleWreckCrushVisual,
+  updateSquadCasualtyVisual,
+} from '../units/UnitMeshes.js';
 import { FIELD_BUILD_TYPES } from './EngineerSandbags.js';
 import {
   applyTrenchVisual,
@@ -257,6 +261,8 @@ export function captureBattleSave(game, { id = null } = {}) {
       wreckTimeLeft: u.wreckTimeLeft ?? 0,
       recoverableWreck: !!u._recoverableWreck,
       wreckRepairProgress: u._wreckRepairProgress ?? 0,
+      wreckImpactCount: u._wreckImpactCount ?? 0,
+      wreckCrushed: !!u._wreckCrushed,
       mobilityDamaged: !!u._mobilityDamaged,
       mobilityDamageKind: u._mobilityDamageKind ?? null,
       mobilityRepairProgress: u._mobilityRepairProgress ?? 0,
@@ -316,6 +322,7 @@ export function captureBattleSave(game, { id = null } = {}) {
   delete sessionOptions.restoreSnapshot;
   if (game.clearance) {
     sessionOptions.clearanceRole = game.clearanceRole ?? 'attack';
+    sessionOptions.clearanceTimeLimitEnabled = game.clearanceTimeLimitEnabled !== false;
     if (game.clearanceAttackPlan?.id) {
       sessionOptions.clearanceAttackPlanId = game.clearanceAttackPlan.id;
     }
@@ -515,6 +522,8 @@ export function captureBattleSave(game, { id = null } = {}) {
         progress: s.progress,
         engineerId: s.engineerId,
         rotationY: s.rotationY,
+        aiDefensiveFieldwork: !!s._aiDefensiveFieldwork,
+        aiFieldworkMode: s._aiFieldworkMode ?? null,
       })),
       fieldBunkers: (game.engineerSandbags?.fieldBunkers ?? [])
         .filter((e) => !e.destroyed)
@@ -528,6 +537,8 @@ export function captureBattleSave(game, { id = null } = {}) {
           maxHp: e.maxHp,
           garrison: [...(e.garrison ?? [])],
           rotationY: e.mesh?.rotation?.y ?? 0,
+          aiDefensiveFieldwork: !!e._aiDefensiveFieldwork,
+          aiFieldworkMode: e._aiFieldworkMode ?? null,
         })),
       mines: (game.engineerSandbags?.mines ?? []).map((mine) => ({
         id: mine.id,
@@ -538,6 +549,8 @@ export function captureBattleSave(game, { id = null } = {}) {
         damage: mine.damage,
         triggerRadius: mine.triggerRadius,
         rotationY: mine.mesh?.rotation?.y ?? 0,
+        aiDefensiveFieldwork: !!mine._aiDefensiveFieldwork,
+        aiFieldworkMode: mine._aiFieldworkMode ?? null,
       })),
       engineerScenery: [],
     },
@@ -554,6 +567,8 @@ export function captureBattleSave(game, { id = null } = {}) {
             diggerId: s.diggerId,
             progress: s.progress,
             rotationY: s.rotationY,
+            aiDefensiveTrench: !!s._aiDefensiveTrench,
+            aiTrenchMode: s._aiTrenchMode ?? null,
           })),
           trenches: game.infantryTrenches.trenches
             .filter((t) => !t.destroyed)
@@ -565,6 +580,8 @@ export function captureBattleSave(game, { id = null } = {}) {
               y: t.y,
               garrison: [...(t.garrison ?? [])],
               rotationY: t.mesh?.rotation?.y ?? 0,
+              aiDefensiveTrench: !!t._aiDefensiveTrench,
+              aiTrenchMode: t._aiTrenchMode ?? null,
             })),
         }
       : null,
@@ -580,6 +597,8 @@ export function captureBattleSave(game, { id = null } = {}) {
             team: s.team,
             medicId: s.medicId,
             progress: s.progress,
+            aiDefensiveHospital: !!s._aiDefensiveHospital,
+            aiHospitalMode: s._aiHospitalMode ?? null,
           })),
           tents: game.medicFieldHospitals.tents
             .filter((t) => !t.destroyed)
@@ -594,6 +613,8 @@ export function captureBattleSave(game, { id = null } = {}) {
               healRange: t.healRange,
               healPerSec: t.healPerSec,
               rotationY: t.mesh?.rotation?.y ?? 0,
+              aiDefensiveHospital: !!t._aiDefensiveHospital,
+              aiHospitalMode: t._aiHospitalMode ?? null,
             })),
         }
       : null,
@@ -881,6 +902,8 @@ function restoreEngineerSite(manager, siteData) {
     engineerId: siteData.engineerId,
     progress: siteData.progress ?? 0,
     rotationY: siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
+    _aiDefensiveFieldwork: !!siteData.aiDefensiveFieldwork,
+    _aiFieldworkMode: siteData.aiFieldworkMode ?? null,
     marker: null,
   };
   const mat = new THREE.MeshBasicMaterial({
@@ -919,6 +942,8 @@ function restoreFieldBunker(manager, data) {
     mesh: null,
     manager,
     engineerBuilt: true,
+    _aiDefensiveFieldwork: !!data.aiDefensiveFieldwork,
+    _aiFieldworkMode: data.aiFieldworkMode ?? null,
     _attackTarget: null,
   };
   const mesh = createCampaignBunkerMesh(manager._factionId(data.team));
@@ -952,6 +977,8 @@ function restoreEngineerMine(manager, data) {
     damage: data.damage ?? DEFENSE_TYPES.mine.damage,
     triggerRadius: data.triggerRadius ?? DEFENSE_TYPES.mine.triggerRadius,
     mesh,
+    _aiDefensiveFieldwork: !!data.aiDefensiveFieldwork,
+    _aiFieldworkMode: data.aiFieldworkMode ?? null,
   });
 }
 
@@ -972,6 +999,8 @@ function restoreTrenchState(game, data) {
       progress: siteData.progress ?? 0,
       rotationY:
         siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
+      _aiDefensiveTrench: !!siteData.aiDefensiveTrench,
+      _aiTrenchMode: siteData.aiTrenchMode ?? null,
       marker: null,
     };
     manager.sites.push(site);
@@ -997,6 +1026,8 @@ function restoreTrenchState(game, data) {
       garrison: [...(trenchData.garrison ?? [])],
       mesh,
       rotationY,
+      _aiDefensiveTrench: !!trenchData.aiDefensiveTrench,
+      _aiTrenchMode: trenchData.aiTrenchMode ?? null,
     });
     game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
   }
@@ -1017,6 +1048,8 @@ function restoreMedicFieldHospitalState(game, data) {
       team: siteData.team,
       medicId: siteData.medicId,
       progress: siteData.progress ?? 0,
+      _aiDefensiveHospital: !!siteData.aiDefensiveHospital,
+      _aiHospitalMode: siteData.aiHospitalMode ?? null,
       marker: null,
     };
     manager.sites.push(site);
@@ -1042,6 +1075,8 @@ function restoreMedicFieldHospitalState(game, data) {
       mesh,
       healRange: tentData.healRange,
       healPerSec: tentData.healPerSec,
+      _aiDefensiveHospital: !!tentData.aiDefensiveHospital,
+      _aiHospitalMode: tentData.aiHospitalMode ?? null,
     });
   }
 }
@@ -1345,6 +1380,9 @@ export function applyBattleSave(game, snapshot) {
     unit._commanderDeathHandled = !!uData.commanderDeathHandled;
     unit._recoverableWreck = !!uData.recoverableWreck;
     unit._wreckRepairProgress = uData.wreckRepairProgress ?? 0;
+    unit._wreckImpactCount = uData.wreckImpactCount ?? 0;
+    unit._wreckCrushed = !!uData.wreckCrushed;
+    if (unit._wreckCrushed) unit._recoverableWreck = false;
     unit._mobilityDamaged = !!uData.mobilityDamaged;
     unit._mobilityDamageKind = uData.mobilityDamageKind ?? null;
     unit._mobilityRepairProgress = uData.mobilityRepairProgress ?? 0;
@@ -1400,6 +1438,7 @@ export function applyBattleSave(game, snapshot) {
       // Rebuild the static death pose without replaying the kill explosion.
       unit._vehicleKillFxDone = true;
       applyUnitDeathVisual(unit);
+      if (unit._wreckCrushed) applyVehicleWreckCrushVisual(unit);
       // applyUnitDeathVisual supplies defaults; retain the saved lifetime for
       // modes which age battlefield debris normally.
       unit.corpseTimeLeft = uData.corpseTimeLeft ?? unit.corpseTimeLeft;

@@ -1607,4 +1607,18 @@ export function applyTankWreckLook(mesh, { preserveTurret = false } = {}) {
   mesh.add(barrelChunk);
 }
 
+/** Apply the persistent flattened look left by a vehicle running over a wreck. */
+export function applyVehicleWreckCrushVisual(unit) {
+  const mesh = unit?.mesh;
+  if (!mesh || mesh.userData.wreckCrushApplied) return;
+  mesh.userData.wreckCrushApplied = true;
+  mesh.scale.y *= 0.86;
+  mesh.traverse((child) => {
+    const part = child.userData?.tankPart;
+    if (part === 'barrel' || part === 'mantlet') child.visible = false;
+  });
+  const sign = Number(unit.id) % 2 === 0 ? 1 : -1;
+  mesh.rotation.z += sign * 0.08;
+}
+
 export { spawnMuzzleFlash } from '../effects/CombatEffects.js';

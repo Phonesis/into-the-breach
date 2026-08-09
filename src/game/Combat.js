@@ -84,6 +84,10 @@ import {
 } from '../units/VehicleMeshKit.js';
 import { isFootSoldier } from '../units/VehicleTypes.js';
 import { isUnitGarrisoned } from './BunkerGarrison.js';
+import {
+  clampVehicleMoveAgainstUnits,
+  resolveVehicleOverlaps,
+} from './VehicleCollision.js';
 
 
 const SMALL_ARMS_TYPES = new Set([
@@ -1801,9 +1805,52 @@ function applySplashDamage(
   }
 }
 
+/**
+ * A building-aware route can leave a waypoint inside a wreck that was not on
+ * the map when the path was planned. Once the vehicle is physically pushing
+ * that wreck, skip only the blocked intermediate points and retain the final
+ * ordered destination.
+ */
+function skipVehicleWaypointsBlockedByWreck(unit, wreck) {
+  if (!unit?._movePath || unit._movePath.length < 2 || !wreck?.position) return false;
+
+  const requiredDistance =
+    unitPathRadius(unit.def?.type) + unitPathRadius(wreck.def?.type) + 0.35;
+  let skipped = false;
+  while (unit._movePath.length > 1) {
+    const waypoint = unit._movePath[0];
+    if (
+      Math.hypot(
+        waypoint.x - wreck.position.x,
+        waypoint.z - wreck.position.z
+      ) >= requiredDistance * 1.05
+    ) {
+      break;
+    }
+    unit._movePath.shift();
+    skipped = true;
+  }
+
+  if (skipped) unit.moveTarget = { ...unit._movePath[0] };
+  return skipped;
+}
+
 export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
+  const collisionUnits = options.collisionUnits ?? units;
+  const collisionOptions = {
+    ...options,
+    mapDef,
+    sampleTerrainHeight,
+  };
+  // Resolve spawn/save/reinforcement overlaps before advancing anyone. The
+  // movement segment clamp below then keeps vehicles and wrecks separated.
+  resolveVehicleOverlaps(collisionUnits, collisionOptions);
+
   for (const unit of units) {
     unit._terrainMesh = options.terrainMesh ?? unit._terrainMesh ?? null;
+    if (unit.def?.type === 'armoredCar' && !unit.moveTarget) {
+      unit._driveSpeed = 0;
+    }
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
     if (isUnitMounted(unit)) continue;
     // Garrisoned troops stay put; leave is handled by updateBunkerGarrison
@@ -1813,6 +1860,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       continue;
     }
     if (unit._mobilityDamaged) {
+      if (unit.def?.type === 'armoredCar') unit._driveSpeed = 0;
       unit.moveTarget = null;
       unit._movePath = null;
       unit._userMoveOrder = false;
@@ -2000,6 +2048,16 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         advanceUnitOnTerrain(unit, dest, mapDef, moveDt, {
           horizReach: movePathHorizontalReach(unit, mapDef),
         });
+        const vehicleCollision = clampVehicleMoveAgainstUnits(
+          unit,
+          collisionUnits,
+          beforeX,
+          beforeZ,
+          collisionOptions
+        );
+        if (vehicleCollision?.pushedWreck) {
+          skipVehicleWaypointsBlockedByWreck(unit, vehicleCollision.wreck);
+        }
         const directionX = unit.position.x - beforeX;
         const directionZ = unit.position.z - beforeZ;
         let blockedByBuilding = false;
@@ -2184,6 +2242,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     }
 
     if (!unit.moveTarget) {
+      if (unit.def?.type === 'armoredCar') unit._driveSpeed = 0;
       unit._autoMoveOrderX = null;
       unit._autoMoveOrderZ = null;
       if (!unit._userMoveOrder) unit._reverseMoveOrder = false;

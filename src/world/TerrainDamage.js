@@ -313,7 +313,12 @@ function seededCraterNoise(index, seed, salt) {
 
 function craterTextureKey(mapDef, x, z, heavy) {
   const bucket = Math.floor(x * 0.7) ^ Math.floor(z * 0.7);
-  return `${mapDef?.id ?? 'map'}:${terrainKind(mapDef)}:${heavy ? 'h' : 'm'}:${bucket % 5}`;
+  // Keep five deterministic variants on both sides of the world origin.
+  // JavaScript's remainder keeps the dividend sign, which previously turned
+  // the intended five variants into nine (-4..4) and left a first strafe
+  // generating/uploading fresh 256px canvases while the fighter was moving.
+  const variant = ((bucket % 5) + 5) % 5;
+  return `${mapDef?.id ?? 'map'}:${terrainKind(mapDef)}:${heavy ? 'h' : 'm'}:${variant}`;
 }
 
 function getCraterTexture(mapDef, x, z, heavy) {
@@ -347,15 +352,34 @@ function scheduleCraterTextureWarm() {
 }
 
 /** Build exact crater texture variants during a strike's warning period. */
-export function prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy = false) {
+export function prewarmExplosionCraterTextures(
+  renderer,
+  mapDef,
+  impacts,
+  heavy = false,
+  prioritize = false
+) {
   if (!Array.isArray(impacts)) return;
+  const priorityJobs = [];
   for (const impact of impacts) {
     if (!Number.isFinite(impact?.x) || !Number.isFinite(impact?.z)) continue;
     const key = craterTextureKey(mapDef, impact.x, impact.z, heavy);
     const pendingKey = `${craterTextureGeneration}:${key}`;
-    if (texCache.has(key) || pendingTextureKeys.has(pendingKey)) continue;
+    if (texCache.has(key)) continue;
+
+    // A previous support call may already have queued this exact variant.
+    // Promote it when the new warning belongs to the imminent strike so the
+    // first impact cannot wait behind stale warm-up work.
+    const queuedIndex = prioritize
+      ? craterTextureWarmQueue.findIndex((job) => job.pendingKey === pendingKey)
+      : -1;
+    if (queuedIndex >= 0) {
+      priorityJobs.push(craterTextureWarmQueue.splice(queuedIndex, 1)[0]);
+      continue;
+    }
+    if (pendingTextureKeys.has(pendingKey)) continue;
     pendingTextureKeys.add(pendingKey);
-    craterTextureWarmQueue.push({
+    const job = {
       mapDef,
       renderer,
       x: impact.x,
@@ -363,9 +387,30 @@ export function prewarmExplosionCraterTextures(renderer, mapDef, impacts, heavy 
       heavy,
       pendingKey,
       generation: craterTextureGeneration,
-    });
+    };
+    if (prioritize) priorityJobs.push(job);
+    else craterTextureWarmQueue.push(job);
+  }
+  if (priorityJobs.length) {
+    // Preserve the impact order while moving this strike ahead of older jobs.
+    craterTextureWarmQueue.unshift(...priorityJobs.reverse());
   }
   scheduleCraterTextureWarm();
+}
+
+/**
+ * Build the complete light/medium crater atlas before battle rendering starts.
+ * Five variants retain the full visual variety used by shell and strafe scars;
+ * doing this during setup keeps the expensive canvas paint and GPU upload work
+ * out of the first visible fighter pass.
+ */
+export function prewarmMapCraterTextures(renderer, mapDef) {
+  for (let variant = 0; variant < 5; variant++) {
+    // z=0 and a positive x bucket produce each normalized cache variant.
+    const x = (variant + 0.1) / 0.7;
+    const texture = getCraterTexture(mapDef, x, 0, false);
+    renderer?.initTexture?.(texture);
+  }
 }
 
 function getCraterDeformationState(geo, pos) {
@@ -379,6 +424,14 @@ function getCraterDeformationState(geo, pos) {
     geo.userData.craterOffsets = offsets;
   }
   return { baseY, offsets };
+}
+
+/** Allocate crater deformation buffers before the first shell reaches terrain. */
+export function prewarmTerrainDamage(terrainMesh) {
+  const geo = terrainMesh?.geometry;
+  const pos = geo?.attributes?.position;
+  if (!geo || !pos) return;
+  getCraterDeformationState(geo, pos);
 }
 
 function mergeCraterOffset(current, next) {

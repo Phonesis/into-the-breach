@@ -1647,19 +1647,49 @@ function usesHullAlignedDrive(unit) {
   return isVehicleUnit(unit?.def?.type);
 }
 
+const ARMORED_CAR_TYPE = 'armoredCar';
+const ARMORED_CAR_ACCELERATION = 8.5;
+const ARMORED_CAR_BRAKING = 12.5;
+
+function approachValue(current, target, maxDelta) {
+  if (current < target) return Math.min(target, current + maxDelta);
+  return Math.max(target, current - maxDelta);
+}
+
+function getArmoredCarDriveSpeed(unit, targetSpeed, dt) {
+  if (unit.def?.type !== ARMORED_CAR_TYPE) return targetSpeed;
+
+  const currentSpeed = Number.isFinite(unit._driveSpeed)
+    ? Math.max(0, unit._driveSpeed)
+    : 0;
+  const rate = targetSpeed >= currentSpeed
+    ? ARMORED_CAR_ACCELERATION
+    : ARMORED_CAR_BRAKING;
+  unit._driveSpeed = approachValue(
+    currentSpeed,
+    Math.max(0, targetSpeed),
+    rate * Math.max(0, dt)
+  );
+  return unit._driveSpeed;
+}
+
 /**
  * Move one step toward dest, snapping Y to terrain. Returns false if already there.
  * Vehicles turn the hull toward the travel direction and only roll along that axis
  * (no sideways sliding). Infantry may still step freely.
  */
 export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
-  if (!dest || !mapDef) return false;
+  if (!dest || !mapDef) {
+    if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+    return false;
+  }
 
   const cfg = getMoveReachConfig(unit.def?.type);
   const horizReach = options.horizReach ?? cfg.horiz;
   const canalMove = resolveUrbanCanalMoveTarget(unit, dest, mapDef, cfg);
   const movementDest = canalMove.target;
   if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
+    if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
     if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
     return false;
   }
@@ -1683,6 +1713,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
 
   for (let s = 0; s < substeps; s++) {
     if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
+      if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
       if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
       return false;
     }
@@ -1690,7 +1721,10 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
     const dx = movementDest.x - unit.position.x;
     const dz = movementDest.z - unit.position.z;
     const horiz = Math.hypot(dx, dz);
-    if (horiz < 0.001) return false;
+    if (horiz < 0.001) {
+      if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+      return false;
+    }
 
     const nx = dx / horiz;
     const nz = dz / horiz;
@@ -1758,22 +1792,33 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
         : forwardDot >= alignDotMin;
       if (!aligned) {
         // Nudge slowly only if mostly forward/back already; otherwise pure turn.
-        if (Math.abs(forwardDot) < 0.35) continue;
+        if (Math.abs(forwardDot) < 0.35) {
+          if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+          continue;
+        }
       }
     }
 
-    let speed = unit.def.speed * reverseSpeedMultiplier * subDt;
-    if (uphill > 2) speed *= 0.58;
-    else if (uphill > 0.6) speed *= 0.78;
-    else if (uphill < -1.5) speed *= 1.05;
+    let targetSpeed = unit.def.speed * reverseSpeedMultiplier;
+    if (uphill > 2) targetSpeed *= 0.58;
+    else if (uphill > 0.6) targetSpeed *= 0.78;
+    else if (uphill < -1.5) targetSpeed *= 1.05;
 
     if (hullDrive) {
       // Drive along hull forward; scale by alignment so sharp turns slow naturally.
       const drive = reversing
         ? Math.min(0, forwardDot) // reverse only when nose is away from dest
         : Math.max(0, forwardDot);
-      const alignScale = Math.max(0, Math.min(1, (Math.abs(drive) - 0.35) / 0.55));
-      speed *= 0.15 + 0.85 * alignScale;
+      const alignScale =
+        unit.def?.type === ARMORED_CAR_TYPE
+          ? Math.max(0, Math.min(1, (Math.abs(drive) - 0.2) / 0.8))
+          : Math.max(0, Math.min(1, (Math.abs(drive) - 0.35) / 0.55));
+      const turnSpeedScale =
+        unit.def?.type === ARMORED_CAR_TYPE
+          ? 0.18 + 0.82 * alignScale * alignScale
+          : 0.15 + 0.85 * alignScale;
+      targetSpeed *= turnSpeedScale;
+      const speed = getArmoredCarDriveSpeed(unit, targetSpeed, subDt) * subDt;
       const step = Math.min(speed, horiz);
       const sign = drive < 0 || reversing ? -1 : 1;
       // Only roll when we have meaningful forward/back commitment.
@@ -1788,7 +1833,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
         );
       }
     } else {
-      const step = Math.min(speed, horiz);
+      const step = Math.min(targetSpeed * subDt, horiz);
       unit.position.x += nx * step;
       unit.position.z += nz * step;
       unit.position.y = sampleUnitTerrainHeight(

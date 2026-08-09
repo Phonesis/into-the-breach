@@ -20,7 +20,7 @@ export const GAME_MODES = {
     id: 'clearance',
     name: 'Fortified Line',
     subtitle:
-      'Break prepared positions within 15 minutes or command the garrison until the attackers are forced to retreat.',
+      'Break prepared positions within the optional 15-minute deadline, or command the garrison until the attackers are forced to retreat.',
     needsRole: true,
   },
   /** @deprecated Legacy alias; starts as Clear Defenses with Small reinforcements. */
@@ -118,18 +118,26 @@ export const CLEARANCE_ROLES = {
     id: 'attack',
     name: 'Assault the Position',
     subtitle:
-      'Assault prepared defenses with a fixed force. Wipe every defender within 15 minutes to win.',
+      'Assault prepared defenses with a fixed force. Wipe every defender before the optional 15-minute deadline to win.',
   },
   defend: {
     id: 'defend',
     name: 'Command the Garrison',
     subtitle:
-      'Hold dug-in positions for 15 minutes or destroy the attacking force to win.',
+      'Hold dug-in positions until the optional 15-minute deadline or destroy the attacking force to win.',
   },
 };
 
 export const CLEARANCE_ROLE_LIST = Object.values(CLEARANCE_ROLES);
 export const DEFAULT_CLEARANCE_ROLE = 'attack';
+
+/** The Fortified Line deadline is enabled for new operations by default. */
+export const DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED = true;
+
+export function resolveClearanceTimeLimitEnabled(options = {}) {
+  const raw = options.clearanceTimeLimitEnabled;
+  return typeof raw === 'boolean' ? raw : DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED;
+}
 
 export function resolveClearanceRole(options = {}) {
   const raw = options.clearanceRole ?? options.assaultRole;

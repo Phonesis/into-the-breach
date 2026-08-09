@@ -14,6 +14,7 @@ import {
   DEFAULT_CLEARANCE_REINFORCEMENT_SIZE,
   CLEARANCE_ROLE_LIST,
   DEFAULT_CLEARANCE_ROLE,
+  DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED,
   STANDARD_UNIT_LIMIT,
   canUseAssaultMapSize,
   resolveAssaultMapSize,
@@ -79,6 +80,14 @@ import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
 import { BattleMinimap } from './Minimap.js';
+import {
+  DEBRIS_RETENTION_OPTIONS,
+  GAME_SETTING_KEYS,
+  readBooleanSetting,
+  readDebrisRetentionIndex,
+  writeBooleanSetting,
+  writeDebrisRetentionIndex,
+} from '../game/GameSettings.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
 import {
   LAST_STAND_DEPLOY_MODE_LIST,
@@ -133,14 +142,14 @@ function hpBarMarkup(hp, maxHp, { showValues = true, compact = false } = {}) {
   `;
 }
 
-const UNIT_FIELD_ICONS_KEY = 'ww2-rts-unit-field-icons';
-const UNIT_STATUS_VISIBLE_KEY = 'ww2-rts-unit-status-visible';
-const FRONTLINE_VISIBLE_KEY = 'ww2-rts-frontline-visible';
-const CAPTURE_POINTS_VISIBLE_KEY = 'ww2-rts-capture-points-visible';
-const SEEK_COVER_MODE_KEY = 'ww2-rts-seek-cover-mode';
+const UNIT_FIELD_ICONS_KEY = GAME_SETTING_KEYS.unitFieldIcons;
+const UNIT_STATUS_VISIBLE_KEY = GAME_SETTING_KEYS.unitStatus;
+const FRONTLINE_VISIBLE_KEY = GAME_SETTING_KEYS.frontline;
+const CAPTURE_POINTS_VISIBLE_KEY = GAME_SETTING_KEYS.capturePoints;
+const SEEK_COVER_MODE_KEY = GAME_SETTING_KEYS.seekCover;
 const AUTO_BUILD_MODE_KEYS = {
-  classic: 'ww2-rts-auto-build-mode-classic',
-  baseBuilding: 'ww2-rts-auto-build-mode-base-building',
+  classic: GAME_SETTING_KEYS.autoBuildClassic,
+  baseBuilding: GAME_SETTING_KEYS.autoBuildBaseBuilding,
 };
 const AUTO_BUILD_MODE_KEY_LEGACY = 'ww2-rts-auto-build-mode';
 
@@ -192,6 +201,7 @@ export class UIManager {
     this.selectedDifficulty = DEFAULT_DIFFICULTY;
     this.selectedCampaignStyle = 'classic';
     this.selectedClearanceReinforcementSize = DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
+    this.selectedClearanceTimeLimitEnabled = DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED;
     this.selectedTdWaveMode = 'standard';
     this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
@@ -201,11 +211,12 @@ export class UIManager {
     this._baseBuildUiKey = '';
     this._hudBaseBuilding = false;
     this._hudStandardCampaign = false;
-    this.showUnitFieldIcons = localStorage.getItem(UNIT_FIELD_ICONS_KEY) !== '0';
-    this.showUnitStatus = localStorage.getItem(UNIT_STATUS_VISIBLE_KEY) !== '0';
-    this.showFrontline = localStorage.getItem(FRONTLINE_VISIBLE_KEY) !== '0';
-    this.showCapturePoints = localStorage.getItem(CAPTURE_POINTS_VISIBLE_KEY) !== '0';
-    this.seekCoverMode = localStorage.getItem(SEEK_COVER_MODE_KEY) === '1';
+    this._settingsReturnTarget = 'title';
+    this.showUnitFieldIcons = readBooleanSetting(UNIT_FIELD_ICONS_KEY, true);
+    this.showUnitStatus = readBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
+    this.showFrontline = readBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
+    this.showCapturePoints = readBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
+    this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, false);
     /** When true, all in-battle HUD chrome is hidden (toggle from pause menu). */
     this.hudHidden = false;
     this.autoBuildMode = false;
@@ -233,6 +244,7 @@ export class UIManager {
     this._syncGeneralOrdersCollapse();
     this._syncDefenseCollapse();
     this._syncBaseBuildCollapse();
+    this._syncSettingsControls();
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -257,10 +269,84 @@ export class UIManager {
           <div class="title-actions title-screen-actions">
             <button class="btn btn-primary interactive" id="btn-start">New Operation</button>
             <button class="btn btn-secondary interactive" id="btn-load-saves">Continue Saved Battle</button>
+            <button class="btn btn-secondary interactive" id="btn-settings">Settings</button>
             <button class="btn btn-secondary interactive" id="btn-guide-title">Open Field Manual</button>
             <button class="btn btn-secondary interactive" id="btn-about">Credits &amp; Information</button>
           </div>
           <p class="title-footnote">Plan the operation. Choose your command. Fight the battle.</p>
+        </div>
+      </div>
+
+      <div id="screen-settings" class="screen menu-screen settings-screen interactive hidden">
+        <div class="title-block">
+          <span class="menu-kicker">Headquarters Configuration</span>
+          <h1>Settings</h1>
+          <p>Choose the battlefield defaults used whenever you begin or resume an operation. Changes are saved automatically in this browser.</p>
+        </div>
+        <div class="panel menu-panel settings-panel">
+          <h2>Battlefield Interface</h2>
+          <div class="settings-grid">
+            <label class="setting-row" for="setting-minimap">
+              <span><strong>Tactical map</strong><small>Show the minimap when a battle begins.</small><span class="setting-detail" id="setting-minimap-detail">Displays friendly and enemy contacts, commander markers, capture points, and fading traces from active firefights. Click the map to move the camera instantly; hiding it does not change unit awareness or battlefield rules.</span></span>
+              <input type="checkbox" id="setting-minimap" data-setting="minimap" aria-describedby="setting-minimap-detail" />
+            </label>
+            <label class="setting-row" for="setting-field-icons">
+              <span><strong>Field icons</strong><small>Show unit-type icons and health bars above friendly forces.</small><span class="setting-detail" id="setting-field-icons-detail">Adds readable role symbols and health bars above your troops so mixed formations are easier to identify at a glance. This is display-only and does not affect selection, targeting, combat, or enemy visibility.</span></span>
+              <input type="checkbox" id="setting-field-icons" data-setting="unitFieldIcons" aria-describedby="setting-field-icons-detail" />
+            </label>
+            <label class="setting-row" for="setting-unit-status">
+              <span><strong>Unit status markers</strong><small>Show Inspired, In Cover, Retreat, and support markers.</small><span class="setting-detail" id="setting-unit-status-detail">Shows tactical states including morale, cover, retreat, surrender, healing, and repairs above units. Turning this off only reduces battlefield labels; the states and their gameplay effects remain active and selection details stay available.</span></span>
+              <input type="checkbox" id="setting-unit-status" data-setting="unitStatus" aria-describedby="setting-unit-status-detail" />
+            </label>
+            <label class="setting-row" for="setting-capture-points">
+              <span><strong>Capture circles</strong><small>Show capture-zone circles on the battlefield.</small><span class="setting-detail" id="setting-capture-points-detail">Draws the ground boundary of objectives in modes that use capture zones. Hiding the circles does not disable capturing, ownership changes, income, or victory progress; it only removes the large battlefield rings.</span></span>
+              <input type="checkbox" id="setting-capture-points" data-setting="capturePoints" aria-describedby="setting-capture-points-detail" />
+            </label>
+            <label class="setting-row" for="setting-frontline">
+              <span><strong>Frontline</strong><small>Show the red frontline in modes that use it.</small><span class="setting-detail" id="setting-frontline-detail">Displays the sector boundary used in Breakthrough and Hold the Line battles. Hiding it is visual only: deployment limits, defensive territory, breach timers, and frontline movement continue to work normally.</span></span>
+              <input type="checkbox" id="setting-frontline" data-setting="frontline" aria-describedby="setting-frontline-detail" />
+            </label>
+            <label class="setting-row" for="setting-seek-cover">
+              <span><strong>Seek Cover</strong><small>Route foot-troop move orders toward nearby cover by default.</small><span class="setting-detail" id="setting-seek-cover-detail">Future move orders for infantry, commanders, medics, engineers, MGs, mortars, and snipers will snap to suitable nearby cover. Tanks, armored cars, anti-tank guns, and artillery still move to the exact point ordered.</span></span>
+              <input type="checkbox" id="setting-seek-cover" data-setting="seekCover" aria-describedby="setting-seek-cover-detail" />
+            </label>
+          </div>
+
+          <h2 class="settings-section-title">Standard Mode Automation</h2>
+          <div class="settings-grid settings-grid--compact">
+            <label class="setting-row" for="setting-auto-build-classic">
+              <span><strong>Auto Build — Classic</strong><small>Automatically maintain a balanced reinforcement queue.</small><span class="setting-detail" id="setting-auto-build-classic-detail">Available in Standard — Classic battles. It fills open queue slots with a combined-arms mix based on your current force, supplies, and unit cap. You can still add units manually, and enabling cheat mode temporarily disables automation.</span></span>
+              <input type="checkbox" id="setting-auto-build-classic" data-setting="autoBuildClassic" aria-describedby="setting-auto-build-classic-detail" />
+            </label>
+            <label class="setting-row" for="setting-auto-build-base">
+              <span><strong>Auto Build — Base Building</strong><small>Enable automatic production after constructing your base.</small><span class="setting-detail" id="setting-auto-build-base-detail">Available in Standard — Base Building battles. Automation uses your unlocked units and working production buildings, but may spend supplies you intended for new structures or upgrades, so leaving it off gives tighter control over early expansion.</span></span>
+              <input type="checkbox" id="setting-auto-build-base" data-setting="autoBuildBaseBuilding" aria-describedby="setting-auto-build-base-detail" />
+            </label>
+          </div>
+
+          <h2 class="settings-section-title">Battlefield Remains</h2>
+          <div class="debris-setting">
+            <div class="debris-setting-copy">
+              <strong>Bodies and destroyed vehicles</strong>
+              <small>How long fallen troops and knocked-out vehicles remain after destruction.</small>
+            </div>
+            <output id="debris-retention-value" for="debris-retention-slider">Permanent</output>
+            <input
+              type="range"
+              id="debris-retention-slider"
+              min="0"
+              max="${DEBRIS_RETENTION_OPTIONS.length - 1}"
+              step="1"
+              value="${readDebrisRetentionIndex()}"
+              aria-describedby="debris-performance-warning"
+            />
+            <div class="debris-scale" aria-hidden="true"><span>10 sec</span><span>30 sec</span><span>1 min</span><span>2 min</span><span>5 min</span><span>Permanent</span></div>
+            <p class="settings-warning" id="debris-performance-warning"><strong>Performance warning:</strong> Longer retention — especially Permanent — can reduce frame rate as casualties and wrecks accumulate.</p>
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-settings">Return to Headquarters</button>
+          </div>
         </div>
       </div>
 
@@ -371,6 +457,17 @@ export class UIManager {
           <div class="campaign-style-block hidden" id="clearance-style-block">
             <h2>Reinforcement Size</h2>
             <div class="campaign-style-grid" id="clearance-style-grid"></div>
+          </div>
+          <div class="campaign-style-block hidden" id="clearance-time-limit-block">
+            <h2>Assault Deadline</h2>
+            <label class="setting-row" for="clearance-time-limit-toggle">
+              <span>
+                <strong>15-minute deadline</strong>
+                <small>On by default. End the assault when the clock reaches 15:00.</small>
+                <span class="setting-detail" id="clearance-time-limit-detail">With this enabled, attackers must clear every defender before 15 minutes, while the garrison wins by holding until the deadline. Turn it off for an open-ended Fortified Line battle; force elimination still ends the battle.</span>
+              </span>
+              <input type="checkbox" id="clearance-time-limit-toggle" aria-describedby="clearance-time-limit-detail" />
+            </label>
           </div>
           <div class="campaign-style-block hidden" id="td-wave-mode-block">
             <h2>Battle Duration</h2>
@@ -497,15 +594,25 @@ export class UIManager {
           <div class="pause-overlay-card interactive">
             <p class="pause-overlay-title">Paused</p>
             <p class="pause-overlay-sub">Press <kbd>P</kbd> to resume</p>
-            <button
-              type="button"
-              class="btn btn-secondary pause-hud-toggle interactive"
-              id="btn-toggle-hud-visibility"
-              aria-pressed="false"
-              title="Hide all on-screen HUD elements (minimap, panels, banners). Press P again to pause and show this menu."
-            >
-              Hide HUD
-            </button>
+            <div class="pause-overlay-actions">
+              <button
+                type="button"
+                class="btn btn-secondary pause-hud-toggle interactive"
+                id="btn-toggle-hud-visibility"
+                aria-pressed="false"
+                title="Hide all on-screen HUD elements (minimap, panels, banners). Press P again to pause and show this menu."
+              >
+                Hide HUD
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary pause-settings-btn interactive"
+                id="btn-pause-settings"
+                title="Open persistent battlefield settings while the battle remains paused"
+              >
+                Settings
+              </button>
+            </div>
             <p class="pause-overlay-hud-hint" id="pause-hud-toggle-hint">
               Hides minimap, panels, and status banners for a clear view
             </p>
@@ -1115,6 +1222,7 @@ export class UIManager {
     const styleBlock = this.root.querySelector('#campaign-style-block');
     const clearanceRoleBlock = this.root.querySelector('#clearance-role-block');
     const clearanceStyleBlock = this.root.querySelector('#clearance-style-block');
+    const clearanceTimeLimitBlock = this.root.querySelector('#clearance-time-limit-block');
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
     const tdStyleBlock = this.root.querySelector('#td-style-block');
     const lastStandBlock = this.root.querySelector('#laststand-deploy-block');
@@ -1127,6 +1235,7 @@ export class UIManager {
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
     if (clearanceRoleBlock) clearanceRoleBlock.classList.toggle('hidden', !isClearance);
     if (clearanceStyleBlock) clearanceStyleBlock.classList.toggle('hidden', !isClearance);
+    if (clearanceTimeLimitBlock) clearanceTimeLimitBlock.classList.toggle('hidden', !isClearance);
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
     if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
     if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
@@ -1138,6 +1247,10 @@ export class UIManager {
     if (isClearance) {
       this.renderClearanceRoles();
       this.renderClearanceStyles();
+    }
+    const clearanceTimeLimitToggle = this.root.querySelector('#clearance-time-limit-toggle');
+    if (clearanceTimeLimitToggle) {
+      clearanceTimeLimitToggle.checked = this.selectedClearanceTimeLimitEnabled;
     }
     if (isTowerDefense) {
       this.renderTdWaveModes();
@@ -1275,7 +1388,7 @@ export class UIManager {
   }
 
   bind() {
-    const menuScreens = new Set(['title', 'mode', 'assault-role', 'faction', 'map', 'saves']);
+    const menuScreens = new Set(['title', 'settings', 'mode', 'assault-role', 'faction', 'map', 'saves']);
 
     const show = (id) => {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
@@ -1288,12 +1401,34 @@ export class UIManager {
     };
 
     this.root.querySelector('#btn-start').onclick = () => show('mode');
+    this.root.querySelector('#btn-settings').onclick = () => {
+      this._settingsReturnTarget = 'title';
+      this._syncSettingsBackButton();
+      this._syncSettingsControls();
+      show('settings');
+    };
+    this.root.querySelector('#btn-back-settings').onclick = () => {
+      if (!this.closePausedSettings()) show('title');
+    };
+    this.root.querySelector('#btn-pause-settings')?.addEventListener('click', () => {
+      this.openPausedSettings();
+    });
     this.root.querySelector('#btn-load-saves').onclick = () => {
       this.renderSaveList();
       show('saves');
     };
     this.root.querySelector('#btn-back-saves').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
+    this.root.querySelectorAll('[data-setting]').forEach((input) => {
+      input.addEventListener('change', () => this._setMenuSetting(input.dataset.setting, input.checked));
+    });
+    this.root.querySelector('#debris-retention-slider')?.addEventListener('input', (event) => {
+      const index = writeDebrisRetentionIndex(event.currentTarget.value);
+      this._syncDebrisRetentionControl(index);
+      if (this._settingsReturnTarget === 'pause') {
+        this.callbacks.onChangeDebrisRetention?.(DEBRIS_RETENTION_OPTIONS[index].seconds);
+      }
+    });
     this.root.querySelector('#btn-about')?.addEventListener('click', () => this.openAbout());
     this.root.querySelector('#btn-about-close')?.addEventListener('click', () => this.closeAbout());
     this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
@@ -1445,6 +1580,10 @@ export class UIManager {
       this.selectedClearanceRole = btn.dataset.id;
     });
 
+    this.root.querySelector('#clearance-time-limit-toggle')?.addEventListener('change', (e) => {
+      this.selectedClearanceTimeLimitEnabled = e.currentTarget.checked;
+    });
+
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
       if (
@@ -1548,6 +1687,10 @@ export class UIManager {
           clearanceReinforcementSize:
             this.selectedGameMode === 'clearance'
               ? this.selectedClearanceReinforcementSize
+              : undefined,
+          clearanceTimeLimitEnabled:
+            this.selectedGameMode === 'clearance'
+              ? this.selectedClearanceTimeLimitEnabled
               : undefined,
           tdWaveMode:
             this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
@@ -1945,6 +2088,7 @@ export class UIManager {
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance' || gameMode === 'clearanceReinforced';
     const clearanceReinforced = clearance && options.clearanceReinforced;
+    const clearanceTimeLimitEnabled = clearance && options.clearanceTimeLimitEnabled !== false;
     const towerDefense = gameMode === 'towerDefense' || options.towerDefense;
     const tdHqDefense = towerDefense && (options.tdHqDefense || options.tdStyle === 'hqDefense');
     const lastStand = gameMode === 'lastStand' || options.lastStand;
@@ -1973,9 +2117,10 @@ export class UIManager {
             ? 'Medium'
             : 'Small';
       const roleLabel = options.clearanceRole === 'defend' ? 'Defend' : 'Attack';
+      const deadlineLabel = clearanceTimeLimitEnabled ? '15-minute assault' : 'no assault deadline';
       clearanceBanner.textContent = clearanceReinforced
-        ? `Fortified Line · ${roleLabel} · 15-minute assault · ${sizeLabel} reinforcements every 3 minutes`
-        : `Fortified Line · ${roleLabel} · 15-minute assault`;
+        ? `Fortified Line · ${roleLabel} · ${deadlineLabel} · ${sizeLabel} reinforcements every 3 minutes`
+        : `Fortified Line · ${roleLabel} · ${deadlineLabel}`;
     }
 
     this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
@@ -2041,10 +2186,16 @@ export class UIManager {
       } else if (clearance) {
         this._defaultHudHint =
           options.clearanceRole === 'defend'
-            ? 'Fortified Line (Defend): hold for 15 minutes or destroy the assault force · attackers retreat when time expires'
+            ? clearanceTimeLimitEnabled
+              ? 'Fortified Line (Defend): hold for 15 minutes or destroy the assault force · attackers retreat when time expires'
+              : 'Fortified Line (Defend): hold the line or destroy the assault force · no deadline'
             : clearanceReinforced
-              ? 'Fortified Line (Attack): wipe all defenders within 15 minutes · both sides reinforce every 3 minutes'
-              : 'Fortified Line (Attack): wipe all defenders within 15 minutes · no HQ or sector economy';
+              ? clearanceTimeLimitEnabled
+                ? 'Fortified Line (Attack): wipe all defenders within 15 minutes · both sides reinforce every 3 minutes'
+                : 'Fortified Line (Attack): wipe all defenders · no deadline · both sides reinforce every 3 minutes'
+              : clearanceTimeLimitEnabled
+                ? 'Fortified Line (Attack): wipe all defenders within 15 minutes · no HQ or sector economy'
+                : 'Fortified Line (Attack): wipe all defenders · no deadline · no HQ or sector economy';
       } else if (assault) {
         this._defaultHudHint =
           'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
@@ -2129,8 +2280,128 @@ export class UIManager {
 
   setUnitFieldIconsEnabled(on) {
     this.showUnitFieldIcons = !!on;
-    localStorage.setItem(UNIT_FIELD_ICONS_KEY, on ? '1' : '0');
+    writeBooleanSetting(UNIT_FIELD_ICONS_KEY, on);
     this._syncFieldIconToggle();
+  }
+
+  openPausedSettings() {
+    const hud = this.root.querySelector('#hud');
+    const settings = this.root.querySelector('#screen-settings');
+    if (!hud || !settings || hud.classList.contains('hidden')) return;
+    this._settingsReturnTarget = 'pause';
+    this._syncSettingsBackButton();
+    this._syncSettingsControls();
+    this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+    hud.classList.add('hidden');
+    settings.classList.remove('hidden');
+    settings.scrollTop = 0;
+  }
+
+  closePausedSettings() {
+    if (this._settingsReturnTarget !== 'pause') return false;
+    this.root.querySelector('#screen-settings')?.classList.add('hidden');
+    this.root.querySelector('#hud')?.classList.remove('hidden');
+    this._settingsReturnTarget = 'title';
+    this._syncSettingsBackButton();
+    return true;
+  }
+
+  isPausedSettingsOpen() {
+    return (
+      this._settingsReturnTarget === 'pause' &&
+      !this.root.querySelector('#screen-settings')?.classList.contains('hidden')
+    );
+  }
+
+  _syncSettingsBackButton() {
+    const btn = this.root.querySelector('#btn-back-settings');
+    if (btn) {
+      btn.textContent = this._settingsReturnTarget === 'pause'
+        ? 'Return to Paused Battle'
+        : 'Return to Headquarters';
+    }
+  }
+
+  _setMenuSetting(setting, on) {
+    const applyToBattle = this._settingsReturnTarget === 'pause';
+    switch (setting) {
+      case 'minimap':
+        this.minimap?.setVisible(on);
+        this.showMinimap = !!on;
+        break;
+      case 'unitFieldIcons':
+        this.setUnitFieldIconsEnabled(on);
+        if (applyToBattle) this.callbacks.onToggleUnitFieldIcons?.(this.showUnitFieldIcons);
+        break;
+      case 'unitStatus':
+        this.setUnitStatusEnabled(on);
+        if (applyToBattle) this.callbacks.onToggleUnitStatus?.(this.showUnitStatus);
+        break;
+      case 'frontline':
+        this.setFrontlineVisible(on);
+        if (applyToBattle) this.callbacks.onToggleFrontline?.(this.showFrontline);
+        break;
+      case 'capturePoints':
+        this.setCapturePointsVisible(on);
+        if (applyToBattle) this.callbacks.onToggleCapturePoints?.(this.showCapturePoints);
+        break;
+      case 'seekCover':
+        this.setSeekCoverMode(on);
+        if (applyToBattle) this.callbacks.onToggleSeekCover?.(this.seekCoverMode);
+        break;
+      case 'autoBuildClassic':
+        writeBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, on);
+        if (this._hudCampaignStyle === 'classic') {
+          this.autoBuildMode = !!on;
+          this._syncAutoBuildToggle();
+          if (applyToBattle && this._hudAutoBuildAvailable) {
+            this.callbacks.onToggleAutoBuild?.(this.autoBuildMode);
+          }
+        }
+        break;
+      case 'autoBuildBaseBuilding':
+        writeBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, on);
+        if (this._hudCampaignStyle === 'baseBuilding') {
+          this.autoBuildMode = !!on;
+          this._syncAutoBuildToggle();
+          if (applyToBattle && this._hudAutoBuildAvailable) {
+            this.callbacks.onToggleAutoBuild?.(this.autoBuildMode);
+          }
+        }
+        break;
+      default:
+        return;
+    }
+    this._syncSettingsControls();
+  }
+
+  _syncSettingsControls() {
+    const states = {
+      minimap: this.minimap?.visible ?? readBooleanSetting(GAME_SETTING_KEYS.minimap, true),
+      unitFieldIcons: this.showUnitFieldIcons,
+      unitStatus: this.showUnitStatus,
+      frontline: this.showFrontline,
+      capturePoints: this.showCapturePoints,
+      seekCover: this.seekCoverMode,
+      autoBuildClassic: readBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false),
+      autoBuildBaseBuilding: readBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false),
+    };
+    for (const [setting, enabled] of Object.entries(states)) {
+      const input = this.root.querySelector(`[data-setting="${setting}"]`);
+      if (input) input.checked = !!enabled;
+    }
+    this._syncDebrisRetentionControl(readDebrisRetentionIndex());
+  }
+
+  _syncDebrisRetentionControl(index) {
+    const safeIndex = Math.max(
+      0,
+      Math.min(DEBRIS_RETENTION_OPTIONS.length - 1, Math.round(Number(index) || 0))
+    );
+    const slider = this.root.querySelector('#debris-retention-slider');
+    const output = this.root.querySelector('#debris-retention-value');
+    if (slider) slider.value = String(safeIndex);
+    if (output) output.textContent = DEBRIS_RETENTION_OPTIONS[safeIndex].label;
   }
 
   _syncFieldIconToggle() {
@@ -2145,7 +2416,7 @@ export class UIManager {
 
   setUnitStatusEnabled(on) {
     this.showUnitStatus = !!on;
-    localStorage.setItem(UNIT_STATUS_VISIBLE_KEY, on ? '1' : '0');
+    writeBooleanSetting(UNIT_STATUS_VISIBLE_KEY, on);
     this._syncUnitStatusToggle();
   }
 
@@ -2161,7 +2432,7 @@ export class UIManager {
 
   setSeekCoverMode(on) {
     this.seekCoverMode = !!on;
-    localStorage.setItem(SEEK_COVER_MODE_KEY, on ? '1' : '0');
+    writeBooleanSetting(SEEK_COVER_MODE_KEY, on);
     this._syncSeekCoverToggle();
   }
 
@@ -2176,7 +2447,7 @@ export class UIManager {
     if (this._hudCheatMode && on) return;
     this.autoBuildMode = !!on;
     if (options.persist !== false) {
-      localStorage.setItem(getAutoBuildStorageKey(campaignStyle), on ? '1' : '0');
+      writeBooleanSetting(getAutoBuildStorageKey(campaignStyle), on);
     }
     this._syncAutoBuildToggle();
   }
@@ -2245,7 +2516,7 @@ export class UIManager {
 
   setFrontlineVisible(on) {
     this.showFrontline = !!on;
-    localStorage.setItem(FRONTLINE_VISIBLE_KEY, on ? '1' : '0');
+    writeBooleanSetting(FRONTLINE_VISIBLE_KEY, on);
     this._syncFrontlineToggle();
   }
 
@@ -2261,7 +2532,7 @@ export class UIManager {
 
   setCapturePointsVisible(on) {
     this.showCapturePoints = !!on;
-    localStorage.setItem(CAPTURE_POINTS_VISIBLE_KEY, on ? '1' : '0');
+    writeBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, on);
     this._syncCapturePointToggle();
   }
 
@@ -3287,6 +3558,8 @@ export class UIManager {
   }
 
   hideHUD() {
+    this._settingsReturnTarget = 'title';
+    this._syncSettingsBackButton();
     this.hudHidden = false;
     this.setGamePaused(false);
     this.hideLastStandBriefing();
@@ -3367,23 +3640,28 @@ export class UIManager {
       el.textContent = `Your forces: ${playerAlive} · Practice mode`;
     } else if (clearance) {
       const playerDefends = opts.clearanceRole === 'defend';
-      const timeLeft = Math.max(
-        0,
-        Math.ceil((opts.clearanceTimeLimit ?? 15 * 60) - (opts.matchTime ?? 0))
-      );
-      const timeMins = Math.floor(timeLeft / 60);
-      const timeSecs = String(timeLeft % 60).padStart(2, '0');
       const forceText = playerDefends
         ? `Garrison: ${playerAlive} · Attackers: ${enemyAlive}`
         : `Assault force: ${playerAlive} · Defenders: ${enemyAlive}`;
       const reinforcement = opts.clearanceReinforcements;
+      const deadline = opts.clearanceTimeLimitEnabled !== false;
+      let timeText = 'No deadline';
+      if (deadline) {
+        const timeLeft = Math.max(
+          0,
+          Math.ceil((opts.clearanceTimeLimit ?? 15 * 60) - (opts.matchTime ?? 0))
+        );
+        const timeMins = Math.floor(timeLeft / 60);
+        const timeSecs = String(timeLeft % 60).padStart(2, '0');
+        timeText = `Assault time ${timeMins}:${timeSecs}`;
+      }
       if (reinforcement?.enabled) {
         const seconds = Math.max(0, Math.ceil(reinforcement.nextAt - (opts.matchTime ?? 0)));
         const mins = Math.floor(seconds / 60);
         const secs = String(seconds % 60).padStart(2, '0');
-        el.textContent = `${forceText} · Assault time ${timeMins}:${timeSecs} · Reinforcements ${mins}:${secs}`;
+        el.textContent = `${forceText} · ${timeText} · Reinforcements ${mins}:${secs}`;
       } else {
-        el.textContent = `${forceText} · Assault time ${timeMins}:${timeSecs}`;
+        el.textContent = `${forceText} · ${timeText}`;
       }
     } else if (opts.towerDefense && opts.tdHqDefense) {
       el.textContent = `Your forces: ${playerAlive} · Assault force: ${enemyAlive}`;

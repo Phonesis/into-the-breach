@@ -27,7 +27,15 @@ const WEAPON_POSE_TYPES = new Set([
   'vehicleCrew',
   'commander',
 ]);
-const PRONE_FIRE_TYPES = new Set(['radioOperator', 'infantry', 'paratrooper', 'engineer']);
+const PRONE_FIRE_TYPES = new Set([
+  'radioOperator',
+  'infantry',
+  'paratrooper',
+  'engineer',
+  'sniper',
+  'vehicleCrew',
+  'commander',
+]);
 
 /** True while a foot squad is visually prone (stationary and firing). */
 export function isUnitVisuallyProne(unit) {
@@ -876,6 +884,10 @@ export function updateInfantryWeaponPose(unit, dt) {
   if (!unit?.mesh || unit.dead || unit.surrendered || unit._captureExit || unit._dropping) return;
   if (!WEAPON_POSE_TYPES.has(unit.def?.type)) return;
 
+  if ((unit._underFireProneTimer ?? 0) > 0) {
+    unit._underFireProneTimer = Math.max(0, unit._underFireProneTimer - dt);
+  }
+
   if (unit._fireAimHold > 0) {
     unit._fireAimHold = Math.max(0, unit._fireAimHold - dt);
   }
@@ -896,7 +908,11 @@ export function updateInfantryWeaponPose(unit, dt) {
       !unit._mountedOnTankId &&
       !unit._trenchId &&
       !unit._diggingTrench;
-    const proneTarget = canGoProne && targetBlend > 0 ? 1 : 0;
+    const underFireProne =
+      !unit.moveTarget &&
+      !unit._userMoveOrder &&
+      (unit._underFireProneTimer ?? 0) > 0;
+    const proneTarget = canGoProne && (targetBlend > 0 || underFireProne) ? 1 : 0;
     const proneRate = proneTarget > (child.userData.proneBlend ?? 0) ? 7 : 5;
     const previousProneBlend = child.userData.proneBlend ?? 0;
     child.userData.proneBlend = THREE.MathUtils.lerp(

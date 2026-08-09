@@ -20,23 +20,28 @@ const temporary = join(tmpdir(), 'ww2-rts-elevenlabs-menu-theme.mp3');
 const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
 const force = process.argv.includes('--force');
 const validateOnly = process.argv.includes('--validate');
-const durationMs = 80_000;
+const durationMs = 90_000;
 const loopCrossfadeSec = 4;
 const promptLimit = 4_100;
 
+// Stylistic era: late-90s / early-2000s war games (Medal of Honor, Hidden & Dangerous)
+// mood — original writing only; never quote those scores.
 const prompt = [
   'Original instrumental main-menu theme for a serious World War Two tactical strategy game.',
-  'Classic symphonic war-drama scoring at roughly 76 BPM in D minor: a solemn four-note French-horn',
-  'motif, low strings and cellos, restrained military side drum, concert bass drum, timpani,',
-  'woodwinds, and broad orchestral brass. Begin quietly and nobly with distant horn and strings;',
-  'develop the motif with measured snare rhythm and rising counterpoint; reach a dramatic, heroic',
-  'but bittersweet full-orchestra climax; then settle back into the same sparse harmony and texture',
-  'as the opening so the track can loop naturally. Strong memorable melody, dignified and human,',
-  'evoking sacrifice, duty, uncertainty, and resolve. Instrumental only. Authentic acoustic',
-  'orchestra, late-1990s classic historical war-game atmosphere, wide cinematic stereo recording.',
-  'No quotation or imitation of any existing theme. No vocals, lyrics, modern synths, electric',
-  'guitar, rock drum kit, trailer braams, oversized percussion, sound effects, gunfire, explosions,',
-  'radio noise, abrupt ending, or triumphant Hollywood cheerfulness.',
+  'Late-1990s classic PC war-game orchestral atmosphere: dramatic, sombre, and haunted,',
+  'in the spirit of Medal of Honor and Hidden & Dangerous film-score drama — without quoting',
+  'or imitating any existing theme. Roughly 72 BPM in C minor / E-flat minor colors.',
+  'Instrumentation: low strings and cellos in dark ostinato, mournful French horns and muted',
+  'trombones, lonely solo trumpet, woodwinds, soft choir-like string pads without voices,',
+  'distant military snare, timpani, and restrained concert bass drum. Begin sparsely with cold',
+  'low strings and a fragile horn motif suggesting loss and dread; build with uneasy counterpoint,',
+  'marching snare, and tragic brass; swell to a dramatic, grim full-orchestra climax that feels',
+  'heroic yet devastated — undertones of tragedy, horror, and the cost of war; then recede into',
+  'the same sparse, mournful texture as the opening so the track loops cleanly. Memorable',
+  'melody, dignified, human, and bleak. Instrumental only. Authentic acoustic symphony orchestra,',
+  'wide cinematic stereo, dry natural hall reverb. No vocals, lyrics, modern synths, electric',
+  'guitar, rock kit, EDM, trailer braams, oversized hybrid percussion, sound effects, gunfire,',
+  'explosions, radio noise, abrupt ending, or cheerful triumphant fanfare.',
 ].join(' ');
 
 function validate() {
