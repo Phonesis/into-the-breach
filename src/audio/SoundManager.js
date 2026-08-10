@@ -320,6 +320,8 @@ export class SoundManager {
     this._constrainedAudio = isIPadLikeDevice();
     this._sampleLoadsActive = 0;
     this._sampleLoadWaiters = [];
+    this._coreLoadPromise = null;
+    this._resolveCoreLoad = null;
     /** @type {HTMLAudioElement[]} */
     this._htmlPool = [];
     this._htmlPoolBusy = 0;
@@ -458,6 +460,9 @@ export class SoundManager {
       // Put the small menu theme ahead of the large combat sample batch so a
       // cold cache can start music promptly after the first user gesture.
       this.menuMusic.ensureLoaded();
+      this._coreLoadPromise = new Promise((resolve) => {
+        this._resolveCoreLoad = resolve;
+      });
       this._loadPromise = this._loadSamples();
       if (this.menuMusicVisible && !this.inBattle) {
         this.menuMusic.setMenuActive(true);
@@ -466,6 +471,9 @@ export class SoundManager {
     } catch {
       this.unlocked = false;
       this._loadPromise = null;
+      this._resolveCoreLoad?.(false);
+      this._coreLoadPromise = null;
+      this._resolveCoreLoad = null;
       this._samplesReady = false;
       try {
         this.ctx?.close?.();
@@ -552,9 +560,17 @@ export class SoundManager {
     );
     if (this._constrainedAudio) {
       await loadEntries(coreEntries);
+      const atmos = await this._loadDecodedSample(
+        publicUrl(`sounds/${ATMOS_SAMPLE_FILES_TABLET[0]}`)
+      );
+      if (atmos) this.atmosBuffers.push(atmos);
       // The two baseline effects are enough for tablet combat to start while
       // weapon masters, engines, voices, and variants fill in progressively.
+      // A short ambience bed is included so iOS has audible battle output as
+      // soon as this readiness boundary is crossed.
       this._samplesReady = true;
+      this._resolveCoreLoad?.(true);
+      this._resolveCoreLoad = null;
       this._flushPendingPlays();
     } else {
       // Desktop intentionally retains the original all-at-once load order.
@@ -734,7 +750,10 @@ export class SoundManager {
     loadPool(BULLET_STRUCTURE_IMPACT_FILES, this.bulletStructureImpactBuffers);
     loadPool(BULLET_METAL_IMPACT_FILES, this.bulletMetalImpactBuffers);
     loadPool(BULLET_WHIZ_FILES, this.bulletWhizBuffers);
-    loadPool(this._constrainedAudio ? ATMOS_SAMPLE_FILES_TABLET : ATMOS_SAMPLE_FILES, this.atmosBuffers);
+    loadPool(
+      this._constrainedAudio ? ATMOS_SAMPLE_FILES_TABLET.slice(1) : ATMOS_SAMPLE_FILES,
+      this.atmosBuffers
+    );
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
     loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
@@ -753,6 +772,8 @@ export class SoundManager {
     if (this.impactBuffers[0]) this.buffers.impact = this.impactBuffers[0];
 
     this._samplesReady = true;
+    this._resolveCoreLoad?.(true);
+    this._resolveCoreLoad = null;
     this._flushPendingPlays();
   }
 
@@ -951,7 +972,8 @@ export class SoundManager {
     if (!this.unlock()) return false;
     // Start the resume attempt before waiting for the (large) sample batch.
     const resumePromise = this._resumeContext();
-    if (this._loadPromise) await this._loadPromise;
+    const readyPromise = this._constrainedAudio ? this._coreLoadPromise : this._loadPromise;
+    if (readyPromise) await readyPromise;
     await resumePromise;
     return this._isRunning();
   }
