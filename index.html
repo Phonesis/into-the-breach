@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Into the Breach</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,6 +14,14 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <div id="mobile-support-message" class="mobile-support-screen" hidden>
+      <div class="mobile-support-card" role="alert" aria-labelledby="mobile-support-title">
+        <span class="mobile-support-kicker">Device compatibility</span>
+        <h1 id="mobile-support-title">Desktop or tablet required</h1>
+        <p>This game only supports desktop browsers and tablet devices.</p>
+        <p class="mobile-support-detail">Please open Into the Breach on a desktop browser or tablet to play.</p>
+      </div>
+    </div>
     <div id="app">
       <canvas id="game-canvas"></canvas>
       <div id="placement-layer" class="placement-layer hidden" aria-hidden="true"></div>

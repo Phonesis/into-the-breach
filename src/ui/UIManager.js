@@ -79,6 +79,7 @@ import {
 import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
 import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { publicUrl } from '../lib/publicUrl.js';
 import { BattleMinimap } from './Minimap.js';
 import {
   DEBRIS_RETENTION_OPTIONS,
@@ -153,6 +154,21 @@ const AUTO_BUILD_MODE_KEYS = {
 };
 const AUTO_BUILD_MODE_KEY_LEGACY = 'ww2-rts-auto-build-mode';
 
+const LOADING_ART_PATHS = [
+  'menu/menu-title.jpg',
+  'menu/menu-mode.jpg',
+  'menu/menu-assault.jpg',
+  'menu/menu-faction.jpg',
+  'menu/menu-map.jpg',
+  'menu/menu-faction-germany.jpg',
+  'menu/menu-faction-usa.jpg',
+  'menu/menu-faction-uk.jpg',
+  'menu/menu-faction-russia.jpg',
+  'menu/menu-faction-japan.jpg',
+].map((path) => publicUrl(path));
+
+const LOADING_ART_INTERVAL_MS = 2800;
+
 function getAutoBuildStorageKey(campaignStyle = 'classic') {
   return campaignStyle === 'baseBuilding'
     ? AUTO_BUILD_MODE_KEYS.baseBuilding
@@ -216,7 +232,7 @@ export class UIManager {
     this.showUnitStatus = readBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
     this.showFrontline = readBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     this.showCapturePoints = readBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
-    this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, false);
+    this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, true);
     /** When true, all in-battle HUD chrome is hidden (toggle from pause menu). */
     this.hudHidden = false;
     this.autoBuildMode = false;
@@ -227,6 +243,11 @@ export class UIManager {
     this.defenseExpanded = false;
     this.baseBuildExpanded = false;
     this._hudCheatMode = false;
+    this._loadingActive = false;
+    this._loadingArtIndex = -1;
+    this._loadingArtLayerIndex = 0;
+    this._loadingArtTimer = null;
+    this._preloadLoadingArt();
     this.render();
     this.tabletCamera = new TabletCameraControls(this.root);
     this.minimap = new BattleMinimap(this.root, {
@@ -245,6 +266,16 @@ export class UIManager {
     this._syncDefenseCollapse();
     this._syncBaseBuildCollapse();
     this._syncSettingsControls();
+  }
+
+  _preloadLoadingArt() {
+    if (typeof Image === 'undefined') return;
+    this._loadingArtImages = LOADING_ART_PATHS.map((src) => {
+      const image = new Image();
+      image.decoding = 'async';
+      image.src = src;
+      return image;
+    });
   }
 
   /** Nation-specific art on the faction picker (hover / selection). */
@@ -1044,6 +1075,29 @@ export class UIManager {
         <button type="button" class="btn btn-primary interactive" id="btn-back-to-results">Back to results</button>
       </div>
 
+      <div
+        id="battle-loading-screen"
+        class="battle-loading-screen hidden interactive"
+        role="status"
+        aria-live="polite"
+        aria-busy="false"
+        aria-hidden="true"
+      >
+        <div class="battle-loading-art" aria-hidden="true">
+          <div class="battle-loading-art-layer battle-loading-art-layer--a"></div>
+          <div class="battle-loading-art-layer battle-loading-art-layer--b"></div>
+        </div>
+        <div class="battle-loading-vignette" aria-hidden="true"></div>
+        <div class="battle-loading-content">
+          <div class="battle-loading-mark" aria-hidden="true"><span></span></div>
+          <span class="battle-loading-kicker">Field Operations</span>
+          <h2 id="battle-loading-title">Preparing battlefield</h2>
+          <p id="battle-loading-detail">Loading terrain, forces, and combat systems…</p>
+          <div class="battle-loading-progress" aria-hidden="true"><span></span></div>
+          <span class="battle-loading-status">Stand by — deployment is under way</span>
+        </div>
+      </div>
+
       <div id="select-box" class="select-box"></div>
       <div id="save-toast" class="save-toast hidden" role="status" aria-live="polite"></div>
     `;
@@ -1676,35 +1730,41 @@ export class UIManager {
         const lastStandPreset =
           this.selectedGameMode === 'lastStand' &&
           isLastStandPresetDeployMode(this.selectedLastStandDeployMode);
-        this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
-          assaultRole: this.selectedAssaultRole ?? 'defend',
-          difficulty: this.selectedDifficulty,
-          mapSize,
-          campaignStyle:
-            this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
-          clearanceRole:
-            this.selectedGameMode === 'clearance' ? this.selectedClearanceRole : undefined,
-          clearanceReinforcementSize:
-            this.selectedGameMode === 'clearance'
-              ? this.selectedClearanceReinforcementSize
+        void this._runLoadingAction(
+          () => this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
+            assaultRole: this.selectedAssaultRole ?? 'defend',
+            difficulty: this.selectedDifficulty,
+            mapSize,
+            campaignStyle:
+              this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
+            clearanceRole:
+              this.selectedGameMode === 'clearance' ? this.selectedClearanceRole : undefined,
+            clearanceReinforcementSize:
+              this.selectedGameMode === 'clearance'
+                ? this.selectedClearanceReinforcementSize
+                : undefined,
+            clearanceTimeLimitEnabled:
+              this.selectedGameMode === 'clearance'
+                ? this.selectedClearanceTimeLimitEnabled
+                : undefined,
+            tdWaveMode:
+              this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
+            tdStyle:
+              this.selectedGameMode === 'towerDefense' ? this.selectedTdStyle : undefined,
+            lastStandDeployMode:
+              this.selectedGameMode === 'lastStand' ? this.selectedLastStandDeployMode : undefined,
+            lastStandPresetSize: lastStandPreset
+              ? resolveLastStandPresetSize(
+                  this.selectedLastStandPresetSize,
+                  mapBase ?? this.selectedMap
+                )
               : undefined,
-          clearanceTimeLimitEnabled:
-            this.selectedGameMode === 'clearance'
-              ? this.selectedClearanceTimeLimitEnabled
-              : undefined,
-          tdWaveMode:
-            this.selectedGameMode === 'towerDefense' ? this.selectedTdWaveMode : undefined,
-          tdStyle:
-            this.selectedGameMode === 'towerDefense' ? this.selectedTdStyle : undefined,
-          lastStandDeployMode:
-            this.selectedGameMode === 'lastStand' ? this.selectedLastStandDeployMode : undefined,
-          lastStandPresetSize: lastStandPreset
-            ? resolveLastStandPresetSize(
-                this.selectedLastStandPresetSize,
-                mapBase ?? this.selectedMap
-              )
-            : undefined,
-        });
+          }),
+          {
+            title: 'Deploying operation',
+            detail: 'Loading the theater, forces, and combat systems…',
+          }
+        );
       }
     };
 
@@ -1727,7 +1787,13 @@ export class UIManager {
     this.root.querySelector('#btn-replay').onclick = () => {
       this.hideEndOverlay();
       this.hidePostMatchViewBar();
-      if (this.callbacks.onReplay) this.callbacks.onReplay();
+      void this._runLoadingAction(
+        () => this.callbacks.onReplay?.(),
+        {
+          title: 'Replaying operation',
+          detail: 'Rebuilding the battlefield and restoring the original command plan…',
+        }
+      );
     };
 
     this.root.querySelector('#btn-launch-battle-now')?.addEventListener('click', () => {
@@ -2050,7 +2116,13 @@ export class UIManager {
 
     list.querySelectorAll('.save-load-btn').forEach((btn) => {
       btn.onclick = () => {
-        this.callbacks.onLoadBattle?.(btn.dataset.id);
+        void this._runLoadingAction(
+          () => this.callbacks.onLoadBattle?.(btn.dataset.id),
+          {
+            title: 'Resuming operation',
+            detail: 'Restoring the battlefield, forces, and command state…',
+          }
+        );
       };
     });
     list.querySelectorAll('.save-delete-btn').forEach((btn) => {
@@ -2059,6 +2131,80 @@ export class UIManager {
         this.renderSaveList();
       };
     });
+  }
+
+  _waitForLoadingPaint() {
+    if (typeof requestAnimationFrame !== 'function') {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+  }
+
+  async _runLoadingAction(action, copy = {}) {
+    if (typeof action !== 'function' || this._loadingActive) return;
+    this.showLoadingScreen(copy);
+    await this._waitForLoadingPaint();
+    try {
+      return await action();
+    } catch (error) {
+      console.error('Battle transition failed:', error);
+      this.showSaveToast('Could not prepare the battle. Please try again.');
+    } finally {
+      this.hideLoadingScreen();
+    }
+  }
+
+  showLoadingScreen({
+    title = 'Preparing battlefield',
+    detail = 'Loading terrain, forces, and combat systems…',
+  } = {}) {
+    const overlay = this.root.querySelector('#battle-loading-screen');
+    if (!overlay) return;
+
+    this._loadingActive = true;
+    const titleEl = this.root.querySelector('#battle-loading-title');
+    const detailEl = this.root.querySelector('#battle-loading-detail');
+    if (titleEl) titleEl.textContent = title;
+    if (detailEl) detailEl.textContent = detail;
+
+    const layers = [...this.root.querySelectorAll('.battle-loading-art-layer')];
+    if (layers.length >= 2 && LOADING_ART_PATHS.length > 0) {
+      clearInterval(this._loadingArtTimer);
+      this._loadingArtIndex = (this._loadingArtIndex + 1) % LOADING_ART_PATHS.length;
+      this._loadingArtLayerIndex = 0;
+      layers[0].style.backgroundImage = `url("${LOADING_ART_PATHS[this._loadingArtIndex]}")`;
+      layers[1].style.backgroundImage = `url("${LOADING_ART_PATHS[(this._loadingArtIndex + 1) % LOADING_ART_PATHS.length]}")`;
+      layers[0].classList.add('is-visible');
+      layers[1].classList.remove('is-visible');
+
+      this._loadingArtTimer = setInterval(() => {
+        const currentLayer = layers[this._loadingArtLayerIndex];
+        const nextLayerIndex = 1 - this._loadingArtLayerIndex;
+        const nextLayer = layers[nextLayerIndex];
+        this._loadingArtIndex = (this._loadingArtIndex + 1) % LOADING_ART_PATHS.length;
+        nextLayer.style.backgroundImage = `url("${LOADING_ART_PATHS[this._loadingArtIndex]}")`;
+        nextLayer.classList.add('is-visible');
+        currentLayer.classList.remove('is-visible');
+        this._loadingArtLayerIndex = nextLayerIndex;
+      }, LOADING_ART_INTERVAL_MS);
+    }
+
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.setAttribute('aria-busy', 'true');
+  }
+
+  hideLoadingScreen() {
+    this._loadingActive = false;
+    clearInterval(this._loadingArtTimer);
+    this._loadingArtTimer = null;
+    const overlay = this.root.querySelector('#battle-loading-screen');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.setAttribute('aria-busy', 'false');
   }
 
   showSaveToast(message) {
@@ -3558,6 +3704,7 @@ export class UIManager {
   }
 
   hideHUD() {
+    this.hideLoadingScreen();
     this._settingsReturnTarget = 'title';
     this._syncSettingsBackButton();
     this.hudHidden = false;

@@ -456,7 +456,7 @@ src/
     TabletCameraControls.js # On-screen camera pad for touch devices
     unitIcons.js          # SVG icons for roster & manual
   lib/
-    tabletDetect.js       # Tablet/phone detection (?tablet=1 override)
+    tabletDetect.js       # Tablet detection and phone compatibility gate
   input/
     RTSController.js      # Select, move, attack, fire missions
     BattleCursor.js       # Shift fire-mission reticle

@@ -398,7 +398,7 @@ export class Game {
     this._largeBattleSimulationPerfActive = false;
     this.showUnitFieldIcons = true;
     this.showUnitStatus = true;
-    this.seekCoverMode = false;
+    this.seekCoverMode = true;
     this.autoBuildMode = false;
     this.showFrontline = true;
     this.showCapturePoints = true;

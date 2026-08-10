@@ -95,7 +95,7 @@ export const GAME_GUIDE_SECTIONS = [
       'On <strong>Berlin</strong>, all ground units route along connected streets and around intact buildings rather than attempting to cross masonry. The canal has animated ripples and glints; shells striking water produce spray instead of a ground impact.',
       'Experienced units earn rank badges beside them (always shown, not tied to field icons): <strong>VET</strong> at <strong>1 kill</strong>, upgraded to <strong>ELITE</strong> at <strong>3 kills</strong>.',
       'Isolated foot troops under fire may <strong>surrender</strong>. Move friendlies close to liberate; enemies close to capture prisoners off the map (see Combat).',
-      'On tablets and phones, a <strong>camera pad</strong> appears at the bottom-right for pan, rotate, and zoom. Use <strong>Target</strong> to pick enemies (tap twice or press Engage). Use <strong>Fire</strong> to order manual fire at ground or cover (like Shift+LMB). <strong>Long-press</strong> the map to move or attack (replaces right-click). Pinch to zoom.',
+      'On tablets, a <strong>camera pad</strong> appears at the bottom-right for pan, rotate, and zoom. Use <strong>Target</strong> to pick enemies (tap twice or press Engage). Use <strong>Fire</strong> to order manual fire at ground or cover (like Shift+LMB). <strong>Long-press</strong> the map to move or attack (replaces right-click). Pinch to zoom.',
       'When your <strong>HQ is under heavy attack</strong>, a red alert banner appears at the top with HP and an alarm — pull units back to defend before the headquarters falls.',
     ],
   },

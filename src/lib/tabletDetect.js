@@ -23,3 +23,32 @@ export function isTabletLikeDevice() {
 
   return false;
 }
+
+/** True for phone-sized mobile browsers; tablets and desktop browsers remain supported. */
+export function isPhoneLikeDevice() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+
+  const userAgent = navigator.userAgent || '';
+  const isIPad =
+    /iPad/i.test(userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  // iPadOS can advertise itself as a Mac and older iPad Safari UAs include
+  // "Mobile", so exclude both forms before checking for phone UAs.
+  if (isIPad) return false;
+
+  if (navigator.userAgentData?.mobile === true) return true;
+  if (/Android/i.test(userAgent)) return /Mobile/i.test(userAgent);
+  if (/iPhone|iPod|Windows Phone|webOS|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)) {
+    return true;
+  }
+  if (/\bMobile\b/i.test(userAgent)) return true;
+
+  // Keep a fallback for browsers that omit a useful UA but expose a phone-like
+  // touch viewport. The short edge keeps normal tablet layouts supported.
+  const touch = navigator.maxTouchPoints > 0;
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const noHover = window.matchMedia?.('(hover: none)').matches ?? false;
+  const shortEdge = Math.min(window.innerWidth, window.innerHeight);
+  return touch && coarse && noHover && shortEdge < 480;
+}

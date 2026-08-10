@@ -2,8 +2,17 @@ import { Game } from './game/Game.js';
 import { UIManager } from './ui/UIManager.js';
 import { sounds } from './audio/SoundManager.js';
 import { preloadUnitTextures } from './units/UnitTextures.js';
+import { isPhoneLikeDevice } from './lib/tabletDetect.js';
 
-preloadUnitTextures().catch((err) => console.warn('Unit camo textures failed to load:', err));
+const phoneUnsupported = isPhoneLikeDevice();
+
+if (phoneUnsupported) {
+  document.body.classList.add('phone-unsupported');
+  document.getElementById('app')?.setAttribute('aria-hidden', 'true');
+  document.getElementById('mobile-support-message')?.removeAttribute('hidden');
+} else {
+  preloadUnitTextures().catch((err) => console.warn('Unit camo textures failed to load:', err));
+}
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
@@ -32,15 +41,17 @@ function restoreAudioContext() {
 
 // Capture gestures before UI handlers start asynchronous work. The click
 // fallback covers keyboard/assistive activation that does not emit pointerdown.
-window.addEventListener('pointerdown', resumeAudioContext, { capture: true });
-window.addEventListener('keydown', resumeAudioContext, { capture: true });
-window.addEventListener('click', resumeAudioContext, { capture: true });
-window.addEventListener('pageshow', restoreAudioContext);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) restoreAudioContext();
-});
+if (!phoneUnsupported) {
+  window.addEventListener('pointerdown', resumeAudioContext, { capture: true });
+  window.addEventListener('keydown', resumeAudioContext, { capture: true });
+  window.addEventListener('click', resumeAudioContext, { capture: true });
+  window.addEventListener('pageshow', restoreAudioContext);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) restoreAudioContext();
+  });
+}
 
-const ui = new UIManager(uiRoot, {
+const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   onMenuVisible(visible) {
     if (sounds.inBattle) {
       if (!visible) sounds.setMenuMusicActive(false);

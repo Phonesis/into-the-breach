@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Into the Breach</title>
+  <desc id="desc">A gold battlefield shield on a dark field.</desc>
+  <rect width="64" height="64" rx="12" fill="#0a0c0f"/>
+  <path d="M32 6 53 16v16c0 14-8.5 22.7-21 27C19.5 54.7 11 46 11 32V16L32 6Z" fill="#d6aa3a"/>
+  <path d="M32 12 47 19v13c0 10.3-5.8 17.2-15 21-9.2-3.8-15-10.7-15-21V19l15-7Z" fill="#18212a"/>
+  <path d="m32 17 3.7 7.5 8.3 1.2-6 5.8 1.4 8.2-7.4-3.9-7.4 3.9 1.4-8.2-6-5.8 8.3-1.2L32 17Z" fill="#f0c95a"/>
+  <path d="M20 47h24" stroke="#d6aa3a" stroke-width="2" stroke-linecap="round"/>
+</svg>
