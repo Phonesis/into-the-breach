@@ -2286,6 +2286,12 @@ export class Game {
     sounds.playImpact('shell', { x: wreck.position.x, z: wreck.position.z }, 0.02);
   }
 
+  _handleVehicleWreckRunOver(wreck, vehicle) {
+    if (!wreck?.mesh?.parent) return;
+    applyVehicleWreckCrushVisual(wreck);
+    sounds.playImpact('shell', { x: wreck.position.x, z: wreck.position.z }, 0.012);
+  }
+
   stopGame() {
     this.zoomMax = 100;
     this.running = false;
@@ -4028,6 +4034,8 @@ export class Game {
             collisionUnits: this.units,
             onVehicleWreckCrushed: (wreck, vehicle, impact) =>
               this._handleVehicleWreckCrushed(wreck, vehicle, impact),
+            onVehicleWreckRunOver: (wreck, vehicle, impact) =>
+              this._handleVehicleWreckRunOver(wreck, vehicle, impact),
             terrainMesh: this._terrainMesh,
             getWireSlowMult: this.defenses
               ? (x, z, unit) => this.defenses.getMoveSlowMult(x, z, unit)

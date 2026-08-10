@@ -6,6 +6,7 @@ import { VehicleEngineAudio } from './VehicleEngineAudio.js';
 import { StrafeAircraftAudio } from './StrafeAircraftAudio.js';
 import { MenuMusic } from './MenuMusic.js';
 import { publicUrl } from '../lib/publicUrl.js';
+import { isIPadLikeDevice } from '../lib/tabletDetect.js';
 import {
   getAllWeaponSampleUrls,
   pickSampleFile,
@@ -114,6 +115,7 @@ const BULLET_WHIZ_FILES = Array.from(
   (_, index) => `bullet-whiz-${String(index + 1).padStart(2, '0')}.wav`
 );
 const ATMOS_SAMPLE_FILES_FULL = ['battle-atmos.wav', 'battle-atmos-close.wav'];
+const ATMOS_SAMPLE_FILES_TABLET = ['battle-atmos-short.wav', 'battle-atmos-close-short.wav'];
 /** Looped channel noise under speech (static / crackle / hum beds). */
 const RADIO_STATIC_FILES = [
   'radio-static-a.wav',
@@ -315,6 +317,9 @@ export class SoundManager {
     this._battleLockGain = null;
     this._htmlLock = null;
     this._samplesReady = false;
+    this._constrainedAudio = isIPadLikeDevice();
+    this._sampleLoadsActive = 0;
+    this._sampleLoadWaiters = [];
     /** @type {HTMLAudioElement[]} */
     this._htmlPool = [];
     this._htmlPoolBusy = 0;
@@ -510,47 +515,78 @@ export class SoundManager {
     return impulse;
   }
 
+  async _loadDecodedSample(url) {
+    const concurrency = this._constrainedAudio ? 2 : Number.POSITIVE_INFINITY;
+    if (this._sampleLoadsActive >= concurrency) {
+      await new Promise((resolve) => this._sampleLoadWaiters.push(resolve));
+    }
+    this._sampleLoadsActive += 1;
+    try {
+      const res = await fetch(url);
+      if (!res.ok || !this.ctx || this.ctx.state === 'closed') return null;
+      const ab = await res.arrayBuffer();
+      return await this.ctx.decodeAudioData(ab);
+    } catch {
+      return null;
+    } finally {
+      this._sampleLoadsActive -= 1;
+      this._sampleLoadWaiters.shift()?.();
+    }
+  }
+
   async _loadSamples() {
     const entries = Object.entries(SAMPLE_URLS);
-    await Promise.all(
-      entries.map(async ([key, url]) => {
+    const loadEntries = (items) => Promise.all(
+      items.map(async ([key, url]) => {
         try {
-          const res = await fetch(url);
-          if (!res.ok) return;
-          const ab = await res.arrayBuffer();
-          this.buffers[key] = await this.ctx.decodeAudioData(ab);
+          const buf = await this._loadDecodedSample(url);
+          if (buf) this.buffers[key] = buf;
         } catch {
           /* missing sample */
         }
       })
     );
+    const coreEntries = entries.filter(([key]) => key === 'impact' || key === 'explosion');
+    const supplementalEntries = entries.filter(
+      ([key]) => key !== 'impact' && key !== 'explosion'
+    );
+    if (this._constrainedAudio) {
+      await loadEntries(coreEntries);
+      // The two baseline effects are enough for tablet combat to start while
+      // weapon masters, engines, voices, and variants fill in progressively.
+      this._samplesReady = true;
+      this._flushPendingPlays();
+    } else {
+      // Desktop intentionally retains the original all-at-once load order.
+      await loadEntries(entries);
+    }
 
     const weaponUrls = getAllWeaponSampleUrls();
     await Promise.all(
       weaponUrls.map(async (url) => {
         try {
-          const res = await fetch(url);
-          if (!res.ok) return;
-          const ab = await res.arrayBuffer();
+          const buf = await this._loadDecodedSample(url);
+          if (!buf) return;
           const stem = url.split('/').pop().replace(/\.wav$/i, '');
-          this.weaponBuffers[stem] = await this.ctx.decodeAudioData(ab);
+          this.weaponBuffers[stem] = buf;
         } catch {
           /* missing sample */
         }
       })
     );
 
+    if (this._constrainedAudio) await loadEntries(supplementalEntries);
+
     const deathLoads = [];
     for (const [voiceKey, { prefix }] of Object.entries(INFANTRY_DEATH_FACTIONS)) {
-      for (let i = 1; i <= INFANTRY_DEATH_COUNT; i++) {
+      const count = this._constrainedAudio ? 3 : INFANTRY_DEATH_COUNT;
+      for (let i = 1; i <= count; i++) {
         const num = String(i).padStart(2, '0');
         deathLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/${prefix}-${num}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/${prefix}-${num}.wav`));
+              if (!buf) return;
               this.infantryDeathBuffers[voiceKey].push(buf);
             } catch {
               /* missing */
@@ -563,15 +599,14 @@ export class SoundManager {
 
     const selectLoads = [];
     for (const faction of UNIT_SELECT_FACTIONS) {
-      for (let i = 1; i <= UNIT_SELECT_COUNT; i++) {
+      const count = this._constrainedAudio ? 2 : UNIT_SELECT_COUNT;
+      for (let i = 1; i <= count; i++) {
         const num = String(i).padStart(2, '0');
         selectLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/unit-select-${faction}-${num}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/unit-select-${faction}-${num}.wav`));
+              if (!buf) return;
               this.unitSelectBuffers[faction].push(buf);
             } catch {
               /* missing */
@@ -584,15 +619,14 @@ export class SoundManager {
 
     const underFireLoads = [];
     for (const faction of UNIT_UNDERFIRE_FACTIONS) {
-      for (let i = 1; i <= UNIT_UNDERFIRE_COUNT; i++) {
+      const count = this._constrainedAudio ? 3 : UNIT_UNDERFIRE_COUNT;
+      for (let i = 1; i <= count; i++) {
         const num = String(i).padStart(2, '0');
         underFireLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/unit-underfire-${faction}-${num}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/unit-underfire-${faction}-${num}.wav`));
+              if (!buf) return;
               this.unitUnderFireBuffers[faction].push(buf);
             } catch {
               /* missing */
@@ -605,15 +639,14 @@ export class SoundManager {
 
     const retreatLoads = [];
     for (const faction of UNIT_RETREAT_FACTIONS) {
-      for (let i = 1; i <= UNIT_RETREAT_COUNT; i++) {
+      const count = this._constrainedAudio ? 2 : UNIT_RETREAT_COUNT;
+      for (let i = 1; i <= count; i++) {
         const num = String(i).padStart(2, '0');
         retreatLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/unit-retreat-${faction}-${num}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/unit-retreat-${faction}-${num}.wav`));
+              if (!buf) return;
               this.unitRetreatBuffers[faction].push(buf);
             } catch {
               /* missing */
@@ -626,15 +659,14 @@ export class SoundManager {
 
     const attackLoads = [];
     for (const faction of UNIT_ATTACK_FACTIONS) {
-      for (let i = 1; i <= UNIT_ATTACK_COUNT; i++) {
+      const count = this._constrainedAudio ? 2 : UNIT_ATTACK_COUNT;
+      for (let i = 1; i <= count; i++) {
         const num = String(i).padStart(2, '0');
         attackLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/unit-attack-${faction}-${num}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/unit-attack-${faction}-${num}.wav`));
+              if (!buf) return;
               this.unitAttackBuffers[faction].push(buf);
             } catch {
               /* missing */
@@ -651,10 +683,8 @@ export class SoundManager {
         commanderLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/commander-${faction}-${kind}.wav`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/commander-${faction}-${kind}.wav`));
+              if (!buf) return;
               this.commanderOrderBuffers[faction][kind] = buf;
             } catch {
               /* missing */
@@ -671,10 +701,8 @@ export class SoundManager {
         poolLoads.push(
           (async () => {
             try {
-              const res = await fetch(publicUrl(`sounds/${file}`));
-              if (!res.ok) return;
-              const ab = await res.arrayBuffer();
-              const buf = await this.ctx.decodeAudioData(ab);
+              const buf = await this._loadDecodedSample(publicUrl(`sounds/${file}`));
+              if (!buf) return;
               targetArr.push(buf);
             } catch {
               /* missing */
@@ -698,14 +726,15 @@ export class SoundManager {
     this.bombExplosionBuffers = [];
     this.garandPingBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
-    loadPool(EXPLOSION_SAMPLE_FILES, this.explosionBuffers);
-    loadPool(IMPACT_SAMPLE_FILES, this.impactBuffers);
-    loadPool(ARMOR_RICOCHET_FILES, this.armorRicochetBuffers);
+    const limit = (files, tabletCount) => this._constrainedAudio ? files.slice(0, tabletCount) : files;
+    loadPool(limit(EXPLOSION_SAMPLE_FILES, 4), this.explosionBuffers);
+    loadPool(limit(IMPACT_SAMPLE_FILES, 3), this.impactBuffers);
+    loadPool(limit(ARMOR_RICOCHET_FILES, 3), this.armorRicochetBuffers);
     loadPool(BULLET_IMPACT_FILES, this.bulletImpactBuffers);
     loadPool(BULLET_STRUCTURE_IMPACT_FILES, this.bulletStructureImpactBuffers);
     loadPool(BULLET_METAL_IMPACT_FILES, this.bulletMetalImpactBuffers);
     loadPool(BULLET_WHIZ_FILES, this.bulletWhizBuffers);
-    loadPool(ATMOS_SAMPLE_FILES, this.atmosBuffers);
+    loadPool(this._constrainedAudio ? ATMOS_SAMPLE_FILES_TABLET : ATMOS_SAMPLE_FILES, this.atmosBuffers);
     loadPool(RADIO_STATIC_FILES, this.radioStaticBuffers);
     loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
@@ -826,8 +855,10 @@ export class SoundManager {
         this._enqueuePending(fn);
       });
     };
-    if (this._loadPromise) void this._loadPromise.then(attempt);
-    else attempt();
+    // Tablet audio becomes usable progressively. Desktop retains the original
+    // behavior of waiting for the complete sample library.
+    if ((this._constrainedAudio && this._samplesReady) || !this._loadPromise) attempt();
+    else void this._loadPromise.then(attempt);
   }
 
   _borrowHtmlAudio() {

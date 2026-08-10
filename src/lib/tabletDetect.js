@@ -24,14 +24,22 @@ export function isTabletLikeDevice() {
   return false;
 }
 
+/** True for iPadOS, including its desktop-class Safari user agent. */
+export function isIPadLikeDevice() {
+  if (typeof navigator === 'undefined') return false;
+  const userAgent = navigator.userAgent || '';
+  return (
+    /iPad/i.test(userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 /** True for phone-sized mobile browsers; tablets and desktop browsers remain supported. */
 export function isPhoneLikeDevice() {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
 
   const userAgent = navigator.userAgent || '';
-  const isIPad =
-    /iPad/i.test(userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isIPad = isIPadLikeDevice();
 
   // iPadOS can advertise itself as a Mac and older iPad Safari UAs include
   // "Mobile", so exclude both forms before checking for phone UAs.

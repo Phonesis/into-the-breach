@@ -2,9 +2,10 @@ import { Game } from './game/Game.js';
 import { UIManager } from './ui/UIManager.js';
 import { sounds } from './audio/SoundManager.js';
 import { preloadUnitTextures } from './units/UnitTextures.js';
-import { isPhoneLikeDevice } from './lib/tabletDetect.js';
+import { isPhoneLikeDevice, isIPadLikeDevice } from './lib/tabletDetect.js';
 
 const phoneUnsupported = isPhoneLikeDevice();
+const iPadConstrained = isIPadLikeDevice();
 
 if (phoneUnsupported) {
   document.body.classList.add('phone-unsupported');
@@ -63,7 +64,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
     primeAudio();
     const audioReady = sounds.primeForCombat();
     await preloadUnitTextures();
-    await audioReady;
+    // Preserve the established desktop gate. Only tablet-class browsers avoid
+    // waiting for the large combat library before constructing the battlefield.
+    if (!iPadConstrained) await audioReady;
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -83,7 +86,7 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
     primeAudio();
     const audioReady = sounds.primeForCombat();
     await preloadUnitTextures();
-    await audioReady;
+    if (!iPadConstrained) await audioReady;
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });

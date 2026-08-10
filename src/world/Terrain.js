@@ -1410,6 +1410,7 @@ function sampleUnitTerrainHeight(unit, x, z, mapDef) {
 function terrainPoseRadius(type) {
   switch (type) {
     case 'superHeavyTank': return 2.15;
+    case 'tankDestroyer':
     case 'tank': return 1.7;
     case 'armoredCar': return 1.35;
     case 'artillery': return 1.35;
@@ -1475,8 +1476,17 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
   const maxTilt = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type)
     ? 0.46
     : 0.32;
-  const targetPitch = THREE.MathUtils.clamp(-Math.atan(forwardSlope), -maxTilt, maxTilt);
-  const targetRoll = THREE.MathUtils.clamp(Math.atan(rightSlope), -maxTilt, maxTilt);
+  const wreckPose = unit._wreckTraversalPose;
+  const targetPitch = THREE.MathUtils.clamp(
+    -Math.atan(forwardSlope) + (wreckPose?.pitch ?? 0),
+    -maxTilt,
+    maxTilt
+  );
+  const targetRoll = THREE.MathUtils.clamp(
+    Math.atan(rightSlope) + (wreckPose?.roll ?? 0),
+    -maxTilt,
+    maxTilt
+  );
 
   // Sample the footprint corners and lift over sharp convex breaks that a
   // single center-height sample cannot represent.
@@ -1494,7 +1504,10 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
 
   const vehicleLike = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type);
   const targetY =
-    center + terrainClearance(unit.def?.type) + Math.min(convexLift, vehicleLike ? 0.24 : 0.1);
+    center +
+    terrainClearance(unit.def?.type) +
+    Math.min(convexLift, vehicleLike ? 0.24 : 0.1) +
+    (wreckPose?.lift ?? 0);
   const alpha = 1 - Math.exp(-Math.max(0, dt) * (unit.moveTarget ? 12 : 7));
   // Movement stepping snaps to center-ground every substep, so apply the full
   // footprint correction while moving; stationary settling remains smoothed.

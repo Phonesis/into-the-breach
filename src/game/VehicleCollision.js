@@ -6,6 +6,14 @@ import { unitPathRadius } from './MovePath.js';
 // visuals or effects; it only prevents physical vehicle bodies from stacking.
 const VEHICLE_SEPARATION_GAP = 0.35;
 const COLLISION_EPSILON = 1e-6;
+const WRECK_TRAVERSAL_HEIGHT = Object.freeze({
+  superHeavyTank: 0.72,
+  tankDestroyer: 0.58,
+  tank: 0.56,
+  artillery: 0.38,
+  antiTankGun: 0.32,
+  armoredCar: 0.34,
+});
 
 function isCollidableVehicle(unit) {
   return !!(
@@ -40,6 +48,16 @@ function isActivelyMovingVehicle(unit) {
 
 function isPushableWreck(unit) {
   return !!unit && (unit.dead || unit._crewless);
+}
+
+function isTraversableWreck(unit) {
+  return !!(
+    unit?.dead &&
+    unit._wreckCrushed &&
+    unit.position &&
+    unit.mesh?.parent &&
+    isVehicleUnit(unit.def?.type)
+  );
 }
 
 function wreckPushResistance(type) {
@@ -88,6 +106,85 @@ function recordWreckImpact(wreck, vehicle, displacement, directionX, directionZ,
     directionX,
     directionZ,
   });
+}
+
+function recordWreckRunOver(wreck, vehicle, directionX, directionZ, options) {
+  if (!wreck?.dead || !wreck._wreckCrushed) return;
+  wreck._wreckImpactCount = (wreck._wreckImpactCount ?? 0) + 1;
+  wreck._wreckRunOverCount = (wreck._wreckRunOverCount ?? 0) + 1;
+  options?.onVehicleWreckRunOver?.(wreck, vehicle, {
+    directionX,
+    directionZ,
+  });
+}
+
+/**
+ * Treat a flattened wreck as a low mound instead of deleting its physical
+ * presence. This pose is consumed by Terrain.updateUnitTerrainPose(), which
+ * blends it with the actual ground slope so a hull climbs nose-first, levels
+ * over the wreck, then pitches down on the far side.
+ */
+export function updateVehicleWreckTraversalPose(unit, units, options = {}) {
+  if (!unit || unit.dead || !isVehicleUnit(unit.def?.type)) return null;
+
+  const yaw = unit.mesh?.rotation?.y ?? 0;
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const unitRadius = getCollisionRadius(unit);
+  let best = null;
+
+  for (const wreck of units ?? []) {
+    if (wreck === unit || !isTraversableWreck(wreck)) continue;
+    const dx = wreck.position.x - unit.position.x;
+    const dz = wreck.position.z - unit.position.z;
+    const centerDistance = Math.hypot(dx, dz);
+    const supportRadius = Math.max(
+      1.2,
+      unitRadius * 0.72 + getCollisionRadius(wreck) * 0.78
+    );
+    if (centerDistance >= supportRadius) continue;
+
+    const normalized = centerDistance / supportRadius;
+    // Cosine support gives zero height and slope at the outer edge, avoiding a
+    // pop as the first track touches or leaves the wreck.
+    const support = 0.5 + 0.5 * Math.cos(normalized * Math.PI);
+    const height = WRECK_TRAVERSAL_HEIGHT[wreck.def?.type] ?? 0.4;
+    const lift = height * support;
+    if (best && best.lift >= lift) continue;
+
+    const forwardDistance = dx * forwardX + dz * forwardZ;
+    const sideDistance = dx * rightX + dz * rightZ;
+    const slopeStrength = Math.sin(normalized * Math.PI);
+    best = {
+      wreck,
+      lift,
+      // Negative rotation.x raises the nose in Three's YXZ vehicle pose.
+      pitch: -Math.sign(forwardDistance || 1) * slopeStrength * 0.24,
+      roll: Math.sign(sideDistance || 1) * slopeStrength * 0.11,
+    };
+  }
+
+  const previousWreckId = unit._wreckTraversalWreckId ?? null;
+  const nextWreckId = best?.wreck?.id ?? null;
+  if (best && previousWreckId !== nextWreckId) {
+    const moveX = Number(options.directionX) || forwardX;
+    const moveZ = Number(options.directionZ) || forwardZ;
+    const length = Math.hypot(moveX, moveZ) || 1;
+    recordWreckRunOver(
+      best.wreck,
+      unit,
+      moveX / length,
+      moveZ / length,
+      options
+    );
+  }
+  unit._wreckTraversalWreckId = nextWreckId;
+  unit._wreckTraversalPose = best
+    ? { lift: best.lift, pitch: best.pitch, roll: best.roll }
+    : null;
+  return unit._wreckTraversalPose;
 }
 
 function stableSeparationNormal(a, b) {

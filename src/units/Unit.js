@@ -78,6 +78,7 @@ export class Unit {
     this.corpseTimeLeft = 0;
     this.wreckFire = null;
     this._wreckImpactCount = 0;
+    this._wreckRunOverCount = 0;
     this._wreckCrushed = false;
     this._wreckCrushFxDone = false;
     this._chasingAttack = false;
@@ -538,6 +539,7 @@ export class Unit {
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
     this._wreckImpactCount = 0;
+    this._wreckRunOverCount = 0;
     this._wreckCrushed = false;
     this._wreckCrushFxDone = false;
     this._driveSpeed = 0;
