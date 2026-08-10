@@ -727,8 +727,8 @@ export function updateCombatEffects(dt) {
         puff.mesh.scale.multiplyScalar(1 + dt * puff.growth);
         puff.material.opacity = puff.opacity * fade * fade;
       }
-      fx.ring.scale.multiplyScalar(1 + dt * 2.2);
-      fx.ringMaterial.opacity = 0.28 * fade * fade;
+      if (fx.ring) fx.ring.scale.multiplyScalar(1 + dt * 2.2);
+      if (fx.ringMaterial) fx.ringMaterial.opacity = 0.28 * fade * fade;
     } else if (fx.type === 'buildingDamageDust') {
       const t = 1 - Math.max(0, fx.life / fx.maxLife);
       const fade = 1 - THREE.MathUtils.smoothstep(t, 0.38, 1);
@@ -1473,7 +1473,13 @@ export function spawnBulletImpact(
 }
 
 /** One capped effect for a heavy, ground-hugging building-collapse dust sheet. */
-export function spawnCollapseDust(scene, pos, radius = 2.5, direction = null) {
+export function spawnCollapseDust(
+  scene,
+  pos,
+  radius = 2.5,
+  direction = null,
+  { includeRing = true } = {}
+) {
   if (!scene || !canSpawnEffect()) return false;
   const group = new THREE.Group();
   group.position.copy(toVec3(pos));
@@ -1515,19 +1521,24 @@ export function spawnCollapseDust(scene, pos, radius = 2.5, direction = null) {
     });
   }
 
-  const ringGeometry = new THREE.RingGeometry(radius * 0.22, radius * 0.78, 24);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0x8e8169,
-    transparent: true,
-    opacity: 0.28,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.08;
-  group.add(ring);
-  materials.push(ringMaterial);
+  let ringGeometry = null;
+  let ringMaterial = null;
+  let ring = null;
+  if (includeRing) {
+    ringGeometry = new THREE.RingGeometry(radius * 0.22, radius * 0.78, 24);
+    ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8e8169,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.08;
+    group.add(ring);
+    materials.push(ringMaterial);
+  }
   scene.add(group);
 
   const life = 1.05;
@@ -1537,7 +1548,7 @@ export function spawnCollapseDust(scene, pos, radius = 2.5, direction = null) {
     puffs,
     ring,
     ringMaterial,
-    geometries: [geometry, ringGeometry],
+    geometries: ringGeometry ? [geometry, ringGeometry] : [geometry],
     materials,
     life,
     maxLife: life,

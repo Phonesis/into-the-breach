@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { spawnMuzzleFlash } from '../units/UnitMeshes.js';
+import {
+  applyVehicleWreckCrushVisual,
+  spawnMuzzleFlash,
+} from '../units/UnitMeshes.js';
 import {
   spawnBulletImpact,
   spawnHandGrenade,
@@ -437,6 +440,23 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
       crushed: true,
       impactFrom,
     });
+    if (target.dead && CREW_SERVED_GUN_TYPES.has(target.def?.type)) {
+      target._wreckCrushed = true;
+      target._wreckReducedToRubble = true;
+      target._wreckRunOverCount = (target._wreckRunOverCount ?? 0) + 1;
+      target._wreckRunOverDamage = 1;
+      target._recoverableWreck = false;
+      target._wreckRepairProgress = 0;
+      applyVehicleWreckCrushVisual(target);
+      const dirLength = Math.hypot(dirX, dirZ) || 1;
+      options.onVehicleWreckRunOver?.(target, vehicle, {
+        directionX: dirX / dirLength,
+        directionZ: dirZ / dirLength,
+        severity: 0.75,
+        totalDamage: 1,
+        reducedToRubble: true,
+      });
+    }
   }
 
   options.infantryTrenches?.crushAt?.(vx, vz, radius * 0.92, {
@@ -2049,6 +2069,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
         advanceUnitOnTerrain(unit, dest, mapDef, moveDt, {
           horizReach: movePathHorizontalReach(unit, mapDef),
         });
+        collisionOptions.dt = moveDt;
         const vehicleCollision = clampVehicleMoveAgainstUnits(
           unit,
           collisionUnits,
@@ -2253,6 +2274,9 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       onVehicleWreckRunOver: collisionOptions.onVehicleWreckRunOver,
       directionX: unit.position.x - (unit._wreckPosePrevX ?? unit.position.x),
       directionZ: unit.position.z - (unit._wreckPosePrevZ ?? unit.position.z),
+      dt,
+      mapDef,
+      sampleTerrainHeight,
     });
     unit._wreckPosePrevX = unit.position.x;
     unit._wreckPosePrevZ = unit.position.z;

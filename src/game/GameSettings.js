@@ -8,6 +8,7 @@ export const GAME_SETTING_KEYS = Object.freeze({
   autoBuildClassic: 'ww2-rts-auto-build-mode-classic',
   autoBuildBaseBuilding: 'ww2-rts-auto-build-mode-base-building',
   debrisRetention: 'ww2-rts-debris-retention',
+  tabletMode: 'ww2-rts-tablet-mode',
 });
 
 export const DEBRIS_RETENTION_OPTIONS = Object.freeze([

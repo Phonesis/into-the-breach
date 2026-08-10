@@ -14,20 +14,44 @@ const WRECK_TRAVERSAL_HEIGHT = Object.freeze({
   antiTankGun: 0.32,
   armoredCar: 0.34,
 });
+const VEHICLE_MASS_CLASS = Object.freeze({
+  antiTankGun: 0.7,
+  armoredCar: 1,
+  artillery: 1.15,
+  tank: 2.6,
+  tankDestroyer: 3,
+  superHeavyTank: 4,
+});
+const WRECK_DAMAGE_VULNERABILITY = Object.freeze({
+  antiTankGun: 0.38,
+  armoredCar: 0.42,
+  artillery: 0.32,
+  tank: 0.14,
+  tankDestroyer: 0.12,
+  superHeavyTank: 0.09,
+});
+const TRACKED_ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
+const GUN_RUBBLE_TYPES = new Set(['antiTankGun', 'artillery']);
+
+function isPhysicalVehicle(unit) {
+  return !!(
+    unit?.position &&
+    isVehicleUnit(unit.def?.type) &&
+    (!unit.dead || !!unit.mesh?.parent) &&
+    !unit._mountedOnTankId
+  );
+}
 
 function isCollidableVehicle(unit) {
   return !!(
-    unit &&
-    unit.position &&
-    isVehicleUnit(unit.def?.type) &&
-    // A wreck that has been flattened by sustained contact remains visible and
-    // provides cover, but its low profile can now be driven over.
+    isPhysicalVehicle(unit) &&
+    // Generic overlap repair ignores a flattened wreck. Movement-segment
+    // collision below applies the mover-versus-wreck mass check explicitly.
     !(unit.dead && unit._wreckCrushed) &&
     // Dead vehicles remain blockers while their wreck mesh is still on the
     // battlefield. Dead units whose mesh has been removed are no longer
     // physical obstacles.
-    (!unit.dead || !!unit.mesh?.parent) &&
-    !unit._mountedOnTankId
+    (!unit.dead || !!unit.mesh?.parent)
   );
 }
 
@@ -50,14 +74,98 @@ function isPushableWreck(unit) {
   return !!unit && (unit.dead || unit._crewless);
 }
 
-function isTraversableWreck(unit) {
+function canVehicleOverrunWreckClass(vehicle, wreck) {
+  const moverType = vehicle?.def?.type;
+  const wreckType = wreck?.def?.type;
+  if (!moverType || !wreckType) return false;
+
+  // Wheeled scout cars can clamber over collapsed light vehicles and gun
+  // carriages, but not an armored fighting vehicle hull.
+  if (moverType === 'armoredCar') {
+    return wreckType === 'armoredCar' || wreckType === 'antiTankGun';
+  }
+  // Towed pieces are not wreck-crushing vehicles. At most they can cross a
+  // flattened light gun carriage.
+  if (moverType === 'artillery' || moverType === 'antiTankGun') {
+    return wreckType === 'antiTankGun';
+  }
+
+  // Tracked armor can flatten light wheeled wrecks and gun carriages, but an
+  // armored fighting vehicle hull remains an obstacle regardless of the
+  // moving tank's weight. Tank wrecks may still be nudged by impact momentum.
+  if (TRACKED_ARMOR_TYPES.has(moverType)) {
+    return wreckType === 'armoredCar' || GUN_RUBBLE_TYPES.has(wreckType);
+  }
+
+  return false;
+}
+
+function canTrackedArmorOverrunLiveGun(vehicle, other) {
   return !!(
-    unit?.dead &&
-    unit._wreckCrushed &&
-    unit.position &&
-    unit.mesh?.parent &&
-    isVehicleUnit(unit.def?.type)
+    TRACKED_ARMOR_TYPES.has(vehicle?.def?.type) &&
+    other &&
+    !other.dead &&
+    other.team !== vehicle.team &&
+    GUN_RUBBLE_TYPES.has(other.def?.type)
   );
+}
+
+export function canVehicleTraverseWreck(vehicle, wreck) {
+  return !!(
+    wreck?.dead &&
+    wreck._wreckCrushed &&
+    wreck.position &&
+    wreck.mesh?.parent &&
+    isVehicleUnit(wreck.def?.type) &&
+    canVehicleOverrunWreckClass(vehicle, wreck)
+  );
+}
+
+function getWreckRunOverSeverity(vehicle, wreck) {
+  const moverMass = VEHICLE_MASS_CLASS[vehicle?.def?.type] ?? 0;
+  const wreckMass = VEHICLE_MASS_CLASS[wreck?.def?.type] ?? 1;
+  const massRatio = moverMass / Math.max(0.1, wreckMass);
+  const vulnerability = WRECK_DAMAGE_VULNERABILITY[wreck?.def?.type] ?? 0.18;
+  return Math.max(0.05, Math.min(0.75, vulnerability * Math.min(1.7, massRatio)));
+}
+
+function initialMomentumPushDistance(vehicle, wreck, segmentDistance, dt) {
+  if (!TRACKED_ARMOR_TYPES.has(vehicle?.def?.type)) return 0;
+  if (!Number.isFinite(dt) || dt <= 0 || segmentDistance <= 0) return 0;
+  const actualSpeed = segmentDistance / dt;
+  const speedRatio = actualSpeed / Math.max(0.1, vehicle.def?.speed ?? actualSpeed);
+  if (speedRatio < 0.7) return 0;
+  const moverMass = VEHICLE_MASS_CLASS[vehicle.def?.type] ?? 1;
+  const wreckMass = VEHICLE_MASS_CLASS[wreck?.def?.type] ?? 1;
+  const massResponse = Math.max(0.35, Math.min(1.5, moverMass / wreckMass));
+  return Math.min(0.24, (speedRatio - 0.55) * 0.28 * massResponse);
+}
+
+function applyInitialWreckMomentum(
+  vehicle,
+  wreck,
+  directionX,
+  directionZ,
+  segmentDistance,
+  options
+) {
+  const impulse = initialMomentumPushDistance(
+    vehicle,
+    wreck,
+    segmentDistance,
+    options?.dt
+  );
+  if (impulse <= COLLISION_EPSILON) return 0;
+  wreck.position.x += directionX * impulse;
+  wreck.position.z += directionZ * impulse;
+  if (options?.mapDef) {
+    wreck.position.y = options.sampleTerrainHeight?.(
+      wreck.position.x,
+      wreck.position.z,
+      options.mapDef
+    ) ?? wreck.position.y;
+  }
+  return impulse;
 }
 
 function wreckPushResistance(type) {
@@ -81,13 +189,17 @@ function vehiclePushForce(type) {
 }
 
 function getWreckPushFraction(vehicle, wreck) {
-  return Math.max(
+  const baseFraction = Math.max(
     0.04,
     Math.min(
       0.5,
       wreckPushResistance(wreck.def?.type) * vehiclePushForce(vehicle.def?.type)
     )
   );
+  if (canVehicleOverrunWreckClass(vehicle, wreck)) return baseFraction;
+  // An under-mass vehicle can nudge a heavy wreck under sustained contact, but
+  // cannot shove it ahead quickly enough to masquerade as driving through it.
+  return Math.max(0.006, Math.min(0.025, baseFraction * 0.12));
 }
 
 function recordWreckImpact(wreck, vehicle, displacement, directionX, directionZ, options) {
@@ -96,6 +208,7 @@ function recordWreckImpact(wreck, vehicle, displacement, directionX, directionZ,
   wreck._wreckImpactCount = (wreck._wreckImpactCount ?? 0) + 1;
   const meaningfulImpact = displacement >= 0.18 || wreck._wreckImpactCount >= 3;
   if (!meaningfulImpact || wreck._wreckCrushed) return;
+  if (!canVehicleOverrunWreckClass(vehicle, wreck)) return;
 
   // A vehicle that has been run over is no longer a recoverable knockout.
   wreck._wreckCrushed = true;
@@ -109,12 +222,23 @@ function recordWreckImpact(wreck, vehicle, displacement, directionX, directionZ,
 }
 
 function recordWreckRunOver(wreck, vehicle, directionX, directionZ, options) {
-  if (!wreck?.dead || !wreck._wreckCrushed) return;
+  if (!canVehicleTraverseWreck(vehicle, wreck)) return;
+  const reducedToRubble =
+    TRACKED_ARMOR_TYPES.has(vehicle?.def?.type) &&
+    GUN_RUBBLE_TYPES.has(wreck?.def?.type);
+  const severity = reducedToRubble ? 0.75 : getWreckRunOverSeverity(vehicle, wreck);
   wreck._wreckImpactCount = (wreck._wreckImpactCount ?? 0) + 1;
   wreck._wreckRunOverCount = (wreck._wreckRunOverCount ?? 0) + 1;
+  wreck._wreckReducedToRubble ||= reducedToRubble;
+  wreck._wreckRunOverDamage = reducedToRubble
+    ? 1
+    : Math.min(1, (wreck._wreckRunOverDamage ?? 0) + severity);
   options?.onVehicleWreckRunOver?.(wreck, vehicle, {
     directionX,
     directionZ,
+    severity,
+    totalDamage: wreck._wreckRunOverDamage,
+    reducedToRubble,
   });
 }
 
@@ -136,7 +260,7 @@ export function updateVehicleWreckTraversalPose(unit, units, options = {}) {
   let best = null;
 
   for (const wreck of units ?? []) {
-    if (wreck === unit || !isTraversableWreck(wreck)) continue;
+    if (wreck === unit || !canVehicleTraverseWreck(unit, wreck)) continue;
     const dx = wreck.position.x - unit.position.x;
     const dz = wreck.position.z - unit.position.z;
     const centerDistance = Math.hypot(dx, dz);
@@ -169,9 +293,20 @@ export function updateVehicleWreckTraversalPose(unit, units, options = {}) {
   const previousWreckId = unit._wreckTraversalWreckId ?? null;
   const nextWreckId = best?.wreck?.id ?? null;
   if (best && previousWreckId !== nextWreckId) {
-    const moveX = Number(options.directionX) || forwardX;
-    const moveZ = Number(options.directionZ) || forwardZ;
+    const rawMoveX = Number(options.directionX) || 0;
+    const rawMoveZ = Number(options.directionZ) || 0;
+    const movementDistance = Math.hypot(rawMoveX, rawMoveZ);
+    const moveX = movementDistance > COLLISION_EPSILON ? rawMoveX : forwardX;
+    const moveZ = movementDistance > COLLISION_EPSILON ? rawMoveZ : forwardZ;
     const length = Math.hypot(moveX, moveZ) || 1;
+    applyInitialWreckMomentum(
+      unit,
+      best.wreck,
+      moveX / length,
+      moveZ / length,
+      movementDistance,
+      options
+    );
     recordWreckRunOver(
       best.wreck,
       unit,
@@ -205,10 +340,12 @@ function firstSegmentCircleHit(ax, az, bx, bz, cx, cz, radius) {
   const c = fx * fx + fz * fz - radius * radius;
 
   if (c <= 0) {
-    // If the unit is touching the other hull and moving away, it is already
-    // valid. If it is inside or moving back toward the hull, stop immediately.
+    // Contact resolution can leave the moving hull microscopically inside the
+    // separation radius. Always allow an order that increases (or holds) the
+    // separation so the vehicle can escape on its next move order; only block
+    // movement farther into the wreck.
     const towardOther = dx * (cx - ax) + dz * (cz - az);
-    return c < 0 || towardOther > COLLISION_EPSILON ? 0 : null;
+    return towardOther > COLLISION_EPSILON ? 0 : null;
   }
 
   const bTerm = 2 * (fx * dx + fz * dz);
@@ -219,7 +356,18 @@ function firstSegmentCircleHit(ax, az, bx, bz, cx, cz, radius) {
   return root >= 0 && root <= 1 ? root : null;
 }
 
-function pushWreckAhead(vehicle, wreck, fromX, fromZ, toX, toZ, hit, requiredDistance, options) {
+function pushWreckAhead(
+  vehicle,
+  wreck,
+  fromX,
+  fromZ,
+  toX,
+  toZ,
+  hit,
+  requiredDistance,
+  options,
+  initialImpact = false
+) {
   const dx = toX - fromX;
   const dz = toZ - fromZ;
   const travelDistance = Math.hypot(dx, dz);
@@ -229,7 +377,11 @@ function pushWreckAhead(vehicle, wreck, fromX, fromZ, toX, toZ, hit, requiredDis
   const directionZ = dz / travelDistance;
   const contactDistance = Math.max(0, Math.min(travelDistance, travelDistance * hit));
   const remainingDistance = Math.max(0, travelDistance - contactDistance);
-  const pushDistance = remainingDistance * getWreckPushFraction(vehicle, wreck);
+  const momentumPush = initialImpact
+    ? initialMomentumPushDistance(vehicle, wreck, travelDistance, options?.dt)
+    : 0;
+  const pushDistance =
+    remainingDistance * getWreckPushFraction(vehicle, wreck) + momentumPush;
   if (pushDistance <= COLLISION_EPSILON) return false;
 
   const desiredX = wreck.position.x + directionX * pushDistance;
@@ -303,7 +455,9 @@ export function clampVehicleMoveAgainstUnits(
   let firstLiveVehicleHit = 1;
   let firstWreckCollision = null;
   for (const other of units ?? []) {
-    if (other === unit || !isCollidableVehicle(other)) continue;
+    if (other === unit || !isPhysicalVehicle(other)) continue;
+    if (canTrackedArmorOverrunLiveGun(unit, other)) continue;
+    if (canVehicleTraverseWreck(unit, other)) continue;
 
     const requiredDistance =
       getCollisionRadius(unit) + getCollisionRadius(other) + VEHICLE_SEPARATION_GAP;
@@ -329,6 +483,22 @@ export function clampVehicleMoveAgainstUnits(
   let pushedWreck = false;
   let allowedTravel = travelDistance;
   if (firstWreckCollision && firstWreckCollision.hit < firstLiveVehicleHit) {
+    const initialImpact = unit._wreckMomentumContactId !== firstWreckCollision.wreck.id;
+    unit._wreckMomentumContactId = firstWreckCollision.wreck.id;
+    if (
+      initialImpact &&
+      TRACKED_ARMOR_TYPES.has(unit.def?.type) &&
+      TRACKED_ARMOR_TYPES.has(firstWreckCollision.wreck.def?.type)
+    ) {
+      options?.onVehicleWreckImpact?.(firstWreckCollision.wreck, unit, {
+        directionX: dx / travelDistance,
+        directionZ: dz / travelDistance,
+        speedRatio: Math.min(
+          1.5,
+          travelDistance / Math.max(COLLISION_EPSILON, (options?.dt ?? 0) * (unit.def?.speed ?? 1))
+        ),
+      });
+    }
     const pushResult = pushWreckAhead(
       unit,
       firstWreckCollision.wreck,
@@ -338,7 +508,8 @@ export function clampVehicleMoveAgainstUnits(
       toZ,
       firstWreckCollision.hit,
       firstWreckCollision.requiredDistance,
-      options
+      options,
+      initialImpact
     );
     if (pushResult?.pushed) {
       pushedWreck = true;
@@ -347,6 +518,8 @@ export function clampVehicleMoveAgainstUnits(
       // wreck cannot jump ahead while the vehicle carries on at full speed.
       allowedTravel = Math.min(allowedTravel, pushResult.vehicleTravel);
     }
+  } else {
+    unit._wreckMomentumContactId = null;
   }
 
   if (firstLiveVehicleHit < 1 - COLLISION_EPSILON) {

@@ -1,5 +1,7 @@
 /** True when the primary input is touch without a precise pointer (tablet / phone). */
 
+import { GAME_SETTING_KEYS } from '../game/GameSettings.js';
+
 export function isTabletLikeDevice() {
   if (typeof window === 'undefined') return false;
 
@@ -13,6 +15,20 @@ export function isTabletLikeDevice() {
 
   const touch = navigator.maxTouchPoints > 0;
   if (!touch) return false;
+
+  // iPadOS can expose a desktop-class pointer when a keyboard or trackpad is
+  // attached. It is still a tablet for the purposes of the optional setting.
+  if (
+    /iPad/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  ) {
+    return true;
+  }
+  // Android tablets likewise may advertise a fine pointer once accessories
+  // are attached; exclude phones by requiring the non-Mobile form.
+  if (/Android/i.test(navigator.userAgent || '') && !/Mobile/i.test(navigator.userAgent || '')) {
+    return true;
+  }
 
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const noHover = window.matchMedia('(hover: none)').matches;
@@ -32,6 +48,20 @@ export function isIPadLikeDevice() {
     /iPad/i.test(userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   );
+}
+
+/**
+ * Tablet touch controls can be disabled when a keyboard/mouse is connected.
+ * The raw device check remains separate so the preference is only meaningful
+ * (and only shown) on tablet-class devices.
+ */
+export function isTabletModeEnabled() {
+  if (!isTabletLikeDevice()) return false;
+  try {
+    return (globalThis.localStorage?.getItem(GAME_SETTING_KEYS.tabletMode) ?? '1') === '1';
+  } catch {
+    return true;
+  }
 }
 
 /** True for phone-sized mobile browsers; tablets and desktop browsers remain supported. */

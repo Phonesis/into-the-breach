@@ -293,6 +293,7 @@ export class SoundManager {
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     this._atmosSrc = null;
     this._atmosGain = null;
+    this._tabletAtmosAudio = null;
     this._lastExplosionFile = null;
     this._lastImpactFile = null;
     this._lastGarandPingFile = null;
@@ -800,10 +801,41 @@ export class SoundManager {
     this._atmosGain?.disconnect?.();
     this._atmosSrc = null;
     this._atmosGain = null;
+    if (this._tabletAtmosAudio) {
+      this._tabletAtmosAudio.pause();
+      try {
+        this._tabletAtmosAudio.currentTime = 0;
+      } catch {
+        /* unavailable */
+      }
+    }
+  }
+
+  _startTabletAtmosFallback() {
+    if (!this._constrainedAudio || this.muted) return false;
+    if (!this._tabletAtmosAudio) {
+      const audio = new Audio(publicUrl(`sounds/${ATMOS_SAMPLE_FILES_TABLET[0]}`));
+      audio.loop = true;
+      audio.preload = 'auto';
+      audio.volume = 0.34;
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
+      this._tabletAtmosAudio = audio;
+    }
+    try {
+      void this._tabletAtmosAudio.play().catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Looping battlefield bed during combat (under combat one-shots, but clearly audible). */
   _startBattleAtmos() {
+    if (this._constrainedAudio) {
+      this._startTabletAtmosFallback();
+      return;
+    }
     if (!this.ctx || this.muted || !this._isRunning()) return;
     if (this._atmosSrc) return;
     const buf = this.atmosBuffers[Math.floor(Math.random() * this.atmosBuffers.length)];
@@ -991,6 +1023,43 @@ export class SoundManager {
       }
       return result;
     });
+  }
+
+  /**
+   * iPadOS needs a source started synchronously inside the tap in addition to
+   * AudioContext.resume(). Desktop delegates to the established path unchanged.
+   */
+  resumeFromGesture() {
+    if (!this.unlock()) return Promise.resolve(false);
+    if (!this._constrainedAudio) return this.resumeContext();
+    if (this.ctx && !this.muted) {
+      try {
+        const src = this.ctx.createBufferSource();
+        const gain = this.ctx.createGain();
+        src.buffer = this._getSilentPrimeBuffer();
+        gain.gain.value = 0.00001;
+        src.connect(gain);
+        gain.connect(this.master);
+        src.start(0);
+        src.onended = () => {
+          src.disconnect();
+          gain.disconnect();
+        };
+      } catch {
+        /* the HTML ambience fallback still retries on the next gesture */
+      }
+      if (this.inBattle) this._startTabletAtmosFallback();
+    }
+    return this.resumeContext().then((result) => {
+      if (result && !this._warmedUp) this._warmUpNow();
+      return result;
+    });
+  }
+
+  /** Start the iPad media fallback directly from the launch/resume tap. */
+  startBattleAudioFromGesture() {
+    if (!this._constrainedAudio) return false;
+    return this._startTabletAtmosFallback();
   }
 
   /** Prime the audio graph after a user gesture so the first combat shot is audible. */

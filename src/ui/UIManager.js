@@ -78,7 +78,7 @@ import {
 } from '../data/baseBuildings.js';
 import { getUnitIconMarkup } from './unitIcons.js';
 import { TabletCameraControls } from './TabletCameraControls.js';
-import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { isTabletLikeDevice, isTabletModeEnabled } from '../lib/tabletDetect.js';
 import { publicUrl } from '../lib/publicUrl.js';
 import { BattleMinimap } from './Minimap.js';
 import {
@@ -289,6 +289,13 @@ export class UIManager {
   }
 
   render() {
+    const tabletModeSetting = isTabletLikeDevice()
+      ? `
+            <label class="setting-row" for="setting-tablet-mode">
+              <span><strong>Tablet controls</strong><small>Use touch camera controls and tablet targeting.</small><span class="setting-detail" id="setting-tablet-mode-detail">Turn this off when a keyboard and mouse are connected to the tablet to use the normal WASD, mouse, and keyboard command scheme. This setting is only available on tablet-class devices.</span></span>
+              <input type="checkbox" id="setting-tablet-mode" data-setting="tabletMode" aria-describedby="setting-tablet-mode-detail" />
+            </label>`
+      : '';
     this.root.innerHTML = `
       <div id="screen-title" class="screen menu-screen title-screen interactive">
         <div class="title-hero">
@@ -341,6 +348,7 @@ export class UIManager {
               <span><strong>Seek Cover</strong><small>Route foot-troop move orders toward nearby cover by default.</small><span class="setting-detail" id="setting-seek-cover-detail">Future move orders for infantry, commanders, medics, engineers, MGs, mortars, and snipers will snap to suitable nearby cover. Tanks, armored cars, anti-tank guns, and artillery still move to the exact point ordered.</span></span>
               <input type="checkbox" id="setting-seek-cover" data-setting="seekCover" aria-describedby="setting-seek-cover-detail" />
             </label>
+            ${tabletModeSetting}
           </div>
 
           <h2 class="settings-section-title">Standard Mode Automation</h2>
@@ -2495,6 +2503,16 @@ export class UIManager {
         this.setSeekCoverMode(on);
         if (applyToBattle) this.callbacks.onToggleSeekCover?.(this.seekCoverMode);
         break;
+      case 'tabletMode':
+        if (!isTabletLikeDevice()) return;
+        writeBooleanSetting(GAME_SETTING_KEYS.tabletMode, on);
+        this.tabletCamera?.setVisible(isTabletModeEnabled());
+        if (!on) {
+          this.setTabletTargetMode(false);
+          this.setTabletFireMode(false);
+        }
+        this.callbacks.onTabletModeChanged?.(isTabletModeEnabled());
+        break;
       case 'autoBuildClassic':
         writeBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, on);
         if (this._hudCampaignStyle === 'classic') {
@@ -2529,6 +2547,7 @@ export class UIManager {
       frontline: this.showFrontline,
       capturePoints: this.showCapturePoints,
       seekCover: this.seekCoverMode,
+      tabletMode: isTabletModeEnabled(),
       autoBuildClassic: readBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false),
       autoBuildBaseBuilding: readBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false),
     };

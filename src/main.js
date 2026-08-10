@@ -24,15 +24,18 @@ function primeAudio() {
   return sounds.unlock();
 }
 
-function resumeAudioContext() {
+function resumeAudioContext(event) {
   if (!primeAudio()) return;
   // Resume immediately while the browser still considers this a user gesture.
   // Combat samples continue loading in the background; menu music must not wait
   // for the entire sound library to decode.
   void sounds
-    .resumeContext()
+    .resumeFromGesture()
     // Autoplay policy can reject a resume attempt; the next user gesture retries it.
     .catch(() => {});
+  if (event?.target?.closest?.('#btn-launch, .save-load-btn')) {
+    sounds.startBattleAudioFromGesture();
+  }
 }
 
 function restoreAudioContext() {
@@ -118,6 +121,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   },
   onTabletFireMode(on) {
     game?.setTabletFireMode(on);
+  },
+  onTabletModeChanged(on) {
+    game?.setTabletMode(on);
   },
   onCancelFireMissions() {
     game?.cancelAllFireMissions();

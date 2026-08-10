@@ -1611,22 +1611,139 @@ export function applyTankWreckLook(mesh, { preserveTurret = false } = {}) {
 export function applyVehicleWreckCrushVisual(unit) {
   const mesh = unit?.mesh;
   if (!mesh) return;
+  const wreckType = unit?.def?.type;
+  const reducedToRubble = !!unit?._wreckReducedToRubble;
   const runOvers = Math.max(0, unit?._wreckRunOverCount ?? 0);
-  const targetScale = Math.max(0.56, 0.78 - runOvers * 0.11);
-  const currentScale = mesh.userData.wreckCrushScale ?? 1;
-  if (targetScale >= currentScale - 0.001) return;
+  const damage = THREE.MathUtils.clamp(
+    unit?._wreckRunOverDamage ?? Math.min(1, runOvers * 0.14),
+    0,
+    1
+  );
+  const currentDamage = mesh.userData.wreckRunOverVisualDamage ?? -1;
+  if (
+    damage <= currentDamage + 0.0001 &&
+    (!reducedToRubble || mesh.userData.wreckRubbleApplied)
+  ) {
+    return;
+  }
+
+  const lightWreck = ['armoredCar', 'antiTankGun', 'artillery'].includes(wreckType);
+  const maxHullCompression = {
+    armoredCar: 0.23,
+    antiTankGun: 0.2,
+    artillery: 0.17,
+    tank: 0.1,
+    tankDestroyer: 0.09,
+    superHeavyTank: 0.07,
+  }[wreckType] ?? 0.12;
+  // Armored hulls retain their volume. Most visible change comes from broken
+  // running gear, displaced fittings and thin upper plates—not a squashed box.
+  const targetVerticalScale = reducedToRubble
+    ? 0.32
+    : 0.93 - damage * maxHullCompression;
+  const currentVerticalScale = mesh.userData.wreckCrushScale ?? 1;
+  const targetFootprintScale = reducedToRubble
+    ? 1.08
+    : 1 + damage * (lightWreck ? 0.04 : 0.015);
+  const currentFootprintScale = mesh.userData.wreckCrushFootprintScale ?? 1;
+
   mesh.userData.wreckCrushApplied = true;
-  mesh.userData.wreckCrushScale = targetScale;
-  mesh.scale.y *= targetScale / currentScale;
+  mesh.userData.wreckRubbleApplied ||= reducedToRubble;
+  mesh.userData.wreckRunOverVisualDamage = damage;
+  mesh.userData.wreckCrushScale = targetVerticalScale;
+  mesh.userData.wreckCrushFootprintScale = targetFootprintScale;
+  mesh.scale.y *= targetVerticalScale / currentVerticalScale;
+  mesh.scale.x *= targetFootprintScale / currentFootprintScale;
+  mesh.scale.z *= targetFootprintScale / currentFootprintScale;
+
+  const targetTrackSpread = reducedToRubble
+    ? 1.3
+    : 1 + damage * (lightWreck ? 0.18 : 0.12);
+  const currentTrackSpread = mesh.userData.wreckTrackSpread ?? 1;
+  const trackSpreadRatio = targetTrackSpread / currentTrackSpread;
+  const targetTrackBend = reducedToRubble
+    ? 0.55
+    : damage * (lightWreck ? 0.34 : 0.22);
+  const currentTrackBend = mesh.userData.wreckTrackBend ?? 0;
+  const addedTrackBend = targetTrackBend - currentTrackBend;
+  mesh.userData.wreckTrackSpread = targetTrackSpread;
+  mesh.userData.wreckTrackBend = targetTrackBend;
   mesh.traverse((child) => {
     const part = child.userData?.tankPart;
-    if (part === 'barrel' || part === 'mantlet') child.visible = false;
+    if (
+      part === 'barrel' ||
+      part === 'mantlet' ||
+      (reducedToRubble && (part === 'turret' || part === 'muzzle'))
+    ) {
+      child.visible = false;
+    }
+    if (part === 'track') {
+      child.position.x *= trackSpreadRatio;
+      const side = Math.sign(child.position.x) || 1;
+      child.rotation.z += side * addedTrackBend;
+    }
   });
-  if (!mesh.userData.wreckCrushTiltApplied) {
-    mesh.userData.wreckCrushTiltApplied = true;
-    const sign = Number(unit.id) % 2 === 0 ? 1 : -1;
-    mesh.rotation.z += sign * 0.08;
+
+  const targetDebrisCount = reducedToRubble
+    ? 16
+    : 2 + Math.round(damage * (lightWreck ? 10 : 7));
+  let debrisCount = mesh.children.filter(
+    (child) => child.name === 'wreckRunOverDebris'
+  ).length;
+  while (debrisCount < targetDebrisCount) {
+    const i = debrisCount++;
+    const angle = (Number(unit.id) * 1.713 + i * 2.399) % (Math.PI * 2);
+    const radius = 1.05 + (i % 4) * 0.34;
+    const chunk = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24 + (i % 3) * 0.08, 0.1, 0.2 + (i % 2) * 0.1),
+      new THREE.MeshStandardMaterial({
+        color: i % 3 === 0 ? 0x79371f : 0x292725,
+        roughness: 0.92,
+        metalness: 0.28,
+      })
+    );
+    chunk.name = 'wreckRunOverDebris';
+    chunk.position.set(
+      Math.cos(angle) * radius,
+      0.12 + (i % 2) * 0.04,
+      Math.sin(angle) * radius
+    );
+    chunk.rotation.set(angle * 0.37, angle, angle * 0.61);
+    mesh.add(chunk);
   }
+
+  // Thin fittings and access plates can buckle or shear; thick hull armor does
+  // not uniformly collapse. Light wrecks expose more plate damage.
+  const targetPlateCount = reducedToRubble
+    ? 7
+    : damage > 0
+      ? Math.max(1, Math.ceil(damage * (lightWreck ? 5 : 3)))
+      : 0;
+  let plateCount = mesh.children.filter(
+    (child) => child.name === 'wreckRunOverDamagePlate'
+  ).length;
+  while (plateCount < targetPlateCount) {
+    const i = plateCount++;
+    const side = i % 2 === 0 ? 1 : -1;
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42 + (i % 3) * 0.1, 0.06, 0.3 + (i % 2) * 0.1),
+      new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? 0x8a3b21 : 0x3a302a,
+        roughness: 0.88,
+        metalness: 0.36,
+      })
+    );
+    plate.name = 'wreckRunOverDamagePlate';
+    plate.position.set(side * (0.35 + (i % 3) * 0.38), 0.72, (i - 1) * 0.38);
+    plate.rotation.set(side * 0.13, i * 1.17, side * (0.18 + i * 0.035));
+    mesh.add(plate);
+  }
+
+  const sign = Number(unit.id) % 2 === 0 ? 1 : -1;
+  const targetTilt = sign * (0.045 + damage * (lightWreck ? 0.055 : 0.025));
+  const currentTilt = mesh.userData.wreckCrushTilt ?? 0;
+  mesh.rotation.z += targetTilt - currentTilt;
+  mesh.userData.wreckCrushTilt = targetTilt;
 }
 
 export { spawnMuzzleFlash } from '../effects/CombatEffects.js';

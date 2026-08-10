@@ -18,7 +18,7 @@ import {
 import { wrapSceneryTarget } from '../game/SceneryTarget.js';
 import { canManualFireOrder, canSmokeShellOrder, isSmokeShellReady } from './BattleCursor.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { isTabletModeEnabled } from '../lib/tabletDetect.js';
 
 const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _groundHit = new THREE.Vector3();
@@ -126,7 +126,7 @@ export class RTSController {
     this.hoveredTarget = null;
     this._modifierShift = false;
     this._lastHoverRayAt = 0;
-    this._tabletMode = isTabletLikeDevice();
+    this._tabletMode = isTabletModeEnabled();
     this._tabletTargetMode = false;
     this._tabletFireMode = false;
     this._tabletTargetConfirmKey = null;
@@ -186,6 +186,16 @@ export class RTSController {
 
   isTabletTargetMode() {
     return this._tabletMode && this._tabletTargetMode;
+  }
+
+  setTabletMode(on) {
+    this._tabletMode = !!on;
+    if (!this._tabletMode) {
+      this._tabletTargetMode = false;
+      this._tabletFireMode = false;
+      this._tabletTargetConfirmKey = null;
+    }
+    this.onBattleCursorChange?.();
   }
 
   setTabletTargetMode(on) {

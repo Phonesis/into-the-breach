@@ -263,6 +263,8 @@ export function captureBattleSave(game, { id = null } = {}) {
       wreckRepairProgress: u._wreckRepairProgress ?? 0,
       wreckImpactCount: u._wreckImpactCount ?? 0,
       wreckRunOverCount: u._wreckRunOverCount ?? 0,
+      wreckRunOverDamage: u._wreckRunOverDamage ?? 0,
+      wreckReducedToRubble: !!u._wreckReducedToRubble,
       wreckCrushed: !!u._wreckCrushed,
       mobilityDamaged: !!u._mobilityDamaged,
       mobilityDamageKind: u._mobilityDamageKind ?? null,
@@ -1383,6 +1385,11 @@ export function applyBattleSave(game, snapshot) {
     unit._wreckRepairProgress = uData.wreckRepairProgress ?? 0;
     unit._wreckImpactCount = uData.wreckImpactCount ?? 0;
     unit._wreckRunOverCount = uData.wreckRunOverCount ?? 0;
+    unit._wreckRunOverDamage = uData.wreckRunOverDamage ?? Math.min(
+      1,
+      (uData.wreckRunOverCount ?? 0) * 0.14
+    );
+    unit._wreckReducedToRubble = !!uData.wreckReducedToRubble;
     unit._wreckCrushed = !!uData.wreckCrushed;
     if (unit._wreckCrushed) unit._recoverableWreck = false;
     unit._mobilityDamaged = !!uData.mobilityDamaged;

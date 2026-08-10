@@ -1,4 +1,4 @@
-import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { isTabletModeEnabled } from '../lib/tabletDetect.js';
 
 const ACTIONS = [
   'panForward',
@@ -89,7 +89,7 @@ export class TabletCameraControls {
   }
 
   shouldEnable() {
-    return isTabletLikeDevice();
+    return isTabletModeEnabled();
   }
 
   setVisible(on) {

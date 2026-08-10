@@ -163,7 +163,7 @@ import {
   shouldIgnoreCheatKeyEvent,
 } from './CheatMode.js';
 import { buildCoverSites } from '../world/CoverSites.js';
-import { isTabletLikeDevice } from '../lib/tabletDetect.js';
+import { isTabletLikeDevice, isTabletModeEnabled } from '../lib/tabletDetect.js';
 import {
   CoverSystem,
   addVehicleWreckCover,
@@ -217,7 +217,7 @@ import {
   spawnArtilleryExplosion,
   spawnArmorRicochet,
   spawnShellExplosion,
-  spawnShellExplosionLite,
+  spawnCollapseDust,
   spawnWaterImpact,
   prewarmImpactLightPrograms,
   updateCombatEffects,
@@ -396,6 +396,7 @@ export class Game {
     this._largeBattleMovementAccum = 0;
     this._largeBattleTacticalVisualAccum = 0;
     this._largeBattleSimulationPerfActive = false;
+    this._tabletMode = isTabletModeEnabled();
     this.showUnitFieldIcons = true;
     this.showUnitStatus = true;
     this.seekCoverMode = true;
@@ -898,7 +899,7 @@ export class Game {
     canvas.addEventListener(
       'touchmove',
       (e) => {
-        if ((!this.running && !this.viewingBattlefield) || e.touches.length !== 2) return;
+        if (!this._tabletMode || (!this.running && !this.viewingBattlefield) || e.touches.length !== 2) return;
         const dist = pinchDist(e.touches);
         if (lastPinchDist > 0) {
           const delta = (lastPinchDist - dist) * 0.045;
@@ -1461,7 +1462,9 @@ export class Game {
       clearanceRole: this.clearanceRole ?? 'attack',
       clearanceTimeLimitEnabled: this.clearanceTimeLimitEnabled,
     });
-    if (isTabletLikeDevice()) {
+    this._tabletMode = isTabletModeEnabled();
+    this.controller?.setTabletMode(this._tabletMode);
+    if (this._tabletMode) {
       this.setTabletTargetMode(true);
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
@@ -2168,6 +2171,18 @@ export class Game {
     this.ui?.setTabletTargetMode(on);
   }
 
+  setTabletMode(on) {
+    this._tabletMode = !!on;
+    this.controller?.setTabletMode(this._tabletMode);
+    this.ui?.tabletCamera?.setVisible(this._tabletMode);
+    if (this._tabletMode && this.running) {
+      this.setTabletTargetMode(true);
+    } else if (!this._tabletMode) {
+      this.setTabletTargetMode(false);
+      this.setTabletFireMode(false);
+    }
+  }
+
   setTabletFireMode(on) {
     this.controller?.setTabletFireMode(on);
     this.ui?.setTabletFireMode(on);
@@ -2274,22 +2289,54 @@ export class Game {
 
     applyVehicleWreckCrushVisual(wreck);
 
-    spawnShellExplosionLite(
-      this.scene,
-      {
-        x: wreck.position.x,
-        y: wreck.position.y + 0.28,
-        z: wreck.position.z,
-      },
-      vehicle?.def?.type === 'superHeavyTank' ? 'heavy' : 'medium'
-    );
     sounds.playImpact('shell', { x: wreck.position.x, z: wreck.position.z }, 0.02);
   }
 
-  _handleVehicleWreckRunOver(wreck, vehicle) {
+  _handleVehicleWreckImpact(wreck, vehicle, impact = {}) {
+    if (!wreck?.mesh?.parent) return;
+    const severity = THREE.MathUtils.clamp(impact.speedRatio ?? 0.5, 0.25, 1);
+    spawnCollapseDust(
+      this.scene,
+      {
+        x: wreck.position.x,
+        y: wreck.position.y + 0.06,
+        z: wreck.position.z,
+      },
+      0.55 + severity * 0.55,
+      {
+        x: impact.directionX ?? 0,
+        z: impact.directionZ ?? 0,
+      },
+      { includeRing: false }
+    );
+    const impactPosition = { x: wreck.position.x, z: wreck.position.z };
+    sounds.playImpact('impact', impactPosition, 0);
+    sounds.playImpact('bullet_metal', impactPosition, 0.015);
+  }
+
+  _handleVehicleWreckRunOver(wreck, vehicle, impact = {}) {
     if (!wreck?.mesh?.parent) return;
     applyVehicleWreckCrushVisual(wreck);
-    sounds.playImpact('shell', { x: wreck.position.x, z: wreck.position.z }, 0.012);
+    const severity = THREE.MathUtils.clamp(impact.severity ?? 0.12, 0.05, 0.75);
+    spawnCollapseDust(
+      this.scene,
+      {
+        x: wreck.position.x,
+        y: wreck.position.y + 0.08,
+        z: wreck.position.z,
+      },
+      0.7 + severity * 1.7,
+      {
+        x: (vehicle?.position?.x ?? wreck.position.x) - wreck.position.x,
+        z: (vehicle?.position?.z ?? wreck.position.z) - wreck.position.z,
+      },
+      { includeRing: false }
+    );
+    sounds.playImpact(
+      'shell',
+      { x: wreck.position.x, z: wreck.position.z },
+      0.006 + severity * 0.016
+    );
   }
 
   stopGame() {
@@ -4032,6 +4079,8 @@ export class Game {
         if (updateArmyMovement) {
           updateMovement(this._aliveUnits, movementDt, this.mapDef, this.hqs, {
             collisionUnits: this.units,
+            onVehicleWreckImpact: (wreck, vehicle, impact) =>
+              this._handleVehicleWreckImpact(wreck, vehicle, impact),
             onVehicleWreckCrushed: (wreck, vehicle, impact) =>
               this._handleVehicleWreckCrushed(wreck, vehicle, impact),
             onVehicleWreckRunOver: (wreck, vehicle, impact) =>

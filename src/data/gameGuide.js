@@ -74,7 +74,7 @@ export const GAME_GUIDE_SECTIONS = [
       ['Fire support', 'Strafe, Bomb, Barrage, Creep, or Airborne → LMB on map · Esc cancels'],
       ['General Orders', 'HUD panel below Fire Support — Full Retreat, Hold Ground (3 min cooldown each, 30 s effect), and Seek Cover toggle. Orders require a living commander; the enemy AI uses the same command net and loses these orders when its commander dies'],
       ['Auto Build', 'Reinforcements panel (Standard only) — toggle to automatically fill the HQ queue with a balanced combined-arms mix'],
-      ['Tablet / touch', 'Camera pad: pan, rotate, zoom · <strong>Target</strong> = tap enemy to highlight, tap again or Engage to attack · <strong>Fire</strong> = tap ground/cover (Shift+LMB) · long-press = move/attack · <code>?tablet=1</code> forces tablet UI'],
+      ['Tablet / touch', 'Camera pad: pan, rotate, zoom · <strong>Target</strong> = tap enemy to highlight, tap again or Engage to attack · <strong>Fire</strong> = tap ground/cover (Shift+LMB) · long-press = move/attack · on tablets, use Settings → Tablet controls to switch to the normal keyboard/mouse scheme when a keyboard is connected · <code>?tablet=1</code> forces tablet UI'],
       ['Cheat mode', 'Type <code>iddqd</code> during a battle, or add <code>?cheat=1</code> to the URL before loading — unlimited supplies and instant builds (<code>iddqd</code> toggles off)'],
     ],
   },
