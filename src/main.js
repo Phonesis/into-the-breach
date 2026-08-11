@@ -179,6 +179,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   onSelectUnit(unitId, additive) {
     game?.selectPlayerUnitById(unitId, additive);
   },
+  onHighlightUnit(unitId) {
+    game?.setRosterHighlightedUnit(unitId);
+  },
   onLaunchBattleNow() {
     game?.launchBattleNow();
   },
@@ -202,6 +205,12 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   },
   onToggleSeekCover(enabled) {
     game?.setSeekCoverMode(enabled);
+  },
+  onChangeArtilleryAutoFire(enabled) {
+    game?.setArtilleryAutoFire(enabled);
+  },
+  onChangePursueTargets(enabled) {
+    game?.setPursueTargetsByDefault(enabled);
   },
   onToggleAutoBuild(enabled) {
     game?.setAutoBuildMode(enabled);

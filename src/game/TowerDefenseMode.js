@@ -2,6 +2,7 @@ import { sounds } from '../audio/SoundManager.js';
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
+import { canAddRadioOperator } from './RadioOperatorBehavior.js';
 import { repositionFrontlineVisual } from '../world/Frontline.js';
 import { getFrontlineDef } from './AssaultMode.js';
 import {
@@ -390,6 +391,9 @@ export function getWaveComposition(wave, waveMult = 1, endless = false) {
   if (w >= 3) add('mortar', Math.max(1, Math.floor((w - 2) / 2)));
   if (w >= 5) add('armoredCar', Math.floor((w - 4) / 2));
   if (w >= 6) add('tank', Math.floor((w - 5) / 2));
+  // Signals detachments arrive with selected assault waves. Surviving radio
+  // operators keep the enemy's off-map support link alive into later waves.
+  if (w >= 2 && (w - 2) % 3 === 0) add('radioOperator', 1);
   if (w >= 9) add('superHeavyTank', w >= 11 ? 1 : 0);
   if (w >= 8) add('artillery', w >= 10 ? 1 : 0);
 
@@ -416,6 +420,9 @@ export function startNextWave(td) {
   td.phase = 'prepare';
   td.phaseTimer = td.wave === 1 ? TD_PREPARE_TIME : TD_PREPARE_TIME_BETWEEN;
   td.spawnQueue = buildSpawnQueue(td.wave, td.waveMult, td.endless);
+  if (isTdHqDefenseStyle(td)) {
+    td.spawnQueue = td.spawnQueue.filter((type) => type !== 'radioOperator');
+  }
   td.spawned = 0;
   td.totalToSpawn = td.spawnQueue.length;
   td.killsThisWave = 0;
@@ -489,6 +496,7 @@ export function updateTowerDefenseMode(game, dt) {
 function spawnWaveUnit(game, type) {
   const def = game.enemyFaction.units[type];
   if (!def) return;
+  if (type === 'radioOperator' && !canAddRadioOperator(game.units, ENEMY)) return;
 
   const td = game.towerDefense;
   const sectors = td?.assaultSectors?.length ? td.assaultSectors : pickWaveAssaultSectors(td?.wave ?? 1).sectors;

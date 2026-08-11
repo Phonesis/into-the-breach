@@ -362,6 +362,10 @@ export class Game {
     this._selectionUiKey = '';
     /** After an order, hide the selection info panel but keep units selected. */
     this._selectionPanelDismissed = false;
+    /** Keyboard unit shortcuts keep a stable ordered cycle until selection changes. */
+    this._unitSelectionCycle = null;
+    this._unitSelectionShortcutApplying = false;
+    this._highlightedRosterUnitId = null;
     this._healMarkerAccum = 0;
     this._combatBuildingTargets = [];
     this._hoverUiId = '';
@@ -400,6 +404,8 @@ export class Game {
     this.showUnitFieldIcons = true;
     this.showUnitStatus = true;
     this.seekCoverMode = true;
+    this.pursueTargetsByDefault = this.ui?.pursueTargetsByDefault ?? false;
+    this.artilleryAutoFire = this.ui?.artilleryAutoFire ?? true;
     this.autoBuildMode = false;
     this.showFrontline = true;
     this.showCapturePoints = true;
@@ -444,6 +450,7 @@ export class Game {
     this.zoomMax = 100;
     /** Orbit angle around the look target (radians). */
     this.cameraYaw = Math.atan2(-0.52, 0.72);
+    this._cameraGroundDirection = new THREE.Vector3();
     this.keys = {};
     this.cheatMode = isCheatModeFromUrl();
     this._cheatKeys = createCheatKeyBuffer();
@@ -499,6 +506,12 @@ export class Game {
       getScenery: () => this.scenery,
       onSpawn: (team, _unitType, unit) => {
         if (this.campaign && unit) applyCampaignUnitHp(unit);
+        if (team === PLAYER_TEAM && unit?.def?.type === 'artillery') {
+          unit.setAutoFire(this.artilleryAutoFire);
+        }
+        if (team === PLAYER_TEAM && unit) {
+          unit.setEngagementStance(this.pursueTargetsByDefault ? 'pursue' : 'hold');
+        }
         if (team === PLAYER_TEAM) {
           sounds.play('spawn');
           syncUnitFieldIcon(unit, this.showUnitFieldIcons);
@@ -579,6 +592,7 @@ export class Game {
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
         // Explicit re-select (click unit / box / HQ) brings the info panel back.
         this._selectionPanelDismissed = false;
+        if (!this._unitSelectionShortcutApplying) this._unitSelectionCycle = null;
         this.selectedHq = hq;
         this.selectedBaseBuilding = baseBuilding;
         if (sel.length > 0) {
@@ -944,6 +958,8 @@ export class Game {
     void sounds.primeForCombat();
     const restoreSnapshot = options.restoreSnapshot ?? null;
     this.debrisRetentionSeconds = getDebrisRetentionSeconds();
+    this.pursueTargetsByDefault = this.ui?.pursueTargetsByDefault ?? false;
+    this.artilleryAutoFire = this.ui?.artilleryAutoFire ?? true;
     const startOptions = { ...options };
     delete startOptions.restoreSnapshot;
     const clearanceTimeLimitEnabled = isClearanceMode(gameMode)
@@ -1340,6 +1356,7 @@ export class Game {
       u._terrainMesh = this._terrainMesh;
       u.position.y = sampleTerrainHeight(u.position.x, u.position.z, this.mapDef);
     }
+    if (!restoreSnapshot) this._applyArtilleryAutoFireDefault(this.units);
 
     if (this.lastStand && isLastStandPresetForce(this) && !restoreSnapshot) {
       this._rebuildUnitCaches();
@@ -1395,9 +1412,13 @@ export class Game {
     if (!this.lastStand || isLastStandPresetForce(this)) {
       ensureStartingRadioOperators(
         this,
-        this.tutorial ? [PLAYER_TEAM] : [PLAYER_TEAM, ENEMY_TEAM]
+        this.tutorial ||
+          (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense))
+          ? [PLAYER_TEAM]
+          : [PLAYER_TEAM, ENEMY_TEAM]
       );
     }
+    if (!restoreSnapshot) this._applyEngagementStanceDefault(this.units);
 
     if (!restoreSnapshot) {
       resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
@@ -1469,6 +1490,8 @@ export class Game {
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.showUnitStatus = this.ui.showUnitStatus !== false;
+    this.pursueTargetsByDefault = this.ui.pursueTargetsByDefault ?? false;
+    this.artilleryAutoFire = this.ui.artilleryAutoFire ?? true;
     setUnitStatusMarkersVisible(this.showUnitStatus);
     this.seekCoverMode = this.ui.seekCoverMode;
     this.autoBuildMode = this.ui.syncAutoBuildForCampaign(this.campaignStyle);
@@ -1532,6 +1555,9 @@ export class Game {
     this._rebuildUnitCaches();
     this._syncUnitRoster();
     this._updateMinimap();
+    if (this.paused) {
+      this.ui?.setGamePaused(true, this._buildCurrentBattleReport());
+    }
     preloadUnitFieldIcons([...getProducibleUnits(this.playerFaction), 'commander']).then(() => {
       if (this.running) syncPlayerFieldIcons(this._aliveUnits, this.showUnitFieldIcons);
     });
@@ -1627,7 +1653,7 @@ export class Game {
     return true;
   }
 
-  /** Toggle Auto-fire on selected player howitzers (off by default). */
+  /** Toggle Auto-fire on selected player howitzers. */
   toggleSelectedArtilleryAutoFire() {
     const selected = this._playerAlive.filter(
       (u) => u.selected && !u.dead && !u.surrendered && u.def?.type === 'artillery'
@@ -1832,6 +1858,15 @@ export class Game {
     this.camera.lookAt(this.cameraTarget);
   }
 
+  _captureCameraFacing() {
+    this.camera.getWorldDirection(this._cameraGroundDirection);
+    this._cameraGroundDirection.y = 0;
+    if (this._cameraGroundDirection.lengthSq() <= 0.0001) return;
+    this._cameraGroundDirection.normalize();
+    const yaw = Math.atan2(-this._cameraGroundDirection.x, -this._cameraGroundDirection.z);
+    if (Number.isFinite(yaw)) this.cameraYaw = yaw;
+  }
+
   _setupBattleCamera(playerFocus, enemyFocus) {
     const dx = enemyFocus.x - playerFocus.x;
     const dz = enemyFocus.z - playerFocus.z;
@@ -1937,6 +1972,38 @@ export class Game {
     this.seekCoverMode = !!enabled;
   }
 
+  setPursueTargetsByDefault(enabled) {
+    this.pursueTargetsByDefault = !!enabled;
+    this._applyEngagementStanceDefault(this.units);
+    this._selectionUiKey = '';
+    const selected = this._playerAlive?.filter((unit) => unit.selected) ?? [];
+    if (selected.length) {
+      this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    }
+  }
+
+  _applyEngagementStanceDefault(units = this.units) {
+    const stance = this.pursueTargetsByDefault ? 'pursue' : 'hold';
+    for (const unit of units ?? []) {
+      if (unit?.team !== PLAYER_TEAM || unit.dead) continue;
+      unit.setEngagementStance(stance);
+    }
+  }
+
+  setArtilleryAutoFire(enabled) {
+    this.artilleryAutoFire = !!enabled;
+    this._applyArtilleryAutoFireDefault(this.units);
+    this._selectionUiKey = '';
+    this.ui?.updateArtilleryAutoFire?.(this);
+  }
+
+  _applyArtilleryAutoFireDefault(units = this.units) {
+    for (const unit of units ?? []) {
+      if (unit?.team !== PLAYER_TEAM || unit.dead || unit.def?.type !== 'artillery') continue;
+      unit.setAutoFire(this.artilleryAutoFire);
+    }
+  }
+
   setAutoBuildMode(enabled) {
     if (this.cheatMode && enabled) return;
     this.autoBuildMode = !!enabled;
@@ -1972,9 +2039,13 @@ export class Game {
 
   panCameraTo(x, z) {
     if (!this.mapDef) return;
+    // Rebuild the orbit from the view the player is already looking through;
+    // moving the target must never introduce a new camera angle.
+    this._captureCameraFacing();
     const half = this.mapDef.size / 2 - 5;
     this.cameraTarget.x = THREE.MathUtils.clamp(x, -half, half);
     this.cameraTarget.z = THREE.MathUtils.clamp(z, -half, half);
+    this._updateCameraFromTarget();
   }
 
   _isTextInputFocused(target) {
@@ -1989,7 +2060,10 @@ export class Game {
       this.ui.closePausedSettings();
     }
     this.paused = !this.paused;
-    this.ui?.setGamePaused(this.paused);
+    this.ui?.setGamePaused(
+      this.paused,
+      this.paused ? this._buildCurrentBattleReport() : null
+    );
     if (this.paused) sounds.clearVehicleEngines();
     this._syncBattleCursor();
   }
@@ -2012,10 +2086,23 @@ export class Game {
         z: this.cameraTarget.z,
         zoom: this.zoom,
       },
+      highlightedUnitId: this._highlightedRosterUnitId,
     });
   }
 
+  setRosterHighlightedUnit(unitId) {
+    const nextId = unitId == null ? null : Number(unitId);
+    if (nextId !== null && !Number.isFinite(nextId)) return;
+    if (nextId !== null && !this.units.some((unit) => unit.id === nextId && unit.team === PLAYER_TEAM)) {
+      return;
+    }
+    if (nextId === this._highlightedRosterUnitId) return;
+    this._highlightedRosterUnitId = nextId;
+    this._updateMinimap();
+  }
+
   selectPlayerUnitById(unitId, additive = false) {
+    if (!this._unitSelectionShortcutApplying) this._unitSelectionCycle = null;
     const unit = this.units.find(
       (u) => u.id === unitId && u.team === PLAYER_TEAM && !u.dead
     );
@@ -2094,6 +2181,39 @@ export class Game {
     const selected = teamUnits.filter(
       (unit) => isAvailable(unit) && unit.selected
     );
+
+    const cycle = this._unitSelectionCycle;
+    const canAdvanceCycle =
+      cycle?.type === unitType &&
+      cycle.currentId != null &&
+      selected.length === 1 &&
+      selected[0].id === cycle.currentId &&
+      candidates.some((unit) => unit.id === cycle.currentId);
+
+    if (canAdvanceCycle) {
+      const availableById = new Map(candidates.map((unit) => [unit.id, unit]));
+      const orderedIds = cycle.orderIds.filter((id) => availableById.has(id));
+      if (orderedIds.length > 0) {
+        const currentIndex = orderedIds.indexOf(cycle.currentId);
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % orderedIds.length : 0;
+        const next = availableById.get(orderedIds[nextIndex]);
+        if (next) {
+          this._unitSelectionCycle = {
+            type: unitType,
+            orderIds: orderedIds,
+            currentId: next.id,
+          };
+          this._unitSelectionShortcutApplying = true;
+          try {
+            this.selectPlayerUnitById(next.id, false);
+          } finally {
+            this._unitSelectionShortcutApplying = false;
+          }
+          return next;
+        }
+      }
+    }
+
     let anchorX = this.cameraTarget.x;
     let anchorZ = this.cameraTarget.z;
     if (selected.length > 0) {
@@ -2101,19 +2221,30 @@ export class Game {
       anchorZ = selected.reduce((sum, unit) => sum + unit.position.z, 0) / selected.length;
     }
 
-    const nearest = candidates.reduce((best, unit) => {
-      const distanceSq =
-        (unit.position.x - anchorX) ** 2 +
-        (unit.position.z - anchorZ) ** 2;
-      if (!best || distanceSq < best.distanceSq) return { unit, distanceSq };
-      if (distanceSq === best.distanceSq && unit.id < best.unit.id) {
-        return { unit, distanceSq };
-      }
-      return best;
-    }, null)?.unit;
+    const ordered = [...candidates].sort((a, b) => {
+      const distanceA =
+        (a.position.x - anchorX) ** 2 +
+        (a.position.z - anchorZ) ** 2;
+      const distanceB =
+        (b.position.x - anchorX) ** 2 +
+        (b.position.z - anchorZ) ** 2;
+      if (distanceA !== distanceB) return distanceA - distanceB;
+      return a.id - b.id;
+    });
+    const nearest = ordered[0];
     if (!nearest) return null;
 
-    this.selectPlayerUnitById(nearest.id, false);
+    this._unitSelectionCycle = {
+      type: unitType,
+      orderIds: ordered.map((unit) => unit.id),
+      currentId: nearest.id,
+    };
+    this._unitSelectionShortcutApplying = true;
+    try {
+      this.selectPlayerUnitById(nearest.id, false);
+    } finally {
+      this._unitSelectionShortcutApplying = false;
+    }
     return nearest;
   }
 
@@ -2238,6 +2369,8 @@ export class Game {
     const result = tryPlacePlayerUnit(this, type, x, z);
     if (!result.ok) return;
 
+    this._applyEngagementStanceDefault([result.unit]);
+    this._applyArtilleryAutoFireDefault([result.unit]);
     sounds.play('spawn');
     this._rebuildUnitCaches();
     this._syncUnitRoster();
@@ -2350,6 +2483,9 @@ export class Game {
     this._pendingEnd = null;
     clearPendingMortarImpacts();
     this._teardownPending = false;
+    this._unitSelectionCycle = null;
+    this._unitSelectionShortcutApplying = false;
+    this._highlightedRosterUnitId = null;
     this.viewingBattlefield = false;
     this.ui?.hideEndOverlay();
     this.ui?.hidePostMatchViewBar();
@@ -3455,8 +3591,7 @@ export class Game {
     this.battleStats.recordDefenseFromEntries(this.defenses?.entries);
   }
 
-  _buildEndBattleReport() {
-    this._finalizeBattleStats();
+  _buildBattleStatsReport() {
     return this.battleStats.buildReport({
       playerName: this.playerFaction.name,
       enemyName: this.enemyFaction.name,
@@ -3465,6 +3600,16 @@ export class Game {
       tdEndless: !!this.towerDefense?.endless,
       tdWavesCleared: this.towerDefense?.wavesCleared ?? 0,
     });
+  }
+
+  _buildCurrentBattleReport() {
+    this.recordBattleLosses();
+    return this._buildBattleStatsReport();
+  }
+
+  _buildEndBattleReport() {
+    this._finalizeBattleStats();
+    return this._buildBattleStatsReport();
   }
 
   _purgeBattlefieldEffects() {
@@ -3952,6 +4097,8 @@ export class Game {
         }
         const clearanceArrival = updateClearanceReinforcements(this);
         if (clearanceArrival) {
+          this._applyEngagementStanceDefault(clearanceArrival.units);
+          this._applyArtilleryAutoFireDefault(clearanceArrival.units);
           this._rebuildUnitCaches();
           this._syncUnitRoster();
           this.ui?.showSaveToast?.(
@@ -4321,12 +4468,16 @@ export class Game {
           if (this.towerDefense) {
             const enemyStagingPhase = this.towerDefense.phase !== 'active';
             if (!enemyStagingPhase) {
+              const supportTargets = [
+                ...this._playerAlive,
+                ...(this.defenses?.getAttackTargets?.() ?? []),
+              ];
               updateAIOffMapSupport(
                 this.enemyFireSupport,
                 this._playerAlive,
                 dt,
                 this.difficulty,
-                { clearance: false }
+                { clearance: false, supportTargets }
               );
             }
             updateAICommandSystems({

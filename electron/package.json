@@ -1,0 +1,64 @@
+{
+  "name": "into-the-breach-macos",
+  "version": "1.0.0",
+  "description": "Native macOS desktop wrapper for Into the Breach",
+  "author": "Martin Poole",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "build:game": "npm --prefix .. run build -- --base ./ --outDir electron/game-dist",
+    "start": "npm run build:game && electron .",
+    "start:fast": "electron .",
+    "pack:mac": "npm run build:game && electron-builder --mac dir",
+    "dist:mac": "npm run build:game && electron-builder --mac dmg zip",
+    "dist:mac:universal": "npm run build:game && electron-builder --mac dmg zip --universal",
+    "check": "node --check main.js && node scripts/verify-build.mjs"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.martinpoole.intothebreach",
+    "productName": "Into the Breach",
+    "asar": true,
+    "files": [
+      "main.js",
+      "game-dist/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.games",
+      "hardenedRuntime": true,
+      "identity": null,
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "title": "Into the Breach ${version}",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  }
+}

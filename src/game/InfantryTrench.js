@@ -380,7 +380,14 @@ export class InfantryTrenchManager {
       seed: site.x * 0.19 + site.z * 0.31,
     });
     const rotationY = site.rotationY ?? this._facingYaw(site.team, site.x, site.z);
-    alignTrenchGroupToTerrain(mesh, site.x, site.z, rotationY, this.game.mapDef);
+    alignTrenchGroupToTerrain(
+      mesh,
+      site.x,
+      site.z,
+      rotationY,
+      this.game.mapDef,
+      this.game._terrainMesh
+    );
     this.game.scene.add(mesh);
 
     const trench = {
@@ -603,7 +610,8 @@ export function releaseFromTrench(unit, manager) {
 function positionTrenchOccupants(trench, manager) {
   if (!trench?.garrison?.length || !manager?.game?.units) return;
   const count = trench.garrison.length;
-  const yaw = trench.rotationY ?? trench.mesh?.rotation?.y ?? 0;
+  const yaw =
+    trench.rotationY ?? trench.mesh?.userData?.trenchYaw ?? trench.mesh?.rotation?.y ?? 0;
   const rightX = Math.cos(yaw);
   const rightZ = -Math.sin(yaw);
   for (let slot = 0; slot < count; slot++) {

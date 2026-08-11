@@ -4,9 +4,12 @@ export const GAME_SETTING_KEYS = Object.freeze({
   frontline: 'ww2-rts-frontline-visible',
   capturePoints: 'ww2-rts-capture-points-visible',
   seekCover: 'ww2-rts-seek-cover-mode',
+  pursueTargets: 'ww2-rts-pursue-targets-by-default',
   minimap: 'ww2-rts-minimap-visible',
   autoBuildClassic: 'ww2-rts-auto-build-mode-classic',
   autoBuildBaseBuilding: 'ww2-rts-auto-build-mode-base-building',
+  autoBuildLegacy: 'ww2-rts-auto-build-mode',
+  artilleryAutoFire: 'ww2-rts-artillery-auto-fire',
   debrisRetention: 'ww2-rts-debris-retention',
   tabletMode: 'ww2-rts-tablet-mode',
 });
@@ -40,6 +43,14 @@ export function readBooleanSetting(key, fallback) {
 
 export function writeBooleanSetting(key, enabled) {
   storage()?.setItem(key, enabled ? '1' : '0');
+}
+
+export function resetGameSettings() {
+  const store = storage();
+  if (!store) return;
+  for (const key of Object.values(GAME_SETTING_KEYS)) {
+    store.removeItem(key);
+  }
 }
 
 export function readDebrisRetentionIndex() {

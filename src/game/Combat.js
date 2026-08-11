@@ -562,22 +562,28 @@ function getArtilleryTrajectoryBlocker(attacker, target, scenery) {
 }
 
 function shouldAdvanceBlockedPursuit(attacker, target) {
-  // Hard / chasing orders must path around masonry when the aim-line is blocked.
-  // _chasingAttack alone is not enough: it is cleared while the unit stands and
-  // fires, but the player order (_hardAttackOrder) must still repath if the
-  // target slips behind a building.
+  // Pursue orders and initial Hold Ground approaches may path around masonry.
+  // Once Hold Ground has reached the target's range, a withdrawal or a new
+  // obstruction must not turn the order into a chase.
   return (
     attacker?.attackOrder === target &&
     target?.def !== undefined &&
+    shouldAdvanceOrderedTarget(attacker, target) &&
     (!!attacker._chasingAttack || !!attacker._hardAttackOrder)
   );
 }
 
+function shouldAdvanceOrderedTarget(attacker, target) {
+  if (!target || target.isGround || isSmokeShellTarget(target)) return true;
+  if (attacker?.engagementStance === 'pursue') return true;
+  return !attacker?._attackOrderReachedRange;
+}
+
 function shouldRetainBlockedOrder(attacker, target) {
-  // Keep the ordered target selected while LOS is blocked: stance-bound Hold
-  // waits for a clear shot; hard player/AI click-attacks keep the order and
-  // repath. Without this, attacks were wiped the moment a building sat between
-  // gun and target (common for landed paratroopers on Berlin).
+  // Keep the ordered target selected while LOS is blocked. Hold waits for a
+  // clear shot; Pursue and an initial approach can still repath. Without this,
+  // attacks were wiped the moment a building sat between gun and target
+  // (common for landed paratroopers on Berlin).
   return (
     attacker?.attackOrder === target &&
     target?.def !== undefined &&
@@ -1926,6 +1932,14 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       }
     }
 
+    const orderedTargetInRange =
+      unit.attackOrder &&
+      !unit.attackOrder.dead &&
+      !unit.attackOrder.isGround &&
+      !unit.attackOrder.isSmokeShell &&
+      canEngageManualOrder(unit, unit.attackOrder);
+    if (orderedTargetInRange) unit._attackOrderReachedRange = true;
+
     if (
       (unit.attackOrder?.isGround || unit.attackOrder?.isSmokeShell) &&
       unit._userMoveOrder
@@ -1969,14 +1983,15 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       !unit.retreating &&
       unit.attackOrder &&
       !unit.attackOrder.dead &&
+      shouldAdvanceOrderedTarget(unit, unit.attackOrder) &&
       (!canEngageManualOrder(unit, unit.attackOrder) || blockedPursuit)
     ) {
       // Resume closing whenever a hard order needs range or a clear lane again.
-      if (unit._hardAttackOrder) unit._chasingAttack = true;
       if (unit.attackOrder.isGround || unit.attackOrder.isSmokeShell) {
         const dest = getGroundFireMoveDest(unit, unit.attackOrder.position);
         if (dest) unit.moveTarget = dest;
       } else {
+        unit._chasingAttack = true;
         const dist = distanceBetween(unit, unit.attackOrder);
         const rangeSlack =
           unit.attackOrder.isScenery ||

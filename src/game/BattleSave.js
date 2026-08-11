@@ -309,10 +309,12 @@ export function captureBattleSave(game, { id = null } = {}) {
       autoFire: !!u.autoFire,
       stancePursuitOrder: !!u._stancePursuitOrder,
       stanceBoundAttackOrder: !!u._stanceBoundAttackOrder,
+      attackOrderReachedRange: !!u._attackOrderReachedRange,
       manualFireMission: !!u._manualFireMission,
       attackOrderRef: serializeTargetRef(u.attackOrder),
       targetRef: serializeTargetRef(u.target),
       defensiveHold: u.defensiveHold ? { ...u.defensiveHold } : null,
+      aiStrategicPointGuardId: u._aiStrategicPointGuardId ?? null,
       lastStandRole: u.lastStandRole ?? null,
       lastStandEchelon: u.lastStandEchelon ?? null,
       lastStandStance: u.lastStandStance ?? null,
@@ -1017,7 +1019,14 @@ function restoreTrenchState(game, data) {
       seed: trenchData.x * 0.19 + trenchData.z * 0.31,
     });
     const rotationY = trenchData.rotationY ?? 0;
-    alignTrenchGroupToTerrain(mesh, trenchData.x, trenchData.z, rotationY, game.mapDef);
+    alignTrenchGroupToTerrain(
+      mesh,
+      trenchData.x,
+      trenchData.z,
+      rotationY,
+      game.mapDef,
+      game._terrainMesh
+    );
     game.scene.add(mesh);
     manager.trenches.push({
       id: trenchData.id,
@@ -1425,11 +1434,21 @@ export function applyBattleSave(game, snapshot) {
     unit._userMoveOrder = !!uData._userMoveOrder;
     unit._reverseMoveOrder = !!uData._reverseMoveOrder;
     unit._chasingAttack = !!uData._chasingAttack;
-    unit.engagementStance = uData.engagementStance === 'pursue' ? 'pursue' : 'hold';
-    unit.autoFire = !!uData.autoFire;
+    unit._attackOrderReachedRange = !!uData.attackOrderReachedRange;
+    unit.engagementStance = Object.prototype.hasOwnProperty.call(uData, 'engagementStance')
+      ? (uData.engagementStance === 'pursue' ? 'pursue' : 'hold')
+      : unit.team === 'player'
+        ? (game.pursueTargetsByDefault ? 'pursue' : 'hold')
+        : 'hold';
+    unit.autoFire = Object.prototype.hasOwnProperty.call(uData, 'autoFire')
+      ? !!uData.autoFire
+      : unit.team === 'player'
+        ? !!(game.artilleryAutoFire ?? true)
+        : true;
     unit._stancePursuitOrder = !!uData.stancePursuitOrder;
     unit._stanceBoundAttackOrder = !!uData.stanceBoundAttackOrder;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;
+    unit._aiStrategicPointGuardId = uData.aiStrategicPointGuardId ?? null;
     unit.lastStandRole = uData.lastStandRole ?? null;
     unit.lastStandEchelon = uData.lastStandEchelon ?? null;
     unit.lastStandStance = uData.lastStandStance ?? null;
@@ -1476,6 +1495,7 @@ export function applyBattleSave(game, snapshot) {
     } else {
       unit._stancePursuitOrder = false;
       unit._stanceBoundAttackOrder = false;
+      unit._attackOrderReachedRange = false;
     }
     if (uData.moveTarget) {
       unit.moveTarget = { x: uData.moveTarget.x, z: uData.moveTarget.z };

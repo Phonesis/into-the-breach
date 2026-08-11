@@ -118,6 +118,13 @@ const AI_FIELDWORK_MAX_ARMOR_THREAT_DISTANCE = 104;
 const AI_FIELDWORK_MINE_LINE_MIN_DEPTH = 14;
 const AI_FIELDWORK_MINE_LINE_MAX_DEPTH = 30;
 const AI_FIELDWORK_BUNKER_SHELTER_RANGE = 30;
+const AI_CAPTURE_POINT_GUARD_MAX_UNITS = 2;
+const AI_CAPTURE_POINT_GUARD_RECRUIT_RADIUS = 46;
+const AI_CAPTURE_POINT_GUARD_HOLD_RADIUS = 13;
+const AI_CAPTURE_POINT_GUARD_ENGAGE_RADIUS = 34;
+const AI_CAPTURE_POINT_FIELDWORK_RADIUS = 26;
+const AI_CAPTURE_POINT_MINE_TARGET = 2;
+const AI_CAPTURE_POINT_SANDBAG_TARGET = 2;
 const AI_FIELDWORK_HOSPITAL_MIN_WOUNDED = 2;
 const AI_FIELDWORK_HOSPITAL_WOUNDED_RATIO = 0.8;
 const AI_FIELDWORK_HOSPITAL_CRITICAL_RATIO = 0.58;
@@ -2071,6 +2078,11 @@ export function updateAI({
       continue;
     }
 
+    // A small detachment stays behind at a sector the enemy has just taken.
+    // This runs before the normal capture/advance logic so the next AI tick
+    // cannot immediately pull every capturing squad away from the new flag.
+    if (maintainAiCapturedPointGuard(unit, game, alivePlayers)) continue;
+
     const holdsPreparedClearanceLine =
       !!clearance && game?.clearanceRole !== 'defend';
     const clearanceOperationalHold =
@@ -2840,6 +2852,222 @@ function getAiTrenchFacing(game, context, point) {
   return Math.atan2(attacker.x - point.x, attacker.z - point.z);
 }
 
+function isAiCapturedPointGuardCandidate(unit) {
+  const type = unit?.def?.type;
+  return !!(
+    isAiLiveEnemyUnit(unit) &&
+    !unit.retreating &&
+    !unit._mobilityDamaged &&
+    !unit._sandbagSite &&
+    !unit._trenchDigSite &&
+    !unit._medicTentSite &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiSupportMode &&
+    type !== 'commander' &&
+    type !== 'radioOperator' &&
+    type !== 'medic' &&
+    type !== 'engineer' &&
+    type !== 'artillery' &&
+    type !== 'mortar'
+  );
+}
+
+function clearAiCapturedPointGuards(game) {
+  for (const unit of game?.units ?? []) {
+    if (!unit?._aiStrategicPointGuardId) continue;
+    releaseAiCapturedPointGuard(unit);
+  }
+}
+
+function releaseAiCapturedPointGuard(unit) {
+  if (!unit) return;
+  unit._aiStrategicPointGuardId = null;
+  if (unit.defensiveHold?._aiCapturedPoint) unit.defensiveHold = null;
+}
+
+/**
+ * Standard / Frontline Command remembers ownership transitions and leaves a
+ * bounded guard at the newest enemy capture. The state is deliberately kept
+ * on the game instance so Classic and Forward Bases share the same doctrine.
+ */
+function getAiCapturedPointDefenseContext(game, enemyUnits, playerUnits) {
+  if (!game?.campaign || game.assault || game.clearance || game.lastStand || game.towerDefense) {
+    clearAiCapturedPointGuards(game);
+    return null;
+  }
+
+  const capturePoints = game.capturePoints ?? [];
+  if (!capturePoints.length) return null;
+  const existingState = game._aiStrategicPointDefense;
+  const state = existingState ?? {
+    owners: Object.create(null),
+    pointId: null,
+  };
+  game._aiStrategicPointDefense = state;
+
+  let newestCapture = null;
+  for (const point of capturePoints) {
+    const previousOwner = state.owners[point.id];
+    if (existingState && point.owner === 'enemy' && previousOwner !== 'enemy') {
+      newestCapture = point;
+    }
+    state.owners[point.id] = point.owner ?? null;
+  }
+
+  let point = capturePoints.find(
+    (candidate) => candidate.id === state.pointId && candidate.owner === 'enemy'
+  );
+  if (newestCapture) {
+    point = newestCapture;
+  } else if (!point) {
+    const restoredGuardPoint = capturePoints.find(
+      (candidate) =>
+        candidate.owner === 'enemy' &&
+        (enemyUnits ?? []).some(
+          (unit) => unit?._aiStrategicPointGuardId === candidate.id
+        )
+    );
+    const held = capturePoints.filter((candidate) => candidate.owner === 'enemy');
+    point = restoredGuardPoint ?? held.sort((a, b) => {
+      const nearestPlayer = (candidate) =>
+        (playerUnits ?? []).reduce(
+          (best, unit) =>
+            !unit || unit.dead
+              ? best
+              : Math.min(best, Math.hypot(unit.position.x - candidate.x, unit.position.z - candidate.z)),
+          Infinity
+        );
+      return nearestPlayer(a) - nearestPlayer(b);
+    })[0] ?? null;
+  }
+
+  if (!point) {
+    state.pointId = null;
+    clearAiCapturedPointGuards(game);
+    return null;
+  }
+
+  state.pointId = point.id;
+
+  const heldPoints = capturePoints.filter((candidate) => candidate.owner === 'enemy');
+  const heldPointIds = new Set(heldPoints.map((candidate) => candidate.id));
+  for (const unit of enemyUnits ?? []) {
+    if (
+      unit?._aiStrategicPointGuardId &&
+      (
+        !heldPointIds.has(unit._aiStrategicPointGuardId) ||
+        !isAiLiveEnemyUnit(unit) ||
+        unit.retreating
+      )
+    ) {
+      releaseAiCapturedPointGuard(unit);
+    }
+  }
+
+  // Keep a small garrison at every held sector. The newest capture is handled
+  // first so its capturing troops are the ones most likely to stay behind.
+  heldPoints.sort((a, b) => (a.id === point.id ? -1 : b.id === point.id ? 1 : 0));
+  for (const heldPoint of heldPoints) {
+    const guards = (enemyUnits ?? []).filter(
+      (unit) =>
+        unit?._aiStrategicPointGuardId === heldPoint.id &&
+        isAiLiveEnemyUnit(unit) &&
+        !unit.retreating
+    );
+    const recruits = (enemyUnits ?? [])
+      .filter(
+        (unit) =>
+          isAiCapturedPointGuardCandidate(unit) &&
+          !unit._aiStrategicPointGuardId &&
+          Math.hypot(unit.position.x - heldPoint.x, unit.position.z - heldPoint.z) <=
+            AI_CAPTURE_POINT_GUARD_RECRUIT_RADIUS
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.position.x - heldPoint.x, a.position.z - heldPoint.z) -
+          Math.hypot(b.position.x - heldPoint.x, b.position.z - heldPoint.z)
+      );
+    for (const recruit of recruits) {
+      if (guards.length >= AI_CAPTURE_POINT_GUARD_MAX_UNITS) break;
+      recruit._aiStrategicPointGuardId = heldPoint.id;
+      const angle = ((Number(recruit.id) || guards.length + 1) * 2.399963) % (Math.PI * 2);
+      recruit.defensiveHold = {
+        x: heldPoint.x + Math.sin(angle) * 7,
+        z: heldPoint.z + Math.cos(angle) * 7,
+        radius: AI_CAPTURE_POINT_GUARD_HOLD_RADIUS,
+        _aiCapturedPoint: true,
+      };
+      guards.push(recruit);
+    }
+  }
+
+  const guards = (enemyUnits ?? []).filter(
+    (unit) => unit?._aiStrategicPointGuardId === point.id && isAiLiveEnemyUnit(unit)
+  );
+
+  return {
+    kind: 'capturedPoint',
+    pointId: point.id,
+    useTrenches: guards.length > 0,
+    reserveRatio: 0.2,
+    anchor: { x: point.x, z: point.z },
+    heldUnits: guards,
+    unitFilter: (unit) => unit?._aiStrategicPointGuardId === point.id,
+  };
+}
+
+function maintainAiCapturedPointGuard(unit, game, playerUnits) {
+  const pointId = unit?._aiStrategicPointGuardId;
+  if (!pointId) return false;
+  const point = game?.capturePoints?.find((candidate) => candidate.id === pointId);
+  if (!game?.campaign || !point || point.owner !== 'enemy') {
+    releaseAiCapturedPointGuard(unit);
+    return false;
+  }
+
+  const hold = unit.defensiveHold?._aiCapturedPoint
+    ? unit.defensiveHold
+    : { x: point.x, z: point.z, radius: AI_CAPTURE_POINT_GUARD_HOLD_RADIUS };
+  const currentTarget = unit.attackOrder;
+  const targetNearPoint = !!(
+    currentTarget &&
+    !currentTarget.dead &&
+    currentTarget.position &&
+    Math.hypot(currentTarget.position.x - point.x, currentTarget.position.z - point.z) <=
+      AI_CAPTURE_POINT_GUARD_ENGAGE_RADIUS
+  );
+  if (targetNearPoint) {
+    if (!isInRange(unit, currentTarget)) unit.moveTarget = getStandoffPosition(unit, currentTarget);
+    else unit.moveTarget = null;
+    return true;
+  }
+
+  const threat = (playerUnits ?? [])
+    .filter(
+      (candidate) =>
+        candidate &&
+        !candidate.dead &&
+        !candidate.surrendered &&
+        !candidate._captureExit &&
+        Math.hypot(candidate.position.x - point.x, candidate.position.z - point.z) <=
+          AI_CAPTURE_POINT_GUARD_ENGAGE_RADIUS &&
+        isVisibleAttackTarget(unit, candidate, game?.scenery)
+    )
+    .sort((a, b) => unit.distanceTo(a) - unit.distanceTo(b))[0];
+  if (threat) {
+    unit.setAttackOrder(threat);
+    unit.moveTarget = isInRange(unit, threat) ? null : getStandoffPosition(unit, threat);
+    return true;
+  }
+
+  unit.clearAttackOrder();
+  const distance = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+  unit.moveTarget = distance > (hold.radius ?? AI_CAPTURE_POINT_GUARD_HOLD_RADIUS)
+    ? { x: hold.x, z: hold.z }
+    : null;
+  return true;
+}
+
 function getAiDefensiveTrenchContext(
   game,
   enemyUnits,
@@ -2909,6 +3137,12 @@ function getAiDefensiveTrenchContext(
     };
   }
 
+  const capturedPointContext = getAiCapturedPointDefenseContext(
+    game,
+    liveEnemies,
+    playerUnits
+  );
+
   const hqThreatened = !!(
     enemyHq &&
     (playerUnits ?? []).some(
@@ -2936,6 +3170,8 @@ function getAiDefensiveTrenchContext(
       };
     }
   }
+
+  if (capturedPointContext) return capturedPointContext;
 
   const held = liveEnemies.filter(
     (unit) => unit.defensiveHold && unit.lastStandStance !== 'attack'
@@ -3049,13 +3285,17 @@ function getAiDefensiveFieldworkContext(game, enemyUnits, playerUnits, trenchCon
 
 function getAiFieldworkBuildPoint(game, context, buildType) {
   const anchor = context?.anchor ?? { x: 0, z: 0 };
-  if (buildType !== 'mine' || !context?.armoredThreats?.length) {
+  if (buildType !== 'mine') {
     return clampAiOrderPoint(game?.mapDef, anchor);
   }
 
-  const threat = context.armoredThreats[0];
-  const dx = threat.position.x - anchor.x;
-  const dz = threat.position.z - anchor.z;
+  const threatPoint = context?.armoredThreats?.[0]?.position ??
+    (context?.kind === 'capturedPoint'
+      ? game?.hqs?.find((hq) => hq.team === 'player' && !hq.dead)?.position ?? game?.mapDef?.playerBase
+      : null);
+  if (!threatPoint) return clampAiOrderPoint(game?.mapDef, anchor);
+  const dx = threatPoint.x - anchor.x;
+  const dz = threatPoint.z - anchor.z;
   const distance = Math.hypot(dx, dz);
   if (distance < 0.5) return clampAiOrderPoint(game?.mapDef, anchor);
 
@@ -3068,6 +3308,26 @@ function getAiFieldworkBuildPoint(game, context, buildType) {
     x: anchor.x + (dx / distance) * depth,
     z: anchor.z + (dz / distance) * depth,
   });
+}
+
+function countAiFieldworksNear(game, context, buildType) {
+  const manager = game?.engineerSandbags;
+  const anchor = context?.anchor ?? { x: 0, z: 0 };
+  const points = [
+    ...(manager?._builtPositions ?? []),
+    ...(manager?.sites ?? []),
+  ];
+  if (buildType === 'mine') points.push(...(manager?.mines ?? []));
+  if (buildType === 'bunker') points.push(...(manager?.fieldBunkers ?? []));
+  const matches = points.filter(
+    (entry) =>
+      entry?.team === 'enemy' &&
+      (entry.buildType === buildType || (buildType === 'mine' && entry.damage != null) || (buildType === 'bunker' && entry.def?.garrison)) &&
+      Math.hypot(entry.x - anchor.x, entry.z - anchor.z) <= AI_CAPTURE_POINT_FIELDWORK_RADIUS
+  );
+  return new Set(
+    matches.map((entry) => `${entry.x.toFixed(2)}:${entry.z.toFixed(2)}`)
+  ).size;
 }
 
 function getAiGarrisonBunkerEntries(game) {
@@ -3195,7 +3455,14 @@ function getAiDefensiveFieldworkPlans(game, context) {
 
   const plans = [];
   const armoredThreat = (context.armoredThreats?.length ?? 0) > 0;
-  if (armoredThreat && manager.canBuildMine?.()) {
+  const capturedPoint = context.kind === 'capturedPoint';
+  const localMines = capturedPoint ? countAiFieldworksNear(game, context, 'mine') : 0;
+  const localSandbags = capturedPoint ? countAiFieldworksNear(game, context, 'sandbags') : 0;
+  if (
+    (armoredThreat || capturedPoint) &&
+    manager.canBuildMine?.() &&
+    (!capturedPoint || localMines < AI_CAPTURE_POINT_MINE_TARGET)
+  ) {
     plans.push({
       buildType: 'mine',
       point: getAiFieldworkBuildPoint(game, context, 'mine'),
@@ -3214,11 +3481,23 @@ function getAiDefensiveFieldworkPlans(game, context) {
     plans.push({ buildType: 'bunker', point: bunkerPoint });
   }
 
-  if (manager.canBuildSandbags?.()) {
+  if (
+    manager.canBuildSandbags?.() &&
+    (!capturedPoint || localSandbags < AI_CAPTURE_POINT_SANDBAG_TARGET)
+  ) {
     plans.push({
       buildType: 'sandbags',
       point: getAiFieldworkBuildPoint(game, context, 'sandbags'),
     });
+  }
+
+  if (capturedPoint) {
+    const priority = {
+      sandbags: localSandbags === 0 ? 0 : 3,
+      bunker: 1,
+      mine: 2,
+    };
+    plans.sort((a, b) => priority[a.buildType] - priority[b.buildType]);
   }
 
   return plans;
@@ -5182,7 +5461,7 @@ export function updateAIOffMapSupport(
     clearance: !!options.clearance,
     enemyStagingPhase: !!options.enemyStagingPhase,
   });
-  updateAISupport(support, players, dt, difficulty, {
+  updateAISupport(support, options.supportTargets ?? players, dt, difficulty, {
     ...options,
     radioCoveragePending,
   });

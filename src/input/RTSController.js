@@ -627,7 +627,7 @@ export class RTSController {
         if (!canManualFireOrder(u) || !isInRange(u, target)) continue;
       }
       // Explicit player attack orders always bind and close with the target.
-      // Engagement stance only gates idle auto-acquire — never rejects a click.
+      // Hold Ground stops if that target later withdraws; Pursue follows it.
       if (u.setAttackOrder(target) === false) continue;
       fireUnits.push(u);
     }

@@ -115,7 +115,10 @@ export class FireSupportManager {
   }
 
   get targetUnits() {
-    return this.targetTeam === ENEMY ? this.game._enemyAlive : this.game._playerAlive;
+    const units =
+      this.targetTeam === ENEMY ? this.game._enemyAlive : this.game._playerAlive;
+    if (this.targetTeam !== PLAYER) return units;
+    return [...units, ...(this.game.defenses?.getAttackTargets?.() ?? [])];
   }
 
   reset() {

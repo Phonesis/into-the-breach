@@ -1279,6 +1279,7 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 .unit-roster {
+  --unit-roster-card-width: calc(4.6rem - 0.7rem - 2px);
   position: absolute;
   left: 0.65rem;
   top: 50%;
@@ -1462,8 +1463,9 @@ body.phone-unsupported .mobile-support-screen {
   gap: 0.3rem;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 0.1rem;
+  width: 100%;
   scrollbar-width: thin;
+  transition: width 0.18s ease;
 }
 
 .unit-roster-empty {
@@ -1472,6 +1474,64 @@ body.phone-unsupported .mobile-support-screen {
   text-align: center;
   padding: 0.35rem 0.2rem;
   line-height: 1.3;
+}
+
+.unit-roster-group {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  gap: 0.3rem;
+}
+
+.unit-roster-group-main,
+.unit-roster-member {
+  flex: 0 0 var(--unit-roster-card-width);
+  width: var(--unit-roster-card-width);
+}
+
+.unit-roster-group-members {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 0;
+  gap: 0.3rem;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-0.45rem);
+  transition: flex-basis 0.18s ease, max-width 0.18s ease, opacity 0.15s ease, transform 0.18s ease;
+}
+
+.unit-roster-group:hover .unit-roster-group-members,
+.unit-roster-group:focus-within .unit-roster-group-members,
+.unit-roster-group.is-expanded .unit-roster-group-members {
+  flex: 1 1 auto;
+  max-width: 100%;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.unit-roster-list:has(.unit-roster-group.has-members:hover),
+.unit-roster-list:has(.unit-roster-group.has-members:focus-within),
+.unit-roster-list:has(.unit-roster-group.has-members.is-expanded) {
+  width: min(15rem, calc(100vw - 1.3rem));
+}
+
+.unit-roster-group-selected {
+  border-color: rgba(74, 222, 128, 0.7);
+  background: rgba(30, 60, 45, 0.4);
+  color: #bbf7d0;
+}
+
+.unit-roster-count,
+.unit-roster-member-index {
+  margin-left: 0.12rem;
+  color: #f0c95a;
+  font-size: 0.52rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 .unit-roster-item {
@@ -1611,6 +1671,28 @@ body.phone-unsupported .mobile-support-screen {
     overflow-x: auto;
     overflow-y: hidden;
     max-width: calc(100vw - 5rem);
+  }
+
+  .unit-roster-list {
+    transition: none;
+  }
+
+  .unit-roster-group {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .unit-roster-group-members {
+    width: 0;
+    flex: 0 0 0;
+  }
+
+  .unit-roster-group:hover .unit-roster-group-members,
+  .unit-roster-group:focus-within .unit-roster-group-members,
+  .unit-roster-group.is-expanded .unit-roster-group-members {
+    width: auto;
+    flex: 0 0 auto;
+    max-width: none;
   }
 }
 
@@ -3317,12 +3399,15 @@ body.phone-unsupported .mobile-support-screen {
 .pause-overlay-card {
   pointer-events: auto;
   text-align: center;
-  padding: 1rem 1.6rem 1.15rem;
+  width: min(94vw, 58rem);
+  max-height: min(92vh, 48rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.15rem 1.6rem 1.25rem;
   border-radius: 10px;
   border: 2px solid rgba(200, 220, 255, 0.45);
   background: linear-gradient(180deg, rgba(12, 18, 28, 0.94) 0%, rgba(24, 32, 48, 0.92) 100%);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
-  max-width: min(22rem, 92vw);
 }
 
 .pause-overlay-title {
@@ -3350,11 +3435,124 @@ body.phone-unsupported .mobile-support-screen {
   font-size: 0.82rem;
 }
 
+.pause-overlay-stats {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(200, 220, 255, 0.18);
+  text-align: left;
+}
+
+.pause-overlay-stats-heading {
+  margin: 0 0 0.65rem;
+  color: #d9e5f8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.pause-overlay-casualty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.pause-overlay-casualty-col {
+  min-width: 0;
+  padding: 0.7rem 0.8rem 0.65rem;
+  border: 1px solid rgba(200, 220, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(4, 8, 14, 0.28);
+}
+
+.pause-overlay-casualty-col h3 {
+  overflow: hidden;
+  margin: 0;
+  color: #f0c95a;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pause-overlay-casualty-total {
+  margin: 0.08rem 0 0.45rem;
+  color: #e5edf9;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pause-overlay-casualty-subheading {
+  margin: 0 0 0.12rem;
+  color: rgba(225, 233, 245, 0.5);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pause-overlay-casualty-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: #e8eef8;
+  font-size: 0.82rem;
+}
+
+.pause-overlay-casualty-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid rgba(200, 220, 255, 0.1);
+}
+
+.pause-overlay-casualty-list li:last-child {
+  border-bottom: none;
+}
+
+.pause-overlay-casualty-list .loss-type {
+  min-width: 0;
+  color: #e8eef8;
+}
+
+.pause-loss-detail {
+  flex: 0 0 auto;
+  color: #f5a4a0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pause-loss-unit-count {
+  color: #d7e4f7;
+}
+
+.pause-loss-separator {
+  margin: 0 0.22rem;
+  color: rgba(225, 233, 245, 0.38);
+}
+
+.pause-overlay-empty {
+  margin: 0.2rem 0 0;
+  color: rgba(225, 233, 245, 0.52);
+  font-style: italic;
+}
+
 .pause-overlay-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 0.55rem;
   margin-top: 0.85rem;
+}
+
+.pause-overlay-action-group {
+  min-width: 0;
 }
 
 .pause-hud-toggle,
@@ -3815,6 +4013,19 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 @media (max-width: 520px) {
+  .pause-overlay-card {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .pause-overlay-casualty-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pause-overlay-actions {
+    grid-template-columns: 1fr;
+  }
+
   .end-stats-grid {
     grid-template-columns: 1fr;
   }
@@ -4560,6 +4771,16 @@ body.phone-unsupported .mobile-support-screen {
   margin-right: auto;
 }
 
+.settings-panel .settings-reset-btn {
+  margin-right: auto;
+  border-color: rgba(240, 201, 90, 0.34);
+  color: #e4c86e;
+}
+
+.settings-panel .btn-back {
+  margin-right: 0;
+}
+
 .title-screen {
   align-items: flex-start;
   justify-content: center;
@@ -4664,14 +4885,72 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 .settings-screen .title-block,
-.settings-screen .settings-panel {
+.settings-screen .settings-panel-shell {
   width: min(62rem, 94vw);
+}
+
+.settings-panel-shell {
+  position: relative;
+  margin: 0 auto;
+}
+
+.settings-screen .settings-panel {
+  width: 100%;
 }
 
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
+}
+
+.settings-info-panel {
+  display: none;
+  position: absolute;
+  z-index: 3;
+  top: var(--settings-info-top, 0);
+  left: calc(100% + 1rem);
+  width: 20rem;
+  max-height: 14rem;
+  align-content: start;
+  gap: 0.25rem;
+  overflow-y: auto;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(198, 205, 214, 0.18);
+  background: rgba(20, 27, 35, 0.76);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.settings-panel-shell.has-info > .settings-info-panel {
+  display: grid;
+}
+
+.settings-info-panel.is-active {
+  border-color: rgba(240, 201, 90, 0.45);
+  background: rgba(31, 39, 48, 0.86);
+}
+
+.settings-info-kicker {
+  color: var(--menu-gold-bright);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.settings-info-panel strong {
+  color: #f2efe7;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.18rem;
+  font-weight: 400;
+  letter-spacing: 0.055em;
+}
+
+.settings-info-panel p {
+  color: #c6ccd3;
+  font-size: 0.78rem;
+  line-height: 1.42;
 }
 
 .setting-row {
@@ -4684,6 +4963,10 @@ body.phone-unsupported .mobile-support-screen {
   border: 1px solid rgba(198, 205, 214, 0.18);
   background: rgba(31, 39, 48, 0.72);
   cursor: pointer;
+}
+
+.settings-panel .setting-row {
+  position: relative;
 }
 
 .setting-row:hover {
@@ -4718,7 +5001,20 @@ body.phone-unsupported .mobile-support-screen {
   line-height: 1.35;
 }
 
-.setting-detail {
+.settings-panel .setting-detail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.campaign-style-block .setting-detail {
   max-height: 0;
   overflow: hidden;
   color: #d2d7dc;
@@ -4729,12 +5025,38 @@ body.phone-unsupported .mobile-support-screen {
   transition: max-height 220ms ease, margin-top 180ms ease, opacity 160ms ease, transform 180ms ease;
 }
 
-.setting-row:hover .setting-detail,
-.setting-row:focus-within .setting-detail {
+.campaign-style-block .setting-row:hover .setting-detail,
+.campaign-style-block .setting-row:focus-within .setting-detail {
   max-height: 8rem;
   margin-top: 0.32rem;
   opacity: 1;
   transform: translateY(0);
+}
+
+.campaign-style-block .setting-row--always-detail .setting-detail {
+  max-height: none;
+  margin-top: 0.32rem;
+  opacity: 1;
+  overflow: visible;
+  transform: none;
+  transition: none;
+}
+
+.campaign-style-block .setting-row--always-detail:hover .setting-detail,
+.campaign-style-block .setting-row--always-detail:focus-within .setting-detail {
+  max-height: none;
+  margin-top: 0.32rem;
+  opacity: 1;
+  overflow: visible;
+  transform: none;
+  transition: none;
+}
+
+.campaign-style-block .setting-row--always-detail:hover,
+.campaign-style-block .setting-row--always-detail:focus-within {
+  border-color: rgba(198, 205, 214, 0.18);
+  background: rgba(31, 39, 48, 0.72);
+  box-shadow: none;
 }
 
 .setting-row input[type='checkbox'] {
@@ -4884,6 +5206,32 @@ body.phone-unsupported .mobile-support-screen {
   animation-delay: 120ms;
 }
 
+@media (min-width: 721px) and (max-width: 1380px) {
+  .settings-screen .title-block,
+  .settings-screen .settings-panel-shell {
+    width: 96vw;
+  }
+
+  .settings-panel-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
+    align-items: start;
+    gap: 1rem;
+  }
+
+  .settings-panel-shell > .settings-panel {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .settings-panel-shell > .settings-info-panel {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+  }
+}
+
 @media (max-width: 1120px) {
   .menu-screen .mode-grid,
   .menu-screen .map-grid {
@@ -4939,6 +5287,20 @@ body.phone-unsupported .mobile-support-screen {
 
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-screen .settings-panel-shell {
+    width: 100%;
+  }
+
+  .settings-info-panel {
+    position: fixed;
+    top: auto;
+    right: 0.85rem;
+    bottom: 0.85rem;
+    left: 0.85rem;
+    width: auto;
+    max-height: 10rem;
   }
 
   .debris-scale span:nth-child(2),

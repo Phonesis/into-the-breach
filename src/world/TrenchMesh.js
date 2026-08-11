@@ -1,15 +1,26 @@
 import * as THREE from 'three';
 import { createCamoMaterial, getInfantryUniformTexture, getVehicleCamoTexture } from '../units/UnitTextures.js';
-import { sampleTerrainHeight } from './Terrain.js';
+import { sampleTerrainHeight, sampleTerrainMeshHeight } from './Terrain.js';
 
-const MAX_TRENCH_TILT = 0.52;
+const MAX_TRENCH_TILT = 0.65;
+const TRENCH_SURFACE_CLEARANCE = 0.08;
 
-/** Seat a rigid trench into the best-fit local terrain plane. */
-export function alignTrenchGroupToTerrain(group, x, z, yaw, mapDef) {
+/**
+ * Seat a trench into the local terrain while keeping its visible earthworks
+ * above the rendered ground. The map can change height quickly across a
+ * four-metre trench, so a single rigid box otherwise gets occluded on one
+ * side of the position.
+ */
+export function alignTrenchGroupToTerrain(group, x, z, yaw, mapDef, terrainMesh = null) {
   if (!group) return;
   const length = group.userData.trenchLength ?? 4.2;
   const width = group.userData.trenchWidth ?? 2.4;
-  const center = mapDef ? sampleTerrainHeight(x, z, mapDef) : 0;
+  const sample = mapDef
+    ? terrainMesh
+      ? (sampleX, sampleZ) => sampleTerrainMeshHeight(terrainMesh, sampleX, sampleZ, mapDef)
+      : (sampleX, sampleZ) => sampleTerrainHeight(sampleX, sampleZ, mapDef)
+    : () => 0;
+  const center = sample(x, z);
   const forwardRadius = Math.max(0.65, width * 0.42);
   const rightRadius = Math.max(1.1, length * 0.43);
   const forwardX = Math.sin(yaw);
@@ -17,32 +28,103 @@ export function alignTrenchGroupToTerrain(group, x, z, yaw, mapDef) {
   const rightX = Math.cos(yaw);
   const rightZ = -Math.sin(yaw);
   const front = mapDef
-    ? sampleTerrainHeight(x + forwardX * forwardRadius, z + forwardZ * forwardRadius, mapDef)
+    ? sample(x + forwardX * forwardRadius, z + forwardZ * forwardRadius)
     : center;
   const back = mapDef
-    ? sampleTerrainHeight(x - forwardX * forwardRadius, z - forwardZ * forwardRadius, mapDef)
+    ? sample(x - forwardX * forwardRadius, z - forwardZ * forwardRadius)
     : center;
   const right = mapDef
-    ? sampleTerrainHeight(x + rightX * rightRadius, z + rightZ * rightRadius, mapDef)
+    ? sample(x + rightX * rightRadius, z + rightZ * rightRadius)
     : center;
   const left = mapDef
-    ? sampleTerrainHeight(x - rightX * rightRadius, z - rightZ * rightRadius, mapDef)
+    ? sample(x - rightX * rightRadius, z - rightZ * rightRadius)
     : center;
-  const pitch = THREE.MathUtils.clamp(
-    -Math.atan((front - back) / (forwardRadius * 2)),
-    -MAX_TRENCH_TILT,
-    MAX_TRENCH_TILT
-  );
-  const roll = THREE.MathUtils.clamp(
-    Math.atan((right - left) / (rightRadius * 2)),
-    -MAX_TRENCH_TILT,
-    MAX_TRENCH_TILT
-  );
 
   group.position.set(x, center, z);
-  group.rotation.set(pitch, yaw, roll);
-  group.userData.terrainPitch = pitch;
-  group.userData.terrainRoll = roll;
+  group.userData.trenchYaw = yaw;
+
+  if (!mapDef) {
+    group.rotation.set(0, yaw, 0);
+    return;
+  }
+
+  // Build an orthonormal basis from the trench's forward/right axes. Applying
+  // pitch and roll as world Euler angles becomes visibly wrong once the
+  // trench is rotated diagonally across a slope.
+  const up = new THREE.Vector3(0, 1, 0);
+  const forward = new THREE.Vector3(forwardX, 0, forwardZ);
+  const rightAxis = new THREE.Vector3(rightX, 0, rightZ);
+  const forwardSlope = THREE.MathUtils.clamp(
+    (front - back) / (forwardRadius * 2),
+    -Math.tan(MAX_TRENCH_TILT),
+    Math.tan(MAX_TRENCH_TILT)
+  );
+  const rightSlope = THREE.MathUtils.clamp(
+    (right - left) / (rightRadius * 2),
+    -Math.tan(MAX_TRENCH_TILT),
+    Math.tan(MAX_TRENCH_TILT)
+  );
+  const terrainNormal = new THREE.Vector3()
+    .copy(up)
+    .addScaledVector(forward, -forwardSlope)
+    .addScaledVector(rightAxis, -rightSlope)
+    .normalize();
+  const terrainRight = new THREE.Vector3()
+    .copy(rightAxis)
+    .addScaledVector(up, rightSlope)
+    .normalize();
+  const terrainForward = new THREE.Vector3()
+    .crossVectors(terrainRight, terrainNormal)
+    .normalize();
+  const orientation = new THREE.Matrix4().makeBasis(
+    terrainRight,
+    terrainNormal,
+    terrainForward
+  );
+  group.quaternion.setFromRotationMatrix(orientation);
+  group.userData.terrainPitch = -Math.atan(forwardSlope);
+  group.userData.terrainRoll = Math.atan(rightSlope);
+
+  conformTrenchGeometryToTerrain(group, sample);
+}
+
+/** Follow the local terrain with each earthwork section instead of burying it. */
+function conformTrenchGeometryToTerrain(group, sample) {
+  const terrainUp = new THREE.Vector3(0, 1, 0).applyQuaternion(group.quaternion);
+  if (terrainUp.y <= 0.1) return;
+
+  for (const child of group.children) {
+    if (!child.isMesh || !child.geometry?.attributes?.position) continue;
+
+    // Bake the child transform so every subdivided ground-facing vertex can
+    // follow the terrain independently while retaining the group orientation.
+    child.updateMatrix();
+    child.geometry.applyMatrix4(child.matrix);
+    child.position.set(0, 0, 0);
+    child.rotation.set(0, 0, 0);
+    child.scale.set(1, 1, 1);
+
+    const positions = child.geometry.attributes.position;
+    const worldBase = new THREE.Vector3();
+    const localVertex = new THREE.Vector3();
+    for (let i = 0; i < positions.count; i++) {
+      localVertex.fromBufferAttribute(positions, i);
+      worldBase
+        .set(localVertex.x, 0, localVertex.z)
+        .applyQuaternion(group.quaternion)
+        .add(group.position);
+      const groundY = sample(worldBase.x, worldBase.z);
+      localVertex.y +=
+        (groundY + TRENCH_SURFACE_CLEARANCE - worldBase.y) / terrainUp.y;
+      positions.setXYZ(i, localVertex.x, localVertex.y, localVertex.z);
+    }
+    positions.needsUpdate = true;
+    child.geometry.computeVertexNormals();
+    child.geometry.computeBoundingBox();
+    child.geometry.computeBoundingSphere();
+  }
+
+  group.userData.terrainConformed = true;
 }
 
 /**
@@ -53,6 +135,8 @@ export function createTrenchGroup({ factionId = null, seed = 0, length = 4.2, wi
   g.name = 'infantryTrench';
   g.userData.trenchLength = length;
   g.userData.trenchWidth = width;
+  const lengthSegments = Math.max(4, Math.ceil(length / 0.55));
+  const widthSegments = Math.max(3, Math.ceil(width / 0.55));
 
   const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
   const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
@@ -68,7 +152,7 @@ export function createTrenchGroup({ factionId = null, seed = 0, length = 4.2, wi
 
   // Sunken floor
   const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(length * 0.92, 0.22, width * 0.85),
+    new THREE.BoxGeometry(length * 0.92, 0.22, width * 0.85, lengthSegments, 1, widthSegments),
     dirtDark
   );
   floor.position.y = -0.12;
@@ -77,13 +161,19 @@ export function createTrenchGroup({ factionId = null, seed = 0, length = 4.2, wi
 
   // Front and rear berms (facing +Z as "front")
   const bermH = 0.42;
-  const front = new THREE.Mesh(new THREE.BoxGeometry(length, bermH, 0.55), lip);
+  const front = new THREE.Mesh(
+    new THREE.BoxGeometry(length, bermH, 0.55, lengthSegments, 1, 2),
+    lip
+  );
   front.position.set(0, bermH * 0.35, width * 0.42);
   front.castShadow = true;
   front.receiveShadow = true;
   g.add(front);
 
-  const rear = new THREE.Mesh(new THREE.BoxGeometry(length * 0.95, bermH * 0.85, 0.48), dirt);
+  const rear = new THREE.Mesh(
+    new THREE.BoxGeometry(length * 0.95, bermH * 0.85, 0.48, lengthSegments, 1, 2),
+    dirt
+  );
   rear.position.set(0, bermH * 0.28, -width * 0.4);
   rear.castShadow = true;
   rear.receiveShadow = true;
@@ -92,7 +182,7 @@ export function createTrenchGroup({ factionId = null, seed = 0, length = 4.2, wi
   // Side walls
   for (const side of [-1, 1]) {
     const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, bermH * 0.9, width * 0.75),
+      new THREE.BoxGeometry(0.42, bermH * 0.9, width * 0.75, 2, 1, widthSegments),
       side > 0 ? dirt : lip
     );
     wall.position.set(side * (length * 0.46), bermH * 0.3, 0);

@@ -88,8 +88,15 @@ export class Unit {
     this._hardAttackOrder = false;
     this.engagementStance = 'hold';
     /**
-     * Player artillery only: when false (default), howitzers do not auto-acquire.
-     * Ordered fire missions still work. Enemy artillery ignores this and always auto-fires.
+     * An ordered target has reached weapon range at least once. Hold Ground
+     * may close to an initially distant target, but this flag prevents that
+     * same order from turning into a chase after the target withdraws.
+     */
+    this._attackOrderReachedRange = false;
+    /**
+     * Player artillery only: Game settings apply the saved default when a unit
+     * enters the battle. Ordered fire missions still work when this is false;
+     * enemy artillery ignores this and always auto-fires.
      */
     this.autoFire = false;
     this._stancePursuitOrder = false;
@@ -170,10 +177,16 @@ export class Unit {
     this.target = target;
     this._manualFireMission = manualFire;
     this._stanceBoundAttackOrder = stanceBoundTarget;
-    // Hard orders survive Hold stance and brief LOS blocks until the target
-    // dies or the player cancels. Soft (stance-bound) orders do not.
+    // Explicit orders survive brief LOS blocks until the target dies or the
+    // player cancels. Hold/Pursue decide whether an order keeps advancing.
     this._hardAttackOrder = !stanceBoundTarget;
-    // Close with the target unless this is a pure Hold-only bind (in-range only).
+    this._attackOrderReachedRange =
+      !!target &&
+      !target.isGround &&
+      !target.isSmokeShell &&
+      canEngageManualOrder(this, target);
+    // Close with any selected target that starts out of range. Hold stops
+    // advancing once the target has been reached and subsequently withdraws.
     this._chasingAttack = !stanceBoundTarget || this.engagementStance === 'pursue';
     this._stancePursuitOrder = false;
     this._userMoveOrder = false;
@@ -194,6 +207,7 @@ export class Unit {
     this._hardAttackOrder = false;
     this._stancePursuitOrder = false;
     this._stanceBoundAttackOrder = false;
+    this._attackOrderReachedRange = false;
     this._manualFireMission = false;
     this._bunkerEntryId = null;
   }
@@ -211,10 +225,16 @@ export class Unit {
     const changed = this.engagementStance !== next;
     this.engagementStance = next;
     if (next === 'hold') {
-      // Hard player/AI click-attacks keep their target regardless of stance —
-      // only idle auto-behaviour is stance-gated.
+      // An explicit order still closes to an initially distant target, but a
+      // held unit must stop when a target it has engaged withdraws.
       if (this._hardAttackOrder && this.attackOrder && !this.attackOrder.dead) {
-        if (!canEngageManualOrder(this, this.attackOrder)) {
+        const inRange = canEngageManualOrder(this, this.attackOrder);
+        if (inRange) this._attackOrderReachedRange = true;
+        if (
+          !this._attackOrderReachedRange &&
+          !this.attackOrder.isGround &&
+          !this.attackOrder.isSmokeShell
+        ) {
           this._chasingAttack = true;
           this.moveTarget = getStandoffPosition(this, this.attackOrder);
         } else {
@@ -241,8 +261,15 @@ export class Unit {
         this._finalMoveGoal = null;
         this._chasingAttack = false;
       }
-    } else if (this._hardAttackOrder && this.attackOrder?.def !== undefined) {
+    } else if (this._hardAttackOrder && this.attackOrder && !this.attackOrder.dead) {
       this._chasingAttack = true;
+      if (
+        !canEngageManualOrder(this, this.attackOrder) &&
+        !this.attackOrder.isGround &&
+        !this.attackOrder.isSmokeShell
+      ) {
+        this.moveTarget = getStandoffPosition(this, this.attackOrder);
+      }
     } else if (this._stanceBoundAttackOrder && this.attackOrder?.def !== undefined) {
       // A held in-range order becomes a live pursuit order. It remains still
       // while the target is in range and resumes movement if the target pulls away.
@@ -283,6 +310,7 @@ export class Unit {
     this.target = groundTarget;
     this._stanceBoundAttackOrder = false;
     this._hardAttackOrder = false;
+    this._attackOrderReachedRange = false;
     this._chasingAttack = false;
     this._userMoveOrder = false;
     this._movePath = null;
@@ -305,6 +333,7 @@ export class Unit {
     this.target = target;
     this._stanceBoundAttackOrder = false;
     this._hardAttackOrder = false;
+    this._attackOrderReachedRange = false;
     this._manualFireMission = true;
     this._chasingAttack = false;
     this._userMoveOrder = false;

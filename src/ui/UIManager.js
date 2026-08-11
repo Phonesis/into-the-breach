@@ -86,6 +86,7 @@ import {
   GAME_SETTING_KEYS,
   readBooleanSetting,
   readDebrisRetentionIndex,
+  resetGameSettings,
   writeBooleanSetting,
   writeDebrisRetentionIndex,
 } from '../game/GameSettings.js';
@@ -148,11 +149,15 @@ const UNIT_STATUS_VISIBLE_KEY = GAME_SETTING_KEYS.unitStatus;
 const FRONTLINE_VISIBLE_KEY = GAME_SETTING_KEYS.frontline;
 const CAPTURE_POINTS_VISIBLE_KEY = GAME_SETTING_KEYS.capturePoints;
 const SEEK_COVER_MODE_KEY = GAME_SETTING_KEYS.seekCover;
+// Keep the existing storage key so saved pursuit choices migrate cleanly while
+// the Settings control presents the clearer Hold Ground default.
+const HOLD_GROUND_KEY = GAME_SETTING_KEYS.pursueTargets;
+const ARTILLERY_AUTO_FIRE_KEY = GAME_SETTING_KEYS.artilleryAutoFire;
 const AUTO_BUILD_MODE_KEYS = {
   classic: GAME_SETTING_KEYS.autoBuildClassic,
   baseBuilding: GAME_SETTING_KEYS.autoBuildBaseBuilding,
 };
-const AUTO_BUILD_MODE_KEY_LEGACY = 'ww2-rts-auto-build-mode';
+const AUTO_BUILD_MODE_KEY_LEGACY = GAME_SETTING_KEYS.autoBuildLegacy;
 
 const LOADING_ART_PATHS = [
   'menu/menu-title.jpg',
@@ -233,11 +238,16 @@ export class UIManager {
     this.showFrontline = readBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     this.showCapturePoints = readBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
     this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, true);
+    this.holdGroundByDefault = !readBooleanSetting(HOLD_GROUND_KEY, false);
+    this.pursueTargetsByDefault = !this.holdGroundByDefault;
+    this.artilleryAutoFire = readBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true);
     /** When true, all in-battle HUD chrome is hidden (toggle from pause menu). */
     this.hudHidden = false;
     this.autoBuildMode = false;
     this._hudCampaignStyle = 'classic';
     this._hudAutoBuildAvailable = false;
+    this._unitRosterHoveredUnitId = null;
+    this._unitRosterFocusedUnitId = null;
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
@@ -321,7 +331,8 @@ export class UIManager {
           <h1>Settings</h1>
           <p>Choose the battlefield defaults used whenever you begin or resume an operation. Changes are saved automatically in this browser.</p>
         </div>
-        <div class="panel menu-panel settings-panel">
+        <div class="settings-panel-shell">
+          <div class="panel menu-panel settings-panel">
           <h2>Battlefield Interface</h2>
           <div class="settings-grid">
             <label class="setting-row" for="setting-minimap">
@@ -344,14 +355,26 @@ export class UIManager {
               <span><strong>Frontline</strong><small>Show the red frontline in modes that use it.</small><span class="setting-detail" id="setting-frontline-detail">Displays the sector boundary used in Breakthrough and Hold the Line battles. Hiding it is visual only: deployment limits, defensive territory, breach timers, and frontline movement continue to work normally.</span></span>
               <input type="checkbox" id="setting-frontline" data-setting="frontline" aria-describedby="setting-frontline-detail" />
             </label>
+            ${tabletModeSetting}
+          </div>
+
+          <h2 class="settings-section-title">Unit Behaviour</h2>
+          <div class="settings-grid">
             <label class="setting-row" for="setting-seek-cover">
               <span><strong>Seek Cover</strong><small>Route foot-troop move orders toward nearby cover by default.</small><span class="setting-detail" id="setting-seek-cover-detail">Future move orders for infantry, commanders, medics, engineers, MGs, mortars, and snipers will snap to suitable nearby cover. Tanks, armored cars, anti-tank guns, and artillery still move to the exact point ordered.</span></span>
               <input type="checkbox" id="setting-seek-cover" data-setting="seekCover" aria-describedby="setting-seek-cover-detail" />
             </label>
-            ${tabletModeSetting}
+            <label class="setting-row" for="setting-hold-ground">
+              <span><strong>Hold Ground by default</strong><small>Choose whether idle units hold ground or chase targets.</small><span class="setting-detail" id="setting-hold-ground-detail">When on, player units that auto-acquire an enemy will hold their firing position and stop chasing after the target leaves engagement range. When off, units pursue targets and close the distance beyond their initial firing position. Explicit attack orders always bind to the selected target; Hold Ground or Pursue determines whether they stop or follow after reaching range. Changing this while paused updates existing player units.</span></span>
+              <input type="checkbox" id="setting-hold-ground" data-setting="holdGround" aria-describedby="setting-hold-ground-detail" />
+            </label>
+            <label class="setting-row" for="setting-artillery-auto-fire">
+              <span><strong>Artillery auto-fire</strong><small>Set whether your howitzers acquire targets without an order.</small><span class="setting-detail" id="setting-artillery-auto-fire-detail">Sets the default behavior for player howitzers in every mode. When on, idle batteries search for enemies in range; when off, they wait for attack-unit, ground, building, or smoke missions. Changing this while paused updates existing player howitzers; you can still change selected batteries during a battle. Enemy artillery always auto-fires.</span></span>
+              <input type="checkbox" id="setting-artillery-auto-fire" data-setting="artilleryAutoFire" aria-describedby="setting-artillery-auto-fire-detail" />
+            </label>
           </div>
 
-          <h2 class="settings-section-title">Standard Mode Automation</h2>
+          <h2 class="settings-section-title">Build Queue Automation</h2>
           <div class="settings-grid settings-grid--compact">
             <label class="setting-row" for="setting-auto-build-classic">
               <span><strong>Auto Build — Classic</strong><small>Automatically maintain a balanced reinforcement queue.</small><span class="setting-detail" id="setting-auto-build-classic-detail">Available in Standard — Classic battles. It fills open queue slots with a combined-arms mix based on your current force, supplies, and unit cap. You can still add units manually, and enabling cheat mode temporarily disables automation.</span></span>
@@ -363,11 +386,11 @@ export class UIManager {
             </label>
           </div>
 
-          <h2 class="settings-section-title">Battlefield Remains</h2>
+          <h2 class="settings-section-title">Other</h2>
           <div class="debris-setting">
             <div class="debris-setting-copy">
-              <strong>Bodies and destroyed vehicles</strong>
-              <small>How long fallen troops and knocked-out vehicles remain after destruction.</small>
+              <strong>Bodies / Destroyed Vehicle Despawn Delay</strong>
+              <small>How long fallen troops and knocked-out vehicles remain before being despawned from map.</small>
             </div>
             <output id="debris-retention-value" for="debris-retention-slider">Permanent</output>
             <input
@@ -384,8 +407,16 @@ export class UIManager {
           </div>
 
           <div class="actions">
+            <button type="button" class="btn btn-secondary settings-reset-btn" id="btn-reset-settings">Reset All to Defaults</button>
             <button class="btn btn-secondary btn-back interactive" id="btn-back-settings">Return to Headquarters</button>
           </div>
+          </div>
+
+          <aside class="settings-info-panel" id="settings-info-panel" aria-live="polite">
+            <span class="settings-info-kicker">Setting information</span>
+            <strong id="settings-info-title">Highlight a setting</strong>
+            <p id="settings-info-text">Hover over or focus a setting to see how it changes the battlefield.</p>
+          </aside>
         </div>
       </div>
 
@@ -499,7 +530,7 @@ export class UIManager {
           </div>
           <div class="campaign-style-block hidden" id="clearance-time-limit-block">
             <h2>Assault Deadline</h2>
-            <label class="setting-row" for="clearance-time-limit-toggle">
+            <label class="setting-row setting-row--always-detail" for="clearance-time-limit-toggle">
               <span>
                 <strong>15-minute deadline</strong>
                 <small>On by default. End the assault when the clock reaches 15:00.</small>
@@ -633,28 +664,45 @@ export class UIManager {
           <div class="pause-overlay-card interactive">
             <p class="pause-overlay-title">Paused</p>
             <p class="pause-overlay-sub">Press <kbd>P</kbd> to resume</p>
+            <section
+              id="pause-casualty-stats"
+              class="pause-overlay-stats"
+              aria-labelledby="pause-casualty-stats-title"
+              aria-live="polite"
+            >
+              <h2 id="pause-casualty-stats-title" class="pause-overlay-stats-heading">
+                Current casualties
+              </h2>
+              <div id="pause-casualty-grid" class="pause-overlay-casualty-grid">
+                <p class="pause-overlay-empty">No casualties recorded</p>
+              </div>
+            </section>
             <div class="pause-overlay-actions">
-              <button
-                type="button"
-                class="btn btn-secondary pause-hud-toggle interactive"
-                id="btn-toggle-hud-visibility"
-                aria-pressed="false"
-                title="Hide all on-screen HUD elements (minimap, panels, banners). Press P again to pause and show this menu."
-              >
-                Hide HUD
-              </button>
-              <button
-                type="button"
-                class="btn btn-secondary pause-settings-btn interactive"
-                id="btn-pause-settings"
-                title="Open persistent battlefield settings while the battle remains paused"
-              >
-                Settings
-              </button>
+              <div class="pause-overlay-action-group pause-overlay-hud-action">
+                <button
+                  type="button"
+                  class="btn btn-secondary pause-hud-toggle interactive"
+                  id="btn-toggle-hud-visibility"
+                  aria-pressed="false"
+                  title="Hide all on-screen HUD elements (minimap, panels, banners). Press P again to pause and show this menu."
+                >
+                  Hide HUD
+                </button>
+                <p class="pause-overlay-hud-hint" id="pause-hud-toggle-hint">
+                  Hides minimap, panels, and status banners for a clear view
+                </p>
+              </div>
+              <div class="pause-overlay-action-group pause-overlay-settings-action">
+                <button
+                  type="button"
+                  class="btn btn-secondary pause-settings-btn interactive"
+                  id="btn-pause-settings"
+                  title="Open persistent battlefield settings while the battle remains paused"
+                >
+                  Settings
+                </button>
+              </div>
             </div>
-            <p class="pause-overlay-hud-hint" id="pause-hud-toggle-hint">
-              Hides minimap, panels, and status banners for a clear view
-            </p>
           </div>
         </div>
 
@@ -1472,6 +1520,9 @@ export class UIManager {
     this.root.querySelector('#btn-back-settings').onclick = () => {
       if (!this.closePausedSettings()) show('title');
     };
+    this.root.querySelector('#btn-reset-settings')?.addEventListener('click', () => {
+      this.resetAllSettings();
+    });
     this.root.querySelector('#btn-pause-settings')?.addEventListener('click', () => {
       this.openPausedSettings();
     });
@@ -1484,6 +1535,7 @@ export class UIManager {
     this.root.querySelectorAll('[data-setting]').forEach((input) => {
       input.addEventListener('change', () => this._setMenuSetting(input.dataset.setting, input.checked));
     });
+    this._bindSettingsInfo();
     this.root.querySelector('#debris-retention-slider')?.addEventListener('input', (event) => {
       const index = writeDebrisRetentionIndex(event.currentTarget.value);
       this._syncDebrisRetentionControl(index);
@@ -2040,15 +2092,73 @@ export class UIManager {
     this.minimap?.clear();
   }
 
-  setGamePaused(paused) {
+  setGamePaused(paused, report = null) {
     const overlay = this.root.querySelector('#pause-overlay');
     const hud = this.root.querySelector('#hud');
+    if (paused && report) this.updatePauseStats(report);
     if (overlay) {
       overlay.classList.toggle('hidden', !paused);
       overlay.setAttribute('aria-hidden', paused ? 'false' : 'true');
     }
     hud?.classList.toggle('game-paused', !!paused);
     this._syncHudVisibility();
+  }
+
+  updatePauseStats(report) {
+    const grid = this.root.querySelector('#pause-casualty-grid');
+    if (!grid || !report) return;
+    grid.innerHTML = this.renderPauseBattleStats(report);
+  }
+
+  renderPauseBattleStats(report) {
+    const listRows = (lines) => {
+      if (!lines?.length) return '<li class="pause-overlay-empty">No casualties recorded</li>';
+      return lines
+        .map((line) => {
+          const unitCount = Number(line.unitCount) > 0
+            ? `<span class="pause-loss-unit-count">${line.unitCount} unit${line.unitCount === 1 ? '' : 's'}</span>`
+            : '';
+          const casualtyCount = `${line.count} ${line.count === 1 ? 'casualty' : 'casualties'}`;
+          return `
+            <li>
+              <span class="loss-type">${line.label}</span>
+              <span class="pause-loss-detail">${unitCount}${unitCount ? '<span class="pause-loss-separator">·</span>' : ''}${casualtyCount}</span>
+            </li>
+          `;
+        })
+        .join('');
+    };
+
+    const side = (name, lines, total, hqLost, hqLabel) => {
+      const hqRow = hqLost
+        ? `<li class="loss-hq"><span class="loss-type">${hqLabel}</span><span class="loss-n">Destroyed</span></li>`
+        : '';
+      return `
+        <div class="pause-overlay-casualty-col">
+          <h3>${name}</h3>
+          <p class="pause-overlay-casualty-total">${total} ${total === 1 ? 'casualty' : 'casualties'}</p>
+          <p class="pause-overlay-casualty-subheading">By unit type</p>
+          <ul class="pause-overlay-casualty-list">${listRows(lines)}${hqRow}</ul>
+        </div>
+      `;
+    };
+
+    return `
+      ${side(
+        report.playerName,
+        report.playerLines,
+        report.playerTotal,
+        report.playerHqLost,
+        'Headquarters'
+      )}
+      ${side(
+        report.enemyName,
+        report.enemyLines,
+        report.enemyTotal,
+        report.enemyHqLost,
+        report.tutorial ? 'Practice HQ' : 'Headquarters'
+      )}
+    `;
   }
 
   /**
@@ -2298,9 +2408,14 @@ export class UIManager {
       .querySelector('#btn-toggle-capture-points')
       ?.classList.toggle('hidden', !hasCapturePoints);
     this._syncCapturePointToggle();
-    const hideCommandPanels = (towerDefense && !tdHqDefense) || lastStand;
-    this.root.querySelector('#firesupport-panel')?.classList.toggle('hidden', hideCommandPanels);
-    this.root.querySelector('#generalorders-panel')?.classList.toggle('hidden', hideCommandPanels);
+    const hideFireSupportPanel = lastStand;
+    const hideGeneralOrdersPanel = (towerDefense && !tdHqDefense) || lastStand;
+    this.root
+      .querySelector('#firesupport-panel')
+      ?.classList.toggle('hidden', hideFireSupportPanel);
+    this.root
+      .querySelector('#generalorders-panel')
+      ?.classList.toggle('hidden', hideGeneralOrdersPanel);
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
@@ -2438,6 +2553,128 @@ export class UIManager {
     this._syncFieldIconToggle();
   }
 
+  setArtilleryAutoFire(on) {
+    this.artilleryAutoFire = !!on;
+    writeBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, this.artilleryAutoFire);
+    this._syncSettingsControls();
+  }
+
+  setHoldGroundByDefault(on) {
+    this.holdGroundByDefault = !!on;
+    this.pursueTargetsByDefault = !this.holdGroundByDefault;
+    writeBooleanSetting(HOLD_GROUND_KEY, this.pursueTargetsByDefault);
+    this._syncSettingsControls();
+  }
+
+  setPursueTargetsByDefault(on) {
+    this.setHoldGroundByDefault(!on);
+  }
+
+  resetAllSettings() {
+    resetGameSettings();
+    const defaultDebrisIndex = DEBRIS_RETENTION_OPTIONS.findIndex(
+      (option) => option.seconds === 120
+    );
+
+    writeBooleanSetting(GAME_SETTING_KEYS.minimap, true);
+    writeBooleanSetting(UNIT_FIELD_ICONS_KEY, true);
+    writeBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
+    writeBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
+    writeBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
+    writeBooleanSetting(SEEK_COVER_MODE_KEY, true);
+    // The legacy storage key stores pursuit, so false means Hold Ground.
+    writeBooleanSetting(HOLD_GROUND_KEY, false);
+    writeBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true);
+    writeBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false);
+    writeBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false);
+    writeDebrisRetentionIndex(defaultDebrisIndex);
+    if (isTabletLikeDevice()) {
+      writeBooleanSetting(GAME_SETTING_KEYS.tabletMode, true);
+    }
+
+    this.showMinimap = true;
+    this.showUnitFieldIcons = true;
+    this.showUnitStatus = true;
+    this.showFrontline = true;
+    this.showCapturePoints = true;
+    this.seekCoverMode = true;
+    this.holdGroundByDefault = true;
+    this.pursueTargetsByDefault = false;
+    this.artilleryAutoFire = true;
+    this.autoBuildMode = false;
+    this.minimap?.setVisible(true);
+    this._syncFieldIconToggle();
+    this._syncUnitStatusToggle();
+    this._syncFrontlineToggle();
+    this._syncCapturePointToggle();
+    this._syncSeekCoverToggle();
+    this._syncAutoBuildToggle();
+    this._syncSettingsControls();
+
+    if (this._settingsReturnTarget !== 'pause') return;
+    this.callbacks.onToggleUnitFieldIcons?.(true);
+    this.callbacks.onToggleUnitStatus?.(true);
+    this.callbacks.onToggleFrontline?.(true);
+    this.callbacks.onToggleCapturePoints?.(true);
+    this.callbacks.onToggleSeekCover?.(true);
+    this.callbacks.onChangePursueTargets?.(false);
+    this.callbacks.onChangeArtilleryAutoFire?.(true);
+    this.callbacks.onToggleAutoBuild?.(false);
+    this.callbacks.onChangeDebrisRetention?.(DEBRIS_RETENTION_OPTIONS[defaultDebrisIndex].seconds);
+    if (isTabletLikeDevice()) this.callbacks.onTabletModeChanged?.(true);
+  }
+
+  _bindSettingsInfo() {
+    const panel = this.root.querySelector('#settings-info-panel');
+    const title = this.root.querySelector('#settings-info-title');
+    const text = this.root.querySelector('#settings-info-text');
+    if (!panel || !title || !text) return;
+    const settingsShell = panel.closest('.settings-panel-shell');
+
+    const rows = [...this.root.querySelectorAll('#screen-settings .setting-row')]
+      .filter((row) => row.querySelector('[data-setting]'));
+    let hoveredRow = null;
+    let focusedRow = null;
+    const renderInfo = () => {
+      const row = focusedRow ?? hoveredRow;
+      const detail = row?.querySelector('.setting-detail')?.textContent?.trim();
+      const heading = row?.querySelector('strong')?.textContent?.trim();
+      title.textContent = heading || 'Highlight a setting';
+      text.textContent = detail || 'Hover over or focus a setting to see how it changes the battlefield.';
+      if (row && settingsShell) {
+        const rowRect = row.getBoundingClientRect();
+        const shellRect = settingsShell.getBoundingClientRect();
+        panel.style.setProperty('--settings-info-top', `${Math.max(0, rowRect.top - shellRect.top)}px`);
+      } else {
+        panel.style.removeProperty('--settings-info-top');
+      }
+      panel.classList.toggle('is-active', !!row);
+      settingsShell?.classList.toggle('has-info', !!row);
+    };
+
+    for (const row of rows) {
+      row.addEventListener('mouseenter', () => {
+        hoveredRow = row;
+        renderInfo();
+      });
+      row.addEventListener('mouseleave', () => {
+        if (hoveredRow === row) hoveredRow = null;
+        renderInfo();
+      });
+      row.addEventListener('focusin', () => {
+        focusedRow = row;
+        renderInfo();
+      });
+      row.addEventListener('focusout', (event) => {
+        if (!row.contains(event.relatedTarget)) {
+          if (focusedRow === row) focusedRow = null;
+          renderInfo();
+        }
+      });
+    }
+    renderInfo();
+  }
+
   openPausedSettings() {
     const hud = this.root.querySelector('#hud');
     const settings = this.root.querySelector('#screen-settings');
@@ -2503,6 +2740,14 @@ export class UIManager {
         this.setSeekCoverMode(on);
         if (applyToBattle) this.callbacks.onToggleSeekCover?.(this.seekCoverMode);
         break;
+      case 'holdGround':
+        this.setHoldGroundByDefault(on);
+        if (applyToBattle) this.callbacks.onChangePursueTargets?.(this.pursueTargetsByDefault);
+        break;
+      case 'artilleryAutoFire':
+        this.setArtilleryAutoFire(on);
+        if (applyToBattle) this.callbacks.onChangeArtilleryAutoFire?.(this.artilleryAutoFire);
+        break;
       case 'tabletMode':
         if (!isTabletLikeDevice()) return;
         writeBooleanSetting(GAME_SETTING_KEYS.tabletMode, on);
@@ -2547,6 +2792,8 @@ export class UIManager {
       frontline: this.showFrontline,
       capturePoints: this.showCapturePoints,
       seekCover: this.seekCoverMode,
+      holdGround: this.holdGroundByDefault ?? !readBooleanSetting(HOLD_GROUND_KEY, false),
+      artilleryAutoFire: this.artilleryAutoFire ?? readBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true),
       tabletMode: isTabletModeEnabled(),
       autoBuildClassic: readBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false),
       autoBuildBaseBuilding: readBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false),
@@ -3381,9 +3628,47 @@ export class UIManager {
       this.callbacks.onSelectUnit?.(id, e.shiftKey);
     };
 
+    const readUnitId = (btn) => {
+      const id = Number(btn?.dataset.unitId);
+      return Number.isFinite(id) ? id : null;
+    };
+    const emitRosterHighlight = () => {
+      this.callbacks.onHighlightUnit?.(
+        this._unitRosterFocusedUnitId ?? this._unitRosterHoveredUnitId
+      );
+    };
+
     list.addEventListener('pointerdown', handlePick);
     roster.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.unit-roster-item')) handlePick(e);
+    });
+    list.addEventListener('pointerover', (e) => {
+      const btn = e.target.closest?.('.unit-roster-item');
+      if (!btn || !list.contains(btn) || (e.relatedTarget && btn.contains(e.relatedTarget))) return;
+      this._unitRosterHoveredUnitId = readUnitId(btn);
+      emitRosterHighlight();
+    });
+    list.addEventListener('pointerout', (e) => {
+      const btn = e.target.closest?.('.unit-roster-item');
+      if (!btn || !list.contains(btn) || (e.relatedTarget && btn.contains(e.relatedTarget))) return;
+      if (this._unitRosterHoveredUnitId === readUnitId(btn)) {
+        this._unitRosterHoveredUnitId = null;
+        emitRosterHighlight();
+      }
+    });
+    list.addEventListener('focusin', (e) => {
+      const btn = e.target.closest?.('.unit-roster-item');
+      if (!btn || !list.contains(btn)) return;
+      this._unitRosterFocusedUnitId = readUnitId(btn);
+      emitRosterHighlight();
+    });
+    list.addEventListener('focusout', (e) => {
+      const btn = e.target.closest?.('.unit-roster-item');
+      if (!btn || !list.contains(btn) || (e.relatedTarget && btn.contains(e.relatedTarget))) return;
+      if (this._unitRosterFocusedUnitId === readUnitId(btn)) {
+        this._unitRosterFocusedUnitId = null;
+        emitRosterHighlight();
+      }
     });
   }
 
@@ -3397,6 +3682,9 @@ export class UIManager {
 
     if (alive.length === 0) {
       list.innerHTML = '<p class="unit-roster-empty">No units in the field</p>';
+      this._unitRosterHoveredUnitId = null;
+      this._unitRosterFocusedUnitId = null;
+      this.callbacks.onHighlightUnit?.(null);
       return;
     }
 
@@ -3407,18 +3695,47 @@ export class UIManager {
       return a.id - b.id;
     });
 
-    list.innerHTML = sorted
-      .map((u) => {
-        const short = PRODUCE_LABELS[u.type] ?? u.type;
-        const hpPct = hpPercent(u.hp, u.maxHp);
-        const tier = hpTier(hpPct);
-        const sel = selectedIds.has(u.id) ? ' selected' : '';
-        const low = hpPct < 35 ? ' low-hp' : '';
-        return `
-        <button type="button" class="unit-roster-item${sel}${low}" data-unit-id="${u.id}" title="${u.name} — ${u.def?.designation ?? ''}">
+    const groups = [];
+    const groupsByType = new Map();
+    for (const unit of sorted) {
+      const type = unit.type ?? 'infantry';
+      let group = groupsByType.get(type);
+      if (!group) {
+        group = { type, units: [] };
+        groupsByType.set(type, group);
+        groups.push(group);
+      }
+      group.units.push(unit);
+    }
+
+    const renderItem = (u, groupSize, index, member = false, groupSelected = false) => {
+      const short = PRODUCE_LABELS[u.type] ?? u.type;
+      const hpPct = hpPercent(u.hp, u.maxHp);
+      const tier = hpTier(hpPct);
+      const sel = selectedIds.has(u.id) ? ' selected' : '';
+      const low = hpPct < 35 ? ' low-hp' : '';
+      const role = member ? ' unit-roster-member' : ' unit-roster-group-main';
+      const mainSelected = !member && groupSelected && !selectedIds.has(u.id)
+        ? ' unit-roster-group-selected'
+        : '';
+      const count = !member && groupSize > 1
+        ? `<span class="unit-roster-count" aria-hidden="true">×${groupSize}</span>`
+        : '';
+      const memberIndex = member
+        ? `<span class="unit-roster-member-index" aria-hidden="true">#${index + 1}</span>`
+        : '';
+      const ordinal = groupSize > 1 ? `, unit ${index + 1} of ${groupSize}` : '';
+      return `
+        <button
+          type="button"
+          class="unit-roster-item${role}${sel}${low}${mainSelected}"
+          data-unit-id="${u.id}"
+          title="${u.name} — ${u.def?.designation ?? ''}"
+          aria-label="${u.name}${ordinal}"
+        >
           <span class="unit-roster-icon">${getUnitIconMarkup(u.type)}</span>
           <span class="unit-roster-meta">
-            <span class="unit-roster-name">${short}</span>
+            <span class="unit-roster-name">${short}${memberIndex}${count}</span>
             <span class="unit-roster-hp-wrap">
               <span class="unit-roster-hp-bar"><span class="unit-roster-hp-fill unit-roster-hp-fill--${tier}" style="width:${hpPct}%"></span></span>
               <span class="unit-roster-hp">${hpPct}%</span>
@@ -3426,6 +3743,30 @@ export class UIManager {
           </span>
         </button>
       `;
+    };
+
+    list.innerHTML = groups
+      .map(({ type, units: groupUnits }) => {
+        const groupSelected = groupUnits.some((u) => selectedIds.has(u.id));
+        const groupExpanded = groupUnits.length > 1 && groupUnits.some(
+          (u) => u.id === this._unitRosterHoveredUnitId || u.id === this._unitRosterFocusedUnitId
+        );
+        const members = groupUnits.length > 1
+          ? `
+            <div class="unit-roster-group-members" aria-label="Other ${PRODUCE_LABELS[type] ?? type} units">
+              ${groupUnits
+                .slice(1)
+                .map((u, index) => renderItem(u, groupUnits.length, index + 1, true, false))
+                .join('')}
+            </div>
+          `
+          : '';
+        return `
+          <div class="unit-roster-group${groupUnits.length > 1 ? ' has-members' : ''}${groupSelected ? ' has-selected' : ''}${groupExpanded ? ' is-expanded' : ''}" data-unit-type="${type}">
+            ${renderItem(groupUnits[0], groupUnits.length, 0, false, groupSelected)}
+            ${members}
+          </div>
+        `;
       })
       .join('');
   }
@@ -4416,7 +4757,7 @@ export class UIManager {
       hint.textContent = allOn
         ? 'Howitzers auto-engage enemies in range (shells lob over buildings beyond min range). Click to disable.'
         : allOff
-          ? 'Off by default — only ordered fire missions (attack unit, ground, building, or smoke). Click to enable auto-fire.'
+          ? 'Auto-fire is off for this selection — only ordered fire missions (attack unit, ground, building, or smoke). Click to enable auto-fire.'
           : 'Selection has mixed auto-fire settings. Click to turn all selected howitzers on.';
     }
   }
@@ -4729,9 +5070,9 @@ export class UIManager {
     pursue.setAttribute('aria-pressed', String(allPursue));
     if (hint) {
       hint.textContent = allPursue
-        ? 'Attack orders close to weapon range and keep pursuing retreating targets.'
+        ? 'Attack orders close to weapon range and pursue targets that withdraw.'
         : allHold
-          ? 'Enemy-unit orders require targets in range; explicit building attacks still advance.'
+          ? 'Attack orders close to weapon range, then hold position if the target withdraws.'
           : `Mixed stance — ${holdCount} holding, ${pursueCount} pursuing.`;
     }
   }

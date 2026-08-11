@@ -288,6 +288,7 @@ export class BattleMinimap {
    * @param {object[]} state.enemyUnits
    * @param {object[]} [state.hqs]
    * @param {{ x: number, z: number, zoom: number }} state.camera
+   * @param {number|null} [state.highlightedUnitId]
    */
   update(state) {
     if (!this.visible || !this.ctx || !this.canvas || !this.mapDef) return;
@@ -303,6 +304,7 @@ export class BattleMinimap {
     this._drawHqs(state.hqs ?? []);
     this._drawUnits(state.playerUnits ?? [], '#4ade80', '#166534');
     this._drawUnits(state.enemyUnits ?? [], '#f87171', '#7f1d1d');
+    this._drawHighlightedUnit(state.playerUnits ?? [], state.highlightedUnitId);
   }
 
   _drawFireTraces() {
@@ -412,5 +414,30 @@ export class BattleMinimap {
         this.ctx.fillText('★', x, y + 0.25);
       }
     }
+  }
+
+  _drawHighlightedUnit(units, unitId) {
+    if (unitId == null) return;
+    const unit = units.find((candidate) => candidate.id === unitId && !candidate.dead);
+    if (!unit) return;
+
+    const { x, y } = this.worldToCanvas(unit.position.x, unit.position.z);
+    const radius = unitDotRadius(unit);
+    this.ctx.save();
+    this.ctx.strokeStyle = '#fff2a8';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+    this.ctx.stroke();
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+    this.ctx.lineWidth = 0.9;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, radius + 6, 0, Math.PI * 2);
+    this.ctx.stroke();
+    this.ctx.fillStyle = '#fffbe0';
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, Math.max(1.4, radius * 0.42), 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
   }
 }
