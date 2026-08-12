@@ -3,6 +3,10 @@ import { COVER_TYPES, formatCoverReduction, getCoverStatus } from '../game/Cover
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from './UnitOverheadLayout.js';
 
 const textureCache = new Map();
 
@@ -88,13 +92,16 @@ function updateCoverMarkerTransform(unit) {
       : unit.position.y;
     // High above bunker roof so INSIDE is obvious
     const lift = 5.4 + bob;
-    unit.coverMarker.position.set(unit.position.x, yBase + lift, unit.position.z);
+    unit.coverMarker.position.set(unit.position.x, 0, unit.position.z);
+    setOverheadSpriteY(unit.coverMarker, yBase + lift);
     unit.coverMarker.scale.set(4.4, 2.0, 1);
   } else {
-    unit.coverMarker.position.set(0, markerHeight(unit) + bob, 0);
+    unit.coverMarker.position.set(0, 0, 0);
+    setOverheadSpriteY(unit.coverMarker, markerHeight(unit) + bob);
     unit.coverMarker.scale.set(3.6, 1.62, 1);
   }
   unit.coverMarker.visible = true;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function attachCoverMarker(unit, status) {
@@ -131,6 +138,7 @@ export function removeCoverMarker(unit) {
   if (unit.coverMarker.parent) unit.coverMarker.parent.remove(unit.coverMarker);
   unit.coverMarker.material?.dispose();
   unit.coverMarker = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncCoverMarker(unit) {

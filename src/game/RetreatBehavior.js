@@ -10,8 +10,33 @@ import { getCoverStatus } from './CoverSystem.js';
 import { applyObstaclePath } from './MovePath.js';
 import { sounds } from '../audio/SoundManager.js';
 import { areUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from '../visual/UnitOverheadLayout.js';
 
 const _retreatTex = { tex: null };
+
+/** Recent off-map / prepared-position HE leaves troops more shaken for a short time. */
+export const FIRE_SUPPORT_RETREAT_PRESSURE_SEC = 4.5;
+export const FIRE_SUPPORT_RETREAT_PRESSURE_MULT = 1.32;
+
+function nowSeconds() {
+  return (globalThis.performance?.now?.() ?? Date.now()) * 0.001;
+}
+
+/** Mark a living unit as recently rattled by a nearby fire-support impact. */
+export function markFireSupportRetreatPressure(unit) {
+  if (!unit || unit.dead || unit.surrendered) return;
+  unit._fireSupportRetreatPressureUntil = Math.max(
+    unit._fireSupportRetreatPressureUntil ?? 0,
+    nowSeconds() + FIRE_SUPPORT_RETREAT_PRESSURE_SEC
+  );
+}
+
+function hasRecentFireSupportRetreatPressure(unit) {
+  return (unit?._fireSupportRetreatPressureUntil ?? 0) > nowSeconds();
+}
 
 /**
  * Fighting from a prepared position improves cohesion as well as survivability.
@@ -56,10 +81,10 @@ function getRetreatTexture() {
   ctx.lineWidth = 3;
   ctx.stroke();
   ctx.fillStyle = '#ffe8a0';
-  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.font = 'bold 18px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('RETREAT', 64, 32);
+  ctx.fillText('RETREATING', 64, 32);
   ctx.fillStyle = '#ff6622';
   ctx.beginPath();
   ctx.moveTo(64, 2);
@@ -82,10 +107,14 @@ export function attachRetreatMarker(unit) {
   const sprite = new THREE.Sprite(mat);
   sprite.name = 'retreatMarker';
   sprite.scale.set(4.2, 2.1, 1);
-  sprite.position.y = unit.def.type === 'tank' ? 4.2 : unit.def.type === 'artillery' ? 3.8 : 2.8;
+  setOverheadSpriteY(
+    sprite,
+    unit.def.type === 'tank' ? 4.2 : unit.def.type === 'artillery' ? 3.8 : 2.8
+  );
   sprite.renderOrder = 25;
   unit.mesh.add(sprite);
   unit.retreatMarker = sprite;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function removeRetreatMarker(unit) {
@@ -94,6 +123,7 @@ export function removeRetreatMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   unit.retreatMarker.material?.dispose();
   unit.retreatMarker = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncRetreatMarkers(units) {
@@ -194,6 +224,9 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
   if (unit.def.type === 'tank') chance *= 0.45;
   if (unit.def.type === 'artillery' || unit.def.type === 'antiTankGun') chance *= 0.55;
   if (unit.def.type === 'machineGun') chance *= 1.1;
+  if (hasRecentFireSupportRetreatPressure(unit)) {
+    chance *= FIRE_SUPPORT_RETREAT_PRESSURE_MULT;
+  }
 
   chance *= getMedicRetreatMultiplier(unit, units);
   chance *= getEngineerRetreatMultiplier(unit, units);
@@ -209,6 +242,16 @@ export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts
       scenery: options.scenery ?? null,
     });
   }
+}
+
+/**
+ * Apply the shared morale response after an airstrike or barrage has damaged
+ * a unit. The marker also affects a follow-up retreat check for a few seconds.
+ */
+export function handleFireSupportImpactMorale(unit, hqs, units = [], opts = {}) {
+  if (!unit?.def || unit.dead || unit.surrendered) return;
+  markFireSupportRetreatPressure(unit);
+  maybeTriggerRetreat(unit, hqs, units, null, opts);
 }
 
 export function updateRetreatState(unit, hq, mapDef) {
@@ -254,8 +297,11 @@ export function updateRetreatState(unit, hq, mapDef) {
   }
 
   if (unit.retreatMarker) {
-    unit.retreatMarker.position.y =
+    setOverheadSpriteY(
+      unit.retreatMarker,
       (unit.def.type === 'tank' ? 4.2 : unit.def.type === 'artillery' ? 3.8 : 2.8) +
-      Math.sin(Date.now() * 0.006) * 0.15;
+        Math.sin(Date.now() * 0.006) * 0.15
+    );
+    layoutUnitOverheadMarkers(unit);
   }
 }

@@ -130,9 +130,6 @@ export class RTSController {
     this._tabletTargetMode = false;
     this._tabletFireMode = false;
     this._tabletTargetConfirmKey = null;
-    this._longPressTimer = null;
-    this._longPressFired = false;
-    this._longPressMs = 480;
 
     this._onPointerDown = this.onPointerDown.bind(this);
     this._onPointerMove = this.onPointerMove.bind(this);
@@ -759,27 +756,6 @@ export class RTSController {
 
     this.dragStart = { x: e.clientX, y: e.clientY };
     this._dragSelecting = false;
-    this._longPressFired = false;
-    this._clearLongPressTimer();
-
-    if (
-      this._tabletMode &&
-      this.getSelectedPlayerUnits().length > 0 &&
-      !this.getPendingFireSupport?.() &&
-      !this.getPendingDefensePlacement?.() &&
-      !this.getPendingLastStandDeploy?.() &&
-      !this.getPendingSandbagPlacement?.() &&
-      !this.getPendingTrenchPlacement?.() &&
-      !this.getPendingMedicTentPlacement?.() &&
-      !this.getPendingBaseBuildingPlacement?.() &&
-      !this._tabletFireMode
-    ) {
-      this._longPressTimer = setTimeout(() => {
-        this._longPressTimer = null;
-        this._longPressFired = true;
-        this.issueMoveOrAttack();
-      }, this._longPressMs);
-    }
 
     if (this._tabletMode && this.getSelectedPlayerUnits().length > 0) {
       this._refreshHoverTargetNow();
@@ -837,28 +813,37 @@ export class RTSController {
     const dy = e.clientY - this.dragStart.y;
     if (Math.hypot(dx, dy) > 6) {
       this._dragSelecting = true;
-      this._clearLongPressTimer();
     }
   }
 
-  _clearLongPressTimer() {
-    if (this._longPressTimer) {
-      clearTimeout(this._longPressTimer);
-      this._longPressTimer = null;
+  _shouldIssueTabletTapOrder(team) {
+    if (
+      !this._tabletMode ||
+      this._tabletFireMode ||
+      this.getSelectedPlayerUnits().length === 0
+    ) {
+      return false;
     }
+
+    // A tap on a selectable friendly object remains a selection gesture. Empty
+    // battlefield taps, including enemy targets, use the existing move/attack
+    // order path below.
+    if (this.raycastUnit(team) || this.raycastPlayerHQ()) return false;
+    if (
+      this.getIsBaseBuildingMode?.() &&
+      this.pickPlayerBaseBuilding?.(this.raycaster, this.pointer, this.camera)
+    ) {
+      return false;
+    }
+    // Target mode keeps its two-tap/Engage behavior for enemy taps. Clear
+    // ground remains a move tap even when Target is the active tablet mode.
+    if (this._tabletTargetMode && this.raycastAttackTarget()) return false;
+    return true;
   }
 
   onPointerUp(e) {
     if (this._inputBlocked() || e.button !== 0) return;
     this.setPointerFromEvent(e);
-    this._clearLongPressTimer();
-
-    if (this._longPressFired) {
-      this._longPressFired = false;
-      this.dragStart = null;
-      this._dragSelecting = false;
-      return;
-    }
 
     const pendingFs = this.getPendingFireSupport?.();
     const pendingSmoke = this.getPendingSmokeShell?.();
@@ -925,6 +910,15 @@ export class RTSController {
 
     const team = this.getPlayerTeam();
     const units = this.getUnits().filter((u) => u.team === team);
+
+    if (!this._dragSelecting && this._shouldIssueTabletTapOrder(team)) {
+      this.issueMoveOrAttack();
+      this._tabletTargetConfirmKey = null;
+      this.dragStart = null;
+      this._dragSelecting = false;
+      this.updateHoverTarget();
+      return;
+    }
 
     if (this._dragSelecting && this.dragStart) {
       const rect = this.domElement.getBoundingClientRect();

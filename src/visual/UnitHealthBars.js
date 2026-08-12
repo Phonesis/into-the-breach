@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from './UnitOverheadLayout.js';
 
 const BAR_Y = {
   infantry: 2.2,
@@ -153,11 +157,14 @@ function attachHealthBar(unit) {
     const slot = unit._garrisonSlotIndex ?? 0;
     const lat = (slot - 0.5) * 0.85;
     // Just under the INSIDE / field-icon stack
-    hb.sprite.position.set(unit.position.x + lat, yBase + 5.5 + slot * 1.35, unit.position.z);
+    hb.sprite.position.set(unit.position.x + lat, 0, unit.position.z);
+    setOverheadSpriteY(hb.sprite, yBase + 5.5 + slot * 1.35);
   } else {
-    hb.sprite.position.set(0, barYOffset(unit), 0);
+    hb.sprite.position.set(0, 0, 0);
+    setOverheadSpriteY(hb.sprite, barYOffset(unit));
   }
   hb.sprite.scale.set(width, width * 0.22, 1);
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function removeUnitHealthBar(unit) {
@@ -167,6 +174,7 @@ export function removeUnitHealthBar(unit) {
   hb.tex?.dispose();
   hb.sprite?.material?.dispose();
   unit.healthBar = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncUnitHealthBars(units, enabled = true) {

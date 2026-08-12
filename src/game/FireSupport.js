@@ -19,6 +19,7 @@ import {
 import { spawnParatrooperExit } from '../effects/ParachuteEffects.js';
 import { getParatrooperDef } from '../data/paratroopers.js';
 import { sounds, mgProfileForFaction } from '../audio/SoundManager.js';
+import { handleFireSupportImpactMorale } from './RetreatBehavior.js';
 import { HQ_DEPLOY_RADIUS } from './OpeningDeployZone.js';
 import {
   getRadioOperators,
@@ -716,6 +717,20 @@ export class FireSupportManager {
     const radiusSq = radius * radius;
     const hqRadius = radius * 1.2;
     const hqRadiusSq = hqRadius * hqRadius;
+    const strafe = attackerType === 'strafe';
+    const airBomb = attackerType === 'airBomb';
+    const bombDef = FIRE_SUPPORT_TYPES.airBomb;
+    const retreatUnits = this.game._aliveUnits ?? this.game.units ?? [];
+    const retreatOptions = {
+      generalOrders: {
+        player: this.game.generalOrders,
+        enemy: this.game.enemyGeneralOrders,
+      },
+      clearance: !!this.game.clearance,
+      clearanceRole: this.game.clearanceRole,
+      mapDef: this.game.mapDef,
+      scenery: this.game.scenery,
+    };
 
     for (const u of this.targetUnits ?? []) {
       const dx = u.position.x - x;
@@ -729,7 +744,18 @@ export class FireSupportManager {
         def: { type: attackerType },
         position: { x, z },
       });
+      if (airBomb && u.def && d <= (bombDef.directHitRadius ?? 2.5)) {
+        dmg *= bombDef.directHitDamageMult ?? 1.15;
+      }
       u.takeDamage(dmg, { explosive: true });
+      if (dmg > 0) {
+        handleFireSupportImpactMorale(
+          u,
+          this.game.hqs ?? [],
+          retreatUnits,
+          retreatOptions
+        );
+      }
     }
 
     for (const h of this.game.hqs) {
@@ -745,8 +771,6 @@ export class FireSupportManager {
       h.takeDamage(dmg);
     }
 
-    const strafe = attackerType === 'strafe';
-    const airBomb = attackerType === 'airBomb';
     if (!strafe) {
       const mineHitRadius = Math.max(1.5, radius * (airBomb ? 0.7 : 0.55));
       this.game.engineerSandbags?.detonateMinesAt?.(

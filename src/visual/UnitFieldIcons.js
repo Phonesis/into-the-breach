@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { isUnitGarrisoned } from '../game/BunkerGarrison.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { getUnitIconMarkup } from '../ui/unitIcons.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from './UnitOverheadLayout.js';
 
 const textureCache = new Map();
 const ICON_SCALE = 2.4;
@@ -86,9 +90,11 @@ function updateFieldIconTransform(unit) {
     // Slight lateral offset so stacked garrison icons don't fully overlap
     const slot = unit._garrisonSlotIndex ?? 0;
     const lat = garrisoned ? (slot - 0.5) * 0.85 : 0;
-    unit.fieldIcon.position.set(unit.position.x + lat, yBase + lift, unit.position.z);
+    unit.fieldIcon.position.set(unit.position.x + lat, 0, unit.position.z);
+    setOverheadSpriteY(unit.fieldIcon, yBase + lift);
   } else {
-    unit.fieldIcon.position.set(0, yOff, 0);
+    unit.fieldIcon.position.set(0, 0, 0);
+    setOverheadSpriteY(unit.fieldIcon, yOff);
   }
   const scale = garrisoned ? ICON_SCALE * 1.25 : ICON_SCALE;
   unit.fieldIcon.scale.set(scale, scale, 1);
@@ -219,6 +225,7 @@ export function removeFieldIcon(unit) {
   if (marker.parent) marker.parent.remove(marker);
   marker.material?.dispose();
   unit.fieldIcon = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncUnitFieldIcon(unit, enabled) {
@@ -240,6 +247,7 @@ export function syncUnitFieldIcon(unit, enabled) {
 
   reparentFieldIcon(unit);
   updateFieldIconTransform(unit);
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncPlayerFieldIcons(units, enabled) {

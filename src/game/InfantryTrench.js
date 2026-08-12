@@ -1,6 +1,12 @@
 import * as THREE from 'three';
-import { sampleTerrainHeight } from '../world/Terrain.js';
-import { alignTrenchGroupToTerrain, createTrenchGroup } from '../world/TrenchMesh.js';
+import { sampleTerrainHeight, sampleTerrainMeshHeight } from '../world/Terrain.js';
+import {
+  alignTrenchGroupToTerrain,
+  createTrenchGroup,
+  TRENCH_PIT_DEPTH,
+  TRENCH_OCCUPANT_SURFACE_OFFSET,
+} from '../world/TrenchMesh.js';
+import { deformTerrainForTrench } from '../world/TerrainDamage.js';
 import { isUnitMounted } from './TankRiders.js';
 import { isUnitGarrisoned } from './BunkerGarrison.js';
 import { isTdHqDefenseStyle } from '../data/towerDefense.js';
@@ -388,6 +394,15 @@ export class InfantryTrenchManager {
       this.game.mapDef,
       this.game._terrainMesh
     );
+    deformTerrainForTrench(
+      this.game._terrainMesh,
+      site.x,
+      site.z,
+      rotationY,
+      mesh.userData.trenchLength,
+      mesh.userData.trenchWidth,
+      TRENCH_PIT_DEPTH
+    );
     this.game.scene.add(mesh);
 
     const trench = {
@@ -705,10 +720,10 @@ export function updateTrenchOccupation(units, manager) {
   }
 }
 
-/** Lower squad into the pit + crouch pose flag. */
+/** Seat squad on the excavated pit floor + crouch pose flag. */
 export function applyTrenchVisual(unit, inTrench) {
   if (!unit?.mesh) return;
-  const targetY = inTrench ? -0.42 : 0;
+  const targetY = inTrench ? TRENCH_OCCUPANT_SURFACE_OFFSET : 0;
   unit.mesh.userData.trenchSink = targetY;
   unit._inTrenchVisual = !!inTrench;
 
@@ -742,7 +757,9 @@ function getTrenchOccupantTerrainPose(unit) {
   const x = unit?.position?.x ?? 0;
   const z = unit?.position?.z ?? 0;
   const yaw = unit?.mesh?.rotation?.y ?? 0;
-  const y = mapDef ? sampleTerrainHeight(x, z, mapDef) : unit?.position?.y ?? 0;
+  const y = mapDef
+    ? sampleTerrainMeshHeight(unit?._terrainMesh, x, z, mapDef)
+    : unit?.position?.y ?? 0;
   if (!mapDef) return { y, pitch: 0, roll: 0 };
 
   const radius = 0.82;

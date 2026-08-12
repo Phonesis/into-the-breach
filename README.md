@@ -84,7 +84,7 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 
 | Mode | Description |
 |------|-------------|
-| **Standard** | Full skirmish vs AI with difficulty selection. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
+| **Standard** | Full skirmish vs AI with persistent difficulty set in Settings. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
 | **Clear Defenses** | Enemy dug in across the map — **no enemy HQ**. On the Theater screen choose **Classic** fixed forces or **Reinforced** three-minute arrivals. |
 | **Training Ground** | No AI — practice orders, production, fire missions, and fire support. Destroy the passive **Practice Target HQ**. |
 | **Assault & Defend** | Scenario on a fixed frontline. Pick **Attack** or **Defend** after choosing the mode. |
@@ -94,7 +94,7 @@ Then open the URL Vite prints (paths are under `/into-the-breach/`).
 ### Standard
 
 - Opponent faction mirrors your pick (e.g. USA vs Germany, Soviet Union vs Germany).
-- **Difficulty:** Easy, Medium, or Hard — adjusts enemy damage, income, army size, and AI aggression.
+- **Difficulty (Settings):** Recruit, Regular, or Veteran — adjusts enemy damage, income, army size, and AI aggression. Regular is the default and applies across modes with enemy forces.
 - **Pacing:** Higher unit HP, lower damage, slower HQ/capture income, longer build times, larger opening armies, and slower AI reinforcement (see `src/data/campaignPace.js`).
 - AI produces units, captures points, and attacks.
 - Starting armies (each side): 5× infantry, MG, sniper, mortar, armored car, **1× anti-tank gun**, 2× tank, artillery (enemy scaled by difficulty + standard army mult).
@@ -262,7 +262,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
 | **Production buttons** | Queue unit at your HQ (when HQ is alive) |
 | **Strafe / Bomb / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
-| **Tablet / touch** | **Camera pad** (bottom-right): pan, rotate, zoom · **pinch** on battlefield to zoom · **long-press** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
+| **Tablet / touch** | **Camera pad** (bottom-right): pan, rotate, zoom · **pinch** on battlefield to zoom · **tap** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
 | **Cheat mode** | Type **`iddqd`** during a battle, or open the game with **`?cheat=1`** in the URL (unlimited supplies, instant builds) |
 
 **Manual fire** (Shift + LMB): any selected combat unit in range can fire at open ground or destroy cover scenery. Ground bombardment units (MG, mortar, armored car, tank, super heavy, artillery) use **fire missions** on open ground. Anti-tank guns use direct fire only. **RMB move** or **Esc** cancels an active fire mission.
@@ -422,7 +422,7 @@ src/
     campaignPace.js       # Standard mode balance & AI pacing merge
     gameGuide.js          # Field Manual HTML (sections + unit cards)
     towerDefense.js       # TD waves, emplacements, economy
-    difficulty.js         # Easy / Medium / Hard profiles
+    difficulty.js         # Recruit / Regular / Veteran profiles
     fireSupport.js        # Strafe & barrage parameters
   game/
     Game.js               # Loop, modes, victory, surrender, resources

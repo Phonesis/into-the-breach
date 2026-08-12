@@ -6,6 +6,10 @@ import {
 } from '../game/CommanderBehavior.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from './UnitOverheadLayout.js';
 
 let inspiredTexture = null;
 
@@ -91,15 +95,18 @@ function updateInspiredMarkerTransform(unit) {
     const slot = unit._garrisonSlotIndex ?? 0;
     marker.position.set(
       unit.position.x + (slot - 0.5) * 0.85,
-      yBase + 7.9 + slot * 1.35 + bob,
+      0,
       unit.position.z
     );
+    setOverheadSpriteY(marker, yBase + 7.9 + slot * 1.35 + bob);
     marker.scale.set(4.4, 1.85, 1);
   } else {
-    marker.position.set(0, markerHeight(unit) + bob, 0);
+    marker.position.set(0, 0, 0);
+    setOverheadSpriteY(marker, markerHeight(unit) + bob);
     marker.scale.set(3.8, 1.65, 1);
   }
   marker.visible = true;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function attachMoraleMarker(unit) {
@@ -132,6 +139,7 @@ export function removeMoraleMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   marker.material?.dispose();
   unit.inspiredMarker = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function syncMoraleMarkers(units, allUnits = units) {

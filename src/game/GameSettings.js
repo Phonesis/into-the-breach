@@ -1,3 +1,5 @@
+import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
+
 export const GAME_SETTING_KEYS = Object.freeze({
   unitFieldIcons: 'ww2-rts-unit-field-icons',
   unitStatus: 'ww2-rts-unit-status-visible',
@@ -12,6 +14,7 @@ export const GAME_SETTING_KEYS = Object.freeze({
   artilleryAutoFire: 'ww2-rts-artillery-auto-fire',
   debrisRetention: 'ww2-rts-debris-retention',
   tabletMode: 'ww2-rts-tablet-mode',
+  difficulty: 'ww2-rts-difficulty',
 });
 
 export const DEBRIS_RETENTION_OPTIONS = Object.freeze([
@@ -43,6 +46,21 @@ export function readBooleanSetting(key, fallback) {
 
 export function writeBooleanSetting(key, enabled) {
   storage()?.setItem(key, enabled ? '1' : '0');
+}
+
+export function readDifficultySetting() {
+  const stored = storage()?.getItem(GAME_SETTING_KEYS.difficulty);
+  return Object.prototype.hasOwnProperty.call(DIFFICULTIES, stored)
+    ? stored
+    : DEFAULT_DIFFICULTY;
+}
+
+export function writeDifficultySetting(id) {
+  const selected = Object.prototype.hasOwnProperty.call(DIFFICULTIES, id)
+    ? id
+    : DEFAULT_DIFFICULTY;
+  storage()?.setItem(GAME_SETTING_KEYS.difficulty, selected);
+  return selected;
 }
 
 export function resetGameSettings() {

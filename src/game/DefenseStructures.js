@@ -32,6 +32,7 @@ import { sounds } from '../audio/SoundManager.js';
 import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
+import { handleFireSupportImpactMorale } from './RetreatBehavior.js';
 
 const ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
@@ -116,6 +117,9 @@ export class DefenseStructureManager {
     getEnemyUnits,
     getTerrainMesh,
     getScenery,
+    getAllUnits,
+    getHqs,
+    getRetreatOptions,
     onChange,
     onFireTrace,
     factionId = 'germany',
@@ -126,6 +130,9 @@ export class DefenseStructureManager {
     this.getEnemyUnits = getEnemyUnits;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.getScenery = getScenery ?? (() => null);
+    this.getAllUnits = getAllUnits ?? getEnemyUnits;
+    this.getHqs = getHqs ?? (() => []);
+    this.getRetreatOptions = getRetreatOptions ?? (() => ({}));
     this.onChange = onChange;
     this.onFireTrace = onFireTrace ?? null;
     this.factionId = factionId;
@@ -423,12 +430,16 @@ export class DefenseStructureManager {
     const tier = getMaxBarrageTier(this.entries);
     const barrage = getBarrageDefForTier(tier);
     const enemies = this.getEnemyUnits();
+    const allUnits = this.getAllUnits();
+    const hqs = this.getHqs();
+    const retreatOptions = this.getRetreatOptions();
     for (const u of enemies) {
       if (u.dead) continue;
       const d = Math.hypot(u.position.x - x, u.position.z - z);
       if (d <= barrage.radius) {
         const fall = Math.max(0.5, 1 - d / barrage.radius);
         u.takeDamage(barrage.damage * fall, { explosive: true });
+        handleFireSupportImpactMorale(u, hqs, allUnits, retreatOptions);
       }
     }
     const y = sampleTerrainHeight(x, z, this.mapDef);

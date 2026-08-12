@@ -85,9 +85,11 @@ import {
   DEBRIS_RETENTION_OPTIONS,
   GAME_SETTING_KEYS,
   readBooleanSetting,
+  readDifficultySetting,
   readDebrisRetentionIndex,
   resetGameSettings,
   writeBooleanSetting,
+  writeDifficultySetting,
   writeDebrisRetentionIndex,
 } from '../game/GameSettings.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
@@ -219,7 +221,7 @@ export class UIManager {
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
     this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
-    this.selectedDifficulty = DEFAULT_DIFFICULTY;
+    this.selectedDifficulty = readDifficultySetting();
     this.selectedCampaignStyle = 'classic';
     this.selectedClearanceReinforcementSize = DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
     this.selectedClearanceTimeLimitEnabled = DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED;
@@ -356,6 +358,15 @@ export class UIManager {
               <input type="checkbox" id="setting-frontline" data-setting="frontline" aria-describedby="setting-frontline-detail" />
             </label>
             ${tabletModeSetting}
+          </div>
+
+          <h2 class="settings-section-title">Enemy AI</h2>
+          <div class="difficulty-setting">
+            <div class="difficulty-setting-copy">
+              <strong>AI difficulty</strong>
+              <small>Regular is the default. This saved choice is used by all battle modes; Combat Training has no enemy AI.</small>
+            </div>
+            <div class="difficulty-grid settings-difficulty-grid" id="difficulty-grid"></div>
           </div>
 
           <h2 class="settings-section-title">Unit Behaviour</h2>
@@ -500,7 +511,7 @@ export class UIManager {
         <div class="title-block">
           <span class="menu-kicker">Step 03 · Final Briefing</span>
           <h1>Prepare Battlefield</h1>
-          <p>Choose the theater, battlefield scale, enemy competence, and mission-specific deployment rules.</p>
+          <p>Choose the theater, battlefield scale, and mission-specific deployment rules.</p>
         </div>
         <div class="panel menu-panel battlefield-panel">
           <h2>Theater of Operations</h2>
@@ -508,10 +519,6 @@ export class UIManager {
           <div class="map-size-block" id="map-size-block">
             <h2>Battlefield Scale</h2>
             <div class="map-size-grid" id="map-size-grid"></div>
-          </div>
-          <div class="difficulty-block" id="difficulty-block">
-            <h2>Enemy Experience</h2>
-            <div class="difficulty-grid" id="difficulty-grid"></div>
           </div>
           <div class="campaign-style-block hidden" id="campaign-style-block">
             <h2>Command Structure</h2>
@@ -1177,7 +1184,7 @@ export class UIManager {
     if (!grid) return;
     grid.innerHTML = DIFFICULTY_LIST.map(
       (d) => `
-      <button type="button" class="card-btn interactive difficulty-card${d.id === this.selectedDifficulty ? ' selected' : ''}" data-id="${d.id}">
+      <button type="button" class="card-btn interactive difficulty-card${d.id === this.selectedDifficulty ? ' selected' : ''}" data-id="${d.id}" aria-pressed="${d.id === this.selectedDifficulty}">
         <span class="name">${d.name}</span>
         <span class="meta">${d.subtitle}</span>
       </button>
@@ -1327,8 +1334,7 @@ export class UIManager {
     this.renderMapSizes();
   }
 
-  updateDifficultyPanel() {
-    const block = this.root.querySelector('#difficulty-block');
+  updateModeSetupPanels() {
     const styleBlock = this.root.querySelector('#campaign-style-block');
     const clearanceRoleBlock = this.root.querySelector('#clearance-role-block');
     const clearanceStyleBlock = this.root.querySelector('#clearance-style-block');
@@ -1336,12 +1342,10 @@ export class UIManager {
     const tdWaveBlock = this.root.querySelector('#td-wave-mode-block');
     const tdStyleBlock = this.root.querySelector('#td-style-block');
     const lastStandBlock = this.root.querySelector('#laststand-deploy-block');
-    const isTutorial = this.selectedGameMode === 'tutorial';
     const isCampaign = this.selectedGameMode === 'campaign';
     const isClearance = this.selectedGameMode === 'clearance';
     const isTowerDefense = this.selectedGameMode === 'towerDefense';
     const isLastStand = this.selectedGameMode === 'lastStand';
-    if (block) block.classList.toggle('hidden', isTutorial);
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
     if (clearanceRoleBlock) clearanceRoleBlock.classList.toggle('hidden', !isClearance);
     if (clearanceStyleBlock) clearanceStyleBlock.classList.toggle('hidden', !isClearance);
@@ -1349,7 +1353,6 @@ export class UIManager {
     if (tdWaveBlock) tdWaveBlock.classList.toggle('hidden', !isTowerDefense);
     if (tdStyleBlock) tdStyleBlock.classList.toggle('hidden', !isTowerDefense);
     if (lastStandBlock) lastStandBlock.classList.toggle('hidden', !isLastStand);
-    this.renderDifficulties();
     if (isCampaign) {
       this.renderCampaignStyles();
       this.updateCampaignStyleMapSizeLock();
@@ -1601,7 +1604,7 @@ export class UIManager {
           this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
         }
         this.root.querySelector('#btn-to-faction').disabled = false;
-        this.updateDifficultyPanel();
+        this.updateModeSetupPanels();
       };
     });
 
@@ -1645,7 +1648,7 @@ export class UIManager {
     });
 
     this.root.querySelector('#btn-to-maps').onclick = () => {
-      this.updateDifficultyPanel();
+      this.updateModeSetupPanels();
       this.renderMapSizes();
       show('map');
     };
@@ -1669,9 +1672,8 @@ export class UIManager {
     this.root.querySelector('#difficulty-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.difficulty-card');
       if (!btn) return;
-      this.root.querySelectorAll('.difficulty-card').forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      this.selectedDifficulty = btn.dataset.id;
+      this.selectedDifficulty = writeDifficultySetting(btn.dataset.id);
+      this.renderDifficulties();
     });
 
     this.root.querySelector('#clearance-style-grid')?.addEventListener('click', (e) => {
@@ -2487,7 +2489,7 @@ export class UIManager {
           'Victory: destroy the enemy HQ · Base Construction unlocks armor & artillery · garrison trains infantry';
       } else if (tabletOn) {
         this._defaultHudHint =
-          'Victory: destroy the enemy HQ · Tap select · Engage/Fire buttons · Long-press = move/attack';
+          'Victory: destroy the enemy HQ · Tap select · Engage/Fire buttons · Tap map = move/attack';
       } else {
         this._defaultHudHint =
           'Victory: destroy the enemy HQ · WASD pan · wheel zoom · LMB/RMB orders · Shift+LMB fire';
@@ -2495,7 +2497,7 @@ export class UIManager {
       hint.textContent = this._defaultHudHint;
       if (tabletOn && tutorial) {
         hint.textContent =
-          'Tutorial: tap to select · Target/Fire buttons (camera pad) · long-press map to move/attack';
+          'Tutorial: tap to select · Target/Fire buttons (camera pad) · tap map to move/attack';
       } else if (tabletOn && lastStand && options.lastStandPreset) {
         hint.textContent =
           'Preset battle group deployed · Begin Battle when ready · camera pad (right)';
@@ -2587,6 +2589,7 @@ export class UIManager {
     writeBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true);
     writeBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false);
     writeBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false);
+    this.selectedDifficulty = writeDifficultySetting(DEFAULT_DIFFICULTY);
     writeDebrisRetentionIndex(defaultDebrisIndex);
     if (isTabletLikeDevice()) {
       writeBooleanSetting(GAME_SETTING_KEYS.tabletMode, true);
@@ -2630,6 +2633,7 @@ export class UIManager {
     const text = this.root.querySelector('#settings-info-text');
     if (!panel || !title || !text) return;
     const settingsShell = panel.closest('.settings-panel-shell');
+    const settingsScreen = this.root.querySelector('#screen-settings');
 
     const rows = [...this.root.querySelectorAll('#screen-settings .setting-row')]
       .filter((row) => row.querySelector('[data-setting]'));
@@ -2672,6 +2676,8 @@ export class UIManager {
         }
       });
     }
+    settingsScreen?.addEventListener('scroll', renderInfo, { passive: true });
+    window.addEventListener('resize', renderInfo);
     renderInfo();
   }
 
@@ -5003,7 +5009,7 @@ export class UIManager {
             : cover.inCover
               ? ' <span class="cover-tag">COVER</span>'
               : ''
-        }${inspired ? ' <span class="cover-tag inspired-tag">INSPIRED</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDER</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
+        }${inspired ? ' <span class="cover-tag inspired-tag">INSPIRED</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDERED</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${orderLine}</p>
         ${surrenderBlock}

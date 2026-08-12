@@ -10,6 +10,10 @@ import { removeUnitHealthBar } from '../visual/UnitHealthBars.js';
 import { removeCoverMarker } from '../visual/CoverMarkers.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import { areUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from '../visual/UnitOverheadLayout.js';
 
 const SURRENDER_ELIGIBLE = new Set([
   'radioOperator',
@@ -52,10 +56,10 @@ function getSurrenderTexture() {
   ctx.lineWidth = 2.5;
   ctx.stroke();
   ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 18px system-ui, sans-serif';
+  ctx.font = 'bold 15px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('SURRENDER', 64, 32);
+  ctx.fillText('SURRENDERED', 57, 32);
   ctx.fillStyle = '#f1f5f9';
   ctx.fillRect(92, 14, 18, 12);
   ctx.strokeStyle = '#94a3b8';
@@ -86,14 +90,45 @@ function syncSurrenderMarkerTransform(unit) {
   const bob = Math.sin(performance.now() * 0.005) * 0.12;
   if (worldSpace) {
     const slotLift = Math.min(3, unit._garrisonSlotIndex ?? 0) * 0.16;
-    marker.position.set(
-      unit.position.x,
-      (unit.position.y ?? 0) + (unit._garrisonMarkerLift ?? 6.6) + slotLift + bob,
-      unit.position.z
+    marker.position.set(unit.position.x, 0, unit.position.z);
+    setOverheadSpriteY(
+      marker,
+      (unit.position.y ?? 0) + (unit._garrisonMarkerLift ?? 6.6) + slotLift + bob
     );
   } else {
-    marker.position.set(0, markerHeight(unit) + bob, 0);
+    marker.position.set(0, 0, 0);
+    setOverheadSpriteY(marker, markerHeight(unit) + bob);
   }
+  layoutUnitOverheadMarkers(unit);
+}
+
+function syncStatusBannerTransform(unit) {
+  const marker = unit?.statusBanner;
+  const mesh = unit?.mesh;
+  if (!marker || !mesh) return;
+
+  const worldSpace = !!unit._garrisonBunkerId && !mesh.visible && !!mesh.parent;
+  const desiredParent = worldSpace ? mesh.parent : mesh;
+  if (marker.parent !== desiredParent) desiredParent.add(marker);
+  marker.userData.worldSpace = worldSpace;
+
+  const bob = Math.sin(performance.now() * 0.005) * 0.1;
+  if (worldSpace) {
+    const slotLift = Math.min(3, unit._garrisonSlotIndex ?? 0) * 0.16;
+    marker.position.set(unit.position.x, 0, unit.position.z);
+    setOverheadSpriteY(
+      marker,
+      (unit.position.y ?? 0) +
+        (unit._garrisonMarkerLift ?? 6.6) +
+        slotLift +
+        0.35 +
+        bob
+    );
+  } else {
+    marker.position.set(0, 0, 0);
+    setOverheadSpriteY(marker, markerHeight(unit) + 0.35 + bob);
+  }
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function attachSurrenderMarker(unit) {
@@ -118,6 +153,7 @@ export function removeSurrenderMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   marker.material?.dispose();
   unit.surrenderMarker = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 function getStatusTexture(label) {
@@ -156,11 +192,10 @@ export function attachStatusBanner(unit, label) {
   const sprite = new THREE.Sprite(mat);
   sprite.name = 'statusBanner';
   sprite.scale.set(label === 'LIBERATED' ? 4.6 : 4.9, 2.15, 1);
-  sprite.position.y = markerHeight(unit) + 0.35;
   sprite.renderOrder = 28;
-  unit.mesh.add(sprite);
   unit.statusBanner = sprite;
   unit.statusBannerLabel = label;
+  syncStatusBannerTransform(unit);
 }
 
 export function removeStatusBanner(unit) {
@@ -170,6 +205,7 @@ export function removeStatusBanner(unit) {
   marker.material?.dispose();
   unit.statusBanner = null;
   unit.statusBannerLabel = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function isSurrenderEligible(unit) {
@@ -356,8 +392,7 @@ function updateCaptureExit(unit, dt) {
   });
 
   if (unit.statusBanner) {
-    unit.statusBanner.position.y =
-      markerHeight(unit) + 0.35 + Math.sin(performance.now() * 0.005) * 0.1;
+    syncStatusBannerTransform(unit);
     unit.statusBanner.material.opacity = Math.max(0.35, opacity);
   }
 
@@ -419,8 +454,7 @@ export function updateSurrenderState(game, units, dt) {
         removeStatusBanner(unit);
         unit._liberatedBannerUntil = 0;
       } else if (unit.statusBanner) {
-        unit.statusBanner.position.y =
-          markerHeight(unit) + 0.35 + Math.sin(performance.now() * 0.005) * 0.1;
+        syncStatusBannerTransform(unit);
       }
     }
 

@@ -416,6 +416,7 @@ export function prewarmMapCraterTextures(renderer, mapDef) {
 function getCraterDeformationState(geo, pos) {
   let baseY = geo.userData.craterBaseY;
   let offsets = geo.userData.craterOffsets;
+  let trenchOffsets = geo.userData.trenchOffsets;
   if (!(baseY instanceof Float32Array) || baseY.length !== pos.count) {
     baseY = new Float32Array(pos.count);
     offsets = new Float32Array(pos.count);
@@ -423,7 +424,11 @@ function getCraterDeformationState(geo, pos) {
     geo.userData.craterBaseY = baseY;
     geo.userData.craterOffsets = offsets;
   }
-  return { baseY, offsets };
+  if (!(trenchOffsets instanceof Float32Array) || trenchOffsets.length !== pos.count) {
+    trenchOffsets = new Float32Array(pos.count);
+    geo.userData.trenchOffsets = trenchOffsets;
+  }
+  return { baseY, offsets, trenchOffsets };
 }
 
 /** Allocate crater deformation buffers before the first shell reaches terrain. */
@@ -432,6 +437,86 @@ export function prewarmTerrainDamage(terrainMesh) {
   const pos = geo?.attributes?.position;
   if (!geo || !pos) return;
   getCraterDeformationState(geo, pos);
+}
+
+function trenchFalloff(t) {
+  const clamped = THREE.MathUtils.clamp(t, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+/**
+ * Lower the terrain beneath a finished infantry trench. The earthwork mesh
+ * sits at the original surface while this oriented cut lets the pit floor and
+ * occupants remain visible instead of leaving the untouched terrain plane
+ * slicing through them.
+ */
+export function deformTerrainForTrench(
+  terrainMesh,
+  x,
+  z,
+  yaw,
+  length = 4.2,
+  width = 2.4,
+  depth = 0.46
+) {
+  const geo = terrainMesh?.geometry;
+  const pos = geo?.attributes?.position;
+  if (!geo || !pos || depth <= 0) return false;
+
+  const { baseY, offsets, trenchOffsets } = getCraterDeformationState(geo, pos);
+  const halfLength = Math.max(0.8, length * 0.44);
+  const halfWidth = Math.max(0.42, width * 0.3);
+  const lengthFade = Math.max(0.28, length * 0.09);
+  const widthFade = Math.max(0.22, width * 0.1);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const meshX = terrainMesh.position?.x ?? 0;
+  const meshZ = terrainMesh.position?.z ?? 0;
+  let changed = false;
+
+  for (let i = 0; i < pos.count; i++) {
+    const dx = pos.getX(i) + meshX - x;
+    const dz = pos.getZ(i) + meshZ - z;
+    const localX = dx * rightX + dz * rightZ;
+    const localZ = dx * forwardX + dz * forwardZ;
+    const edgeX = Math.max(Math.abs(localX) - halfLength, 0);
+    const edgeZ = Math.max(Math.abs(localZ) - halfWidth, 0);
+    const edgeDistance = Math.hypot(edgeX / lengthFade, edgeZ / widthFade);
+    if (edgeDistance >= 1) continue;
+
+    const next = -depth * trenchFalloff(1 - edgeDistance);
+    const merged = Math.min(trenchOffsets[i], next);
+    if (merged === trenchOffsets[i]) continue;
+    trenchOffsets[i] = merged;
+    pos.setY(i, baseY[i] + trenchOffsets[i] + offsets[i]);
+    changed = true;
+  }
+
+  if (!changed) return false;
+
+  // The terrain is already rendered by the time engineers finish digging, so
+  // explicitly upload the changed height attribute on the next frame.
+  pos.needsUpdate = true;
+  const params = geo.parameters;
+  if (params?.widthSegments != null && params.heightSegments != null) {
+    updateGridTerrainNormals(
+      geo,
+      0,
+      params.widthSegments,
+      0,
+      params.heightSegments,
+      params.widthSegments,
+      params.heightSegments,
+      params.width / params.widthSegments,
+      params.height / params.heightSegments
+    );
+  } else {
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
+  return true;
 }
 
 function mergeCraterOffset(current, next) {
@@ -447,6 +532,7 @@ function deformVertexAt(
   colors,
   baseY,
   offsets,
+  trenchOffsets,
   i,
   x,
   z,
@@ -468,7 +554,7 @@ function deformVertexAt(
     craterHeightOffset(f, depth)
   );
   offsets[i] = mergedOffset;
-  pos.setY(i, baseY[i] + mergedOffset);
+  pos.setY(i, baseY[i] + trenchOffsets[i] + mergedOffset);
 
   if (colors) {
     _vertex.setRGB(colors.getX(i), colors.getY(i), colors.getZ(i));
@@ -556,7 +642,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   const r = radius * 1.05;
   const r2 = r * r;
   const style = craterStyle(mapDef);
-  const { baseY, offsets } = getCraterDeformationState(geo, pos);
+  const { baseY, offsets, trenchOffsets } = getCraterDeformationState(geo, pos);
   let changed = false;
 
   const params = geo.parameters;
@@ -582,6 +668,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
             colors,
             baseY,
             offsets,
+            trenchOffsets,
             base + ix,
             x,
             z,
@@ -620,6 +707,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
           colors,
           baseY,
           offsets,
+          trenchOffsets,
           i,
           x,
           z,

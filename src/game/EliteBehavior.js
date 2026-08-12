@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { distanceBetween } from './Targeting.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from '../visual/UnitOverheadLayout.js';
 
 export const VETERAN_KILLS_REQUIRED = 1;
 export const ELITE_KILLS_REQUIRED = 3;
@@ -186,6 +190,7 @@ function attachRankMarker(unit) {
     unit.rankMarker.material.map = rankTexture(unit);
     unit.rankMarker.material.needsUpdate = true;
     unit.rankMarker.scale.set(markerScale(unit), markerScale(unit), 1);
+    layoutUnitOverheadMarkers(unit);
     return;
   }
 
@@ -199,10 +204,12 @@ function attachRankMarker(unit) {
   sprite.name = 'rankMarker';
   const scale = markerScale(unit);
   sprite.scale.set(scale, scale, 1);
-  sprite.position.set(1.65, markerHeight(unit), 0);
+  sprite.position.set(1.65, 0, 0);
+  setOverheadSpriteY(sprite, markerHeight(unit));
   sprite.renderOrder = 24;
   unit.mesh.add(sprite);
   unit.rankMarker = sprite;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function removeRankMarker(unit) {
@@ -211,6 +218,7 @@ export function removeRankMarker(unit) {
   if (marker.parent) marker.parent.remove(marker);
   marker.material?.dispose();
   unit.rankMarker = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function grantVeteranStatus(unit) {
@@ -251,9 +259,10 @@ export function syncRankMarkers(units) {
     }
     attachRankMarker(unit);
     if (unit.rankMarker) {
-      unit.rankMarker.position.y = markerHeight(unit);
+      setOverheadSpriteY(unit.rankMarker, markerHeight(unit));
       unit.rankMarker.position.x = 1.65;
       unit.rankMarker.scale.set(markerScale(unit), markerScale(unit), 1);
+      layoutUnitOverheadMarkers(unit);
     }
   }
 }
@@ -262,6 +271,7 @@ export function updateRankMarkers(units) {
   const pulse = Math.sin(performance.now() * 0.004) * 0.08;
   for (const unit of units) {
     if (!unit.veteran || !unit.rankMarker) continue;
-    unit.rankMarker.position.y = markerHeight(unit) + pulse;
+    setOverheadSpriteY(unit.rankMarker, markerHeight(unit) + pulse);
+    layoutUnitOverheadMarkers(unit);
   }
 }

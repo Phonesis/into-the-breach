@@ -36,6 +36,9 @@ export const FIRE_SUPPORT_TYPES = {
     /** Free-fall duration from release to impact. */
     fallTime: 1.28,
     hitRadius: 9.5,
+    /** A hit close to the unit centre receives a modest direct-hit bonus. */
+    directHitRadius: 2.5,
+    directHitDamageMult: 1.15,
     damage: 118,
     hqDamage: 280,
     craterRadius: 5.4,

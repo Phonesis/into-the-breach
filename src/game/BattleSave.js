@@ -20,7 +20,11 @@ import { exportAIState, importAIState } from './AI.js';
 import { CLEARANCE_ATTACK_PLANS } from './ClearanceMode.js';
 import { restoreTankRiderLinks } from './TankRiders.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { restoreTerrainDamage, serializeTerrainDamage } from '../world/TerrainDamage.js';
+import {
+  deformTerrainForTrench,
+  restoreTerrainDamage,
+  serializeTerrainDamage,
+} from '../world/TerrainDamage.js';
 import { createSandbagEmplacementGroup } from '../world/SandbagEmplacement.js';
 import {
   createBaseBuildingMesh,
@@ -58,7 +62,11 @@ import {
   peekMedicTentNextId,
   setMedicTentNextId,
 } from './MedicFieldHospital.js';
-import { alignTrenchGroupToTerrain, createTrenchGroup } from '../world/TrenchMesh.js';
+import {
+  alignTrenchGroupToTerrain,
+  createTrenchGroup,
+  TRENCH_PIT_DEPTH,
+} from '../world/TrenchMesh.js';
 import { createFieldTentMesh } from '../visual/FieldTentMesh.js';
 import * as THREE from 'three';
 
@@ -1026,6 +1034,15 @@ function restoreTrenchState(game, data) {
       rotationY,
       game.mapDef,
       game._terrainMesh
+    );
+    deformTerrainForTrench(
+      game._terrainMesh,
+      trenchData.x,
+      trenchData.z,
+      rotationY,
+      mesh.userData.trenchLength,
+      mesh.userData.trenchWidth,
+      TRENCH_PIT_DEPTH
     );
     game.scene.add(mesh);
     manager.trenches.push({

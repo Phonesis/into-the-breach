@@ -193,6 +193,7 @@ body.phone-unsupported .mobile-support-screen {
 
 #screen-settings {
   background-image: url('/menu/menu-title.jpg');
+  background-attachment: fixed;
 }
 
 #screen-mode {
@@ -258,6 +259,7 @@ body.phone-unsupported .mobile-support-screen {
 
 #screen-map {
   background-image: url('/menu/menu-map.jpg');
+  background-attachment: fixed;
 }
 
 .screen.hidden,
@@ -295,20 +297,6 @@ body.phone-unsupported .mobile-support-screen {
   font-size: 0.75rem;
 }
 
-.difficulty-block {
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid rgba(201, 162, 39, 0.2);
-}
-
-.difficulty-block h2 {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.35rem;
-  letter-spacing: 0.08em;
-  color: #c9a227;
-  margin-bottom: 0.85rem;
-}
-
 .difficulty-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -323,6 +311,35 @@ body.phone-unsupported .mobile-support-screen {
 
 .difficulty-card .meta {
   font-size: 0.75rem;
+}
+
+.difficulty-setting {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid rgba(198, 205, 214, 0.18);
+  background: rgba(31, 39, 48, 0.72);
+}
+
+.difficulty-setting-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.difficulty-setting-copy strong {
+  color: #e8e5dc;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.difficulty-setting-copy small {
+  color: #9ca5ae;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.settings-difficulty-grid .difficulty-card {
+  min-height: 6.2rem;
 }
 
 .campaign-style-block {
@@ -4336,6 +4353,7 @@ body.phone-unsupported .mobile-support-screen {
   --menu-gold-bright: #f0c95a;
   --menu-panel: rgba(12, 17, 23, 0.9);
   --menu-line: rgba(223, 229, 235, 0.18);
+  background-attachment: fixed;
   padding: clamp(1.25rem, 3vh, 2.6rem) clamp(1rem, 3vw, 3.5rem) clamp(2rem, 5vh, 4.5rem);
   color: var(--menu-ink);
   isolation: isolate;
@@ -4504,7 +4522,6 @@ body.phone-unsupported .mobile-support-screen {
 
 .menu-screen .menu-panel > h2,
 .menu-screen .map-size-block > h2,
-.menu-screen .difficulty-block > h2,
 .menu-screen .campaign-style-block > h2 {
   display: flex;
   align-items: center;
@@ -4517,7 +4534,6 @@ body.phone-unsupported .mobile-support-screen {
 
 .menu-screen .menu-panel > h2::after,
 .menu-screen .map-size-block > h2::after,
-.menu-screen .difficulty-block > h2::after,
 .menu-screen .campaign-style-block > h2::after {
   content: '';
   flex: 1;
@@ -4699,7 +4715,6 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 .menu-screen .map-size-block,
-.menu-screen .difficulty-block,
 .menu-screen .campaign-style-block {
   margin-top: 1.35rem;
   padding-top: 1.15rem;
@@ -5225,7 +5240,9 @@ body.phone-unsupported .mobile-support-screen {
   }
 
   .settings-panel-shell > .settings-info-panel {
-    position: static;
+    position: relative;
+    top: var(--settings-info-top, 0);
+    left: auto;
     grid-column: 2;
     grid-row: 1;
     width: auto;

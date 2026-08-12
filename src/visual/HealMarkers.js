@@ -10,6 +10,10 @@ import { getActiveHospitals, isUnitNearHospital } from '../game/HospitalBehavior
 import { getActiveMotorPools, isUnitNearMotorPool } from '../game/MotorPoolBehavior.js';
 import { isFootSoldier, isVehicleUnit } from '../units/VehicleTypes.js';
 import { areUnitStatusMarkersVisible } from './UnitStatusVisibility.js';
+import {
+  layoutUnitOverheadMarkers,
+  setOverheadSpriteY,
+} from './UnitOverheadLayout.js';
 
 const _tex = { cross: null, spanner: null, mobility: null };
 
@@ -248,9 +252,10 @@ function attachHealMarker(unit, kind) {
   }
 
   unit.healMarker.visible = true;
-  unit.healMarker.position.y = markerYOffset(unit);
+  setOverheadSpriteY(unit.healMarker, markerYOffset(unit));
   const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.08;
   unit.healMarker.scale.set(baseScale * pulse, baseScale * pulse, 1);
+  layoutUnitOverheadMarkers(unit);
 }
 
 export function removeHealMarker(unit) {
@@ -260,6 +265,7 @@ export function removeHealMarker(unit) {
   marker.material?.dispose();
   unit.healMarker = null;
   unit.healMarkerKind = null;
+  layoutUnitOverheadMarkers(unit);
 }
 
 function attachHqRepairMarker(hq) {

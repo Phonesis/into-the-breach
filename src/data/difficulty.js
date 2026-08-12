@@ -43,7 +43,7 @@ export const DIFFICULTIES = {
 };
 
 export const DIFFICULTY_LIST = Object.values(DIFFICULTIES);
-export const DEFAULT_DIFFICULTY = 'easy';
+export const DEFAULT_DIFFICULTY = 'medium';
 
 export function getDifficulty(id) {
   return DIFFICULTIES[id] ?? DIFFICULTIES[DEFAULT_DIFFICULTY];

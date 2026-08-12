@@ -318,7 +318,7 @@ import {
   deleteBattleSave,
 } from './BattleSave.js';
 import { updateAutoBuild } from './AutoBuild.js';
-import { getDebrisRetentionSeconds } from './GameSettings.js';
+import { getDebrisRetentionSeconds, readDifficultySetting } from './GameSettings.js';
 
 const PLAYER_TEAM = 'player';
 const ENEMY_TEAM = 'enemy';
@@ -1001,9 +1001,7 @@ export class Game {
     this.campaign = isCampaignMode(gameMode);
     let campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
     this.assaultRole = startOptions.assaultRole ?? 'defend';
-    this.difficulty = getDifficulty(
-      this.tutorial ? DEFAULT_DIFFICULTY : (startOptions.difficulty ?? DEFAULT_DIFFICULTY)
-    );
+    this.difficulty = getDifficulty(startOptions.difficulty ?? readDifficultySetting());
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
     let mapSizeId = startOptions.mapSize ?? 'medium';
@@ -1204,6 +1202,18 @@ export class Game {
           getEnemyUnits: () => this._enemyAlive,
           getTerrainMesh: () => this._terrainMesh,
           getScenery: () => this.scenery,
+          getAllUnits: () => this._aliveUnits,
+          getHqs: () => this.hqs,
+          getRetreatOptions: () => ({
+            generalOrders: {
+              player: this.generalOrders,
+              enemy: this.enemyGeneralOrders,
+            },
+            clearance: !!this.clearance,
+            clearanceRole: this.clearanceRole,
+            mapDef: this.mapDef,
+            scenery: this.scenery,
+          }),
           factionId: this.playerFaction?.id ?? 'germany',
           factionAccent: this.playerFaction?.accent ?? 0xc9a227,
           onChange: () => {
