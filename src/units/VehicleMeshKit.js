@@ -249,7 +249,13 @@ function addJapaneseArmyStar(parent, d, {
   parent.add(star);
 }
 
-function addNationalMarkings(parent, d, { width, y, z, part }) {
+function addNationalMarkings(parent, d, {
+  width,
+  y,
+  z,
+  part,
+  curvedSurface = null,
+}) {
   const model = d.model ?? '';
   const german = new Set(['panzer4', 'jagdpanther', 'tiger1', 'sdkfz222']);
   const american = new Set(['sherman', 'm10', 'pershing', 'm8']);
@@ -257,25 +263,35 @@ function addNationalMarkings(parent, d, { width, y, z, part }) {
   const soviet = new Set(['t3485', 'su100', 'is2', 'ba64']);
 
   for (const side of [-1, 1]) {
-    const x = side * (width * 0.5 + 0.018);
+    const facetAngle = curvedSurface ? Math.PI / curvedSurface.segments : 0;
+    const surfaceRadius = curvedSurface?.radius ?? 0;
+    const x = curvedSurface
+      ? side * surfaceRadius * Math.cos(facetAngle)
+      : side * (width * 0.5 + 0.018);
+    const markingZ = curvedSurface
+      ? z + side * surfaceRadius * Math.sin(facetAngle)
+      : z;
+    const markingRotationY = curvedSurface
+      ? side * Math.PI / 2 - facetAngle
+      : side * Math.PI / 2;
     if (german.has(model)) {
       const cream = markingMaterial(0xd8d2bd);
       const black = markingMaterial(0x171815);
-      addBox(parent, new THREE.BoxGeometry(0.018, 0.4, 0.13), cream, { x, y, z, part });
-      addBox(parent, new THREE.BoxGeometry(0.018, 0.14, 0.4), cream, { x, y, z, part });
+      addBox(parent, new THREE.BoxGeometry(0.018, 0.4, 0.13), cream, { x, y, z: markingZ, part });
+      addBox(parent, new THREE.BoxGeometry(0.018, 0.14, 0.4), cream, { x, y, z: markingZ, part });
       addBox(parent, new THREE.BoxGeometry(0.022, 0.31, 0.075), black, {
-        x: x + side * 0.006, y, z, part,
+        x: x + side * 0.006, y, z: markingZ, part,
       });
       addBox(parent, new THREE.BoxGeometry(0.022, 0.075, 0.31), black, {
-        x: x + side * 0.006, y, z, part,
+        x: x + side * 0.006, y, z: markingZ, part,
       });
     } else if (american.has(model) || soviet.has(model)) {
       const star = new THREE.Mesh(
         starGeometry(american.has(model) ? 0.23 : 0.21, american.has(model) ? 0.095 : 0.086),
         markingMaterial(american.has(model) ? 0xe5e1cf : 0xb32d24)
       );
-      star.position.set(x, y, z);
-      star.rotation.y = side * Math.PI / 2;
+      star.position.set(x, y, markingZ);
+      star.rotation.y = markingRotationY;
       star.userData.tankPart = part;
       parent.add(star);
     } else if (british.has(model)) {
@@ -583,6 +599,9 @@ function addArmoredCarDetails(group, turretPivot, body, detail, dark, d) {
     width: markingWidth,
     y: t.y,
     z: t.z,
+    curvedSurface: t.style === 'openRound' || t.style === 'openFaceted'
+      ? { radius: t.w * 0.95 + 0.006, segments: t.style === 'openFaceted' ? 8 : 14 }
+      : null,
     part: 'turret',
   });
 }

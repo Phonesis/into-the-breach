@@ -10,6 +10,12 @@ export const GAME_MODES = {
     name: 'Combat Training',
     subtitle: 'A live-fire command exercise without enemy AI. Practice movement, capture, production, targeting, and combined-arms control.',
   },
+  lineTest: {
+    id: 'lineTest',
+    name: 'Line Effectiveness Lab',
+    subtitle:
+      'Temporary QA range with an enemy mine belt, controllable tanks, and a retreating infantry position for Hold Ground / Pursue tests.',
+  },
   assault: {
     id: 'assault',
     name: 'Breakthrough',
@@ -62,6 +68,7 @@ export function resolveAssaultMapSize(sizeId = 'medium') {
 
 export const GAME_MODE_LIST = [
   GAME_MODES.tutorial,
+  GAME_MODES.lineTest,
   GAME_MODES.campaign,
   GAME_MODES.assault,
   GAME_MODES.clearance,

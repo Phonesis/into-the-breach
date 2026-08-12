@@ -87,6 +87,7 @@ const EXPLOSION_SAMPLE_FILES_FULL = [
   'explosion-h.wav',
   'explosion-i.wav',
 ];
+const MINE_EXPLOSION_FILES = ['mine-explosion-01.wav', 'mine-explosion-02.wav'];
 const IMPACT_SAMPLE_FILES_FULL = [
   'impact.wav',
   'impact-b.wav',
@@ -153,6 +154,11 @@ const BOMB_EXPLOSION_FILES = [
   'bomb-explosion-01.wav',
   'bomb-explosion-02.wav',
   'bomb-explosion-03.wav',
+];
+const BOMB_WHISTLE_FILES = [
+  'bomb-whistle-01.wav',
+  'bomb-whistle-02.wav',
+  'bomb-whistle-03.wav',
 ];
 /** Occasional US rifle reload cue — M1 Garand en-bloc clip eject. */
 const GARAND_PING_FILES = ['m1-garand-ping-el-01.wav'];
@@ -264,6 +270,8 @@ export class SoundManager {
     /** @type {AudioBuffer[]} */
     this.explosionBuffers = [];
     /** @type {AudioBuffer[]} */
+    this.mineExplosionBuffers = [];
+    /** @type {AudioBuffer[]} */
     this.impactBuffers = [];
     /** @type {AudioBuffer[]} */
     this.armorRicochetBuffers = [];
@@ -288,6 +296,8 @@ export class SoundManager {
     /** @type {AudioBuffer[]} */
     this.bombExplosionBuffers = [];
     /** @type {AudioBuffer[]} */
+    this.bombWhistleBuffers = [];
+    /** @type {AudioBuffer[]} */
     this.garandPingBuffers = [];
     /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
@@ -295,6 +305,7 @@ export class SoundManager {
     this._atmosGain = null;
     this._tabletAtmosAudio = null;
     this._lastExplosionFile = null;
+    this._lastMineExplosionFile = null;
     this._lastImpactFile = null;
     this._lastGarandPingFile = null;
     this._lastBuildingCollapseSmall = null;
@@ -729,6 +740,7 @@ export class SoundManager {
       }
     };
     this.explosionBuffers = [];
+    this.mineExplosionBuffers = [];
     this.impactBuffers = [];
     this.armorRicochetBuffers = [];
     this.bulletImpactBuffers = [];
@@ -741,10 +753,12 @@ export class SoundManager {
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this.bombExplosionBuffers = [];
+    this.bombWhistleBuffers = [];
     this.garandPingBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     const limit = (files, tabletCount) => this._constrainedAudio ? files.slice(0, tabletCount) : files;
     loadPool(limit(EXPLOSION_SAMPLE_FILES, 4), this.explosionBuffers);
+    loadPool(MINE_EXPLOSION_FILES, this.mineExplosionBuffers);
     loadPool(limit(IMPACT_SAMPLE_FILES, 3), this.impactBuffers);
     loadPool(limit(ARMOR_RICOCHET_FILES, 3), this.armorRicochetBuffers);
     loadPool(BULLET_IMPACT_FILES, this.bulletImpactBuffers);
@@ -759,6 +773,7 @@ export class SoundManager {
     loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
+    loadPool(BOMB_WHISTLE_FILES, this.bombWhistleBuffers);
     loadPool(GARAND_PING_FILES, this.garandPingBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
@@ -1158,6 +1173,22 @@ export class SoundManager {
 
   startStrafeFlyby(opts) {
     this.strafeAircraft?.startFlyby(opts);
+  }
+
+  /** Descending tail-fin whistle as a support bomb leaves the rack. */
+  playBombWhistle(worldPos = null) {
+    this._runWhenReady(() => {
+      const buf = this._pickFromPool(this.bombWhistleBuffers, '_lastBombWhistleFile');
+      if (!buf) return;
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * 1.05,
+        rate: 0.97 + Math.random() * 0.05,
+        wet: 0.14 + Math.random() * 0.06,
+      });
+    });
   }
 
   /** Large aerial bomb detonation (deeper / longer than artillery shelllets). */
@@ -1648,6 +1679,29 @@ export class SoundManager {
         rate: 0.94 + Math.random() * 0.09,
         wet: 0.32 + Math.random() * 0.08,
         delay: delaySec,
+      });
+    });
+  }
+
+  /** Dedicated buried-mine blast, falling back to the general explosion pool. */
+  playMineExplosion(worldPos = null) {
+    this._runWhenReady(() => {
+      const now = performance.now();
+      if (now - (this._lastByType._mineExplosion ?? 0) < 80) return;
+      const buf =
+        this._pickFromPool(this.mineExplosionBuffers, '_lastMineExplosionFile') ??
+        this._pickFromPool(this.explosionBuffers, '_lastExplosionFile') ??
+        this.buffers.explosion;
+      if (!buf) return;
+      this._lastByType._mineExplosion = now;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      this._playBuffer(buf, {
+        pan,
+        vol: this._distanceGain(dist) * 1.78,
+        rate: 0.9 + Math.random() * 0.1,
+        wet: 0.3 + Math.random() * 0.08,
       });
     });
   }

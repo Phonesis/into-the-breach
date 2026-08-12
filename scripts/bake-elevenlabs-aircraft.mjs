@@ -6,6 +6,7 @@
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --force
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=bomb
+ *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=whistle
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=engines
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --only=transport
  *   ELEVENLABS_API_KEY=sk_… node scripts/bake-elevenlabs-aircraft.mjs --validate
@@ -372,8 +373,42 @@ const CATALOG = [
     text: `Seamless loop of twin transport propellers chopping air hard, continuous loud blade thrash, outdoor, no engine. ${REAL}`,
   },
 
-  // —— Air bomb detonation (no freefall whistle — intentionally omitted).
-  // Format convert only — no EQ. Loud/close prompts so takes match bomb-explosion-02 level.
+  // —— Freefall (played at rack release; ~1.3 s fall in-game).
+  // "Iconic whistle" yields a cartoon sine. Ask for air rush + a breathy howl;
+  // convert() then buries any leftover tone in generated turbulence.
+  {
+    file: 'bomb-whistle-01.wav',
+    duration: 1.45,
+    influence: 0.68,
+    kind: 'whistle',
+    group: 'whistle',
+    text:
+      'Realistic incoming World War Two high explosive falling through air toward the listener, rushing hiss that grows ' +
+      'and slightly falls, outdoor combat recording, dry, no cartoon, no siren, no explosion yet, no airplane, no music, no voices',
+  },
+  {
+    file: 'bomb-whistle-02.wav',
+    duration: 1.45,
+    influence: 0.68,
+    kind: 'whistle',
+    group: 'whistle',
+    text:
+      'Realistic incoming World War Two high explosive falling through air toward the listener, rushing hiss that grows ' +
+      'and slightly falls, outdoor combat recording, dry, no cartoon, no siren, no explosion yet, no airplane, no music, no voices',
+  },
+  {
+    file: 'bomb-whistle-03.wav',
+    duration: 1.5,
+    influence: 0.68,
+    kind: 'whistle',
+    group: 'whistle',
+    text:
+      'Heavy steel bomb falling from an airplane through open air, rushing wind growing louder, slight falling Doppler, ' +
+      'turbulent outdoor field recording, no cartoon, no musical note, no explosion, no airplane engine, no music, no voices',
+  },
+
+  // —— Air bomb detonation. Format convert only — no EQ.
+  // Loud/close prompts so takes match bomb-explosion-02 level.
   {
     file: 'bomb-explosion-01.wav',
     duration: 2.6,
@@ -504,6 +539,15 @@ function engineAf(job) {
   if (kind === 'explosion') {
     return job.reverse ? 'areverse' : null;
   }
+  if (kind === 'whistle') {
+    // Light EQ only — convert() layers turbulence so a leftover tone does not read as a toy whistle.
+    return [
+      'highpass=f=160',
+      'lowpass=f=7000',
+      'equalizer=f=2800:t=q:w=1.2:g=-3',
+      'equalizer=f=5500:t=q:w=1.0:g=-4',
+    ].join(',');
+  }
   if (kind === 'exhaust') {
     return deep
       ? [
@@ -583,11 +627,66 @@ function engineAf(job) {
 }
 
 /**
+ * Bury a leftover falling tone in turbulence so it does not read as a cartoon sine.
+ */
+function convertWhistle(srcPath, dest, job = {}) {
+  const duration = Math.max(1.2, Number(job.duration) || 1.48);
+  const elAf = engineAf({ ...job, kind: 'whistle' });
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-i',
+      srcPath,
+      '-f',
+      'lavfi',
+      '-i',
+      `anoisesrc=d=${duration}:c=pink:r=44100:a=0.32`,
+      '-f',
+      'lavfi',
+      '-i',
+      `anoisesrc=d=${duration}:c=brown:r=44100:a=0.4`,
+      '-filter_complex',
+      [
+        `[0:a]aformat=channel_layouts=mono,aresample=44100,${elAf},chorus=0.4:0.55:26:0.2:0.22:1.2,volume=0.72[el]`,
+        '[1:a]highpass=f=350,lowpass=f=4200,afade=t=in:d=0.06,volume=0.26[pink]',
+        '[2:a]highpass=f=200,lowpass=f=700,afade=t=in:d=0.05,volume=0.28[brown]',
+        '[el][pink][brown]amix=inputs=3:duration=first:dropout_transition=0:normalize=0',
+        'highpass=f=200',
+        'equalizer=f=120:t=q:w=1.2:g=-10',
+        'lowpass=f=8500',
+        'afade=t=in:st=0:d=0.04',
+        'areverse,afade=t=in:st=0:d=0.08,areverse',
+        'loudnorm=I=-16:TP=-1.2:LRA=10',
+        'alimiter=limit=0.96',
+        'aresample=44100',
+      ].join(','),
+      '-ac',
+      '1',
+      '-ar',
+      '44100',
+      '-c:a',
+      'pcm_s16le',
+      dest,
+    ],
+    { encoding: 'utf8' }
+  );
+  if (r.status !== 0) {
+    console.error(r.stderr?.slice(-500));
+    throw new Error(`ffmpeg failed for ${dest}`);
+  }
+}
+
+/**
  * Mono 44.1 kHz. Engines get body EQ + loudnorm (match vehicle engine bake);
  * bombs stay format-only so existing loud takes keep their character.
  */
 function convert(srcPath, destName, job = {}) {
   const dest = join(OUT, destName);
+  if (job.kind === 'whistle') {
+    convertWhistle(srcPath, dest, job);
+    return;
+  }
   const args = ['-y', '-i', srcPath, '-ac', '1', '-ar', '44100'];
   const af = engineAf(job);
   if (af) args.push('-af', af);

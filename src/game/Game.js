@@ -82,6 +82,7 @@ import {
   removeRetreatMarker,
   resolveRetreatHq,
   syncRetreatMarkers,
+  startRetreat,
 } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
@@ -238,6 +239,10 @@ import {
   prewarmTerrainDamage,
 } from '../world/TerrainDamage.js';
 import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
+import {
+  seedLineEffectivenessTestMines,
+  spawnLineEffectivenessTestForces,
+} from './LineEffectivenessTest.js';
 import {
   ensureStartingRadioOperators,
   getRadioOperators,
@@ -425,6 +430,7 @@ export class Game {
     this.playerFaction = null;
     this.enemyFaction = null;
     this.gameMode = 'campaign';
+    this.lineEffectivenessTest = false;
     this.tutorial = false;
     this.clearance = false;
     this.clearanceRole = 'attack';
@@ -977,7 +983,8 @@ export class Game {
       options: startOptions,
     };
     this.gameMode = gameMode;
-    this.tutorial = gameMode === 'tutorial';
+    this.lineEffectivenessTest = gameMode === 'lineTest';
+    this.tutorial = gameMode === 'tutorial' || this.lineEffectivenessTest;
     this.clearance = isClearanceMode(gameMode);
     this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
     this.clearanceTimeLimitEnabled = this.clearance ? clearanceTimeLimitEnabled : false;
@@ -1267,7 +1274,12 @@ export class Game {
 
     const baseBuildingCampaign = this.campaignStyle === 'baseBuilding';
     this.units = [];
-    if (!restoreSnapshot && !this.towerDefense && !this.lastStand) {
+    if (
+      !restoreSnapshot &&
+      !this.towerDefense &&
+      !this.lastStand &&
+      !this.lineEffectivenessTest
+    ) {
       if (this.clearance && !playerAttacksClearance) {
         // Player defends: dig-in force for player, AI assault from rear assembly.
         this.clearanceAttackPlan = pickClearanceAttackPlan();
@@ -1330,7 +1342,14 @@ export class Game {
       }
     }
 
-    if (!this.clearance && !this.tutorial && !this.towerDefense && !this.lastStand && !restoreSnapshot) {
+    if (
+      !this.clearance &&
+      !this.tutorial &&
+      !this.towerDefense &&
+      !this.lastStand &&
+      !this.lineEffectivenessTest &&
+      !restoreSnapshot
+    ) {
       const enemyArmyScale =
         this.difficulty.enemyArmyMult *
         (this.campaign ? CAMPAIGN_BALANCE.enemyArmyMult : 1);
@@ -1349,6 +1368,11 @@ export class Game {
           scenery: this.scenery,
         })
       );
+    }
+
+    if (this.lineEffectivenessTest && !restoreSnapshot) {
+      this.units = spawnLineEffectivenessTestForces(this);
+      seedLineEffectivenessTestMines(this);
     }
 
     if (this.campaign) applyCampaignUnitHp(this.units);
@@ -1416,10 +1440,10 @@ export class Game {
       }
       this._showDeployZoneRings(deployTeams);
     }
-    ensureFieldCommanders(this);
+    if (!this.lineEffectivenessTest) ensureFieldCommanders(this);
     // All modes with a pre-deployed force retain a radio link even when an old
     // save or a custom roster predates the radio-operator unit.
-    if (!this.lastStand || isLastStandPresetForce(this)) {
+    if (!this.lineEffectivenessTest && (!this.lastStand || isLastStandPresetForce(this))) {
       ensureStartingRadioOperators(
         this,
         this.tutorial ||
@@ -1428,7 +1452,14 @@ export class Game {
           : [PLAYER_TEAM, ENEMY_TEAM]
       );
     }
-    if (!restoreSnapshot) this._applyEngagementStanceDefault(this.units);
+    if (!restoreSnapshot) {
+      this._applyEngagementStanceDefault(this.units);
+      if (this.lineEffectivenessTest) {
+        this.units
+          .find((unit) => unit.team === PLAYER_TEAM && unit.def?.type === 'infantry')
+          ?.setSelected(true);
+      }
+    }
 
     if (!restoreSnapshot) {
       resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
@@ -1482,6 +1513,7 @@ export class Game {
     this.ui.showHUD(this.playerFaction, this.mapDef, this.gameMode, {
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
+      lineTest: this.lineEffectivenessTest,
       towerDefense: this.towerDefense,
       tdEndless: !!this.towerDefense?.endless,
       tdHqDefense: isTdHqDefenseStyle(this.towerDefense),
@@ -2293,7 +2325,9 @@ export class Game {
   /** Player-initiated surrender — counts as a defeat, then Main Menu from the end screen. */
   surrender() {
     if (!this.running || this.gameOver) return;
-    const detail = this.tutorial
+    const detail = this.lineEffectivenessTest
+      ? 'Left the line-effectiveness test range.'
+      : this.tutorial
       ? 'Left the training ground.'
       : 'Your forces surrendered.';
     this.endGame(false, detail);
@@ -2532,6 +2566,7 @@ export class Game {
     this.clearanceOperational = null;
     this.clearanceReinforcements = null;
     this.campaign = false;
+    this.lineEffectivenessTest = false;
     this.production.setBuildTimeMult(1);
     for (const u of this.units) {
       if (u.mesh?.parent) u.dispose(this.scene);
@@ -3252,6 +3287,7 @@ export class Game {
 
   tryProduce(unitType) {
     if (!this.running || this.gameOver) return false;
+    if (this.lineEffectivenessTest) return false;
     if (this.clearance) return false;
     if (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense)) return false;
 
@@ -3294,7 +3330,7 @@ export class Game {
   }
 
   tickEconomy(dt) {
-    if (this.lastStand || this.clearance) return;
+    if (this.lastStand || this.clearance || this.lineEffectivenessTest) return;
     if (this.towerDefense) {
       if (isTdHqDefenseStyle(this.towerDefense)) {
         this.resources.player += HQ_INCOME_RATE * dt;
@@ -3754,6 +3790,22 @@ export class Game {
     buildingIntercept,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
+    if (
+      this.lineEffectivenessTest &&
+      attacker?.team === PLAYER_TEAM &&
+      target?._lineTestRetreatOnFire &&
+      !target.dead &&
+      !target._lineTestRetreated
+    ) {
+      const enemyHq = this.hqs.find((hq) => hq.team === ENEMY_TEAM && !hq.dead);
+      if (enemyHq) {
+        target._lineTestRetreated = true;
+        startRetreat(target, enemyHq, {
+          mapDef: this.mapDef,
+          scenery: this.scenery,
+        });
+      }
+    }
     if (
       !coaxFire &&
       !paratrooperAtFire &&

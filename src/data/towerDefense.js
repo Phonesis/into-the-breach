@@ -280,6 +280,12 @@ export const DEFENSE_TYPES = {
     range: 0,
     triggerRadius: 2.4,
     damage: 110,
+    damageByVehicleType: {
+      // Light armoured cars are especially vulnerable to a mine under the
+      // wheel/axle line; the blast still uses normal falloff at the edge.
+      armoredCar: 260,
+    },
+    blastRadius: 6.2,
     tier: 1,
   },
   tankTrap: {
@@ -333,6 +339,17 @@ export const DEFENSE_TYPES = {
     resupplyCost: 26,
   },
 };
+
+/** Resolve mine damage after vehicle type and distance falloff are known. */
+export function getMineDamageForUnit(mineOrDef, unitType) {
+  const baseDamage = Number.isFinite(mineOrDef?.damage)
+    ? mineOrDef.damage
+    : DEFENSE_TYPES.mine.damage;
+  const typeDamage =
+    mineOrDef?.damageByVehicleType?.[unitType] ??
+    DEFENSE_TYPES.mine.damageByVehicleType?.[unitType];
+  return Number.isFinite(typeDamage) ? typeDamage : baseDamage;
+}
 
 /** Placeable in build panel (tier 1 only). */
 export const DEFENSE_TYPE_LIST = [

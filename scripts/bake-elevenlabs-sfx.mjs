@@ -194,6 +194,18 @@ const CATALOG = [
     text: `Massive World War Two high explosive shell detonation outdoors, deep bass boom, dirt and debris, pressure wave, ${REALISTIC}`,
   },
   {
+    file: 'mine-explosion-01.wav',
+    duration: 1.15,
+    influence: 0.62,
+    text: `World War Two anti-tank mine detonating under an armored car, violent close ground blast, deep low thump, tearing hull impact, dirt and stones thrown upward, ${REALISTIC}`,
+  },
+  {
+    file: 'mine-explosion-02.wav',
+    duration: 1.25,
+    influence: 0.6,
+    text: `Buried World War Two anti-tank mine exploding beneath a light armored vehicle in an open field, sharp crack, heavy earth burst, brief metal slam and natural battlefield decay, ${REALISTIC}`,
+  },
+  {
     file: 'impact.wav',
     duration: 0.55,
     influence: 0.5,

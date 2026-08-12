@@ -7,8 +7,12 @@ import {
 } from '../visual/BaseBuildingMeshes.js';
 import { createDefenseMesh } from '../visual/DefenseMeshes.js';
 import { BASE_BUILDING_TYPES, isBaseBuildingCampaign } from '../data/baseBuildings.js';
-import { DEFENSE_TYPES, MINE_VEHICLE_TYPES } from '../data/towerDefense.js';
-import { spawnExplosion } from '../effects/CombatEffects.js';
+import {
+  DEFENSE_TYPES,
+  MINE_VEHICLE_TYPES,
+  getMineDamageForUnit,
+} from '../data/towerDefense.js';
+import { spawnExplosion, spawnShellExplosion } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
 import { applyMobilityDamage } from './ArmorPenetration.js';
@@ -135,6 +139,43 @@ export class EngineerSandbagManager {
 
   _factionId(team) {
     return team === 'player' ? this.game.playerFaction?.id : this.game.enemyFaction?.id;
+  }
+
+  /** Seed a completed mine directly for authored scenarios and QA ranges. */
+  addPrelaidMine({ x, z, team = 'enemy', rotationY = 0, id = null } = {}) {
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !this.game?.mapDef) return null;
+
+    const def = DEFENSE_TYPES.mine;
+    const y = sampleTerrainHeight(x, z, this.game.mapDef);
+    const mesh = createDefenseMesh('mine', 0xc9a227, this._factionId(team));
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotationY;
+    this.game.scene.add(mesh);
+
+    const entry = {
+      id: id ?? `prelaid-mine-${this.mines.length + 1}`,
+      team,
+      x,
+      z,
+      y,
+      damage: def.damage,
+      damageByVehicleType: def.damageByVehicleType,
+      triggerRadius: def.triggerRadius,
+      blastRadius: def.blastRadius,
+      mesh,
+      prelaid: true,
+    };
+    this.mines.push(entry);
+    this._builtPositions.push({
+      id: entry.id,
+      x,
+      z,
+      team,
+      buildType: 'mine',
+      rotationY,
+      prelaid: true,
+    });
+    return entry;
   }
 
   hasGarrisonBunkers() {
@@ -579,7 +620,9 @@ export class EngineerSandbagManager {
         z: site.z,
         y: site.y,
         damage: def.damage,
+        damageByVehicleType: def.damageByVehicleType,
         triggerRadius: def.triggerRadius,
+        blastRadius: def.blastRadius,
         mesh,
         _aiDefensiveFieldwork: !!site._aiDefensiveFieldwork,
         _aiFieldworkMode: site._aiFieldworkMode ?? null,
@@ -745,24 +788,29 @@ export class EngineerSandbagManager {
     const y = this.game.mapDef
       ? sampleTerrainHeight(mine.x, mine.z, this.game.mapDef)
       : mine.y;
-    spawnExplosion(this.game.scene, { x: mine.x, y: y + 0.5, z: mine.z });
+    spawnShellExplosion(
+      this.game.scene,
+      { x: mine.x, y: y + 0.5, z: mine.z },
+      'medium',
+      75
+    );
     addExplosionCrater(
       this.game.scene,
       this.game.mapDef,
       mine.x,
       mine.z,
-      'light',
+      'medium',
       this.game._terrainMesh
     );
-    sounds.play('explosion');
+    sounds.playMineExplosion({ x: mine.x, z: mine.z });
 
-    const blastRadius = mine.triggerRadius * 2.2;
+    const blastRadius = mine.blastRadius ?? mine.triggerRadius * 2.2;
     for (const unit of this.game._aliveUnits ?? this.game.units) {
       if (unit.dead || !MINE_VEHICLE_TYPES.has(unit.def?.type)) continue;
       const distance = Math.hypot(unit.position.x - mine.x, unit.position.z - mine.z);
       if (distance > blastRadius) continue;
       const falloff = Math.max(0.35, 1 - distance / blastRadius);
-      unit.takeDamage(mine.damage * falloff);
+      unit.takeDamage(getMineDamageForUnit(mine, unit.def?.type) * falloff);
       if (!unit.dead) applyMobilityDamage(unit);
     }
 

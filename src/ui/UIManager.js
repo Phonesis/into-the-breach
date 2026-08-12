@@ -1442,7 +1442,15 @@ export class UIManager {
 
   renderMaps() {
     const grid = this.root.querySelector('#map-grid');
-    grid.innerHTML = MAP_LIST.map(
+    const testMode = this.selectedGameMode === 'lineTest';
+    const visibleMaps = MAP_LIST.filter((map) =>
+      testMode ? map.testScenario === 'lineEffectiveness' : !map.testScenario
+    );
+    if (this.selectedMap && !visibleMaps.some((map) => map.id === this.selectedMap)) {
+      this.selectedMap = null;
+      this.root.querySelector('#btn-launch')?.setAttribute('disabled', '');
+    }
+    grid.innerHTML = visibleMaps.map(
       (m, index) => `
       <button class="card-btn interactive map-card" data-id="${m.id}">
         <span class="card-index">Theater ${String(index + 1).padStart(2, '0')}</span>
@@ -1603,6 +1611,7 @@ export class UIManager {
         if (btn.dataset.id !== 'clearance') {
           this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
         }
+        this.renderMaps();
         this.root.querySelector('#btn-to-faction').disabled = false;
         this.updateModeSetupPanels();
       };
@@ -1758,17 +1767,17 @@ export class UIManager {
       this.selectedLastStandPresetSize = btn.dataset.id;
     });
 
-    this.root.querySelectorAll('.map-card').forEach((btn) => {
-      btn.onclick = () => {
-        this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        this.selectedMap = btn.dataset.id;
-        const mapBase = MAPS[this.selectedMap];
-        if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
-        this.renderMapSizes();
-        this.renderLastStandPresetSizes();
-        this.root.querySelector('#btn-launch').disabled = false;
-      };
+    this.root.querySelector('#map-grid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.map-card');
+      if (!btn) return;
+      this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      this.selectedMap = btn.dataset.id;
+      const mapBase = MAPS[this.selectedMap];
+      if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
+      this.renderMapSizes();
+      this.renderLastStandPresetSizes();
+      this.root.querySelector('#btn-launch').disabled = false;
     });
 
     this.root.querySelector('#btn-launch').onclick = () => {
@@ -2350,7 +2359,8 @@ export class UIManager {
     const diffLabel = options.difficulty ? ` · ${options.difficulty.name}` : '';
     this.root.querySelector('#hud-map').textContent = `${formatMapHudLabel(mapDef)}${diffLabel}`;
 
-    const tutorial = gameMode === 'tutorial';
+    const lineTest = gameMode === 'lineTest' || options.lineTest;
+    const tutorial = gameMode === 'tutorial' && !lineTest;
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance' || gameMode === 'clearanceReinforced';
     const clearanceReinforced = clearance && options.clearanceReinforced;
@@ -2395,7 +2405,13 @@ export class UIManager {
     tdCountdown?.classList.add('hidden');
     tdCountdown?.classList.toggle('td-wave-countdown-side', !!towerDefense);
     this.hideTdBreachAlert();
-    this.root.querySelector('#laststand-banner')?.classList.toggle('hidden', !lastStand);
+    const lastStandBanner = this.root.querySelector('#laststand-banner');
+    if (lastStandBanner) {
+      lastStandBanner.classList.toggle('hidden', !lastStand && !lineTest);
+      lastStandBanner.textContent = lineTest
+        ? 'Line Effectiveness Lab — mine belt, vehicle dummies, and retreat lane'
+        : 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.';
+    }
     this._hudTowerDefense = towerDefense;
     this._hudTdHqDefense = tdHqDefense;
     this._hudHasFrontline = assault || towerDefense;
@@ -2410,8 +2426,8 @@ export class UIManager {
       .querySelector('#btn-toggle-capture-points')
       ?.classList.toggle('hidden', !hasCapturePoints);
     this._syncCapturePointToggle();
-    const hideFireSupportPanel = lastStand;
-    const hideGeneralOrdersPanel = (towerDefense && !tdHqDefense) || lastStand;
+    const hideFireSupportPanel = lastStand || lineTest;
+    const hideGeneralOrdersPanel = (towerDefense && !tdHqDefense) || lastStand || lineTest;
     this.root
       .querySelector('#firesupport-panel')
       ?.classList.toggle('hidden', hideFireSupportPanel);
@@ -2430,8 +2446,8 @@ export class UIManager {
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
     this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
     this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
-    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance);
-    this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance);
+    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance || lineTest);
+    this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance || lineTest);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
     this.syncAutoBuildForCampaign(this._hudCampaignStyle);
@@ -2451,7 +2467,10 @@ export class UIManager {
 
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
-      if (tutorial) {
+      if (lineTest) {
+        this._defaultHudHint =
+          'Line Test: select the infantry squad · set Hold Ground or Pursue · explicitly attack the enemy position; drive tanks across the marked enemy mine belt';
+      } else if (tutorial) {
         this._defaultHudHint =
           'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
@@ -2495,7 +2514,10 @@ export class UIManager {
           'Victory: destroy the enemy HQ · WASD pan · wheel zoom · LMB/RMB orders · Shift+LMB fire';
       }
       hint.textContent = this._defaultHudHint;
-      if (tabletOn && tutorial) {
+      if (tabletOn && lineTest) {
+        hint.textContent =
+          'Line Test: select infantry · Hold/Pursue · attack the position · drive tanks over the mine belt';
+      } else if (tabletOn && tutorial) {
         hint.textContent =
           'Tutorial: tap to select · Target/Fire buttons (camera pad) · tap map to move/attack';
       } else if (tabletOn && lastStand && options.lastStandPreset) {

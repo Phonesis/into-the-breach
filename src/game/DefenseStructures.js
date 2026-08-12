@@ -19,6 +19,7 @@ import {
   getAmmoRatio,
   getResupplyCost,
   pickBarrageAmmoPit,
+  getMineDamageForUnit,
 } from '../data/towerDefense.js';
 import {
   spawnArmorRicochet,
@@ -26,7 +27,6 @@ import {
   spawnShellExplosion,
   spawnMuzzleFlash,
 } from '../effects/CombatEffects.js';
-import { spawnExplosion } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
 import { mgProfileForFaction } from '../audio/WeaponSounds.js';
@@ -565,24 +565,24 @@ export class DefenseStructureManager {
   _detonateMine(entry) {
     if (!entry || entry.destroyed) return false;
     const y = sampleTerrainHeight(entry.x, entry.z, this.mapDef);
-    spawnExplosion(this.scene, { x: entry.x, y: y + 0.5, z: entry.z });
+    spawnShellExplosion(this.scene, { x: entry.x, y: y + 0.5, z: entry.z }, 'medium', 75);
     addExplosionCrater(
       this.scene,
       this.mapDef,
       entry.x,
       entry.z,
-      'light',
+      'medium',
       this.getTerrainMesh()
     );
-    sounds.play('explosion');
+    sounds.playMineExplosion({ x: entry.x, z: entry.z });
 
-    const blastRadius = entry.def.triggerRadius * 2.2;
+    const blastRadius = entry.def.blastRadius ?? entry.def.triggerRadius * 2.2;
     for (const unit of this.getEnemyUnits()) {
       if (unit.dead || !MINE_VEHICLE_TYPES.has(unit.def?.type)) continue;
       const distance = Math.hypot(unit.position.x - entry.x, unit.position.z - entry.z);
       if (distance > blastRadius) continue;
       const falloff = Math.max(0.35, 1 - distance / blastRadius);
-      unit.takeDamage(entry.def.damage * falloff);
+      unit.takeDamage(getMineDamageForUnit(entry.def, unit.def?.type) * falloff);
       if (!unit.dead) applyMobilityDamage(unit);
     }
     this.destroyEntry(entry);

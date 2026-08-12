@@ -16,6 +16,7 @@ function factionForPosition(x, z, mapDef, factions) {
 /** Place sandbag fighting positions and return cover zone data. */
 export function buildCoverSites(mapDef, scene, scenery = null, factions = null, options = {}) {
   const zones = [];
+  if (mapDef.testScenario === 'lineEffectiveness') return zones;
   const random = createMapRandom(mapDef, 'cover');
 
   const addBunker = (x, z, type = 'medium') => {

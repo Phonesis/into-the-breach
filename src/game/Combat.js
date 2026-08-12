@@ -767,6 +767,17 @@ export function updateCombat(
     if (openingCeasefire && !attacker.attackOrder) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
 
+    // Authored QA ranges can hold a force quiet until the tester issues an
+    // order. Explicit attack and move orders still use the normal combat path.
+    if (
+      attacker._lineTestPassive &&
+      !attacker.attackOrder &&
+      !attacker._userMoveOrder
+    ) {
+      attacker.target = null;
+      continue;
+    }
+
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
     const localAcquire = filterAcquireNearAttacker(attacker, acquire);

@@ -179,11 +179,13 @@ const WIRE = {
 };
 
 const MINE = {
-  discR: 0.92,
-  discH: 0.1,
-  domeR: 0.38,
-  markerH: 0.38,
-  hitRadius: 1.8,
+  // A buried anti-tank mine is compact; the trigger radius remains a
+  // gameplay value in towerDefense.js and is intentionally separate.
+  discR: 0.42,
+  discH: 0.08,
+  domeR: 0.18,
+  markerH: 0.22,
+  hitRadius: 0.72,
 };
 
 const TANK_TRAP = {
