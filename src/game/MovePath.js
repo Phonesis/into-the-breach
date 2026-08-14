@@ -702,12 +702,35 @@ export function advanceMovePath(unit, mapDef) {
         return;
       }
     }
+    const retreatDestination = unit.retreating
+      ? unit._retreatDestination
+      : null;
+    const retreatReached =
+      !retreatDestination ||
+      Math.hypot(
+        unit.position.x - retreatDestination.x,
+        unit.position.z - retreatDestination.z
+      ) <= (unit._retreatArrivalRadius ?? 18);
+    if (unit.retreating && !retreatReached) {
+      // A blocked/unreachable A* fallback can return the unit's current point
+      // as a one-node path. Do not mistake that recovery point for the rally
+      // destination; leave the retreat state live so the command can retry.
+      unit.moveTarget = null;
+      unit._movePath = null;
+      unit._finalMoveGoal = { ...retreatDestination };
+      return;
+    }
     unit.moveTarget = null;
     unit._movePath = null;
     unit._userMoveOrder = false;
     unit._reverseMoveOrder = false;
     unit._finalMoveGoal = null;
     unit._urbanCanalRoute = null;
-    if (unit.retreating) clearRetreat(unit);
+    if (unit.retreating) {
+      // A completed full-retreat rally slot remains reserved until the
+      // command ends; otherwise the order would immediately re-issue the
+      // route on the next frame and nearby trenches could pull the unit back.
+      clearRetreat(unit, { preserveFullRetreat: true });
+    }
   }
 }

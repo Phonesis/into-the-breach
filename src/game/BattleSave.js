@@ -304,6 +304,11 @@ export function captureBattleSave(game, { id = null } = {}) {
       elite: u.elite,
       killCount: u.killCount ?? 0,
       retreating: u.retreating,
+      retreatDestination: u._retreatDestination
+        ? { x: u._retreatDestination.x, z: u._retreatDestination.z }
+        : null,
+      retreatArrivalRadius: u._retreatArrivalRadius ?? null,
+      fullRetreatRallyHold: !!u._fullRetreatRallyHold,
       // A crew partway through its bailout is committed to surrender. Loading
       // resumes it safely on the ground with the surrender state applied.
       surrendered: u.surrendered || !!u._surrenderAfterBailout,
@@ -1505,6 +1510,12 @@ export function applyBattleSave(game, snapshot) {
     unit.elite = !!uData.elite;
     unit.killCount = uData.killCount ?? 0;
     unit.retreating = !!uData.retreating;
+    unit._retreatDestination = uData.retreatDestination
+      ? { x: uData.retreatDestination.x, z: uData.retreatDestination.z }
+      : null;
+    unit._retreatArrivalRadius = uData.retreatArrivalRadius ?? null;
+    unit._fullRetreatOrderId = null;
+    unit._fullRetreatRallyHold = !!uData.fullRetreatRallyHold;
     unit.surrendered = !!uData.surrendered;
     unit._garrisonBunkerId = null;
     unit._mountedOnTankId = null;

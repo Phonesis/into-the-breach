@@ -18,6 +18,9 @@ import {
 
 const _retreatTex = { tex: null };
 
+/** Arrival radius for a full-retreat rally slot around the HQ / staging zone. */
+export const FULL_RETREAT_RALLY_ARRIVAL_DIST = 4.5;
+
 /** Recent off-map / prepared-position HE leaves troops more shaken for a short time. */
 export const FIRE_SUPPORT_RETREAT_PRESSURE_SEC = 4.5;
 export const FIRE_SUPPORT_RETREAT_PRESSURE_MULT = 1.32;
@@ -149,15 +152,34 @@ function queueImmobileTankSurrender(unit) {
   unit._reverseMoveOrder = false;
 }
 
+/** Resolve the current retreat waypoint, including a full-retreat rally slot. */
+export function getRetreatDestination(unit, hq) {
+  const destination = unit?._retreatDestination;
+  if (
+    destination &&
+    Number.isFinite(destination.x) &&
+    Number.isFinite(destination.z)
+  ) {
+    return destination;
+  }
+  return hq?.position
+    ? { x: hq.position.x, z: hq.position.z }
+    : null;
+}
+
 /**
  * Begin retreat toward HQ / staging. When mapDef + scenery are provided, path
  * around buildings instead of walking straight into them.
  * @param {object} unit
  * @param {object} hq
- * @param {{ mapDef?: object, scenery?: object, voiceDelay?: number }} [options]
+ * @param {{ mapDef?: object, scenery?: object, voiceDelay?: number, playVoice?: boolean,
+ *   destination?: {x:number,z:number}, fullRetreatOrderId?: string,
+ *   retargetActive?: boolean }} [options]
  */
 export function startRetreat(unit, hq, options = {}) {
-  if (!hq || hq.dead || unit.dead || unit.retreating) return;
+  if (!hq || !hq.position || hq.dead || unit.dead) return;
+  const wasRetreating = !!unit.retreating;
+  if (wasRetreating && !options.retargetActive) return;
 
   // A broken-track tank cannot reach the rally point. Queue the existing tank
   // crew-bailout surrender flow instead of leaving it permanently marked as
@@ -169,52 +191,87 @@ export function startRetreat(unit, hq, options = {}) {
   }
 
   unit.retreating = true;
+  if (options.fullRetreatOrderId) {
+    unit._fullRetreatOrderId = options.fullRetreatOrderId;
+    unit._fullRetreatRallyHold = true;
+  } else {
+    unit._fullRetreatOrderId = null;
+    unit._fullRetreatRallyHold = false;
+  }
   unit.clearAttackOrder();
   unit._bunkerEntryId = null;
   unit._userMoveOrder = false;
-  unit._finalMoveGoal = { x: hq.position.x, z: hq.position.z };
+  const destination = getRetreatDestination(
+    { _retreatDestination: options.destination },
+    hq
+  );
+  unit._retreatDestination = destination;
+  unit._retreatArrivalRadius = options.fullRetreatOrderId
+    ? FULL_RETREAT_RALLY_ARRIVAL_DIST
+    : null;
+  unit._finalMoveGoal = destination;
   unit._pathRepathAttempts = 0;
-  unit._autoMoveOrderX = hq.position.x;
-  unit._autoMoveOrderZ = hq.position.z;
+  unit._autoMoveOrderX = destination.x;
+  unit._autoMoveOrderZ = destination.z;
   const mapDef = options.mapDef ?? unit._mapDef ?? null;
   const scenery = options.scenery ?? null;
   if (mapDef && scenery) {
     const routed = applyObstaclePath(
       unit,
-      hq.position.x,
-      hq.position.z,
+      destination.x,
+      destination.z,
       mapDef,
       scenery
     );
+    if (routed && unit._finalMoveGoal) {
+      // Urban road snapping may move the final waypoint away from the raw
+      // ring coordinate. Treat the actual routed endpoint as the slot so the
+      // arrival test does not keep re-seeding a valid path.
+      unit._retreatDestination = { ...unit._finalMoveGoal };
+    }
     if (!routed) {
       unit._movePath = null;
-      unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+      unit.moveTarget = { ...destination };
     }
   } else {
     unit._movePath = null;
-    unit.moveTarget = { x: hq.position.x, z: hq.position.z };
+    unit.moveTarget = { ...destination };
   }
   attachRetreatMarker(unit);
-  const factionId =
-    unit.faction?.id ?? unit.faction?.factionId ?? unit.def?.factionId ?? null;
-  const recentlyCalledUnderFire =
-    performance.now() - (unit._lastUnderFireVoiceAt ?? -Infinity) < 450;
-  sounds.playRetreat(
-    { x: unit.position.x, z: unit.position.z },
-    factionId,
-    {
-      team: unit.team,
-      radio: unit.team === 'player',
-      // Let an immediately preceding hit reaction finish before the withdrawal call.
-      delay: Math.max(options.voiceDelay ?? 0, recentlyCalledUnderFire ? 1.05 : 0),
-    }
-  );
+  // A full-retreat order already has one commander acknowledgement. Keep the
+  // faction-specific unit call for organic morale breaks, but do not launch a
+  // second call for every unit in a command-wide withdrawal.
+  if (!wasRetreating && options.playVoice !== false) {
+    const factionId =
+      unit.faction?.id ?? unit.faction?.factionId ?? unit.def?.factionId ?? null;
+    const recentlyCalledUnderFire =
+      performance.now() - (unit._lastUnderFireVoiceAt ?? -Infinity) < 450;
+    sounds.playRetreat(
+      { x: unit.position.x, z: unit.position.z },
+      factionId,
+      {
+        team: unit.team,
+        radio: unit.team === 'player',
+        // Let an immediately preceding hit reaction finish before the withdrawal call.
+        delay: Math.max(options.voiceDelay ?? 0, recentlyCalledUnderFire ? 1.05 : 0),
+      }
+    );
+  }
 }
 
-export function clearRetreat(unit) {
+export function clearRetreat(unit, options = {}) {
+  const preserveFullRetreat =
+    options.preserveFullRetreat === true &&
+    !!(unit._fullRetreatOrderId || unit._fullRetreatRallyHold);
   unit.retreating = false;
   unit._surrenderOnRetreat = false;
   removeRetreatMarker(unit);
+  if (!preserveFullRetreat) {
+    unit._fullRetreatOrderId = null;
+    unit._fullRetreatRallyHold = false;
+    unit._retreatDestination = null;
+    unit._retreatArrivalRadius = null;
+  }
 }
 
 /**
@@ -222,7 +279,12 @@ export function clearRetreat(unit) {
  * @param {object|null} [opts] — { generalOrders, clearance, mapDef } or a GeneralOrdersManager (legacy)
  */
 export function maybeTriggerRetreat(unit, hqs, units = [], attacker = null, opts = null) {
-  if (unit.dead || unit.retreating || unit.defensiveHold) return;
+  if (
+    unit.dead ||
+    unit.retreating ||
+    unit.defensiveHold ||
+    unit._fullRetreatRallyHold
+  ) return;
 
   // Back-compat: fifth arg used to be generalOrders manager directly
   const options =
@@ -303,24 +365,38 @@ export function updateRetreatState(unit, hq, mapDef) {
   }
 
   const hqDest = { x: hq.position.x, z: hq.position.z };
-  unit._finalMoveGoal = hqDest;
+  const retreatDest = getRetreatDestination(unit, hq) ?? hqDest;
+  unit._finalMoveGoal = retreatDest;
   // Keep an existing building-aware path; only re-issue if lost.
   if (!unit.moveTarget && !unit._movePath?.length) {
-    unit.moveTarget = hqDest;
+    unit.moveTarget = { ...retreatDest };
   }
 
-  const dx = unit.position.x - hq.position.x;
-  const dz = unit.position.z - hq.position.z;
+  const dx = unit.position.x - retreatDest.x;
+  const dz = unit.position.z - retreatDest.z;
   const dist = Math.hypot(dx, dz);
 
-  const reachedHq =
-    dist < 18 ||
-    (mapDef &&
-      hasReachedMoveDest(unit, hqDest, mapDef, 3.5, 5.5)) ||
-    (!unit.moveTarget && dist < 24);
+  const fullRetreatSlot = !!(
+    unit._fullRetreatOrderId || unit._fullRetreatRallyHold
+  );
+  const reachedHq = fullRetreatSlot
+    ? dist < (unit._retreatArrivalRadius ?? FULL_RETREAT_RALLY_ARRIVAL_DIST) ||
+      (mapDef &&
+        hasReachedMoveDest(
+          unit,
+          retreatDest,
+          mapDef,
+          unit._retreatArrivalRadius ?? FULL_RETREAT_RALLY_ARRIVAL_DIST,
+          5.5
+        )) ||
+      (!unit.moveTarget && dist < 6)
+    : Math.hypot(unit.position.x - hq.position.x, unit.position.z - hq.position.z) < 18 ||
+      (mapDef &&
+        hasReachedMoveDest(unit, hqDest, mapDef, 3.5, 5.5)) ||
+      (!unit.moveTarget && dist < 24);
 
   if (reachedHq) {
-    clearRetreat(unit);
+    clearRetreat(unit, { preserveFullRetreat: fullRetreatSlot });
     unit.moveTarget = null;
     unit._movePath = null;
     unit._finalMoveGoal = null;

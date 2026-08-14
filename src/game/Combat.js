@@ -48,7 +48,12 @@ import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
 import { getBlastProfile } from './BlastProfile.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
-import { maybeTriggerRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
+import {
+  maybeTriggerRetreat,
+  clearRetreat,
+  getRetreatDestination,
+  resolveRetreatHq,
+} from './RetreatBehavior.js';
 import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
 import { getRankDamageMultiplier, recordEnemyKill } from './EliteBehavior.js';
 import { isSceneryTarget, wrapSceneryTarget } from './SceneryTarget.js';
@@ -1948,7 +1953,10 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       } else {
         unit.clearAttackOrder();
         unit._bunkerEntryId = null;
-        const dest = { x: hq.position.x, z: hq.position.z };
+        const dest = getRetreatDestination(unit, hq) ?? {
+          x: hq.position.x,
+          z: hq.position.z,
+        };
         unit._finalMoveGoal = dest;
         // Don't stomp an active detour path every frame — repath only if lost.
         const needPath =
@@ -1961,7 +1969,16 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
           unit._autoMoveOrderZ = dest.z;
           unit._pathRepathAttempts = 0;
           if (options.scenery) {
-            applyObstaclePath(unit, dest.x, dest.z, mapDef, options.scenery);
+            const routed = applyObstaclePath(
+              unit,
+              dest.x,
+              dest.z,
+              mapDef,
+              options.scenery
+            );
+            if (unit.retreating && routed && unit._finalMoveGoal) {
+              unit._retreatDestination = { ...unit._finalMoveGoal };
+            }
           } else {
             unit._movePath = null;
             unit.moveTarget = dest;

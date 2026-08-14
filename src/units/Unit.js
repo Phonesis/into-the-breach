@@ -113,6 +113,10 @@ export class Unit {
     this._stanceBoundAttackOrder = false;
     this._mgVolley = 0;
     this.retreating = false;
+    this._retreatDestination = null;
+    this._retreatArrivalRadius = null;
+    this._fullRetreatOrderId = null;
+    this._fullRetreatRallyHold = false;
     this.retreatMarker = null;
     this.surrendered = false;
     this.surrenderMarker = null;

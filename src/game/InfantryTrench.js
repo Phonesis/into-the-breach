@@ -1046,6 +1046,13 @@ export function updateTrenchOccupation(units, manager) {
       continue;
     }
 
+    // Full Retreat owns the rally area until its command window ends. Without
+    // this hold, a unit that reaches its slot beside a trench is auto-entered,
+    // then the still-active retreat order pulls it out on the next frame.
+    if (unit._fullRetreatRallyHold && !unit.retreating && !unit._trenchId) {
+      continue;
+    }
+
     if (unit._trenchId) {
       const trench = manager.getTrenchById(unit._trenchId);
       if (!trench || trench.destroyed) {

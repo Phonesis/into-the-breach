@@ -4056,13 +4056,13 @@ export class UIManager {
       } else if (activeType === 'fullRetreat') {
         const retreatDest = this._hudClearance ? 'starting zone' : 'HQ';
         hint.textContent = `Full Retreat — units withdrawing to ${retreatDest} (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
-     } else if (activeType === 'holdGround') {
-       hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
-     } else if (activeType === 'digIn') {
-       hint.textContent = `Dig In — eligible troops digging enemy-facing trenches (${Math.ceil(activeRem)}s) · click Cancel Dig In or Esc`;
-     } else {
-        hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
-     }
+      } else if (activeType === 'holdGround') {
+        hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
+      } else if (activeType === 'digIn') {
+        hint.textContent = `Dig In — eligible troops digging enemy-facing trenches (${Math.ceil(activeRem)}s) · click Cancel Dig In or Esc`;
+      } else {
+        hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · ready orders replace the active order · Esc cancels';
+      }
     }
   }
 

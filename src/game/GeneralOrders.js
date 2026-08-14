@@ -10,7 +10,10 @@ import { getClearanceStagingAnchor } from './ClearanceMode.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
-const HQ_REACHED_DIST = 18;
+const RETREAT_SLOT_COUNT_PER_RING = 10;
+const RETREAT_SLOT_BASE_RADIUS = 12;
+const RETREAT_SLOT_RING_SPACING = 5.25;
+const RETREAT_SLOT_MIN_SEPARATION = 3.8;
 
 function makeCooldowns() {
   return Object.fromEntries(GENERAL_ORDER_LIST.map((o) => [o.id, 0]));
@@ -75,10 +78,88 @@ function commandRallyPoint(game, ownerTeam) {
   );
 }
 
-function distToHq(unit, hq) {
-  const dx = unit.position.x - hq.position.x;
-  const dz = unit.position.z - hq.position.z;
-  return Math.hypot(dx, dz);
+function compareUnitIds(a, b) {
+  const aId = Number(a?.id);
+  const bId = Number(b?.id);
+  if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) {
+    return aId - bId;
+  }
+  return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+}
+
+function rallySlotRadius(unit) {
+  const type = unit?.def?.type;
+  if (type === 'superHeavyTank') return 3.2;
+  if (
+    type === 'tank' ||
+    type === 'tankDestroyer' ||
+    type === 'armoredCar'
+  ) return 2.6;
+  if (type === 'artillery' || type === 'antiTankGun') return 2.2;
+  return 1.25;
+}
+
+function clampRallyPoint(game, x, z) {
+  const half = Math.max(4, (game?.mapDef?.size ?? 120) * 0.5 - 8);
+  return {
+    x: clamp(x, -half, half),
+    z: clamp(z, -half, half),
+  };
+}
+
+function isRallyPointUsable(unit, point, used, game) {
+  const scenery = game?.scenery;
+  if (
+    scenery?.isMovementBlocked?.(
+      point.x,
+      point.z,
+      rallySlotRadius(unit)
+    )
+  ) {
+    return false;
+  }
+  return !used.some(
+    (other) =>
+      Math.hypot(point.x - other.x, point.z - other.z) <
+      RETREAT_SLOT_MIN_SEPARATION
+  );
+}
+
+function buildRetreatRallySlot(unit, hq, index, count, used, game) {
+  const ring = Math.floor(index / RETREAT_SLOT_COUNT_PER_RING);
+  const ringIndex = index % RETREAT_SLOT_COUNT_PER_RING;
+  const ringCount = Math.min(
+    RETREAT_SLOT_COUNT_PER_RING,
+    Math.max(1, count - ring * RETREAT_SLOT_COUNT_PER_RING)
+  );
+  const baseRadius =
+    RETREAT_SLOT_BASE_RADIUS + Math.min(7, Math.sqrt(Math.max(1, count)) * 1.55);
+  const radius = baseRadius + ring * RETREAT_SLOT_RING_SPACING;
+  const baseAngle =
+    -Math.PI * 0.5 +
+    ((ringIndex + (ring % 2 ? 0.5 : 0)) / ringCount) * Math.PI * 2;
+
+  for (let attempt = 0; attempt < 14; attempt++) {
+    const direction = attempt === 0
+      ? 0
+      : Math.ceil(attempt / 2) * 0.16 * (attempt % 2 ? 1 : -1);
+    const radial = attempt > 8 ? (attempt - 8) * 1.8 : 0;
+    const point = clampRallyPoint(
+      game,
+      hq.position.x + Math.cos(baseAngle + direction) * (radius + radial),
+      hq.position.z + Math.sin(baseAngle + direction) * (radius + radial)
+    );
+    if (isRallyPointUsable(unit, point, used, game)) return point;
+  }
+
+  // A blocked rally ring is unusual (mostly dense urban maps). Keep the slot
+  // deterministic and let the ordinary building-aware path find the final
+  // approach rather than collapsing every unit onto the HQ centre.
+  return clampRallyPoint(
+    game,
+    hq.position.x + Math.cos(baseAngle) * radius,
+    hq.position.z + Math.sin(baseAngle) * radius
+  );
 }
 
 export class GeneralOrdersManager {
@@ -87,11 +168,17 @@ export class GeneralOrdersManager {
     this.ownerTeam = ownerTeam;
     this.cooldowns = makeCooldowns();
     this.active = null;
+    this._retreatOrderSerial = 0;
+    this._fullRetreatOrderId = null;
+    this._fullRetreatSlots = null;
   }
 
   reset() {
     this.cooldowns = makeCooldowns();
     this.active = null;
+    this._retreatOrderSerial = 0;
+    this._fullRetreatOrderId = null;
+    this._fullRetreatSlots = null;
   }
 
   isActive() {
@@ -114,7 +201,10 @@ export class GeneralOrdersManager {
     return (
       this.hasCommandLink() &&
       (this.cooldowns[type] ?? 0) <= 0 &&
-      !this.active
+      // A normal order can replace the currently active order. Scenario-
+      // forced retreats remain the one case that cannot be interrupted by a
+      // different order.
+      !this.active?.forced
     );
   }
 
@@ -135,10 +225,16 @@ export class GeneralOrdersManager {
     const hq = commandRallyPoint(this.game, this.ownerTeam);
     if (type === 'fullRetreat' && !hq) return false;
 
+    const previousActive = this.active;
+    if (previousActive) this.cancelActive();
+
     if (type === 'fullRetreat') {
-      this._applyFullRetreat(hq);
+      this._applyFullRetreat(hq, { playVoice: this.ownerTeam !== PLAYER });
     }
-    if (type === 'digIn' && this._applyDigIn() === 0) return false;
+    if (type === 'digIn' && this._applyDigIn() === 0) {
+      this._restoreActiveOrder(previousActive);
+      return false;
+    }
 
     this.active = { type, remaining: GENERAL_ORDER_DURATION_SEC };
     this.cooldowns[type] = GENERAL_ORDER_COOLDOWN_SEC;
@@ -151,11 +247,19 @@ export class GeneralOrdersManager {
    */
   forceFullRetreat() {
     if (!this.game.running || this.game.gameOver) return false;
+    // Victory/deadline checks can be evaluated more than once while the end
+    // overlay is being prepared. Do not restart the same withdrawal or replay
+    // its command acknowledgement.
+    if (this.active?.type === 'fullRetreat' && this.active.forced) {
+      const existingHq = commandRallyPoint(this.game, this.ownerTeam);
+      if (existingHq) this._enforceFullRetreat(existingHq);
+      return false;
+    }
     const hq = commandRallyPoint(this.game, this.ownerTeam);
     if (!hq) return false;
 
     if (this.active) this.cancelActive();
-    this._applyFullRetreat(hq);
+    this._applyFullRetreat(hq, { playVoice: false });
     this.active = {
       type: 'fullRetreat',
       remaining: GENERAL_ORDER_DURATION_SEC,
@@ -201,6 +305,7 @@ export class GeneralOrdersManager {
     }
 
     if (this.active.remaining <= 0) {
+      if (this.active.type === 'fullRetreat') this._clearCommanderRetreats();
       this.active = null;
     }
   }
@@ -236,50 +341,143 @@ export class GeneralOrdersManager {
     ) ?? 0;
   }
 
-  _applyFullRetreat(hq) {
+  _restoreActiveOrder(order) {
+    if (!order) return;
+    if (order.type === 'fullRetreat') {
+      const hq = commandRallyPoint(this.game, this.ownerTeam);
+      if (hq) this._applyFullRetreat(hq, { playVoice: false });
+    }
+    if (order.type === 'digIn') this._applyDigIn();
+    this.active = { ...order };
+  }
+
+  _applyFullRetreat(hq, { playVoice = false } = {}) {
+    this._beginFullRetreatPlan(hq);
     const pathOpts = {
       mapDef: this.game.mapDef,
       scenery: this.game.scenery,
-      // The HQ commander speaks first; one throttled unit withdrawal call follows.
-      voiceDelay: 2.2,
+      // The player command acknowledgement is the single voice for a
+      // command-wide retreat. Enemy AI has no click acknowledgement, so it
+      // keeps one throttled unit call for audible battlefield feedback.
+      playVoice,
     };
-    for (const unit of this._teamUnits()) {
+    for (const unit of this._teamUnits().sort(compareUnitIds)) {
       if (!canReceiveOrder(unit, this.ownerTeam)) continue;
-      if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
-      startRetreat(unit, hq, pathOpts);
+      startRetreat(unit, hq, {
+        ...pathOpts,
+        destination: this._getFullRetreatDestination(unit, hq),
+        fullRetreatOrderId: this._fullRetreatOrderId,
+        retargetActive: true,
+      });
     }
   }
 
   _clearCommanderRetreats() {
     for (const unit of this._teamUnits()) {
-      if (!unit.retreating) continue;
+      if (
+        !unit.retreating &&
+        !unit._fullRetreatOrderId &&
+        !unit._fullRetreatRallyHold
+      ) continue;
       clearRetreat(unit);
       unit.moveTarget = null;
       unit._movePath = null;
       unit._userMoveOrder = false;
     }
+    this._fullRetreatOrderId = null;
+    this._fullRetreatSlots = null;
   }
 
   _enforceFullRetreat(hq) {
+    this._ensureFullRetreatPlan(hq);
     const pathOpts = {
       mapDef: this.game.mapDef,
       scenery: this.game.scenery,
-      voiceDelay: 2.2,
+      playVoice: false,
     };
     for (const unit of this._teamUnits()) {
       if (!canReceiveOrder(unit, this.ownerTeam)) continue;
-      if (distToHq(unit, hq) < HQ_REACHED_DIST) continue;
+      // A saved full-retreat rally hold has no in-memory order token yet.
+      // Reattach it to the restored active order before deciding whether it
+      // needs another move.
+      if (unit._fullRetreatRallyHold && !unit._fullRetreatOrderId) {
+        unit._fullRetreatOrderId = this._fullRetreatOrderId;
+      }
+      const destination = this._getFullRetreatDestination(unit, hq);
+      const belongsToThisOrder =
+        unit._fullRetreatOrderId === this._fullRetreatOrderId;
+      if (!unit.retreating && belongsToThisOrder) continue;
       if (!unit.retreating) {
-        startRetreat(unit, hq, pathOpts);
+        startRetreat(unit, hq, {
+          ...pathOpts,
+          destination,
+          fullRetreatOrderId: this._fullRetreatOrderId,
+          retargetActive: true,
+        });
         continue;
       }
       unit.clearAttackOrder?.();
       unit._bunkerEntryId = null;
-      // Keep an active detour; only re-seed if the path was lost.
-      if (!unit.moveTarget && !unit._movePath?.length) {
-        startRetreat(unit, hq, pathOpts);
+      // Keep an active detour; re-seed only if the path was lost or this unit
+      // was previously in an organic retreat with a different destination.
+      if (
+        !belongsToThisOrder ||
+        (!unit.moveTarget && !unit._movePath?.length)
+      ) {
+        startRetreat(unit, hq, {
+          ...pathOpts,
+          destination,
+          fullRetreatOrderId: this._fullRetreatOrderId,
+          retargetActive: true,
+        });
       }
     }
+  }
+
+  _beginFullRetreatPlan(hq) {
+    this._fullRetreatOrderId =
+      `${this.ownerTeam}:full-retreat:${++this._retreatOrderSerial}`;
+    this._fullRetreatSlots = new Map();
+    const units = this._teamUnits()
+      .filter((unit) => canReceiveOrder(unit, this.ownerTeam))
+      .sort(compareUnitIds);
+    const used = [];
+    for (const [index, unit] of units.entries()) {
+      const slot = buildRetreatRallySlot(
+        unit,
+        hq,
+        index,
+        units.length,
+        used,
+        this.game
+      );
+      this._fullRetreatSlots.set(unit.id, slot);
+      used.push(slot);
+    }
+  }
+
+  _ensureFullRetreatPlan(hq) {
+    if (!this._fullRetreatOrderId || !this._fullRetreatSlots) {
+      this._beginFullRetreatPlan(hq);
+    }
+  }
+
+  _getFullRetreatDestination(unit, hq) {
+    this._ensureFullRetreatPlan(hq);
+    let destination = this._fullRetreatSlots.get(unit.id);
+    if (!destination) {
+      const used = [...this._fullRetreatSlots.values()];
+      destination = buildRetreatRallySlot(
+        unit,
+        hq,
+        used.length,
+        used.length + 1,
+        used,
+        this.game
+      );
+      this._fullRetreatSlots.set(unit.id, destination);
+    }
+    return { ...destination };
   }
 }
 
