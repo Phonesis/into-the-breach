@@ -37,6 +37,12 @@ const PRONE_FIRE_TYPES = new Set([
   'commander',
 ]);
 
+// Foot troops use a broad range of movement speeds. Keep the slower support
+// teams on a compact marching gait while allowing riflemen and airborne units
+// to transition naturally into a more urgent run.
+const HUMAN_WALK_SPEED = 3.7;
+const HUMAN_RUN_SPEED = 5.5;
+
 /** True while a foot squad is visually prone (stationary and firing). */
 export function isUnitVisuallyProne(unit) {
   if (!unit?.mesh || unit.dead || unit._trenchId || unit._mountedOnTankId) return false;
@@ -209,6 +215,139 @@ function tagShadow(mesh, mode) {
   mesh.userData.shadowMode = mode;
 }
 
+function mergeGeometryAttributes(geometries) {
+  const expanded = geometries.map((geometry) =>
+    geometry.index ? geometry.toNonIndexed() : geometry.clone()
+  );
+  const merged = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const attributes = expanded.map((geometry) => geometry.getAttribute(name));
+    if (attributes.some((attribute) => !attribute)) continue;
+    const itemSize = attributes[0].itemSize;
+    const length = attributes.reduce((sum, attribute) => sum + attribute.array.length, 0);
+    const array = new Float32Array(length);
+    let offset = 0;
+    for (const attribute of attributes) {
+      array.set(attribute.array, offset);
+      offset += attribute.array.length;
+    }
+    merged.setAttribute(name, new THREE.Float32BufferAttribute(array, itemSize));
+  }
+  for (const geometry of expanded) geometry.dispose();
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+/**
+ * Packs and webbing are rigid relative to a soldier. Merge pieces that share
+ * a material and shadow policy so their exact geometry still follows the
+ * animated soldier group with fewer WebGL submissions.
+ */
+function consolidateRigidSoldierEquipment(soldier) {
+  const buckets = new Map();
+  for (const child of soldier.children) {
+    if (
+      !child.isMesh ||
+      Array.isArray(child.material) ||
+      child.userData.infantryPart
+    ) {
+      continue;
+    }
+    const shadowMode = child.userData.shadowMode ?? 'none';
+    let materialBuckets = buckets.get(child.material);
+    if (!materialBuckets) {
+      materialBuckets = new Map();
+      buckets.set(child.material, materialBuckets);
+    }
+    const bucket = materialBuckets.get(shadowMode) ?? [];
+    bucket.push(child);
+    materialBuckets.set(shadowMode, bucket);
+  }
+
+  for (const [equipmentMaterial, materialBuckets] of buckets) {
+    for (const [shadowMode, meshes] of materialBuckets) {
+      if (meshes.length < 2) continue;
+      const geometries = [];
+      for (const mesh of meshes) {
+        mesh.updateMatrix();
+        const geometry = mesh.geometry.clone();
+        geometry.applyMatrix4(mesh.matrix);
+        geometries.push(geometry);
+        soldier.remove(mesh);
+      }
+      const batch = new THREE.Mesh(
+        mergeGeometryAttributes(geometries),
+        equipmentMaterial
+      );
+      for (const geometry of geometries) geometry.dispose();
+      batch.name = 'soldierEquipmentBatch';
+      tagShadow(batch, shadowMode);
+      soldier.add(batch);
+    }
+  }
+}
+
+/** Merge rigid detail attached to one animated body part without crossing a
+ * shadow-policy boundary. The body part still moves as the same object. */
+function consolidateRigidPartDetails(part) {
+  if (!part?.isMesh || Array.isArray(part.material)) return;
+  const partShadowMode = part.userData.shadowMode ?? 'none';
+  const matchingPart = [];
+  const childBuckets = new Map();
+
+  for (const child of part.children) {
+    if (!child.isMesh || Array.isArray(child.material) || child.userData.infantryPart) {
+      continue;
+    }
+    const shadowMode = child.userData.shadowMode ?? 'none';
+    if (child.material === part.material && shadowMode === partShadowMode) {
+      matchingPart.push(child);
+      continue;
+    }
+    let materialBuckets = childBuckets.get(child.material);
+    if (!materialBuckets) {
+      materialBuckets = new Map();
+      childBuckets.set(child.material, materialBuckets);
+    }
+    const bucket = materialBuckets.get(shadowMode) ?? [];
+    bucket.push(child);
+    materialBuckets.set(shadowMode, bucket);
+  }
+
+  if (matchingPart.length) {
+    const geometries = [part.geometry.clone()];
+    for (const child of matchingPart) {
+      child.updateMatrix();
+      const geometry = child.geometry.clone();
+      geometry.applyMatrix4(child.matrix);
+      geometries.push(geometry);
+      part.remove(child);
+    }
+    part.geometry = mergeGeometryAttributes(geometries);
+    for (const geometry of geometries) geometry.dispose();
+  }
+
+  for (const [detailMaterial, materialBuckets] of childBuckets) {
+    for (const [shadowMode, meshes] of materialBuckets) {
+      if (meshes.length < 2) continue;
+      const geometries = [];
+      for (const mesh of meshes) {
+        mesh.updateMatrix();
+        const geometry = mesh.geometry.clone();
+        geometry.applyMatrix4(mesh.matrix);
+        geometries.push(geometry);
+        part.remove(mesh);
+      }
+      const batch = new THREE.Mesh(mergeGeometryAttributes(geometries), detailMaterial);
+      for (const geometry of geometries) geometry.dispose();
+      batch.name = 'soldierPartDetailBatch';
+      tagShadow(batch, shadowMode);
+      part.add(batch);
+    }
+  }
+}
+
 const _up = new THREE.Vector3(0, 1, 0);
 
 function addSegment(parent, from, to, radius, material, radialSegments = 7) {
@@ -311,16 +450,25 @@ function buildWalkRest(parts, groupPosition) {
   return rest;
 }
 
+function resetWalkJoints(part) {
+  for (const joint of part?.userData?.walkJoints ?? []) {
+    if (!joint?.object) continue;
+    joint.object.position.copy(joint.position);
+    joint.object.rotation.copy(joint.rotation);
+  }
+}
+
 function restoreWalkRest(soldier) {
   const rest = soldier.userData.walkRest;
   if (!rest) return;
   soldier.position.copy(rest.group);
   for (const child of soldier.children) {
-    if (!child.isMesh || !child.userData.infantryPart) continue;
+    if (!child.userData?.infantryPart) continue;
     const partRest = rest[child.userData.infantryPart];
     if (!partRest) continue;
     child.position.copy(partRest.position);
     child.rotation.copy(partRest.rotation);
+    resetWalkJoints(child);
   }
 }
 
@@ -329,17 +477,54 @@ function addLegs(soldier, mats, gunner = false) {
   const legs = {};
   for (const side of [-1, 1]) {
     const key = side < 0 ? 'legL' : 'legR';
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.065, 0.23, 7), mats.body);
-    leg.scale.z = 1.08;
-    leg.position.set(side * spread, 0.145, gunner ? 0.04 : 0);
+    // The old single mesh rotated around its midpoint, which made the foot
+    // slide through the ground and the knee appear to swing from the ankle.
+    // Use a hip pivot with a small articulated knee so the stride reads as a
+    // planted step even at this deliberately compact battlefield scale.
+    const leg = new THREE.Group();
+    leg.name = key;
+    leg.position.set(side * spread, 0.26, gunner ? 0.04 : 0);
     if (gunner) leg.rotation.x = 0.35;
     leg.userData.infantryPart = key;
+
+    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.062, 0.13, 7), mats.body);
+    thigh.position.y = -0.065;
+    thigh.scale.z = 1.08;
+    tagShadow(thigh, 'receive');
+    leg.add(thigh);
+
+    const knee = new THREE.Group();
+    knee.name = `${key}Knee`;
+    knee.position.y = -0.13;
+    knee.userData.restRotationX = knee.rotation.x;
+    leg.add(knee);
+
+    const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.058, 0.13, 7), mats.body);
+    shin.position.y = -0.065;
+    shin.scale.z = 1.08;
+    tagShadow(shin, 'receive');
+    knee.add(shin);
+
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.075, 0.14), mats.leather);
+    boot.position.set(0, -0.14, 0.025);
+    boot.rotation.x = -0.08;
+    knee.add(boot);
+
+    leg.userData.kneePivot = knee;
+    leg.userData.walkJoints = [
+      {
+        object: knee,
+        position: knee.position.clone(),
+        rotation: knee.rotation.clone(),
+      },
+      {
+        object: boot,
+        position: boot.position.clone(),
+        rotation: boot.rotation.clone(),
+      },
+    ];
     tagShadow(leg, 'receive');
     soldier.add(leg);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.075, 0.14), mats.leather);
-    boot.position.set(0, -0.135, 0.025);
-    boot.rotation.x = -0.08;
-    leg.add(boot);
     legs[key] = leg;
   }
   return legs;
@@ -614,6 +799,7 @@ function applySoldierPronePose(soldier, proneBlend) {
   const cos = Math.cos(angle);
 
   for (const { child, position, rotation } of proneRest) {
+    resetWalkJoints(child);
     const dy = position.y - pivotY;
     const dz = position.z - pivotZ;
     const proneY = pivotY + dy * cos - dz * sin;
@@ -643,6 +829,28 @@ function applySoldierWeaponPose(soldier, aimBlend, proneBlend = 0) {
   weapon.rotation.x = THREE.MathUtils.lerp(aim.lowered.x, aim.raised.x, t);
   weapon.rotation.y = THREE.MathUtils.lerp(aim.lowered.y, aim.raised.y, t);
   weapon.rotation.z = THREE.MathUtils.lerp(aim.lowered.z, aim.raised.z, t);
+}
+
+function applyMarchingWeaponSway(soldier, phase, blend, runBlend) {
+  const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
+  if (!weapon || blend <= 0.001) return;
+
+  const { gunner = false, crouching = false } = soldier.userData.walkPose ?? {};
+  const compact = gunner || crouching;
+  const scale = (compact ? 0.45 : 1) * blend;
+  const offset = (soldier.userData.squadIndex ?? 0) * 0.82;
+  const sway = Math.sin(phase + offset + Math.PI * 0.35);
+  const bob = 0.5 - Math.cos(phase * 2 + offset * 0.5) * 0.5;
+  const carry = 0.7 + runBlend * 0.3;
+
+  // A rifle carried at port arms follows the shoulders, but lags slightly on
+  // each footfall. This is intentionally applied after aim/prone posing so a
+  // moving soldier never snaps back to the firing pose for one frame.
+  weapon.position.x += sway * 0.012 * scale * carry;
+  weapon.position.y += (bob - 0.5) * 0.014 * scale;
+  weapon.position.z += sway * 0.018 * scale * carry;
+  weapon.rotation.x += sway * 0.045 * scale;
+  weapon.rotation.z -= sway * 0.035 * scale;
 }
 
 function getVisibleSquadMembers(unitMesh) {
@@ -852,6 +1060,9 @@ export function buildSquadSoldier(parentGroup, opts) {
     head.add(ear);
   }
 
+  consolidateRigidPartDetails(torso);
+  consolidateRigidPartDetails(head);
+
   soldier.add(torso, head);
   const helmet = addHelmet(soldier, mats, factionId, torsoY + 0.34, { gunner });
   const legs = addLegs(soldier, mats, gunner || crouching);
@@ -864,6 +1075,7 @@ export function buildSquadSoldier(parentGroup, opts) {
 
   const specialWeapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   if (specialWeapon) addWeaponHands(specialWeapon, mats);
+  consolidateRigidSoldierEquipment(soldier);
 
   const yaw = POSE_YAW[squadIndex % POSE_YAW.length];
   const lean = POSE_LEAN[squadIndex % POSE_LEAN.length];
@@ -930,6 +1142,12 @@ export function updateInfantryWeaponPose(unit, dt) {
       child.userData.weaponAimBlend,
       child.userData.proneBlend
     );
+    applyMarchingWeaponSway(
+      child,
+      unit._walkPhase ?? 0,
+      unit._walkBlend ?? 0,
+      unit._walkRunBlend ?? 0
+    );
   });
 }
 
@@ -947,21 +1165,30 @@ function applyPartAnim(mesh, rest, { position = null, rotation = null } = {}) {
   }
 }
 
-function animateSoldierWalk(soldier, phase, blend) {
+function animateSoldierWalk(soldier, phase, blend, runBlend = 0) {
   const rest = soldier.userData.walkRest;
   if (!rest) return;
 
   const { gunner = false, crouching = false } = soldier.userData.walkPose ?? {};
   const compact = gunner || crouching;
-  const amp = compact ? 0.55 : 1;
+  const compactScale = compact ? 0.56 : 1;
   const squadIndex = soldier.userData.squadIndex ?? 0;
-  const stride = Math.sin(phase + squadIndex * 0.65);
-  const bob = Math.abs(Math.sin(phase * 2 + squadIndex * 0.4));
+  const offset = squadIndex * 0.82;
+  const legPhase = phase + offset;
+  const leftStride = Math.sin(legPhase);
+  const rightStride = Math.sin(legPhase + Math.PI);
+  const leftLift = Math.pow(Math.max(0, leftStride), 1.35);
+  const rightLift = Math.pow(Math.max(0, rightStride), 1.35);
+  const bob = 0.5 - Math.cos(legPhase * 2) * 0.5;
+  const weightShift = Math.sin(legPhase + Math.PI * 0.5);
+  const hipSwing = (0.38 + runBlend * 0.2) * compactScale;
+  const kneeBend = (0.24 + runBlend * 0.18) * compactScale;
+  const strideBlend = blend * (0.84 + runBlend * 0.16);
 
   soldier.position.set(
-    rest.group.x + Math.sin(phase * 0.5 + squadIndex) * 0.018 * blend * amp,
-    rest.group.y + bob * 0.012 * blend * amp,
-    rest.group.z + stride * 0.03 * blend * amp
+    rest.group.x + weightShift * 0.014 * strideBlend,
+    rest.group.y + bob * (compact ? 0.006 : 0.011 + runBlend * 0.004) * blend,
+    rest.group.z + weightShift * 0.008 * strideBlend
   );
 
   const torso = soldier.children.find((c) => c.userData.infantryPart === 'torso');
@@ -969,31 +1196,72 @@ function animateSoldierWalk(soldier, phase, blend) {
   const helmet = soldier.children.find((c) => c.userData.infantryPart === 'helmet');
   const legL = soldier.children.find((c) => c.userData.infantryPart === 'legL');
   const legR = soldier.children.find((c) => c.userData.infantryPart === 'legR');
+  const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
 
   applyPartAnim(torso, rest.torso, {
-    position: { x: 0, y: bob * 0.02 * blend * amp, z: 0 },
-    rotation: { x: 0.1 * blend * amp, y: 0, z: stride * 0.04 * blend },
+    position: { x: 0, y: bob * 0.012 * blend, z: 0 },
+    rotation: {
+      x: (-0.025 - runBlend * 0.025) * strideBlend,
+      y: -weightShift * 0.018 * strideBlend,
+      z: -weightShift * (0.035 + runBlend * 0.015) * strideBlend,
+    },
   });
   applyPartAnim(head, rest.head, {
-    position: { x: 0, y: bob * 0.014 * blend * amp, z: 0 },
-    rotation: { x: -0.03 * blend * amp, y: 0, z: 0 },
+    position: { x: 0, y: bob * 0.007 * blend, z: 0 },
+    rotation: {
+      x: -bob * 0.016 * blend,
+      y: weightShift * 0.012 * strideBlend,
+      z: weightShift * 0.018 * strideBlend,
+    },
   });
   applyPartAnim(helmet, rest.helmet, {
-    position: { x: 0, y: bob * 0.014 * blend * amp, z: 0 },
+    position: { x: 0, y: bob * 0.007 * blend, z: 0 },
   });
-  applyPartAnim(legL, rest.legL, {
-    position: { x: 0, y: 0, z: stride * 0.05 * blend * amp },
-    rotation: { x: stride * 0.55 * blend * amp, y: 0, z: 0 },
-  });
-  applyPartAnim(legR, rest.legR, {
-    position: { x: 0, y: 0, z: -stride * 0.05 * blend * amp },
-    rotation: { x: -stride * 0.55 * blend * amp, y: 0, z: 0 },
-  });
+
+  const animateLeg = (leg, legRest, stride, lift) => {
+    if (!leg || !legRest) return;
+    applyPartAnim(leg, legRest, {
+      position: { x: 0, y: 0, z: stride * 0.012 * strideBlend },
+      rotation: { x: stride * hipSwing * strideBlend, y: 0, z: 0 },
+    });
+
+    const knee = leg.userData.kneePivot;
+    const kneeRest = leg.userData.walkJoints?.find((joint) => joint.object === knee);
+    if (knee && kneeRest) {
+      knee.position.copy(kneeRest.position);
+      knee.rotation.copy(kneeRest.rotation);
+      knee.rotation.x += lift * kneeBend * blend;
+    }
+
+    const boot = leg.userData.walkJoints?.find((joint) => joint.object !== knee)?.object;
+    const bootRest = leg.userData.walkJoints?.find((joint) => joint.object === boot);
+    if (boot && bootRest) {
+      boot.position.copy(bootRest.position);
+      boot.rotation.copy(bootRest.rotation);
+      boot.rotation.x -= lift * 0.14 * blend;
+    }
+  };
+
+  animateLeg(legL, rest.legL, leftStride, leftLift);
+  animateLeg(legR, rest.legR, rightStride, rightLift);
+
+  // Gunners have no weapon-aim state; keep their carried rifles and special
+  // launchers moving with the torso as well. Riflemen are finished in
+  // updateInfantryWeaponPose after movement so aiming remains authoritative.
+  if (weapon && rest.weapon && !soldier.userData.weaponAim) {
+    applyPartAnim(weapon, rest.weapon, {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+    });
+    applyMarchingWeaponSway(soldier, phase, blend, runBlend);
+  }
 }
 
 export function resetInfantryWalkPose(unit) {
   if (!unit?.mesh) return;
   unit._walkBlend = 0;
+  unit._walkMotionRatio = 0;
+  unit._walkRunBlend = 0;
   unit.mesh.traverse((child) => {
     if (child.name !== 'squadMember') return;
     restoreWalkRest(child);
@@ -1012,10 +1280,10 @@ export function updateInfantryWalkAnimation(unit, dt) {
   // Dug into a trench / actively digging — hold crouch pose, no march cycle
   if (unit._trenchId || unit._diggingTrench) {
     unit._walkBlend = 0;
+    unit._walkMotionRatio = 0;
+    unit._walkRunBlend = 0;
     unit.mesh.traverse((child) => {
       if (child.name !== 'squadMember' || !child.visible) return;
-      if (!child.userData.walkPose) child.userData.walkPose = {};
-      child.userData.walkPose.crouching = true;
       restoreWalkRest(child);
       // Compact crouch: sink torso
       const torso = child.children.find((c) => c.userData.infantryPart === 'torso');
@@ -1029,10 +1297,14 @@ export function updateInfantryWalkAnimation(unit, dt) {
       if (legL && rest?.legL) {
         legL.rotation.x = rest.legL.rotation.x + 0.85;
         legL.position.y = rest.legL.position.y + 0.06;
+        const knee = legL.userData.kneePivot;
+        if (knee) knee.rotation.x = (knee.userData.restRotationX ?? knee.rotation.x) + 0.28;
       }
       if (legR && rest?.legR) {
         legR.rotation.x = rest.legR.rotation.x + 0.85;
         legR.position.y = rest.legR.position.y + 0.06;
+        const knee = legR.userData.kneePivot;
+        if (knee) knee.rotation.x = (knee.userData.restRotationX ?? knee.rotation.x) + 0.28;
       }
     });
     return;
@@ -1053,10 +1325,32 @@ export function updateInfantryWalkAnimation(unit, dt) {
     mortarPivot.userData.deployed = !active;
   }
   let blend = unit._walkBlend ?? 0;
+  const unitSpeed = Math.max(0.1, Number(unit.def?.speed) || 0);
+  const measuredSpeed = active && dt > 0 ? moved / dt : 0;
+  const motionRatioTarget = active
+    ? THREE.MathUtils.clamp(measuredSpeed / unitSpeed, 0, 1.2)
+    : 0;
+  const motionAlpha = 1 - Math.exp(-Math.max(0, dt) * 10);
+  unit._walkMotionRatio = THREE.MathUtils.lerp(
+    unit._walkMotionRatio ?? 0,
+    motionRatioTarget,
+    motionAlpha
+  );
+  const speedRunTarget = THREE.MathUtils.clamp(
+    (unitSpeed - HUMAN_WALK_SPEED) / Math.max(0.1, HUMAN_RUN_SPEED - HUMAN_WALK_SPEED),
+    0,
+    1
+  );
+  unit._walkRunBlend = THREE.MathUtils.lerp(
+    unit._walkRunBlend ?? 0,
+    speedRunTarget * THREE.MathUtils.clamp(0.72 + (unit._walkMotionRatio ?? 0) * 0.28, 0, 1),
+    motionAlpha
+  );
   if (active) {
     blend = Math.min(1, blend + dt * 7);
-    const cadence = Math.max(4.5, unit.def.speed * 1.35);
-    unit._walkPhase = (unit._walkPhase ?? 0) + dt * cadence;
+    const cadence = Math.max(4.5, unitSpeed * (1.24 + (unit._walkRunBlend ?? 0) * 0.16));
+    const cadenceScale = 0.72 + THREE.MathUtils.clamp(unit._walkMotionRatio ?? 0, 0, 1) * 0.28;
+    unit._walkPhase = (unit._walkPhase ?? 0) + dt * cadence * cadenceScale;
   } else {
     blend = Math.max(0, blend - dt * 5);
     if (!wantsMove) unit._walkPhase = unit._walkPhase ?? 0;
@@ -1069,6 +1363,11 @@ export function updateInfantryWalkAnimation(unit, dt) {
       restoreWalkRest(child);
       return;
     }
-    animateSoldierWalk(child, unit._walkPhase ?? 0, blend);
+    animateSoldierWalk(
+      child,
+      unit._walkPhase ?? 0,
+      blend,
+      unit._walkRunBlend ?? 0
+    );
   });
 }

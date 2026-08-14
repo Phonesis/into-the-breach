@@ -291,6 +291,36 @@ export function startSurrender(unit) {
   attachSurrenderMarker(unit);
 }
 
+function startTankSurrender(unit, spawnSurrenderingVehicleCrew) {
+  const crew = spawnSurrenderingVehicleCrew?.(unit);
+  if (!crew) return false;
+  clearRetreat(unit);
+  unit.clearAttackOrder();
+  unit.target = null;
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._crewless = true;
+  crew._surrenderAfterBailout = true;
+  return true;
+}
+
+/**
+ * Convert a mobility-damaged tank's queued retreat into a crew bailout.
+ * Explicit mode restrictions still apply through canUnitSurrender().
+ */
+export function surrenderImmobileTank(unit, options = {}) {
+  if (
+    !unit?._mobilityDamaged ||
+    !isTankType(unit.def?.type) ||
+    !canUnitSurrender(unit, options)
+  ) {
+    return false;
+  }
+  return startTankSurrender(unit, options.spawnSurrenderingVehicleCrew);
+}
+
 export function clearSurrender(unit) {
   unit.surrendered = false;
   removeSurrenderMarker(unit);
@@ -329,18 +359,7 @@ export function maybeTriggerSurrender(unit, units, options = {}, attacker = null
 
   if (Math.random() < chance) {
     if (isTankType(unit.def.type)) {
-      const crew = options.spawnSurrenderingVehicleCrew?.(unit);
-      if (!crew) return false;
-      clearRetreat(unit);
-      unit.clearAttackOrder();
-      unit.target = null;
-      unit.moveTarget = null;
-      unit._movePath = null;
-      unit._userMoveOrder = false;
-      unit._reverseMoveOrder = false;
-      unit._crewless = true;
-      crew._surrenderAfterBailout = true;
-      return true;
+      return startTankSurrender(unit, options.spawnSurrenderingVehicleCrew);
     }
     startSurrender(unit);
     return true;
@@ -433,11 +452,12 @@ export function finalizeCapture(game, unit) {
   game._rebuildUnitCaches?.();
 }
 
-export function updateSurrenderState(game, units, dt) {
+export function updateSurrenderState(game, units, dt, extraOptions = {}) {
   const options = {
     clearance: game.clearance,
     tutorial: game.tutorial,
     towerDefense: game.towerDefense,
+    ...extraOptions,
   };
 
   const toFinalize = [];
@@ -455,6 +475,14 @@ export function updateSurrenderState(game, units, dt) {
         unit._liberatedBannerUntil = 0;
       } else if (unit.statusBanner) {
         syncStatusBannerTransform(unit);
+      }
+    }
+
+    if (unit._surrenderOnRetreat) {
+      if (!unit._mobilityDamaged || !canUnitSurrender(unit, options)) {
+        unit._surrenderOnRetreat = false;
+      } else if (surrenderImmobileTank(unit, options)) {
+        continue;
       }
     }
 

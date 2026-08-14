@@ -555,7 +555,11 @@ export class BaseBuildingManager {
     }
 
     if (!isTeamStagingPhase(this.game, 'enemy')) {
-      this._enemyBuildTimer -= dt;
+      const buildTempo = 1 / Math.max(
+        0.75,
+        Math.min(1.5, this.game.difficulty?.aiProdMult ?? 1)
+      );
+      this._enemyBuildTimer -= dt * buildTempo;
       if (this._enemyBuildTimer <= 0) {
         this._enemyBuildTimer = 18 + Math.random() * 14;
         this._tryEnemyBuild();
@@ -563,15 +567,75 @@ export class BaseBuildingManager {
     }
   }
 
+  _getEnemyBuildOrder() {
+    const fallback = [
+      'infantryGarrison',
+      'ordnanceYard',
+      'motorPool',
+      'hospital',
+      'bunker',
+    ];
+    if (this._countType('enemy', 'infantryGarrison') === 0) return fallback;
+
+    const plan = this.game._standardAiPlan;
+    if (!plan || plan.session !== this.game.lastSession) return fallback;
+
+    const { enemy, player } = plan.assessment ?? {};
+    if (!enemy || !player) return fallback;
+    const adaptation = plan.tier?.adaptation ?? 0.9;
+    const anticipation = plan.tier?.anticipation ?? 0.78;
+    const enemyTrackedArmor =
+      (enemy.counts?.tank ?? 0) +
+      (enemy.counts?.tankDestroyer ?? 0) +
+      (enemy.counts?.superHeavyTank ?? 0);
+    const scores = {
+      ordnanceYard:
+        2.8 +
+        player.armorPressure * 1.15 * adaptation +
+        player.infantryPressure * 0.22 * adaptation +
+        (plan.operation === 'defend' || plan.operation === 'contain' ? 1.4 : 0),
+      motorPool:
+        2.7 +
+        (plan.armorMobility ?? 1) * 1.25 +
+        (enemyTrackedArmor === 0 ? 1.2 * anticipation : 0) +
+        (plan.operation === 'counterattack' ? 1.8 * adaptation : 0) +
+        player.supportPressure * 0.32 * adaptation,
+      hospital:
+        0.9 +
+        enemy.wounded * 0.8 * adaptation +
+        Math.max(0, 0.78 - enemy.hpRatio) * 6 * adaptation -
+        this._countType('enemy', 'hospital') * 1.4,
+      bunker:
+        0.45 +
+        (plan.operation === 'defend' || plan.operation === 'contain' ? 1.8 : 0) +
+        Math.max(0, (plan.localPressure ?? 0) - 0.8) * 1.3 -
+        this._countType('enemy', 'bunker') * 1.25,
+    };
+
+    return [
+      'infantryGarrison',
+      ...Object.entries(scores)
+        .sort((a, b) => b[1] - a[1])
+        .map(([typeId]) => typeId),
+    ];
+  }
+
   _tryEnemyBuild() {
     if (this.game.tutorial || this.game.clearance) return;
     const team = 'enemy';
     const res = this.game.resources?.enemy ?? 0;
-    const order = ['infantryGarrison', 'ordnanceYard', 'motorPool', 'hospital', 'bunker', 'bunker'];
+    const order = this._getEnemyBuildOrder();
+    let firstNeeded = true;
     for (const typeId of order) {
       const def = BASE_BUILDING_TYPES[typeId];
       if (this._countType(team, typeId) >= (def.maxPerTeam ?? 99)) continue;
-      if (res < def.cost) continue;
+      // Save for the planner's highest-priority missing structure instead of
+      // repeatedly spending the reserve on a cheaper low-priority bunker.
+      if (res < def.cost) {
+        if (firstNeeded) return;
+        continue;
+      }
+      firstNeeded = false;
       const pos = this._randomBuildPos(team, typeId);
       if (!pos) continue;
       if (this.getPlacementRejectReason(pos.x, pos.z, team, typeId)) continue;

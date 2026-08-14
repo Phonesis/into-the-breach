@@ -1,0 +1,123 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: Japan
+          - generic: Normandy · Medium
+          - generic: Training — no enemy AI
+          - button "Hide capture point circles" [pressed] [ref=e379] [cursor=pointer]:
+            - generic [ref=e381]: Capture circles
+        - generic:
+          - button "Save" [ref=e382] [cursor=pointer]
+          - button "Leave Training" [ref=e383] [cursor=pointer]
+          - generic:
+            - generic: Supplies (+1/3 pts)
+            - text: "217"
+          - generic: "Your forces: 12 · Practice mode"
+      - generic:
+        - generic "Saint-Lô Crossroads — Held (yours)":
+          - generic: Saint-Lô Crossroads ★
+          - generic: 100%
+        - generic "Carentan Road — Neutral":
+          - generic: Carentan Road
+          - generic: 0%
+        - generic "Vire Bridge — Neutral":
+          - generic: Vire Bridge
+          - generic: 0%
+      - generic "Tactical map" [ref=e384]:
+        - generic [ref=e385]:
+          - generic [ref=e386]: Tactical Map
+          - button "Hide" [pressed] [ref=e387] [cursor=pointer]
+        - generic "Battlefield overview" [ref=e388]
+        - paragraph [ref=e389]: Green — friendly · Red — enemy · Traces show live fire · Click to pan
+      - complementary "Your forces" [ref=e390]:
+        - heading "Forces" [level=3] [ref=e391]
+        - button "Field icons" [pressed] [ref=e392] [cursor=pointer]:
+          - img [ref=e394]
+          - generic [ref=e399]: Field icons
+        - button "Unit status" [pressed] [ref=e400] [cursor=pointer]:
+          - generic [ref=e401]: ✦
+          - generic [ref=e402]: Unit status
+        - generic [ref=e403]:
+          - button "Type 1 47 mm AT Gun" [ref=e405] [cursor=pointer]:
+            - img [ref=e407]
+            - generic [ref=e418]:
+              - generic [ref=e419]: AT
+              - generic [ref=e423]: 100%
+          - button "Type 92 Chiyoda" [ref=e425] [cursor=pointer]:
+            - img [ref=e427]
+            - generic [ref=e437]:
+              - generic [ref=e438]: AC
+              - generic [ref=e442]: 100%
+          - button "Type 91 Howitzer" [ref=e444] [cursor=pointer]:
+            - img [ref=e446]
+            - generic [ref=e456]:
+              - generic [ref=e457]: Arty
+              - generic [ref=e461]: 100%
+          - button "Shikikan" [ref=e463] [cursor=pointer]:
+            - img [ref=e465]
+            - generic [ref=e469]:
+              - generic [ref=e470]: CMD
+              - generic [ref=e474]: 100%
+          - button "Kohei Squad" [ref=e476] [cursor=pointer]:
+            - img [ref=e478]
+            - generic [ref=e485]:
+              - generic [ref=e486]: Eng
+              - generic [ref=e490]: 100%
+          - generic [ref=e491]:
+            - button "Rifle Squad, unit 1 of 3" [ref=e492] [cursor=pointer]:
+              - img [ref=e494]
+              - generic [ref=e499]:
+                - generic [ref=e500]: Inf×3
+                - generic [ref=e504]: 100%
+            - generic "Other Inf units":
+              - button "Rifle Squad, unit 2 of 3" [ref=e505] [cursor=pointer]:
+                - img [ref=e507]
+                - generic [ref=e512]:
+                  - generic [ref=e513]: Inf#2
+                  - generic [ref=e517]: 100%
+              - button "Rifle Squad, unit 3 of 3" [ref=e518] [cursor=pointer]:
+                - img [ref=e520]
+                - generic [ref=e525]:
+                  - generic [ref=e526]: Inf#3
+                  - generic [ref=e530]: 100%
+          - button "Type 92 HMG Team" [ref=e532] [cursor=pointer]:
+            - img [ref=e534]
+            - generic [ref=e542]:
+              - generic [ref=e543]: MG
+              - generic [ref=e547]: 100%
+          - button "Type 97 Mortar Team" [ref=e549] [cursor=pointer]:
+            - img [ref=e551]
+            - generic [ref=e557]:
+              - generic [ref=e558]: Mrt
+              - generic [ref=e562]: 100%
+          - button "Musenhei" [ref=e564] [cursor=pointer]:
+            - img [ref=e566]
+            - generic [ref=e572]:
+              - generic [ref=e573]: Radio
+              - generic [ref=e577]: 100%
+          - button "Sogekihei" [ref=e579] [cursor=pointer]:
+            - img [ref=e581]
+            - generic [ref=e588]:
+              - generic [ref=e589]: Snp
+              - generic [ref=e593]: 100%
+          - button "Shinhoto Chi-Ha" [ref=e595] [cursor=pointer]:
+            - img [ref=e597]
+            - generic [ref=e606]:
+              - generic [ref=e607]: Tk
+              - generic [ref=e611]: 100%
+      - generic:
+        - generic [ref=e613]:
+          - heading "No selection" [level=3] [ref=e614]
+          - paragraph [ref=e615]: Click a unit in Forces or on the battlefield to select.
+        - text: ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙
+        - generic:
+          - button "Fire Support" [ref=e618] [cursor=pointer]:
+            - generic [ref=e619]: Fire Support
+            - generic [ref=e620]: ▼
+          - button "General Orders" [ref=e623] [cursor=pointer]:
+            - generic [ref=e624]: General Orders
+            - generic [ref=e625]: ▼
+        - paragraph: "Tutorial: practice vs static HQ — train all unit types, capture neutral points"
+        - button "Field Manual" [ref=e626] [cursor=pointer]

@@ -494,6 +494,7 @@ function spawnReinforcementPackage(game, team, types, wave) {
         z: position.z + facingZ * (6 + (wave % 2) * 3),
         radius: 15,
       };
+      if (team === 'enemy') unit._clearanceDefenderCoverPending = true;
     } else if (team === 'enemy') {
       // AI assault reinforcements inherit the current battle plan.
       unit.clearanceAttackRole = roleForClearanceAttackerType(spawnTypes[i]);
@@ -785,6 +786,7 @@ export function spawnClearanceDefenders({
         z: position.z,
         radius: anchor.holdRadius ?? 12,
       };
+      if (team === 'enemy') unit._clearanceDefenderCoverPending = true;
       unit.position.y = sampleTerrainHeight(position.x, position.z, mapDef);
       if (berlinAtAmbush) {
         unit._clearanceDeploymentYaw = berlinAtAmbush.yaw;

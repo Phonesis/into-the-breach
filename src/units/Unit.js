@@ -74,6 +74,14 @@ export class Unit {
     this.grenadeCooldown = 0;
     this.smokeShellCooldown = 0;
     this.dead = false;
+    this._blastProfile = null;
+    this._deathBlastOrigin = null;
+    this._deathBlastRadius = null;
+    this._deathBlastCaliber = null;
+    this._deathBlastLaunchRadius = null;
+    this._deathBlastKnockdownRadius = null;
+    this._deathBlastImpulseScale = null;
+    this._deathBlastWeaponType = null;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
     this.wreckFire = null;
@@ -99,6 +107,8 @@ export class Unit {
      * enemy artillery ignores this and always auto-fires.
      */
     this.autoFire = false;
+    /** null follows the global Seek Cover setting; booleans are unit overrides. */
+    this.seekCoverOverride = null;
     this._stancePursuitOrder = false;
     this._stanceBoundAttackOrder = false;
     this._mgVolley = 0;
@@ -121,9 +131,11 @@ export class Unit {
     this._mobilityDamaged = false;
     this._mobilityDamageKind = null;
     this._mobilityRepairProgress = 0;
+    this._surrenderOnRetreat = false;
     // Wheeled vehicles build and shed speed instead of reaching full speed
     // instantly. This is transient movement state, not saved battle state.
     this._driveSpeed = 0;
+    this._trackCrushEscapeUntil = 0;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
     this.mesh.position.set(position.x, 0, position.z);
@@ -217,6 +229,13 @@ export class Unit {
     const next = !!on;
     const changed = this.autoFire !== next;
     this.autoFire = next;
+    return changed;
+  }
+
+  setSeekCoverOverride(value) {
+    const next = value === true || value === false ? value : null;
+    const changed = this.seekCoverOverride !== next;
+    this.seekCoverOverride = next;
     return changed;
   }
 
@@ -442,7 +461,8 @@ export class Unit {
   /**
    * @param {number} amount
    * @param {object} [opts]
-   * @param {boolean} [opts.explosive] — shell / blast kill (enables occasional gibs)
+   * @param {boolean} [opts.explosive] — shell / blast damage
+   * @param {{x:number,z:number}} [opts.blastOrigin] — detonation point for corpse throws
    */
   takeDamage(amount, opts = {}) {
     if (this.dead || this.surrendered || this._captureExit) return;
@@ -451,7 +471,38 @@ export class Unit {
     // off-map support — visible to morale and AI incoming-fire reactions.
     markUnderFire(this);
     this.hp -= amount;
-    updateSquadCasualtyVisual(this);
+    const crushingHit = opts.cause === 'crush' || opts.crushed;
+    const explosiveHit = !crushingHit && (opts.explosive || opts.cause === 'explosion');
+    const blastPoint = opts.blastOrigin ?? opts.impact ?? opts.impactFrom ?? null;
+    const blastOrigin =
+      blastPoint && Number.isFinite(blastPoint.x) && Number.isFinite(blastPoint.z)
+        ? { x: blastPoint.x, z: blastPoint.z }
+        : null;
+    const blastProfile = explosiveHit
+      ? {
+          blastOrigin,
+          blastRadius: opts.blastRadius ?? null,
+          blastCaliber: opts.blastCaliber ?? null,
+          blastLaunchRadius: opts.blastLaunchRadius ?? null,
+          blastKnockdownRadius: opts.blastKnockdownRadius ?? null,
+          blastImpulseScale: opts.blastImpulseScale ?? null,
+          blastWeaponType: opts.blastWeaponType ?? null,
+        }
+      : null;
+
+    // Keep the most recent HE profile on living squads so a save/load or a
+    // second casualty update can recreate the same physical response.
+    this._blastProfile = blastProfile;
+
+    // A lethal hit is rendered in one pass below, after its cause is known.
+    // Nonlethal explosive damage still removes individual squad members here,
+    // so those casualties need the same launch as a whole-squad blast death.
+    if (this.hp > 0) {
+      updateSquadCasualtyVisual(
+        this,
+        crushingHit ? { crushed: true } : blastProfile ?? {}
+      );
+    }
 
     // Foot troops yell when hit (not on the killing blow — death lines handle that)
     if (this.hp > 0 && isInfantryUnitType(this.def?.type)) {
@@ -482,17 +533,34 @@ export class Unit {
       this._recoverableWreck = knockout.recoverable && !this._crewBailedOut;
       this._preWreckYaw = this.mesh.rotation?.y ?? 0;
       this.dead = true;
-      if (opts.cause === 'crush' || opts.crushed) {
+      if (crushingHit) {
         this._deathCause = 'crush';
         this._deathBlastOrigin = null;
-      } else if (opts.explosive || opts.cause === 'explosion') {
+        this._deathBlastRadius = null;
+        this._deathBlastCaliber = null;
+        this._deathBlastLaunchRadius = null;
+        this._deathBlastKnockdownRadius = null;
+        this._deathBlastImpulseScale = null;
+        this._deathBlastWeaponType = null;
+      } else if (explosiveHit) {
         this._deathCause = 'explosion';
-        // Blast epicentre (preferred) or attacker muzzle — used to fling corpses outward.
-        const origin = opts.blastOrigin ?? opts.impactFrom ?? null;
-        this._deathBlastOrigin =
-          origin && Number.isFinite(origin.x) && Number.isFinite(origin.z)
-            ? { x: origin.x, z: origin.z }
-            : null;
+        // Preserve the detonation profile for per-member distance classification.
+        this._deathBlastOrigin = blastOrigin;
+        this._deathBlastRadius = opts.blastRadius ?? null;
+        this._deathBlastCaliber = opts.blastCaliber ?? null;
+        this._deathBlastLaunchRadius = opts.blastLaunchRadius ?? null;
+        this._deathBlastKnockdownRadius = opts.blastKnockdownRadius ?? null;
+        this._deathBlastImpulseScale = opts.blastImpulseScale ?? null;
+        this._deathBlastWeaponType = opts.blastWeaponType ?? null;
+      } else {
+        this._deathCause = null;
+        this._deathBlastOrigin = null;
+        this._deathBlastRadius = null;
+        this._deathBlastCaliber = null;
+        this._deathBlastLaunchRadius = null;
+        this._deathBlastKnockdownRadius = null;
+        this._deathBlastImpulseScale = null;
+        this._deathBlastWeaponType = null;
       }
       clearRetreat(this);
       clearSurrender(this);
@@ -566,13 +634,23 @@ export class Unit {
     this._mobilityDamaged = false;
     this._mobilityDamageKind = null;
     this._mobilityRepairProgress = 0;
+    this._surrenderOnRetreat = false;
     this._deathCause = null;
+    this._blastProfile = null;
+    this._deathBlastOrigin = null;
+    this._deathBlastRadius = null;
+    this._deathBlastCaliber = null;
+    this._deathBlastLaunchRadius = null;
+    this._deathBlastKnockdownRadius = null;
+    this._deathBlastImpulseScale = null;
+    this._deathBlastWeaponType = null;
     this.wreckTimeLeft = 0;
     this.corpseTimeLeft = 0;
     this._wreckImpactCount = 0;
     this._wreckRunOverCount = 0;
     this._wreckRunOverDamage = 0;
     this._wreckReducedToRubble = false;
+    this._trackCrushEscapeUntil = 0;
     this._wreckCrushed = false;
     this._wreckCrushFxDone = false;
     this._driveSpeed = 0;

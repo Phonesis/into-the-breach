@@ -259,6 +259,21 @@ export function captureBattleSave(game, { id = null } = {}) {
       maxHp: u.maxHp,
       dead: !!u.dead,
       deathCause: u._deathCause ?? null,
+      deathBlastOrigin: u._deathBlastOrigin ? { ...u._deathBlastOrigin } : null,
+      deathBlastRadius: u._deathBlastRadius ?? null,
+      deathBlastCaliber: u._deathBlastCaliber ?? null,
+      deathBlastLaunchRadius: u._deathBlastLaunchRadius ?? null,
+      deathBlastKnockdownRadius: u._deathBlastKnockdownRadius ?? null,
+      deathBlastImpulseScale: u._deathBlastImpulseScale ?? null,
+      deathBlastWeaponType: u._deathBlastWeaponType ?? null,
+      blastProfile: u._blastProfile
+        ? {
+            ...u._blastProfile,
+            blastOrigin: u._blastProfile.blastOrigin
+              ? { ...u._blastProfile.blastOrigin }
+              : null,
+          }
+        : null,
       deathAt: u._deathAt ?? null,
       commanderRearAnchor: u._commanderRearAnchor
         ? { ...u._commanderRearAnchor }
@@ -277,6 +292,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       mobilityDamaged: !!u._mobilityDamaged,
       mobilityDamageKind: u._mobilityDamageKind ?? null,
       mobilityRepairProgress: u._mobilityRepairProgress ?? 0,
+      surrenderOnRetreat: !!u._surrenderOnRetreat,
       crewBailedOut: !!u._crewBailedOut,
       crewless: !!u._crewless,
       replacementCrewUnitId: u._replacementCrewUnitId ?? null,
@@ -315,6 +331,10 @@ export function captureBattleSave(game, { id = null } = {}) {
       _chasingAttack: !!u._chasingAttack,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
       autoFire: !!u.autoFire,
+      seekCoverOverride:
+        u.seekCoverOverride === true || u.seekCoverOverride === false
+          ? u.seekCoverOverride
+          : null,
       stancePursuitOrder: !!u._stancePursuitOrder,
       stanceBoundAttackOrder: !!u._stanceBoundAttackOrder,
       attackOrderReachedRange: !!u._attackOrderReachedRange,
@@ -397,6 +417,15 @@ export function captureBattleSave(game, { id = null } = {}) {
       cooldowns: { ...game.fireSupport.cooldowns },
       airborneUsesLeft: game.fireSupport.airborneUsesLeft,
       airborneCloudCoverRemaining: game.fireSupport.airborneCloudCoverRemaining,
+      pendingStrike: game.fireSupport.pendingStrike
+        ? {
+            type: game.fireSupport.pendingStrike.type,
+            x: game.fireSupport.pendingStrike.x,
+            z: game.fireSupport.pendingStrike.z,
+            covered: !!game.fireSupport.pendingStrike.covered,
+            radioId: game.fireSupport.pendingStrike.radioId ?? null,
+          }
+        : null,
     },
     enemyFireSupport: {
       cooldowns: { ...game.enemyFireSupport?.cooldowns },
@@ -467,6 +496,9 @@ export function captureBattleSave(game, { id = null } = {}) {
                   : null,
                 lastCenter: game.lastStand.enemyOperational.lastCenter
                   ? { ...game.lastStand.enemyOperational.lastCenter }
+                  : null,
+                playerLastCenter: game.lastStand.enemyOperational.playerLastCenter
+                  ? { ...game.lastStand.enemyOperational.playerLastCenter }
                   : null,
               }
             : null,
@@ -582,19 +614,23 @@ export function captureBattleSave(game, { id = null } = {}) {
             diggerId: s.diggerId,
             progress: s.progress,
             rotationY: s.rotationY,
+            generalOrderTeam: s._generalOrderTeam ?? null,
             aiDefensiveTrench: !!s._aiDefensiveTrench,
             aiTrenchMode: s._aiTrenchMode ?? null,
           })),
           trenches: game.infantryTrenches.trenches
-            .filter((t) => !t.destroyed)
             .map((t) => ({
               id: t.id,
               team: t.team,
               x: t.x,
               z: t.z,
               y: t.y,
-              garrison: [...(t.garrison ?? [])],
-              rotationY: t.mesh?.rotation?.y ?? 0,
+              destroyed: !!t.destroyed,
+              garrison: t.destroyed ? [] : [...(t.garrison ?? [])],
+              rotationY: t.rotationY ?? t.mesh?.userData?.trenchYaw ?? 0,
+              overrunDamage: t._overrunDamage
+                ? { ...t._overrunDamage }
+                : null,
               aiDefensiveTrench: !!t._aiDefensiveTrench,
               aiTrenchMode: t._aiTrenchMode ?? null,
             })),
@@ -1019,6 +1055,7 @@ function restoreTrenchState(game, data) {
         siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
       _aiDefensiveTrench: !!siteData.aiDefensiveTrench,
       _aiTrenchMode: siteData.aiTrenchMode ?? null,
+      _generalOrderTeam: siteData.generalOrderTeam ?? null,
       marker: null,
     };
     manager.sites.push(site);
@@ -1050,20 +1087,28 @@ function restoreTrenchState(game, data) {
       TRENCH_PIT_DEPTH
     );
     game.scene.add(mesh);
-    manager.trenches.push({
+    const trench = {
       id: trenchData.id,
       team: trenchData.team,
       x: trenchData.x,
       z: trenchData.z,
       y: mesh.position.y,
       destroyed: false,
-      garrison: [...(trenchData.garrison ?? [])],
+      garrison: trenchData.destroyed ? [] : [...(trenchData.garrison ?? [])],
       mesh,
       rotationY,
       _aiDefensiveTrench: !!trenchData.aiDefensiveTrench,
       _aiTrenchMode: trenchData.aiTrenchMode ?? null,
-    });
-    game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
+      _overrunDamage: trenchData.overrunDamage
+        ? { ...trenchData.overrunDamage }
+        : null,
+    };
+    manager.trenches.push(trench);
+    if (trenchData.destroyed) {
+      manager.restoreDestroyedTrenchVisual?.(trench, trench._overrunDamage ?? {});
+    } else {
+      game.coverSystem?.addZone(trenchData.x, trenchData.z, 'trench', 3.6);
+    }
   }
 }
 
@@ -1238,6 +1283,9 @@ export function applyBattleSave(game, snapshot) {
             lastCenter: snapshot.lastStand.enemyOperational.lastCenter
               ? { ...snapshot.lastStand.enemyOperational.lastCenter }
               : null,
+            playerLastCenter: snapshot.lastStand.enemyOperational.playerLastCenter
+              ? { ...snapshot.lastStand.enemyOperational.playerLastCenter }
+              : null,
           }
         : null,
     };
@@ -1335,7 +1383,9 @@ export function applyBattleSave(game, snapshot) {
     game.fireSupport.airborneUsesLeft = null;
   }
   game.fireSupport.pending = null;
+  game.fireSupport.clearPendingStrike?.();
   game.fireSupport.clearPreview();
+  const pendingStrikeToRestore = snapshot.fireSupport?.pendingStrike ?? null;
   if (game.enemyFireSupport) {
     game.enemyFireSupport.cooldowns = {
       ...Object.fromEntries(
@@ -1407,6 +1457,23 @@ export function applyBattleSave(game, snapshot) {
     unit.maxHp = uData.maxHp;
     unit.dead = !!uData.dead;
     unit._deathCause = uData.deathCause ?? null;
+    unit._deathBlastOrigin = uData.deathBlastOrigin
+      ? { ...uData.deathBlastOrigin }
+      : null;
+    unit._deathBlastRadius = uData.deathBlastRadius ?? null;
+    unit._deathBlastCaliber = uData.deathBlastCaliber ?? null;
+    unit._deathBlastLaunchRadius = uData.deathBlastLaunchRadius ?? null;
+    unit._deathBlastKnockdownRadius = uData.deathBlastKnockdownRadius ?? null;
+    unit._deathBlastImpulseScale = uData.deathBlastImpulseScale ?? null;
+    unit._deathBlastWeaponType = uData.deathBlastWeaponType ?? null;
+    unit._blastProfile = uData.blastProfile
+      ? {
+          ...uData.blastProfile,
+          blastOrigin: uData.blastProfile.blastOrigin
+            ? { ...uData.blastProfile.blastOrigin }
+            : null,
+        }
+      : null;
     unit._deathAt = uData.deathAt ?? null;
     unit._commanderRearAnchor = uData.commanderRearAnchor
       ? { ...uData.commanderRearAnchor }
@@ -1426,6 +1493,7 @@ export function applyBattleSave(game, snapshot) {
     unit._mobilityDamaged = !!uData.mobilityDamaged;
     unit._mobilityDamageKind = uData.mobilityDamageKind ?? null;
     unit._mobilityRepairProgress = uData.mobilityRepairProgress ?? 0;
+    unit._surrenderOnRetreat = !!uData.surrenderOnRetreat;
     unit._crewBailedOut = !!uData.crewBailedOut;
     unit._crewless = !!uData.crewless;
     unit._replacementCrewUnitId = uData.replacementCrewUnitId ?? null;
@@ -1467,6 +1535,10 @@ export function applyBattleSave(game, snapshot) {
       : unit.team === 'player'
         ? !!(game.artilleryAutoFire ?? true)
         : true;
+    unit.seekCoverOverride =
+      uData.seekCoverOverride === true || uData.seekCoverOverride === false
+        ? uData.seekCoverOverride
+        : null;
     unit._stancePursuitOrder = !!uData.stancePursuitOrder;
     unit._stanceBoundAttackOrder = !!uData.stanceBoundAttackOrder;
     unit.defensiveHold = uData.defensiveHold ? { ...uData.defensiveHold } : null;
@@ -1487,14 +1559,14 @@ export function applyBattleSave(game, snapshot) {
       unit._preWreckYaw = uData.preWreckYaw ?? uData.yaw ?? 0;
       // Rebuild the static death pose without replaying the kill explosion.
       unit._vehicleKillFxDone = true;
-      applyUnitDeathVisual(unit);
+      applyUnitDeathVisual(unit, { staticRestore: true });
       if (unit._wreckCrushed) applyVehicleWreckCrushVisual(unit);
       // applyUnitDeathVisual supplies defaults; retain the saved lifetime for
       // modes which age battlefield debris normally.
       unit.corpseTimeLeft = uData.corpseTimeLeft ?? unit.corpseTimeLeft;
       unit.wreckTimeLeft = uData.wreckTimeLeft ?? unit.wreckTimeLeft;
     } else {
-      updateSquadCasualtyVisual(unit);
+      updateSquadCasualtyVisual(unit, unit._blastProfile ?? {});
     }
     game.units.push(unit);
     unitById.set(unit.id, unit);
@@ -1579,6 +1651,22 @@ export function applyBattleSave(game, snapshot) {
 
   game.coverSystem?.updateUnits?.(game.units);
   game._rebuildUnitCaches();
+  if (
+    pendingStrikeToRestore?.type &&
+    Number.isFinite(pendingStrikeToRestore.x) &&
+    Number.isFinite(pendingStrikeToRestore.z) &&
+    game.fireSupport.isReady(pendingStrikeToRestore.type)
+  ) {
+    game.fireSupport.queuePendingStrike(
+      pendingStrikeToRestore.type,
+      pendingStrikeToRestore.x,
+      pendingStrikeToRestore.z,
+      {
+        covered: !!pendingStrikeToRestore.covered,
+        radioId: pendingStrikeToRestore.radioId ?? null,
+      }
+    );
+  }
   syncRankMarkers(game.units);
   for (const u of game._playerAlive) {
     syncUnitFieldIcon(u, game.showUnitFieldIcons);

@@ -1,0 +1,14 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - generic [ref=e7]: World War II · Real-Time Tactics
+    - heading "Into the Breach" [level=1] [ref=e8]:
+      - generic [ref=e9]: Into the
+      - generic [ref=e10]: Breach
+    - paragraph [ref=e11]: Take command of a historically grounded combined-arms force. Seize vital ground, outmanoeuvre the enemy, and break their ability to fight.
+  - generic [ref=e12]:
+    - button "New Operation" [ref=e13] [cursor=pointer]
+    - button "Continue Saved Battle" [ref=e14] [cursor=pointer]
+    - button "Settings" [ref=e15] [cursor=pointer]
+    - button "Open Field Manual" [ref=e16] [cursor=pointer]
+    - button "Credits & Information" [ref=e17] [cursor=pointer]
+  - paragraph [ref=e18]: Plan the operation. Choose your command. Fight the battle.

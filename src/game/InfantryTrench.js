@@ -28,6 +28,18 @@ export const TRENCH_COVER_MULT = 0.3;
 export const TRENCH_CAPACITY = 4;
 export const TRENCH_ENTER_RANGE = 3.2;
 
+const TRENCH_COLLAPSE_DURATION = 0.9;
+const TRENCH_COLLAPSE_FINAL_SCALE = 0.68;
+const TRENCH_COLLAPSE_FINAL_Y_OFFSET = -0.045;
+const TRENCH_ESCAPE_IMMUNITY_MS = 1600;
+const TRENCH_ESCAPE_DISTANCE = 5.8;
+
+function trenchOverrunSurvivalChance(crusherType) {
+  if (crusherType === 'superHeavyTank') return 0.34;
+  if (crusherType === 'tankDestroyer') return 0.48;
+  return 0.58;
+}
+
 const DIG_TYPES = new Set([
   'commander',
   'radioOperator',
@@ -246,7 +258,15 @@ export class InfantryTrenchManager {
     const spacing = this._spacingConflict(px, pz);
     if (spacing) return spacing;
 
-    if (!this._nearestDigger(px, pz, team, options.selectedOnly !== false)) {
+    if (
+      !this._nearestDigger(
+        px,
+        pz,
+        team,
+        options.selectedOnly !== false,
+        options.diggerPredicate ?? null
+      )
+    ) {
       return 'Select a free radio operator, infantry, airborne, MG team, or sniper to assign this dig site.';
     }
 
@@ -328,6 +348,7 @@ export class InfantryTrenchManager {
     for (const pos of this._aiPlacementCandidates(x, z)) {
       const reason = this.getPlacementRejectReason(pos.x, pos.z, team, {
         selectedOnly: false,
+        diggerPredicate,
       });
       if (reason) continue;
 
@@ -357,6 +378,83 @@ export class InfantryTrenchManager {
       return true;
     }
     return false;
+  }
+
+  /** Assign one specific unit a nearby trench without entering placement mode. */
+  tryOrderUnitDigIn(unit, enemyFocus = null) {
+    if (!unit || unit.dead) return false;
+    const team = unit.team;
+    const isOrderedUnit = (candidate) => candidate === unit;
+
+    for (const candidate of this._aiPlacementCandidates(unit.position.x, unit.position.z)) {
+      let x = candidate.x;
+      let z = candidate.z;
+      if (isTdHqDefenseStyle(this.game.towerDefense) && team === 'player') {
+        const clamped = clampToPlayerSideOfFrontline(x, z, this.game);
+        x = clamped.x;
+        z = clamped.z;
+      }
+
+      const reason = this.getPlacementRejectReason(x, z, team, {
+        selectedOnly: false,
+        diggerPredicate: isOrderedUnit,
+      });
+      if (reason) continue;
+
+      const rotationY = enemyFocus
+        ? Math.atan2(enemyFocus.x - x, enemyFocus.z - z)
+        : this._facingYaw(team, x, z);
+      const y = this.game.mapDef ? sampleTerrainHeight(x, z, this.game.mapDef) : 0;
+      const site = {
+        id: nextTrenchId++,
+        x,
+        z,
+        y,
+        team,
+        diggerId: unit.id,
+        rotationY,
+        progress: 0,
+        marker: null,
+        _generalOrderTeam: team,
+      };
+      this.sites.push(site);
+      unit._trenchDigSite = site.id;
+      unit.clearAttackOrder?.();
+      unit.moveTo?.(site.x, site.z, this.game.mapDef, true);
+      site.moveOrderIssued = true;
+      this._attachSiteMarker(site);
+      return true;
+    }
+    return false;
+  }
+
+  /** Order every currently free trench-capable unit on a team to dig in. */
+  orderTeamDigIn(team, units, enemyFocus = null) {
+    let assigned = 0;
+    for (const unit of units ?? []) {
+      if (unit?.team !== team || !canDigTrenchType(unit.def?.type)) continue;
+      if (this.tryOrderUnitDigIn(unit, enemyFocus)) assigned++;
+    }
+    if (assigned > 0) {
+      this.game.ui?.updateInfantryTrench?.(this.game);
+    }
+    return assigned;
+  }
+
+  /** Cancel only unfinished trenches created by the active Dig In order. */
+  cancelGeneralOrderDigIn(team) {
+    const cancelledIds = new Set();
+    for (const site of this.sites) {
+      if (site._generalOrderTeam !== team) continue;
+      const digger = this.game.units.find((unit) => unit.id === site.diggerId);
+      if (digger) digger._diggingTrench = false;
+      this._cancelSite(site);
+      cancelledIds.add(site.id);
+    }
+    if (!cancelledIds.size) return 0;
+    this.sites = this.sites.filter((site) => !cancelledIds.has(site.id));
+    this.game.ui?.updateInfantryTrench?.(this.game);
+    return cancelledIds.size;
   }
 
   _attachSiteMarker(site) {
@@ -483,6 +581,8 @@ export class InfantryTrenchManager {
   }
 
   update(dt) {
+    this._updateCollapsingTrenches(dt);
+
     // Dig sites
     if (this.sites.length) {
       const finished = [];
@@ -526,6 +626,219 @@ export class InfantryTrenchManager {
     updateTrenchOccupation(this.game._aliveUnits ?? this.game.units, this);
   }
 
+  _updateCollapsingTrenches(dt) {
+    const delta = Math.max(0, Number(dt) || 0);
+    if (!delta) return;
+
+    for (const trench of this.trenches) {
+      const collapse = trench._collapseAnimation;
+      const mesh = trench.mesh;
+      if (!collapse || !mesh) continue;
+
+      collapse.elapsed = Math.min(collapse.duration, collapse.elapsed + delta);
+      const progress = collapse.duration > 0
+        ? collapse.elapsed / collapse.duration
+        : 1;
+      // A tank's weight drops the earthworks quickly, then lets the loose soil
+      // settle over the remaining fraction of a second instead of snapping to
+      // the final flattened scar.
+      const eased = 1 - Math.pow(1 - progress, 3);
+      mesh.scale.y = THREE.MathUtils.lerp(
+        collapse.startScaleY,
+        collapse.finalScaleY,
+        eased
+      );
+      mesh.position.y = THREE.MathUtils.lerp(
+        collapse.startPositionY,
+        collapse.finalPositionY,
+        eased
+      );
+      mesh.rotation.x = THREE.MathUtils.lerp(
+        collapse.startRotationX,
+        collapse.finalRotationX,
+        eased
+      );
+      mesh.rotation.z = THREE.MathUtils.lerp(
+        collapse.startRotationZ,
+        collapse.finalRotationZ,
+        eased
+      );
+
+      if (progress >= 1) {
+        trench._collapseAnimation = null;
+      }
+    }
+  }
+
+  _addOverrunDamageVisual(trench, options = {}) {
+    const mesh = trench?.mesh;
+    if (!mesh || mesh.userData.trenchOverrunDamage) return;
+    mesh.userData.trenchOverrunDamage = true;
+
+    const damage = new THREE.Group();
+    damage.name = 'trenchOverrunDamage';
+    const dirX = options.directionX ?? 0;
+    const dirZ = options.directionZ ?? 0;
+    const worldYaw = Math.hypot(dirX, dirZ) > 0.01
+      ? Math.atan2(dirX, dirZ)
+      : trench.rotationY ?? mesh.userData.trenchYaw ?? 0;
+    const localYaw = worldYaw - (mesh.userData.trenchYaw ?? trench.rotationY ?? 0);
+    const perpendicularX = Math.cos(localYaw);
+    const perpendicularZ = -Math.sin(localYaw);
+
+    const trackMaterial = new THREE.MeshBasicMaterial({
+      color: 0x241810,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    for (const side of [-1, 1]) {
+      const track = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.42, 4.9),
+        trackMaterial
+      );
+      track.name = 'trenchTrackScar';
+      track.rotation.x = -Math.PI / 2;
+      track.rotation.y = localYaw;
+      track.position.set(
+        perpendicularX * side * 0.68,
+        0.62,
+        perpendicularZ * side * 0.68
+      );
+      track.renderOrder = 2;
+      damage.add(track);
+    }
+
+    const brokenWood = new THREE.MeshStandardMaterial({
+      color: 0x24170f,
+      roughness: 1,
+    });
+    for (let i = 0; i < 5; i++) {
+      const splinter = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5 + (i % 2) * 0.18, 0.055, 0.07),
+        brokenWood
+      );
+      const along = (i - 2) * 0.72;
+      splinter.name = 'trenchBrokenRevetment';
+      splinter.position.set(
+        Math.sin(localYaw) * along + perpendicularX * ((i % 2 ? 1 : -1) * 0.32),
+        0.56 + (i % 3) * 0.025,
+        Math.cos(localYaw) * along + perpendicularZ * ((i % 2 ? 1 : -1) * 0.32)
+      );
+      splinter.rotation.set(
+        (i % 2 ? 1 : -1) * 0.12,
+        localYaw + (i - 2) * 0.21,
+        (i % 3 - 1) * 0.18
+      );
+      splinter.castShadow = true;
+      damage.add(splinter);
+    }
+
+    if (options.bloodied) {
+      const bloodMaterial = new THREE.MeshBasicMaterial({
+        color: 0x4b1010,
+        transparent: true,
+        opacity: 0.52,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      for (let i = 0; i < 2; i++) {
+        const stain = new THREE.Mesh(
+          new THREE.CircleGeometry(0.28 + i * 0.09, 10),
+          bloodMaterial
+        );
+        stain.name = 'trenchBloodStain';
+        stain.rotation.x = -Math.PI / 2;
+        stain.position.set(
+          (i ? 0.46 : -0.32) + perpendicularX * 0.18,
+          0.635 + i * 0.003,
+          (i ? -0.18 : 0.38) + perpendicularZ * 0.18
+        );
+        stain.scale.set(1.8, 0.72, 1);
+        stain.renderOrder = 3;
+        damage.add(stain);
+      }
+    }
+
+    mesh.add(damage);
+  }
+
+  _scrambleFromCollapsedTrench(unit, trench, options = {}, survivorIndex = 0) {
+    if (!unit || unit.dead) return;
+    const dirX = options.directionX ?? 0;
+    const dirZ = options.directionZ ?? 0;
+    const length = Math.hypot(dirX, dirZ);
+    const forwardX = length > 0.01 ? dirX / length : Math.sin(trench.rotationY ?? 0);
+    const forwardZ = length > 0.01 ? dirZ / length : Math.cos(trench.rotationY ?? 0);
+    const perpendicularX = -forwardZ;
+    const perpendicularZ = forwardX;
+    const relativeX = unit.position.x - trench.x;
+    const relativeZ = unit.position.z - trench.z;
+    const sideDot = relativeX * perpendicularX + relativeZ * perpendicularZ;
+    const side = Math.abs(sideDot) > 0.12
+      ? Math.sign(sideDot)
+      : survivorIndex % 2 === 0 ? 1 : -1;
+    const stagger = (survivorIndex % 3 - 1) * 0.55;
+    const destinationX =
+      trench.x +
+      perpendicularX * side * TRENCH_ESCAPE_DISTANCE -
+      forwardX * 1.2 +
+      forwardX * stagger;
+    const destinationZ =
+      trench.z +
+      perpendicularZ * side * TRENCH_ESCAPE_DISTANCE -
+      forwardZ * 1.2 +
+      forwardZ * stagger;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    unit._trackCrushEscapeUntil = now + TRENCH_ESCAPE_IMMUNITY_MS;
+    unit.moveTo(destinationX, destinationZ, this.game.mapDef, false, this.game.scenery);
+  }
+
+  restoreDestroyedTrenchVisual(trench, options = {}) {
+    if (!trench?.mesh) return;
+    trench.destroyed = true;
+    trench.garrison = [];
+    const mesh = trench.mesh;
+    const dirX = options.directionX ?? 0;
+    const dirZ = options.directionZ ?? 0;
+    mesh.scale.y = options.scaleY ?? TRENCH_COLLAPSE_FINAL_SCALE;
+    mesh.position.y += options.positionYOffset ?? TRENCH_COLLAPSE_FINAL_Y_OFFSET;
+    const directionLength = Math.hypot(dirX, dirZ);
+    const normalizedX = directionLength > 0.01 ? dirX / directionLength : 0;
+    const normalizedZ = directionLength > 0.01 ? dirZ / directionLength : 0;
+    mesh.rotation.x += options.rotationXOffset ?? normalizedZ * 0.025;
+    mesh.rotation.z += options.rotationZOffset ?? -normalizedX * 0.025;
+    this._addOverrunDamageVisual(trench, {
+      directionX: dirX,
+      directionZ: dirZ,
+      bloodied: options.bloodied !== false,
+    });
+    this._darkenDestroyedTrench(mesh);
+  }
+
+  _darkenDestroyedTrench(mesh) {
+    if (!mesh || mesh.userData.trenchDamageDarkened) return;
+    mesh.userData.trenchDamageDarkened = true;
+    const darkened = new Set();
+    mesh.traverse((child) => {
+      if (
+        !child.isMesh ||
+        !child.material ||
+        child.parent?.name === 'trenchOverrunDamage'
+      ) {
+        return;
+      }
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of mats) {
+        if (!material?.color || darkened.has(material)) continue;
+        material.color.multiplyScalar(0.86);
+        darkened.add(material);
+      }
+    });
+  }
+
   getDiggerStatus(unit) {
     if (!unit?._trenchDigSite) return null;
     const site = this.sites.find((s) => s.id === unit._trenchDigSite);
@@ -537,8 +850,8 @@ export class InfantryTrenchManager {
   }
 
   /**
-   * Tracked armour rolling over a finished trench collapses it and kills anyone
-   * still dug in. Returns how many trenches were crushed.
+   * Tracked armour rolling over a finished trench ruins the position, inflicts
+   * casualties, and gives some occupants a chance to scramble clear.
    */
   crushAt(x, z, radius = 2.4, options = {}) {
     let crushed = 0;
@@ -551,37 +864,68 @@ export class InfantryTrenchManager {
         impactFrom: options.impactFrom ?? { x, z },
         directionX: options.directionX ?? 0,
         directionZ: options.directionZ ?? 0,
+        crusherTeam: options.crusherTeam ?? null,
+        crusherType: options.crusherType ?? 'tank',
+        crusherId: options.crusherId ?? null,
       });
       crushed++;
     }
     return crushed;
   }
 
-  /** Collapse a trench: kill enemy garrison, remove cover, leave flattened dirt. */
+  /** Collapse a trench: inflict casualties, remove cover, and leave damaged earthworks. */
   destroyTrench(trench, options = {}) {
     if (!trench || trench.destroyed) return;
     trench.destroyed = true;
 
     const impactFrom = options.impactFrom ?? { x: trench.x, z: trench.z };
     const garrisonIds = [...(trench.garrison ?? [])];
-    for (const id of garrisonIds) {
+    const survivors = [];
+    let fatalities = 0;
+    for (let i = 0; i < garrisonIds.length; i++) {
+      const id = garrisonIds[i];
       const unit = this.game.units.find((u) => u.id === id);
       if (!unit || unit.dead) continue;
-      // Friendly troops scramble out of a collapsing trench rather than dying to
-      // their own armour. Enemy dig-ins under the tracks are finished.
-      if (options.crusherTeam && unit.team === options.crusherTeam) continue;
       const dirX = options.directionX ?? 0;
       const dirZ = options.directionZ ?? 0;
       if (Math.hypot(dirX, dirZ) > 0.01) {
         unit._crushTrackYaw = Math.atan2(dirX, dirZ);
       }
-      unit.takeDamage(unit.hp + 80, {
-        cause: 'crush',
-        crushed: true,
-        impactFrom,
-      });
+
+      const friendlyArmor = options.crusherTeam && unit.team === options.crusherTeam;
+      const escapes =
+        unit.hp > 1 &&
+        (friendlyArmor || Math.random() < trenchOverrunSurvivalChance(options.crusherType));
+      if (escapes) {
+        const damageFraction = friendlyArmor
+          ? 0.12 + Math.random() * 0.18
+          : 0.38 + Math.random() * 0.24;
+        const damage = Math.min(unit.hp - 1, Math.max(1, unit.hp * damageFraction));
+        unit.takeDamage(damage, {
+          cause: 'crush',
+          crushed: true,
+          impactFrom,
+        });
+        if (!unit.dead) survivors.push({ unit, index: i });
+      } else {
+        unit.takeDamage(unit.hp + 80, {
+          cause: 'crush',
+          crushed: true,
+          impactFrom,
+        });
+        if (unit.dead) fatalities++;
+      }
     }
     this._releaseAllFromTrench(trench);
+    trench.garrison = [];
+    for (const survivor of survivors) {
+      this._scrambleFromCollapsedTrench(
+        survivor.unit,
+        trench,
+        options,
+        survivor.index
+      );
+    }
 
     if (this.game.coverSystem) {
       this.game.coverSystem.removeZoneAt(trench.x, trench.z, TRENCH_COVER_RADIUS + 1);
@@ -589,22 +933,47 @@ export class InfantryTrenchManager {
 
     const mesh = trench.mesh;
     if (mesh) {
-      // Squashed revetment left as a low mud scar rather than vanishing.
-      mesh.scale.y *= 0.18;
-      mesh.position.y -= 0.12;
       const dirX = options.directionX ?? 0;
       const dirZ = options.directionZ ?? 0;
-      if (Math.hypot(dirX, dirZ) > 0.01) {
-        mesh.rotation.x += dirZ * 0.04;
-        mesh.rotation.z -= dirX * 0.04;
-      }
-      mesh.traverse((child) => {
-        if (!child.isMesh || !child.material) return;
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
-        for (const material of mats) {
-          if (material?.color) material.color.multiplyScalar(0.72);
-        }
+      const startScaleY = mesh.scale.y;
+      const startPositionY = mesh.position.y;
+      const startRotationX = mesh.rotation.x;
+      const startRotationZ = mesh.rotation.z;
+      const directionLength = Math.hypot(dirX, dirZ);
+      const normalizedX = directionLength > 0.01 ? dirX / directionLength : 0;
+      const normalizedZ = directionLength > 0.01 ? dirZ / directionLength : 0;
+      // Keep the trench readable: the berms settle and break, but the dug line
+      // remains visible under the tread scars, timber, casualties, and blood.
+      trench._collapseAnimation = {
+        elapsed: 0,
+        duration: Math.max(
+          0,
+          Number(options.collapseDuration) || TRENCH_COLLAPSE_DURATION
+        ),
+        startScaleY,
+        finalScaleY: startScaleY * TRENCH_COLLAPSE_FINAL_SCALE,
+        startPositionY,
+        finalPositionY: startPositionY + TRENCH_COLLAPSE_FINAL_Y_OFFSET,
+        startRotationX,
+        finalRotationX: startRotationX + normalizedZ * 0.025,
+        startRotationZ,
+        finalRotationZ: startRotationZ - normalizedX * 0.025,
+      };
+      trench._overrunDamage = {
+        directionX: dirX,
+        directionZ: dirZ,
+        bloodied: fatalities > 0,
+        scaleY: TRENCH_COLLAPSE_FINAL_SCALE,
+        positionYOffset: TRENCH_COLLAPSE_FINAL_Y_OFFSET,
+        rotationXOffset: normalizedZ * 0.025,
+        rotationZOffset: -normalizedX * 0.025,
+      };
+      this._addOverrunDamageVisual(trench, {
+        directionX: dirX,
+        directionZ: dirZ,
+        bloodied: fatalities > 0,
       });
+      this._darkenDestroyedTrench(mesh);
     }
   }
 }

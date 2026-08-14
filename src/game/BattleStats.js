@@ -1,6 +1,6 @@
 import { UNIT_TYPE_ORDER } from '../data/gameModes.js';
 import { DEFENSE_TYPES } from '../data/towerDefense.js';
-import { personnelPerUnit } from '../data/squadSizes.js';
+import { currentCasualtyCount, personnelPerUnit } from '../data/squadSizes.js';
 import {
   computeTeamMaterielCost,
   formatUsd1944,
@@ -101,11 +101,26 @@ export class BattleStats {
     this.hqLost[team] = true;
   }
 
-  totalLosses(team) {
+  _currentPartialLosses(team, liveUnits = []) {
+    const partial = {};
+    for (const unit of liveUnits ?? []) {
+      if (!unit || unit.team !== team || unit.dead) continue;
+      const count = currentCasualtyCount(unit);
+      if (count <= 0) continue;
+      const type = unit.def?.type ?? 'infantry';
+      partial[type] = (partial[type] ?? 0) + count;
+    }
+    return partial;
+  }
+
+  totalLosses(team, { liveUnits = [] } = {}) {
     const bucket = this.losses[team];
     let total = 0;
     for (const [type, unitCount] of Object.entries(bucket)) {
       total += unitCount * personnelPerUnit(type);
+    }
+    for (const count of Object.values(this._currentPartialLosses(team, liveUnits))) {
+      total += count;
     }
     return total;
   }
@@ -143,22 +158,57 @@ export class BattleStats {
     return lines;
   }
 
-  formatTeamLosses(team) {
-    const bucket = this.losses[team];
-    const lines = [];
+  _mergeLossLines(lines) {
+    const merged = [];
+    const byType = new Map();
+    for (const line of lines) {
+      const existing = byType.get(line.type);
+      if (existing) {
+        existing.count += line.count;
+        existing.unitCount += Number(line.unitCount) || 0;
+        continue;
+      }
+      const copy = { ...line, unitCount: Number(line.unitCount) || 0 };
+      byType.set(line.type, copy);
+      merged.push(copy);
+    }
+    return merged;
+  }
 
-    for (const type of UNIT_TYPE_ORDER) {
+  _formatPartialLossLine(type, count) {
+    // The commander mesh keeps the officer visible while bodyguards fall, so
+    // partial command-group losses are reported as bodyguards. A fully dead
+    // commander still uses _formatLossLines() and reports both rows.
+    const partialType = type === 'commander' ? 'commanderBodyguard' : type;
+    return {
+      type: partialType,
+      label: UNIT_LOSS_LABELS[partialType] ?? partialType,
+      count,
+      unitCount: 0,
+    };
+  }
+
+  formatTeamLosses(team, { liveUnits = [] } = {}) {
+    const bucket = this.losses[team];
+    const partial = this._currentPartialLosses(team, liveUnits);
+    const lines = [];
+    const types = [
+      ...UNIT_TYPE_ORDER,
+      ...Object.keys(bucket),
+      ...Object.keys(partial),
+    ];
+    const seen = new Set();
+
+    for (const type of types) {
+      if (seen.has(type)) continue;
+      seen.add(type);
       const unitCount = bucket[type];
       if (unitCount) lines.push(...this._formatLossLines(type, unitCount));
+      const partialCount = partial[type];
+      if (partialCount) lines.push(this._formatPartialLossLine(type, partialCount));
     }
 
-    for (const [type, unitCount] of Object.entries(bucket)) {
-      if (!UNIT_TYPE_ORDER.includes(type)) {
-        lines.push(...this._formatLossLines(type, unitCount));
-      }
-    }
-
-    return lines;
+    return this._mergeLossLines(lines);
   }
 
   _formatLossLine(type, unitCount) {
@@ -214,12 +264,13 @@ export class BattleStats {
     towerDefense = false,
     tdEndless = false,
     tdWavesCleared = 0,
+    liveUnits = [],
   }) {
-    const playerLines = this.formatTeamLosses('player');
-    const enemyLines = this.formatTeamLosses('enemy');
+    const playerLines = this.formatTeamLosses('player', { liveUnits });
+    const enemyLines = this.formatTeamLosses('enemy', { liveUnits });
     const playerDefenseLines = this.formatDefenseLosses('player');
-    const playerTotal = this.totalLosses('player');
-    const enemyTotal = this.totalLosses('enemy');
+    const playerTotal = this.totalLosses('player', { liveUnits });
+    const enemyTotal = this.totalLosses('enemy', { liveUnits });
     const playerDefenseTotal = this.totalDefenseLosses('player');
     const playerCaptureLines = this.formatTeamCaptures('player');
     const enemyCaptureLines = this.formatTeamCaptures('enemy');

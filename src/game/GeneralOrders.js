@@ -138,6 +138,7 @@ export class GeneralOrdersManager {
     if (type === 'fullRetreat') {
       this._applyFullRetreat(hq);
     }
+    if (type === 'digIn' && this._applyDigIn() === 0) return false;
 
     this.active = { type, remaining: GENERAL_ORDER_DURATION_SEC };
     this.cooldowns[type] = GENERAL_ORDER_COOLDOWN_SEC;
@@ -153,6 +154,7 @@ export class GeneralOrdersManager {
     const hq = commandRallyPoint(this.game, this.ownerTeam);
     if (!hq) return false;
 
+    if (this.active) this.cancelActive();
     this._applyFullRetreat(hq);
     this.active = {
       type: 'fullRetreat',
@@ -171,6 +173,9 @@ export class GeneralOrdersManager {
     const type = this.active.type;
     this.active = null;
     if (type === 'fullRetreat') this._clearCommanderRetreats();
+    if (type === 'digIn') {
+      this.game.infantryTrenches?.cancelGeneralOrderDigIn?.(this.ownerTeam);
+    }
     return true;
   }
 
@@ -203,6 +208,32 @@ export class GeneralOrdersManager {
   _teamUnits() {
     const cache = this.ownerTeam === PLAYER ? this.game._playerAlive : this.game._enemyAlive;
     return cache ?? this.game.units.filter((u) => u.team === this.ownerTeam && !u.dead);
+  }
+
+  _enemyFocus() {
+    const enemyTeam = this.ownerTeam === PLAYER ? ENEMY : PLAYER;
+    const cache = enemyTeam === PLAYER ? this.game._playerAlive : this.game._enemyAlive;
+    const enemies = (cache ?? this.game.units).filter(
+      (unit) => unit.team === enemyTeam && !unit.dead && !unit.surrendered
+    );
+    if (enemies.length) {
+      const total = enemies.reduce(
+        (sum, unit) => ({ x: sum.x + unit.position.x, z: sum.z + unit.position.z }),
+        { x: 0, z: 0 }
+      );
+      return { x: total.x / enemies.length, z: total.z / enemies.length };
+    }
+    return this.ownerTeam === PLAYER
+      ? this.game.mapDef?.enemyBase ?? null
+      : this.game.mapDef?.playerBase ?? null;
+  }
+
+  _applyDigIn() {
+    return this.game.infantryTrenches?.orderTeamDigIn?.(
+      this.ownerTeam,
+      this._teamUnits(),
+      this._enemyFocus()
+    ) ?? 0;
   }
 
   _applyFullRetreat(hq) {

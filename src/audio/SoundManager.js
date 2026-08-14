@@ -82,6 +82,8 @@ const EXPLOSION_SAMPLE_FILES_FULL = [
   'explosion-c.wav',
   'explosion-d.wav',
   'explosion-e.wav',
+  'explosion-j.wav',
+  'explosion-k.wav',
   'explosion-f.wav',
   'explosion-g.wav',
   'explosion-h.wav',
@@ -94,6 +96,8 @@ const IMPACT_SAMPLE_FILES_FULL = [
   'impact-c.wav',
   'impact-d.wav',
   'impact-e.wav',
+  'impact-f.wav',
+  'impact-g.wav',
 ];
 const ARMOR_RICOCHET_FILES = Array.from(
   { length: 6 },
@@ -218,9 +222,12 @@ const COMMANDER_ORDER_KINDS = [
   'airborneDrop',
   'fullRetreat',
   'holdGround',
+  'digIn',
   'lostCommander',
 ];
 const COMMANDER_ORDER_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
+const GENERAL_ORDER_VOICE_KINDS = ['fullRetreat', 'holdGround', 'digIn'];
+const GENERAL_ORDER_VOICE_VARIANTS = 2;
 
 function infantryDeathVoiceKey(factionId) {
   if (factionId === 'usa') return 'usa';
@@ -359,6 +366,14 @@ export class SoundManager {
      * @type {Record<string, Record<string, AudioBuffer>>}
      */
     this.commanderOrderBuffers = {
+      usa: {},
+      uk: {},
+      germany: {},
+      russia: {},
+      japan: {},
+    };
+    /** ElevenLabs variants used in preference to the legacy single order line. */
+    this.commanderGeneralOrderBuffers = {
       usa: {},
       uk: {},
       germany: {},
@@ -723,6 +738,31 @@ export class SoundManager {
     }
     await Promise.all(commanderLoads);
 
+    const generalOrderVoiceLoads = [];
+    for (const faction of COMMANDER_ORDER_FACTIONS) {
+      for (const kind of GENERAL_ORDER_VOICE_KINDS) {
+        this.commanderGeneralOrderBuffers[faction][kind] = [];
+        const count = this._constrainedAudio ? 1 : GENERAL_ORDER_VOICE_VARIANTS;
+        for (let i = 1; i <= count; i++) {
+          const num = String(i).padStart(2, '0');
+          generalOrderVoiceLoads.push(
+            (async () => {
+              try {
+                const buf = await this._loadDecodedSample(
+                  publicUrl(`sounds/commander-${faction}-${kind}-${num}.wav`)
+                );
+                if (!buf) return;
+                this.commanderGeneralOrderBuffers[faction][kind].push(buf);
+              } catch {
+                /* missing — legacy single line remains the fallback */
+              }
+            })()
+          );
+        }
+      }
+    }
+    await Promise.all(generalOrderVoiceLoads);
+
     const poolLoads = [];
     const loadPool = (files, targetArr) => {
       for (const file of files) {
@@ -757,9 +797,9 @@ export class SoundManager {
     this.garandPingBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     const limit = (files, tabletCount) => this._constrainedAudio ? files.slice(0, tabletCount) : files;
-    loadPool(limit(EXPLOSION_SAMPLE_FILES, 4), this.explosionBuffers);
+    loadPool(limit(EXPLOSION_SAMPLE_FILES, 7), this.explosionBuffers);
     loadPool(MINE_EXPLOSION_FILES, this.mineExplosionBuffers);
-    loadPool(limit(IMPACT_SAMPLE_FILES, 3), this.impactBuffers);
+    loadPool(limit(IMPACT_SAMPLE_FILES, 5), this.impactBuffers);
     loadPool(limit(ARMOR_RICOCHET_FILES, 3), this.armorRicochetBuffers);
     loadPool(BULLET_IMPACT_FILES, this.bulletImpactBuffers);
     loadPool(BULLET_STRUCTURE_IMPACT_FILES, this.bulletStructureImpactBuffers);
@@ -1351,7 +1391,11 @@ export class SoundManager {
     this._runWhenReady(() => {
       if (!kind || !COMMANDER_ORDER_KINDS.includes(kind)) return;
       const key = unitSelectVoiceKey(factionId);
-      const buf = this.commanderOrderBuffers[key]?.[kind];
+      const variants = this.commanderGeneralOrderBuffers[key]?.[kind];
+      const buf = variants?.length
+        ? variants[Math.floor(Math.random() * variants.length)]
+        : this.commanderOrderBuffers[key]?.[kind]
+          ?? (kind === 'digIn' ? this.commanderOrderBuffers[key]?.holdGround : null);
       if (!buf) return;
 
       const now = performance.now();

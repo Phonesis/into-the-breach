@@ -116,6 +116,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   onSetEngagementStance(stance) {
     game?.setSelectedEngagementStance(stance);
   },
+  onSetSeekCoverOverride(value) {
+    game?.setSelectedSeekCoverOverride(value);
+  },
   onTabletTargetMode(on) {
     game?.setTabletTargetMode(on);
   },
@@ -205,6 +208,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   },
   onToggleSeekCover(enabled) {
     game?.setSeekCoverMode(enabled);
+  },
+  onChangeRadioOperatorAutoMove(enabled) {
+    game?.setRadioOperatorAutoMove(enabled);
   },
   onChangeArtilleryAutoFire(enabled) {
     game?.setArtilleryAutoFire(enabled);

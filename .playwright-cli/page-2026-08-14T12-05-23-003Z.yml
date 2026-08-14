@@ -1,0 +1,63 @@
+- generic [ref=e308]:
+  - navigation "Operation setup progress" [ref=e309]:
+    - generic [ref=e310]:
+      - generic [ref=e311]: "01"
+      - text: Operation
+    - generic [ref=e313]:
+      - generic [ref=e314]: "02"
+      - text: Command
+    - generic [ref=e316]:
+      - generic [ref=e317]: "03"
+      - text: Battlefield
+  - generic [ref=e318]:
+    - generic [ref=e319]: Step 03 · Final Briefing
+    - heading "Prepare Battlefield" [level=1] [ref=e320]
+    - paragraph [ref=e321]: Choose the theater, battlefield scale, and mission-specific deployment rules.
+  - generic [ref=e322]:
+    - heading "Theater of Operations" [level=2] [ref=e323]
+    - generic [ref=e324]:
+      - button "Theater 01 Normandy Operation Overlord — Cotentin Peninsula, June 1944 Hedgerows · Farm tracks · Overcast skies" [ref=e325] [cursor=pointer]:
+        - generic [ref=e326]: Theater 01
+        - generic [ref=e327]: Normandy
+        - generic [ref=e328]: Operation Overlord — Cotentin Peninsula, June 1944
+        - generic [ref=e329]: Hedgerows · Farm tracks · Overcast skies
+      - button "Theater 02 North Africa Second Battle of El Alamein — Western Desert, Oct 1942 Open desert · Escarpments · Heat haze" [ref=e330] [cursor=pointer]:
+        - generic [ref=e331]: Theater 02
+        - generic [ref=e332]: North Africa
+        - generic [ref=e333]: Second Battle of El Alamein — Western Desert, Oct 1942
+        - generic [ref=e334]: Open desert · Escarpments · Heat haze
+      - button "Theater 03 Eastern Front Battle of Kursk — Steppe south of Orel, July 1943 Rolling steppe · Treelines · Summer dust" [ref=e335] [cursor=pointer]:
+        - generic [ref=e336]: Theater 03
+        - generic [ref=e337]: Eastern Front
+        - generic [ref=e338]: Battle of Kursk — Steppe south of Orel, July 1943
+        - generic [ref=e339]: Rolling steppe · Treelines · Summer dust
+      - button "Theater 04 Italy Battle of Monte Cassino — Liri Valley, Jan 1944 Hill country · Olive groves · Mountain mist" [ref=e340] [cursor=pointer]:
+        - generic [ref=e341]: Theater 04
+        - generic [ref=e342]: Italy
+        - generic [ref=e343]: Battle of Monte Cassino — Liri Valley, Jan 1944
+        - generic [ref=e344]: Hill country · Olive groves · Mountain mist
+      - button "Theater 05 Far East Guadalcanal — Solomon Islands, 1942–1943 Dense tropical jungle · Palm-lined muddy tracks · Kunai grass and village clearings · Humid dawn mist" [ref=e345] [cursor=pointer]:
+        - generic [ref=e346]: Theater 05
+        - generic [ref=e347]: Far East
+        - generic [ref=e348]: Guadalcanal — Solomon Islands, 1942–1943
+        - generic [ref=e349]: Dense tropical jungle · Palm-lined muddy tracks · Kunai grass and village clearings · Humid dawn mist
+      - button "Theater 06 Berlin Battle of Berlin — outer districts, April 1945 Dense streets · Central church square · Canal bridges & bombed parkland" [ref=e350] [cursor=pointer]:
+        - generic [ref=e351]: Theater 06
+        - generic [ref=e352]: Berlin
+        - generic [ref=e353]: Battle of Berlin — outer districts, April 1945
+        - generic [ref=e354]: Dense streets · Central church square · Canal bridges & bombed parkland
+    - generic [ref=e355]:
+      - heading "Battlefield Scale" [level=2] [ref=e356]
+      - generic [ref=e357]:
+        - button "Small Tight engagement zone — fast contact and short flanks" [ref=e379] [cursor=pointer]:
+          - generic [ref=e380]: Small
+          - generic [ref=e381]: Tight engagement zone — fast contact and short flanks
+        - button "Medium Expanded theater — extra maneuver room (default)" [ref=e382] [cursor=pointer]:
+          - generic [ref=e383]: Medium
+          - generic [ref=e384]: Expanded theater — extra maneuver room (default)
+        - button "Large Grand theater — long advances and sweeping flanks" [ref=e385] [cursor=pointer]:
+          - generic [ref=e386]: Large
+          - generic [ref=e387]: Grand theater — long advances and sweeping flanks
+    - generic [ref=e367]:
+      - button "Previous" [ref=e368] [cursor=pointer]
+      - button "Confirm & Deploy Forces" [ref=e369] [cursor=pointer]

@@ -9,6 +9,7 @@ import { getClearanceStagingAnchor } from './ClearanceMode.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { applyObstaclePath } from './MovePath.js';
 import { sounds } from '../audio/SoundManager.js';
+import { isTankType } from '../units/VehicleTypes.js';
 import { areUnitStatusMarkersVisible } from '../visual/UnitStatusVisibility.js';
 import {
   layoutUnitOverheadMarkers,
@@ -136,6 +137,18 @@ export function syncRetreatMarkers(units) {
   }
 }
 
+function queueImmobileTankSurrender(unit) {
+  clearRetreat(unit);
+  unit._surrenderOnRetreat = true;
+  unit.clearAttackOrder();
+  unit.target = null;
+  unit.moveTarget = null;
+  unit._movePath = null;
+  unit._finalMoveGoal = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+}
+
 /**
  * Begin retreat toward HQ / staging. When mapDef + scenery are provided, path
  * around buildings instead of walking straight into them.
@@ -145,6 +158,16 @@ export function syncRetreatMarkers(units) {
  */
 export function startRetreat(unit, hq, options = {}) {
   if (!hq || hq.dead || unit.dead || unit.retreating) return;
+
+  // A broken-track tank cannot reach the rally point. Queue the existing tank
+  // crew-bailout surrender flow instead of leaving it permanently marked as
+  // retreating with no movement possible. SurrenderBehavior resolves this on
+  // the next simulation tick, when the game callback can spawn the crew.
+  if (unit._mobilityDamaged && isTankType(unit.def?.type)) {
+    queueImmobileTankSurrender(unit);
+    return;
+  }
+
   unit.retreating = true;
   unit.clearAttackOrder();
   unit._bunkerEntryId = null;
@@ -190,6 +213,7 @@ export function startRetreat(unit, hq, options = {}) {
 
 export function clearRetreat(unit) {
   unit.retreating = false;
+  unit._surrenderOnRetreat = false;
   removeRetreatMarker(unit);
 }
 
@@ -262,6 +286,13 @@ export function updateRetreatState(unit, hq, mapDef) {
 
   if (!unit.retreating) {
     removeRetreatMarker(unit);
+    return;
+  }
+
+  // Mobility can fail after the withdrawal has already begun. Convert that
+  // active retreat through the same queued surrender path as a fresh trigger.
+  if (unit._mobilityDamaged && isTankType(unit.def?.type)) {
+    queueImmobileTankSurrender(unit);
     return;
   }
 

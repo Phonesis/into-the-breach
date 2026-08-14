@@ -6,6 +6,7 @@ export const GAME_SETTING_KEYS = Object.freeze({
   frontline: 'ww2-rts-frontline-visible',
   capturePoints: 'ww2-rts-capture-points-visible',
   seekCover: 'ww2-rts-seek-cover-mode',
+  radioOperatorAutoMove: 'ww2-rts-radio-operator-auto-move',
   pursueTargets: 'ww2-rts-pursue-targets-by-default',
   minimap: 'ww2-rts-minimap-visible',
   autoBuildClassic: 'ww2-rts-auto-build-mode-classic',

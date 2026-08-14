@@ -23,6 +23,13 @@ export function canSeekCover(unit) {
   return SEEK_COVER_UNIT_TYPES.has(unit?.def?.type);
 }
 
+/** Resolve a unit's explicit move preference against the saved global default. */
+export function getSeekCoverEnabled(unit, defaultEnabled = false) {
+  if (unit?.seekCoverOverride === true) return true;
+  if (unit?.seekCoverOverride === false) return false;
+  return !!defaultEnabled;
+}
+
 /**
  * Pick a cover zone center to move toward instead of the raw click point.
  * @returns {{ x: number, z: number } | null}

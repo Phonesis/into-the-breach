@@ -46,6 +46,7 @@ import {
 } from './Targeting.js';
 import { SMOKE_MISS_CHANCE } from './SmokeScreen.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
+import { getBlastProfile } from './BlastProfile.js';
 import { getArmorDamageMultiplier } from './ClearanceMode.js';
 import { maybeTriggerRetreat, clearRetreat, resolveRetreatHq } from './RetreatBehavior.js';
 import { maybeTriggerSurrender, markUnderFire } from './SurrenderBehavior.js';
@@ -379,6 +380,8 @@ const HAND_GRENADE_DAMAGE = 12;
 /** Enemies low or vulnerable enough that a tracked vehicle can overrun them. */
 function isCrushableFootTarget(unit) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if ((unit._trackCrushEscapeUntil ?? 0) > now) return false;
   if (CREW_SERVED_GUN_TYPES.has(unit.def?.type)) return true;
   if (!isFootSoldier(unit.def?.type) && unit.def?.type !== 'engineer') return false;
   if (isUnitMounted(unit) || isUnitGarrisoned(unit)) return false;
@@ -422,6 +425,9 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
   for (const target of units) {
     if (target === vehicle || target.dead) continue;
     if (target.team === vehicle.team) continue;
+    // Finished-trench occupants are resolved together by the trench manager:
+    // some are caught under the tracks, while others can scramble clear.
+    if (target._trenchId) continue;
     if (!isCrushableFootTarget(target)) continue;
     const dist = Math.hypot(target.position.x - vx, target.position.z - vz);
     if (dist > radius + trackCrushTargetRadius(target.def?.type)) continue;
@@ -464,6 +470,8 @@ function applyTrackCrush(vehicle, units, options, vehicleRadius) {
     directionX: options._crushDirX ?? 0,
     directionZ: options._crushDirZ ?? 0,
     crusherTeam: vehicle.team,
+    crusherType: vehicle.def?.type,
+    crusherId: vehicle.id,
   });
 }
 
@@ -631,7 +639,12 @@ function tryThrowHandGrenade(attacker, candidates, scene, mapDef, onFire, scener
   attacker.grenadeCooldown = HAND_GRENADE_COOLDOWN_SEC + Math.random() * 1.5;
   const armorFactor = target.def.type === 'superHeavyTank' ? 0.65 : 1;
   const damage = HAND_GRENADE_DAMAGE * armorFactor * getRankDamageMultiplier(attacker);
-  target.takeDamage(damage, { explosive: true, impactFrom: attacker.position });
+  target.takeDamage(damage, {
+    explosive: true,
+    blastOrigin: { x: target.position.x, z: target.position.z },
+    impactFrom: attacker.position,
+    ...getBlastProfile({ weaponType: 'handGrenade' }),
+  });
   if (target.dead) recordEnemyKill(attacker, target);
 
   const event = {
@@ -766,17 +779,6 @@ export function updateCombat(
     }
     if (openingCeasefire && !attacker.attackOrder) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
-
-    // Authored QA ranges can hold a force quiet until the tester issues an
-    // order. Explicit attack and move orders still use the normal combat path.
-    if (
-      attacker._lineTestPassive &&
-      !attacker.attackOrder &&
-      !attacker._userMoveOrder
-    ) {
-      attacker.target = null;
-      continue;
-    }
 
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
@@ -1382,12 +1384,14 @@ function fire(
     }
   }
 
+  let directCoverMultiplier = 1;
   if (!target.isGround && !isSceneryTarget(target)) {
-    damage *= getIncomingDamageMultiplier(
+    directCoverMultiplier = getIncomingDamageMultiplier(
       target,
       coverSystem,
       coax ? attackerType : attacker
     );
+    damage *= directCoverMultiplier;
     damage *= getArmorDamageMultiplier(attackerType, target);
   }
   if (isSceneryTarget(target)) {
@@ -1586,10 +1590,21 @@ function fire(
           attacker.def.type === 'antiTankGun' ||
           isTankType(attacker.def.type) ||
           paratrooperAt);
+      const blastProfile = explosiveKill
+        ? getBlastProfile({
+            weaponType: paratrooperAt ? 'paratrooperAt' : attacker.def.type,
+            caliber: attacker.def.caliber,
+          })
+        : null;
       const appliedDamage = scalePracticeHqDamage(target, damage, options);
       target.takeDamage(appliedDamage, {
         explosive: explosiveKill,
+        blastOrigin: explosiveKill ? { x: impact.x, z: impact.z } : undefined,
         impactFrom: attacker.position,
+        ...(blastProfile ?? {}),
+        blastImpulseScale: blastProfile
+          ? blastProfile.blastImpulseScale * Math.sqrt(Math.max(0.3, directCoverMultiplier))
+          : undefined,
         armorHit,
       });
       if (appliedDamage > 0 && !target.dead && !target.surrendered) {
@@ -1763,6 +1778,13 @@ function applySplashDamage(
             ? 5
             : 4
           : 2.5;
+  const blastProfile = smallArmsGroundFire
+    ? null
+    : getBlastProfile({
+        weaponType: attacker.def.type,
+        caliber: attacker.def.caliber,
+        radius: splash,
+      });
 
   if (scenery) {
     scenery.damageAt(
@@ -1809,12 +1831,13 @@ function applySplashDamage(
     if (d > splash) continue;
     const t = 1 - d / splash;
     let splashDmg = baseDamage * t * t * 0.65;
-    splashDmg *= getIncomingDamageMultiplier(other, coverSystem, {
+    const incomingCoverMultiplier = getIncomingDamageMultiplier(other, coverSystem, {
       def: smallArmsGroundFire ? { type: impactWeaponType } : attacker.def,
       // Blast shielding depends on whether the cover lies between the unit and
       // the detonation, not the distant gun that fired the shell.
       position: point,
     });
+    splashDmg *= incomingCoverMultiplier;
     splashDmg *= getArmorDamageMultiplier(impactWeaponType, other);
     if (!other.surrendered) {
       markUnderFire(other);
@@ -1822,10 +1845,14 @@ function applySplashDamage(
       const damageOptions = {
         explosive: !smallArmsGroundFire,
         impactFrom: { x: point.x, z: point.z },
+        ...(blastProfile ?? {}),
       };
       if (!smallArmsGroundFire) {
         // Fling bodies away from the detonation, not the distant gun.
         damageOptions.blastOrigin = { x: point.x, z: point.z };
+        damageOptions.blastImpulseScale =
+          blastProfile.blastImpulseScale *
+          Math.sqrt(Math.max(0.3, incomingCoverMultiplier));
       }
       other.takeDamage(appliedDamage, damageOptions);
       if (appliedDamage > 0 && !other.dead && !other.surrendered) {

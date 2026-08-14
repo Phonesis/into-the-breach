@@ -5,7 +5,10 @@ import {
   canRideTanks,
   issueMountOrder,
 } from '../game/TankRiders.js';
-import { resolveSeekCoverDestination } from '../game/CoverSeek.js';
+import {
+  getSeekCoverEnabled,
+  resolveSeekCoverDestination,
+} from '../game/CoverSeek.js';
 import {
   canEngageManualOrder,
   createGroundTarget,
@@ -43,6 +46,7 @@ export class RTSController {
     getTerrainMesh,
     getPlayerTeam,
     getPendingFireSupport,
+    getPendingFireSupportStrike,
     getPendingSmokeShell,
     getPendingDefensePlacement,
     getPendingLastStandDeploy,
@@ -85,6 +89,7 @@ export class RTSController {
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.getPlayerTeam = getPlayerTeam;
     this.getPendingFireSupport = getPendingFireSupport;
+    this.getPendingFireSupportStrike = getPendingFireSupportStrike ?? (() => null);
     this.getPendingSmokeShell = getPendingSmokeShell ?? (() => false);
     this.getPendingDefensePlacement = getPendingDefensePlacement ?? (() => null);
     this.getPendingLastStandDeploy = getPendingLastStandDeploy ?? (() => null);
@@ -846,6 +851,7 @@ export class RTSController {
     this.setPointerFromEvent(e);
 
     const pendingFs = this.getPendingFireSupport?.();
+    const pendingFsStrike = this.getPendingFireSupportStrike?.();
     const pendingSmoke = this.getPendingSmokeShell?.();
     const pendingDef = this.getPendingDefensePlacement?.();
     const pendingDeploy = this.getPendingLastStandDeploy?.();
@@ -853,6 +859,17 @@ export class RTSController {
     const pendingTrench = this.getPendingTrenchPlacement?.();
     const pendingMedicTent = this.getPendingMedicTentPlacement?.();
     const pendingBaseBuild = this.getPendingBaseBuildingPlacement?.();
+    if (pendingFsStrike && this.onFireSupportTarget) {
+      const ground = this.raycastGround();
+      if (
+        ground &&
+        this.onFireSupportTarget('pending-interact', ground.x, ground.z)
+      ) {
+        this.dragStart = null;
+        this._dragSelecting = false;
+        return;
+      }
+    }
     if (
       pendingFs ||
       pendingSmoke ||
@@ -863,6 +880,17 @@ export class RTSController {
       pendingMedicTent ||
       pendingBaseBuild
     ) {
+      const pendingRadio = pendingFs
+        ? this.raycastUnit(this.getPlayerTeam())
+        : null;
+      if (pendingRadio?.def?.type === 'radioOperator' && this.onFireSupportTarget) {
+        const handled = this.onFireSupportTarget('radio-interact', pendingRadio);
+        if (handled) {
+          this.dragStart = null;
+          this._dragSelecting = false;
+          return;
+        }
+      }
       const ground = this.raycastGround();
       if (ground) {
         if (pendingFs && this.onFireSupportTarget) {
@@ -1080,7 +1108,7 @@ export class RTSController {
 
     const mapDef = this.getMapDef();
     const coverSystem = this.getCoverSystem?.();
-    const seekCover = !!this.getSeekCoverMode?.();
+    const seekCoverDefault = !!this.getSeekCoverMode?.();
     const garrisonSources = getGarrisonBunkerSources(this.getGarrisonSources?.());
     let snapX = clamped.x;
     let snapZ = clamped.z;
@@ -1170,7 +1198,11 @@ export class RTSController {
     for (const { unit, x, z, allowBuildingId } of destinations) {
       let destX = x;
       let destZ = z;
-      if (seekCover && coverSystem && !allowBuildingId) {
+      if (
+        getSeekCoverEnabled(unit, seekCoverDefault) &&
+        coverSystem &&
+        !allowBuildingId
+      ) {
         const coverDest = resolveSeekCoverDestination(unit, x, z, coverSystem);
         destX = coverDest.x;
         destZ = coverDest.z;

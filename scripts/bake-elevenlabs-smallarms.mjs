@@ -15,20 +15,16 @@ const OUT = join(__dir, '../public/sounds');
 const TMP = join(__dir, '../.tmp-elevenlabs-smallarms');
 const API = 'https://api.elevenlabs.io/v1/sound-generation';
 
-const API_KEY = process.env.ELEVENLABS_API_KEY?.trim();
-if (!API_KEY) {
-  console.error('Missing ELEVENLABS_API_KEY');
-  process.exit(1);
-}
-
 const force = process.argv.includes('--force');
+const validate = process.argv.includes('--validate');
+const API_KEY = process.env.ELEVENLABS_API_KEY?.trim();
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TMP, { recursive: true });
 
 const REAL =
   'authentic outdoor field recording, natural acoustic, full low-end body and powder blast, short natural decay, dry, no music, no voices, no speech, no ricochet, not synthetic, not electronic, not cinematic trailer, not metallic ring, not tinny, not buzz saw';
 
-/** Per faction: 2 rifle + 2 MG ElevenLabs masters (f/g suffixes). */
+/** Per faction: extra small-arms ElevenLabs masters. */
 const CATALOG = [
   // —— Germany ——
   {
@@ -133,6 +129,44 @@ const CATALOG = [
     influence: 0.6,
     text: `Short DP-28 machine gun burst outdoors, rhythmic heavy shots powder reports, open field, ${REAL}`,
   },
+
+  // —— Japan ——
+  {
+    file: 'rifle-japan-el-07.wav',
+    duration: 0.7,
+    influence: 0.68,
+    text: `Single Japanese Arisaka Type 99 rifle gunshot outdoors, hard deep muzzle blast and sharp ballistic crack, full-bodied World War Two field recording, ${REAL}`,
+  },
+  {
+    file: 'rifle-japan-el-08.wav',
+    duration: 0.68,
+    influence: 0.62,
+    text: `Single Japanese Arisaka Type 38 rifle shot outdoors, strong powder thump followed by a clean rifle crack, open field live fire, ${REAL}`,
+  },
+  {
+    file: 'smg-japan-el-04.wav',
+    duration: 0.78,
+    influence: 0.64,
+    text: `Short Japanese Type 100 submachine gun burst outdoors, distinct 8mm automatic fire, six separate shots with natural powder reports, ${REAL}`,
+  },
+  {
+    file: 'smg-japan-el-05.wav',
+    duration: 0.72,
+    influence: 0.6,
+    text: `Japanese Type 100 SMG short burst outdoors, measured automatic fire with compact rifle-calibre reports, authentic field recording, ${REAL}`,
+  },
+  {
+    file: 'mg-japan-el-05.wav',
+    duration: 0.88,
+    influence: 0.64,
+    text: `Short Japanese Type 96 light machine gun burst outdoors, five distinct heavy shots with deep muzzle blast, natural World War Two field recording, ${REAL}`,
+  },
+  {
+    file: 'mg-japan-el-06.wav',
+    duration: 0.82,
+    influence: 0.6,
+    text: `Japanese Type 99 light machine gun burst outdoors, rhythmic individual powder reports and a solid low body, open field, ${REAL}`,
+  },
 ];
 
 function sleep(ms) {
@@ -189,7 +223,32 @@ function convertToGameWav(srcPath, destName) {
 }
 
 async function main() {
-  console.log(`ElevenLabs small arms — ${CATALOG.length} samples (2 rifle + 2 MG × 4 factions)`);
+  if (validate) {
+    let invalid = 0;
+    for (const job of CATALOG) {
+      const promptLength = job.text.length;
+      const durationValid = Number.isFinite(job.duration) && job.duration >= 0.5 && job.duration <= 30;
+      if (promptLength > 450 || !durationValid) {
+        console.error(`FAIL ${job.file}: prompt ${promptLength}/450, duration ${job.duration}s`);
+        invalid += 1;
+      } else {
+        console.log(`ok ${job.file}: prompt ${promptLength}/450, ${job.duration}s`);
+      }
+    }
+    if (invalid) {
+      console.error(`Validation failed for ${invalid} prompt(s)`);
+      process.exit(1);
+    }
+    console.log(`Validated ${CATALOG.length} ElevenLabs small-arms prompt(s)`);
+    return;
+  }
+
+  if (!API_KEY) {
+    console.error('Missing ELEVENLABS_API_KEY');
+    process.exit(1);
+  }
+
+  console.log(`ElevenLabs small arms — ${CATALOG.length} samples`);
   let ok = 0;
   let skipped = 0;
   let failed = 0;

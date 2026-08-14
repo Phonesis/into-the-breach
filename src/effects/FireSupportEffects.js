@@ -11,6 +11,7 @@ import {
 } from './CombatEffects.js';
 import { createStrafeAircraftMesh } from './StrafeAircraftMesh.js';
 import { createTransportAircraftMesh } from './TransportAircraftMesh.js';
+import { captureRendererState, restoreRendererState } from './RendererState.js';
 
 const active = [];
 const MAX_ACTIVE_WARNINGS = 2;
@@ -62,7 +63,7 @@ function compileStrafeAircraft(renderer, factionId, targetScene = null) {
   const warmTarget = renderer.render && renderer.setRenderTarget
     ? new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false })
     : null;
-  const previousTarget = renderer.getRenderTarget?.() ?? null;
+  const rendererState = captureRendererState(renderer);
   try {
     renderer.compile(warmScene, warmCamera, targetScene ?? warmScene);
     if (warmTarget) {
@@ -72,10 +73,8 @@ function compileStrafeAircraft(renderer, factionId, targetScene = null) {
       renderer.render(warmScene, warmCamera);
     }
   } finally {
-    if (warmTarget) {
-      renderer.setRenderTarget(previousTarget);
-      warmTarget.dispose();
-    }
+    restoreRendererState(renderer, rendererState);
+    warmTarget?.dispose();
     // Keep the template and its GPU resources cached, but never put the hidden
     // warm-up scene into the live battlefield.
     warmScene.remove(template.group);

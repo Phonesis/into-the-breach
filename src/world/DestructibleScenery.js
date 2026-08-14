@@ -305,6 +305,8 @@ export class DestructibleScenery {
     this.mapDef = mapDef;
     this.getTerrainMesh = getTerrainMesh ?? (() => null);
     this.objects = [];
+    this._attackTargetsCache = null;
+    this._hasGarrisonShelters = false;
     // Dense urban maps contain hundreds of entries. Collision, routing, blast,
     // and LOS checks use this broad phase instead of scanning all of Berlin for
     // every moving unit and every shot.
@@ -451,6 +453,8 @@ export class DestructibleScenery {
     };
     group.userData.destructible = entry;
     this.objects.push(entry);
+    this._attackTargetsCache = null;
+    this._hasGarrisonShelters ||= canGarrison;
     this._indexObject(entry);
     this.scene.add(group);
     this._attachCoverZone(entry);
@@ -480,7 +484,7 @@ export class DestructibleScenery {
   }
 
   hasGarrisonShelters() {
-    return this.objects.some((o) => !o.destroyed && GARRISON_BUILDING_KINDS.has(o.kind));
+    return this._hasGarrisonShelters;
   }
 
   getEntryById(id) {
@@ -550,12 +554,14 @@ export class DestructibleScenery {
 
   /** Combat targets for ordered attacks on cover. */
   getAttackTargets() {
+    if (this._attackTargetsCache) return this._attackTargetsCache;
     const out = [];
     for (const obj of this.getLiveObjects()) {
       const t = wrapSceneryTarget(obj, this);
       if (t) out.push(t);
     }
-    return out;
+    this._attackTargetsCache = out;
+    return this._attackTargetsCache;
   }
 
   /**
@@ -1790,6 +1796,7 @@ export class DestructibleScenery {
   ) {
     if (obj.destroyed) return;
     obj.destroyed = true;
+    this._attackTargetsCache = null;
     const y = obj.group.position.y + 0.5;
     if (effects) spawnExplosion(this.scene, { x: obj.x, y, z: obj.z });
     if (effects && this.mapDef) {
@@ -2271,6 +2278,8 @@ export class DestructibleScenery {
       this._removeAndDisposeGroup(anim.group);
     }
     this.objects = [];
+    this._attackTargetsCache = null;
+    this._hasGarrisonShelters = false;
     this._spatialBuckets = new Map();
     this.rubble = [];
     this.crushAnimations = [];

@@ -27,10 +27,12 @@ import { GENERAL_ORDER_LIST } from '../data/generalOrders.js';
 const GENERAL_ORDER_CANCEL_LABELS = {
   fullRetreat: 'Cancel Retreat',
   holdGround: 'Cancel Hold',
+  digIn: 'Cancel Dig In',
 };
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
+import { canSeekCover } from '../game/CoverSeek.js';
 import {
   COMMANDER_AURA_RANGE,
   isUnitInspiredByCommander,
@@ -151,6 +153,7 @@ const UNIT_STATUS_VISIBLE_KEY = GAME_SETTING_KEYS.unitStatus;
 const FRONTLINE_VISIBLE_KEY = GAME_SETTING_KEYS.frontline;
 const CAPTURE_POINTS_VISIBLE_KEY = GAME_SETTING_KEYS.capturePoints;
 const SEEK_COVER_MODE_KEY = GAME_SETTING_KEYS.seekCover;
+const RADIO_OPERATOR_AUTO_MOVE_KEY = GAME_SETTING_KEYS.radioOperatorAutoMove;
 // Keep the existing storage key so saved pursuit choices migrate cleanly while
 // the Settings control presents the clearer Hold Ground default.
 const HOLD_GROUND_KEY = GAME_SETTING_KEYS.pursueTargets;
@@ -240,6 +243,7 @@ export class UIManager {
     this.showFrontline = readBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     this.showCapturePoints = readBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
     this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, true);
+    this.radioOperatorAutoMove = readBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true);
     this.holdGroundByDefault = !readBooleanSetting(HOLD_GROUND_KEY, false);
     this.pursueTargetsByDefault = !this.holdGroundByDefault;
     this.artilleryAutoFire = readBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true);
@@ -372,8 +376,12 @@ export class UIManager {
           <h2 class="settings-section-title">Unit Behaviour</h2>
           <div class="settings-grid">
             <label class="setting-row" for="setting-seek-cover">
-              <span><strong>Seek Cover</strong><small>Route foot-troop move orders toward nearby cover by default.</small><span class="setting-detail" id="setting-seek-cover-detail">Future move orders for infantry, commanders, medics, engineers, MGs, mortars, and snipers will snap to suitable nearby cover. Tanks, armored cars, anti-tank guns, and artillery still move to the exact point ordered.</span></span>
+              <span><strong>Seek Cover</strong><small>Route foot-troop move orders toward nearby cover by default.</small><span class="setting-detail" id="setting-seek-cover-detail">Future move orders for infantry, commanders, medics, engineers, MGs, mortars, radio operators, snipers, and bailed vehicle crews will snap to suitable nearby cover. Select an applicable unit during battle to override this default for that unit alone. Tanks, armored cars, anti-tank guns, and artillery still move to the exact point ordered.</span></span>
               <input type="checkbox" id="setting-seek-cover" data-setting="seekCover" aria-describedby="setting-seek-cover-detail" />
+            </label>
+            <label class="setting-row" for="setting-radio-operator-auto-move">
+              <span><strong>Automatic radio positioning</strong><small>Move the nearest radio operator into range for an out-of-range support click.</small><span class="setting-detail" id="setting-radio-operator-auto-move-detail">When on, clicking a fire-support target beyond every living radio operator’s current range places a visible pending strike marker and orders the nearest operational operator to a covered position just inside the support radius. Targeting then closes, so later battlefield clicks cannot replace the pending target. The strike fires automatically when the operator can observe it. Click the marker, select the radio operator, or give that operator a manual order to cancel. When off, move a radio operator manually before calling support.</span></span>
+              <input type="checkbox" id="setting-radio-operator-auto-move" data-setting="radioOperatorAutoMove" aria-describedby="setting-radio-operator-auto-move-detail" />
             </label>
             <label class="setting-row" for="setting-hold-ground">
               <span><strong>Hold Ground by default</strong><small>Choose whether idle units hold ground or chase targets.</small><span class="setting-detail" id="setting-hold-ground-detail">When on, player units that auto-acquire an enemy will hold their firing position and stop chasing after the target leaves engagement range. When off, units pursue targets and close the distance beyond their initial firing position. Explicit attack orders always bind to the selected target; Hold Ground or Pursue determines whether they stop or follow after reaching range. Changing this while paused updates existing player units.</span></span>
@@ -862,6 +870,20 @@ export class UIManager {
                 Auto-fire at enemies in range without chasing.
               </p>
             </div>
+            <div class="seek-cover-actions hidden" id="seek-cover-actions">
+              <p class="seek-cover-label">Seek Cover for selected applicable units</p>
+              <div class="seek-cover-buttons" role="group" aria-label="Seek Cover unit override">
+                <button type="button" class="btn btn-secondary interactive" data-seek-cover-override="on">
+                  Seek cover
+                </button>
+                <button type="button" class="btn btn-secondary interactive" data-seek-cover-override="off">
+                  Use clicked ground
+                </button>
+              </div>
+              <p class="seek-cover-hint" id="seek-cover-hint">
+                Uses the global Seek Cover setting from Settings.
+              </p>
+            </div>
             <div class="fire-mission-actions hidden" id="fire-mission-actions">
               <button type="button" class="btn btn-cancel-fire interactive" id="btn-cancel-fire-missions">
                 Cancel fire missions
@@ -1034,7 +1056,7 @@ export class UIManager {
               </div>
               <div class="generalorders-body" id="generalorders-body">
                 <div class="generalorders-btns" id="generalorders-btns"></div>
-                <p class="generalorders-hint" id="generalorders-hint">Command-wide orders — 3 min cooldown each</p>
+                <p class="generalorders-hint" id="generalorders-hint">Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order</p>
               </div>
             </div>
           </div>
@@ -1442,15 +1464,7 @@ export class UIManager {
 
   renderMaps() {
     const grid = this.root.querySelector('#map-grid');
-    const testMode = this.selectedGameMode === 'lineTest';
-    const visibleMaps = MAP_LIST.filter((map) =>
-      testMode ? map.testScenario === 'lineEffectiveness' : !map.testScenario
-    );
-    if (this.selectedMap && !visibleMaps.some((map) => map.id === this.selectedMap)) {
-      this.selectedMap = null;
-      this.root.querySelector('#btn-launch')?.setAttribute('disabled', '');
-    }
-    grid.innerHTML = visibleMaps.map(
+    grid.innerHTML = MAP_LIST.map(
       (m, index) => `
       <button class="card-btn interactive map-card" data-id="${m.id}">
         <span class="card-index">Theater ${String(index + 1).padStart(2, '0')}</span>
@@ -1891,6 +1905,11 @@ export class UIManager {
     });
     this.root.querySelector('#btn-stance-pursue')?.addEventListener('click', () => {
       this.callbacks.onSetEngagementStance?.('pursue');
+    });
+    this.root.querySelectorAll('[data-seek-cover-override]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.callbacks.onSetSeekCoverOverride?.(btn.dataset.seekCoverOverride);
+      });
     });
     this.root.querySelector('#btn-arty-autofire')?.addEventListener('click', () => {
       this.callbacks.onToggleArtilleryAutoFire?.();
@@ -2359,8 +2378,7 @@ export class UIManager {
     const diffLabel = options.difficulty ? ` · ${options.difficulty.name}` : '';
     this.root.querySelector('#hud-map').textContent = `${formatMapHudLabel(mapDef)}${diffLabel}`;
 
-    const lineTest = gameMode === 'lineTest' || options.lineTest;
-    const tutorial = gameMode === 'tutorial' && !lineTest;
+    const tutorial = gameMode === 'tutorial';
     const assault = gameMode === 'assault';
     const clearance = gameMode === 'clearance' || gameMode === 'clearanceReinforced';
     const clearanceReinforced = clearance && options.clearanceReinforced;
@@ -2406,12 +2424,7 @@ export class UIManager {
     tdCountdown?.classList.toggle('td-wave-countdown-side', !!towerDefense);
     this.hideTdBreachAlert();
     const lastStandBanner = this.root.querySelector('#laststand-banner');
-    if (lastStandBanner) {
-      lastStandBanner.classList.toggle('hidden', !lastStand && !lineTest);
-      lastStandBanner.textContent = lineTest
-        ? 'Line Effectiveness Lab — mine belt, vehicle dummies, and retreat lane'
-        : 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.';
-    }
+    lastStandBanner?.classList.toggle('hidden', !lastStand);
     this._hudTowerDefense = towerDefense;
     this._hudTdHqDefense = tdHqDefense;
     this._hudHasFrontline = assault || towerDefense;
@@ -2426,8 +2439,8 @@ export class UIManager {
       .querySelector('#btn-toggle-capture-points')
       ?.classList.toggle('hidden', !hasCapturePoints);
     this._syncCapturePointToggle();
-    const hideFireSupportPanel = lastStand || lineTest;
-    const hideGeneralOrdersPanel = (towerDefense && !tdHqDefense) || lastStand || lineTest;
+    const hideFireSupportPanel = lastStand;
+    const hideGeneralOrdersPanel = (towerDefense && !tdHqDefense) || lastStand;
     this.root
       .querySelector('#firesupport-panel')
       ?.classList.toggle('hidden', hideFireSupportPanel);
@@ -2446,8 +2459,8 @@ export class UIManager {
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
     this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
     this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
-    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance || lineTest);
-    this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance || lineTest);
+    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance);
+    this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
     this.syncAutoBuildForCampaign(this._hudCampaignStyle);
@@ -2467,10 +2480,7 @@ export class UIManager {
 
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
-      if (lineTest) {
-        this._defaultHudHint =
-          'Line Test: select the infantry squad · set Hold Ground or Pursue · explicitly attack the enemy position; drive tanks across the marked enemy mine belt';
-      } else if (tutorial) {
+      if (tutorial) {
         this._defaultHudHint =
           'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
@@ -2514,10 +2524,7 @@ export class UIManager {
           'Victory: destroy the enemy HQ · WASD pan · wheel zoom · LMB/RMB orders · Shift+LMB fire';
       }
       hint.textContent = this._defaultHudHint;
-      if (tabletOn && lineTest) {
-        hint.textContent =
-          'Line Test: select infantry · Hold/Pursue · attack the position · drive tanks over the mine belt';
-      } else if (tabletOn && tutorial) {
+      if (tabletOn && tutorial) {
         hint.textContent =
           'Tutorial: tap to select · Target/Fire buttons (camera pad) · tap map to move/attack';
       } else if (tabletOn && lastStand && options.lastStandPreset) {
@@ -2568,7 +2575,6 @@ export class UIManager {
     this._bindUnitRoster();
     this._syncFieldIconToggle();
     this._syncUnitStatusToggle();
-    this._syncSeekCoverToggle();
   }
 
   setUnitFieldIconsEnabled(on) {
@@ -2606,6 +2612,7 @@ export class UIManager {
     writeBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     writeBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
     writeBooleanSetting(SEEK_COVER_MODE_KEY, true);
+    writeBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true);
     // The legacy storage key stores pursuit, so false means Hold Ground.
     writeBooleanSetting(HOLD_GROUND_KEY, false);
     writeBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true);
@@ -2623,6 +2630,7 @@ export class UIManager {
     this.showFrontline = true;
     this.showCapturePoints = true;
     this.seekCoverMode = true;
+    this.radioOperatorAutoMove = true;
     this.holdGroundByDefault = true;
     this.pursueTargetsByDefault = false;
     this.artilleryAutoFire = true;
@@ -2632,7 +2640,6 @@ export class UIManager {
     this._syncUnitStatusToggle();
     this._syncFrontlineToggle();
     this._syncCapturePointToggle();
-    this._syncSeekCoverToggle();
     this._syncAutoBuildToggle();
     this._syncSettingsControls();
 
@@ -2642,6 +2649,7 @@ export class UIManager {
     this.callbacks.onToggleFrontline?.(true);
     this.callbacks.onToggleCapturePoints?.(true);
     this.callbacks.onToggleSeekCover?.(true);
+    this.callbacks.onChangeRadioOperatorAutoMove?.(true);
     this.callbacks.onChangePursueTargets?.(false);
     this.callbacks.onChangeArtilleryAutoFire?.(true);
     this.callbacks.onToggleAutoBuild?.(false);
@@ -2768,6 +2776,12 @@ export class UIManager {
         this.setSeekCoverMode(on);
         if (applyToBattle) this.callbacks.onToggleSeekCover?.(this.seekCoverMode);
         break;
+      case 'radioOperatorAutoMove':
+        this.setRadioOperatorAutoMove(on);
+        if (applyToBattle) {
+          this.callbacks.onChangeRadioOperatorAutoMove?.(this.radioOperatorAutoMove);
+        }
+        break;
       case 'holdGround':
         this.setHoldGroundByDefault(on);
         if (applyToBattle) this.callbacks.onChangePursueTargets?.(this.pursueTargetsByDefault);
@@ -2820,6 +2834,8 @@ export class UIManager {
       frontline: this.showFrontline,
       capturePoints: this.showCapturePoints,
       seekCover: this.seekCoverMode,
+      radioOperatorAutoMove:
+        this.radioOperatorAutoMove ?? readBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true),
       holdGround: this.holdGroundByDefault ?? !readBooleanSetting(HOLD_GROUND_KEY, false),
       artilleryAutoFire: this.artilleryAutoFire ?? readBooleanSetting(ARTILLERY_AUTO_FIRE_KEY, true),
       tabletMode: isTabletModeEnabled(),
@@ -2873,7 +2889,13 @@ export class UIManager {
   setSeekCoverMode(on) {
     this.seekCoverMode = !!on;
     writeBooleanSetting(SEEK_COVER_MODE_KEY, on);
-    this._syncSeekCoverToggle();
+    this._syncSettingsControls();
+  }
+
+  setRadioOperatorAutoMove(on) {
+    this.radioOperatorAutoMove = !!on;
+    writeBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, on);
+    this._syncSettingsControls();
   }
 
   syncAutoBuildForCampaign(campaignStyle = 'classic') {
@@ -2911,28 +2933,6 @@ export class UIManager {
     }
     const stateEl = btn.querySelector('.auto-build-state');
     if (stateEl) stateEl.textContent = this.autoBuildMode && !cheatBlocked ? 'On' : 'Off';
-  }
-
-  _syncSeekCoverToggle() {
-    const btn = this.root.querySelector('#btn-toggle-seek-cover');
-    if (!btn) return;
-    btn.classList.toggle('order-running', this.seekCoverMode);
-    btn.setAttribute('aria-pressed', this.seekCoverMode ? 'true' : 'false');
-    btn.title = this.seekCoverMode
-      ? 'Foot troops and support crews seek nearest cover (click to disable)'
-      : 'Move orders go to clicked ground — click to seek cover for foot troops and support crews';
-    const stateEl = btn.querySelector('.seek-cover-state');
-    if (stateEl) stateEl.textContent = this.seekCoverMode ? 'On' : 'Off';
-    this._syncGeneralOrdersHint();
-  }
-
-  _syncGeneralOrdersHint() {
-    const hint = this.root.querySelector('#generalorders-hint');
-    if (!hint) return;
-    const base = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
-    hint.textContent = this.seekCoverMode
-      ? `${base} · Seek Cover routes foot troops and support crews to nearby cover`
-      : base;
   }
 
   updateTankRiderActions(units) {
@@ -3872,6 +3872,7 @@ export class UIManager {
     if (!panel || !manager) return;
 
     const pending = manager.pending ?? null;
+    const pendingStrike = manager.pendingStrike ?? null;
     if (pending !== this._lastFireSupportPending) {
       if (pending && !this.fireSupportExpanded) {
         this.setFireSupportExpanded(true);
@@ -3895,11 +3896,14 @@ export class UIManager {
         : 0;
       const ready = manager.isReady(fs.id);
       const armed = manager.pending === fs.id;
+      const queued = pendingStrike?.type === fs.id;
 
       if (cdEl) {
         const cloudMinutes = Math.floor(cloudRemaining / 60);
         const cloudSeconds = String(cloudRemaining % 60).padStart(2, '0');
-        cdEl.textContent = !commandLink
+        cdEl.textContent = queued
+          ? 'Pending'
+          : !commandLink
           ? 'No Radio'
           : airborneSpent
           ? 'Used'
@@ -3912,12 +3916,25 @@ export class UIManager {
       if (btn) {
         btn.disabled = (!ready && !armed) || airborneSpent;
         btn.classList.toggle('armed', armed);
+        // Pending is a status, not an armed targeting selection. The cooldown
+        // label communicates it without leaving the support button highlighted.
+        btn.classList.toggle('queued', false);
         btn.classList.toggle('on-cooldown', !ready || airborneSpent);
+        if (queued) {
+          btn.title = 'Pending strike — click its battlefield marker or manually task the radio operator to cancel';
+        } else {
+          btn.title = fs.label;
+        }
       }
     }
 
     if (hint) {
-      if (!commandLink) {
+      if (pendingStrike) {
+        const label = manager.getDef?.(pendingStrike.type)?.short ?? 'strike';
+        const coverNote = pendingStrike.covered ? ' The operator is moving into cover.' : '';
+        hint.textContent =
+          `Pending ${label} at the battlefield marker — target fixed; normal battlefield controls restored.${coverNote} Click the marker or manually task the operator to cancel.`;
+      } else if (!commandLink) {
         hint.textContent = 'No living radio operator — off-map support unavailable';
       } else if (manager.targetRejectReason) {
         hint.textContent = manager.targetRejectReason;
@@ -3980,35 +3997,13 @@ export class UIManager {
       </button>
     `
     ).join('');
-    const seekCoverBtn = `
-      <button
-        type="button"
-        class="generalorders-btn interactive seek-cover-toggle"
-        id="btn-toggle-seek-cover"
-        title="Move orders seek nearest cover"
-        aria-pressed="false"
-      >
-        <span class="go-name">Seek Cover</span>
-        <span class="go-cd seek-cover-state">Off</span>
-      </button>
-    `;
-    wrap.innerHTML = orderBtns + seekCoverBtn;
+    wrap.innerHTML = orderBtns;
 
     wrap.querySelectorAll('.generalorders-btn[data-go]').forEach((btn) => {
       btn.onclick = () => {
         if (this.callbacks.onGeneralOrder) this.callbacks.onGeneralOrder(btn.dataset.go);
       };
     });
-    const seekBtn = wrap.querySelector('#btn-toggle-seek-cover');
-    if (seekBtn) {
-      seekBtn.onclick = () => {
-        this.setSeekCoverMode(!this.seekCoverMode);
-        if (this.callbacks.onToggleSeekCover) {
-          this.callbacks.onToggleSeekCover(this.seekCoverMode);
-        }
-      };
-    }
-    this._syncSeekCoverToggle();
   }
 
   updateGeneralOrders(manager) {
@@ -4061,11 +4056,13 @@ export class UIManager {
       } else if (activeType === 'fullRetreat') {
         const retreatDest = this._hudClearance ? 'starting zone' : 'HQ';
         hint.textContent = `Full Retreat — units withdrawing to ${retreatDest} (${Math.ceil(activeRem)}s) · click Cancel Retreat or Esc`;
-      } else if (activeType === 'holdGround') {
-        hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
-      } else {
-        this._syncGeneralOrdersHint();
-      }
+     } else if (activeType === 'holdGround') {
+       hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
+     } else if (activeType === 'digIn') {
+       hint.textContent = `Dig In — eligible troops digging enemy-facing trenches (${Math.ceil(activeRem)}s) · click Cancel Dig In or Esc`;
+     } else {
+        hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order';
+     }
     }
   }
 
@@ -4836,6 +4833,7 @@ export class UIManager {
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
     this.updateEngagementStance(hq ? [] : units);
+    this.updateSeekCoverOverride(hq ? [] : units, game);
 
     const showProduction = this._hudBaseBuilding
       ? (game?.selectedBaseBuilding?.def?.spawns?.length ?? 0) > 0
@@ -5102,6 +5100,54 @@ export class UIManager {
         : allHold
           ? 'Attack orders close to weapon range, then hold position if the target withdraws.'
           : `Mixed stance — ${holdCount} holding, ${pursueCount} pursuing.`;
+    }
+  }
+
+  updateSeekCoverOverride(units = [], game = null) {
+    const wrap = this.root.querySelector('#seek-cover-actions');
+    const hint = this.root.querySelector('#seek-cover-hint');
+    if (!wrap) return;
+
+    const eligible = units.filter(
+      (u) => !u.dead && !u.surrendered && canSeekCover(u)
+    );
+    wrap.classList.toggle('hidden', eligible.length === 0);
+    if (!eligible.length) return;
+
+    const stateFor = (unit) =>
+      unit.seekCoverOverride === true
+        ? 'on'
+        : unit.seekCoverOverride === false
+          ? 'off'
+          : 'default';
+    const states = eligible.map(stateFor);
+    const state = states.every((value) => value === states[0]) ? states[0] : 'mixed';
+    const globalOn = game?.seekCoverMode ?? this.seekCoverMode;
+    const highlightedState =
+      state === 'default' ? (globalOn ? 'on' : 'off') : state;
+    const buttons = wrap.querySelectorAll('[data-seek-cover-override]');
+    buttons.forEach((button) => {
+      const value = button.dataset.seekCoverOverride;
+      const active = highlightedState !== 'mixed' && highlightedState === value;
+      button.classList.toggle('armed', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+
+    if (!hint) return;
+    if (state === 'mixed') {
+      hint.textContent = `Mixed per-unit overrides across ${eligible.length} applicable selected units — choose an option to apply it to all.`;
+    } else if (state === 'default') {
+      hint.textContent = eligible.length === 1
+        ? `Follows Settings → Seek Cover (${globalOn ? 'On' : 'Off'}).`
+        : `All ${eligible.length} applicable selected units follow Settings → Seek Cover (${globalOn ? 'On' : 'Off'}).`;
+    } else if (state === 'on') {
+      hint.textContent = eligible.length === 1
+        ? 'This unit always routes move orders toward nearby cover.'
+        : `All ${eligible.length} applicable selected units always route move orders toward nearby cover.`;
+    } else {
+      hint.textContent = eligible.length === 1
+        ? 'This unit always moves to the ground you click.'
+        : `All ${eligible.length} applicable selected units always move to the ground you click.`;
     }
   }
 

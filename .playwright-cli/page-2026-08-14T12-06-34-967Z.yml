@@ -1,0 +1,136 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: United States
+          - generic: Normandy
+          - generic: Training — no enemy AI
+          - button "Hide capture point circles" [pressed] [ref=e388] [cursor=pointer]:
+            - generic [ref=e390]: Capture circles
+        - generic:
+          - button "Save" [ref=e391] [cursor=pointer]
+          - button "Leave Training" [ref=e392] [cursor=pointer]
+          - generic:
+            - generic: Supplies (+1/3 pts)
+            - text: "763"
+          - generic: "Your forces: 12 · Practice mode"
+      - generic:
+        - generic "Saint-Lô Crossroads — Held (yours)":
+          - generic: Saint-Lô Crossroads ★
+          - generic: 100%
+        - generic "Carentan Road — Neutral":
+          - generic: Carentan Road
+          - generic: 0%
+        - generic "Vire Bridge — Neutral":
+          - generic: Vire Bridge
+          - generic: 0%
+      - generic "Tactical map" [ref=e393]:
+        - generic [ref=e394]:
+          - generic [ref=e395]: Tactical Map
+          - button "Hide" [pressed] [ref=e396] [cursor=pointer]
+        - generic "Battlefield overview" [ref=e397]
+        - paragraph [ref=e398]: Green — friendly · Red — enemy · Traces show live fire · Click to pan
+      - complementary "Your forces" [ref=e399]:
+        - heading "Forces" [level=3] [ref=e400]
+        - button "Field icons" [pressed] [ref=e401] [cursor=pointer]:
+          - img [ref=e403]
+          - generic [ref=e408]: Field icons
+        - button "Unit status" [pressed] [ref=e409] [cursor=pointer]:
+          - generic [ref=e410]: ✦
+          - generic [ref=e411]: Unit status
+        - generic [ref=e412]:
+          - button "57 mm Gun M1" [ref=e901] [cursor=pointer]:
+            - img [ref=e903]
+            - generic [ref=e914]:
+              - generic [ref=e915]: AT
+              - generic [ref=e919]: 100%
+          - button "M8 Greyhound" [ref=e921] [cursor=pointer]:
+            - img [ref=e923]
+            - generic [ref=e933]:
+              - generic [ref=e934]: AC
+              - generic [ref=e938]: 100%
+          - button "M101 Howitzer" [ref=e940] [cursor=pointer]:
+            - img [ref=e942]
+            - generic [ref=e952]:
+              - generic [ref=e953]: Arty
+              - generic [ref=e957]: 100%
+          - button "Commanding Officer" [ref=e959] [cursor=pointer]:
+            - img [ref=e961]
+            - generic [ref=e965]:
+              - generic [ref=e966]: CMD
+              - generic [ref=e970]: 100%
+          - button "Engineer Squad" [ref=e972] [cursor=pointer]:
+            - img [ref=e974]
+            - generic [ref=e981]:
+              - generic [ref=e982]: Eng
+              - generic [ref=e986]: 100%
+          - generic [ref=e987]:
+            - button "Rifle Squad, unit 1 of 3" [ref=e988] [cursor=pointer]:
+              - img [ref=e990]
+              - generic [ref=e995]:
+                - generic [ref=e996]: Inf×3
+                - generic [ref=e1000]: 100%
+            - generic "Other Inf units":
+              - button "Rifle Squad, unit 2 of 3" [ref=e1001] [cursor=pointer]:
+                - img [ref=e1003]
+                - generic [ref=e1008]:
+                  - generic [ref=e1009]: Inf#2
+                  - generic [ref=e1013]: 100%
+              - button "Rifle Squad, unit 3 of 3" [ref=e1014] [cursor=pointer]:
+                - img [ref=e1016]
+                - generic [ref=e1021]:
+                  - generic [ref=e1022]: Inf#3
+                  - generic [ref=e1026]: 100%
+          - button "M1919 MG Team" [ref=e1028] [cursor=pointer]:
+            - img [ref=e1030]
+            - generic [ref=e1038]:
+              - generic [ref=e1039]: MG
+              - generic [ref=e1043]: 100%
+          - button "M2 Mortar Squad" [ref=e1045] [cursor=pointer]:
+            - img [ref=e1047]
+            - generic [ref=e1053]:
+              - generic [ref=e1054]: Mrt
+              - generic [ref=e1058]: 100%
+          - button "Radio Operator" [ref=e1060] [cursor=pointer]:
+            - img [ref=e1062]
+            - generic [ref=e1068]:
+              - generic [ref=e1069]: Radio
+              - generic [ref=e1073]: 100%
+          - button "Sniper Team" [ref=e1075] [cursor=pointer]:
+            - img [ref=e1077]
+            - generic [ref=e1084]:
+              - generic [ref=e1085]: Snp
+              - generic [ref=e1089]: 100%
+          - button "M4 Sherman" [ref=e1091] [cursor=pointer]:
+            - img [ref=e1093]
+            - generic [ref=e1102]:
+              - generic [ref=e1103]: Tk
+              - generic [ref=e1107]: 100%
+      - generic:
+        - generic [ref=e622]:
+          - heading "No selection" [level=3] [ref=e1108]
+          - paragraph [ref=e1109]: Click or drag to select units. Click your HQ for status.
+        - text: ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙
+        - generic:
+          - button "Fire Support" [ref=e627] [cursor=pointer]:
+            - generic [ref=e628]: Fire Support
+            - generic [ref=e629]: ▼
+          - generic [ref=e630]:
+            - button "General Orders" [expanded] [active] [ref=e632] [cursor=pointer]:
+              - generic [ref=e633]: General Orders
+              - generic [ref=e634]: ▼
+            - generic [ref=e636]:
+              - generic [ref=e637]:
+                - button "Full Retreat Ready" [ref=e1110] [cursor=pointer]:
+                  - generic [ref=e639]: Full Retreat
+                  - generic [ref=e640]: Ready
+                - button "Hold Ground Ready" [ref=e1111] [cursor=pointer]:
+                  - generic [ref=e642]: Hold Ground
+                  - generic [ref=e643]: Ready
+                - button "Dig In 135s" [disabled] [ref=e1112]:
+                  - generic [ref=e645]: Dig In
+                  - generic [ref=e646]: 135s
+              - paragraph [ref=e647]: Command-wide orders — each lasts 30s, 3 min cooldown · Esc cancels active order
+        - paragraph: "Tutorial: practice vs static HQ — train all unit types, capture neutral points"
+        - button "Field Manual" [ref=e635] [cursor=pointer]

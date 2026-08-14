@@ -194,6 +194,18 @@ const CATALOG = [
     text: `Massive World War Two high explosive shell detonation outdoors, deep bass boom, dirt and debris, pressure wave, ${REALISTIC}`,
   },
   {
+    file: 'explosion-j.wav',
+    duration: 1.7,
+    influence: 0.55,
+    text: `World War Two artillery shell exploding in a muddy field, sharp initial crack, heavy earth burst, deep short boom and natural outdoor decay, authentic field recording, no music, no voices, no speech, no synthetic, no electronic, no cinematic trailer`,
+  },
+  {
+    file: 'explosion-k.wav',
+    duration: 1.85,
+    influence: 0.53,
+    text: `Close World War Two high explosive shell burst beside a stone wall, violent pressure wave, dirt and masonry debris, deep low boom with brief natural rumble, dry outdoor battlefield recording, no music, no voices, no speech, no synthetic, no electronic`,
+  },
+  {
     file: 'mine-explosion-01.wav',
     duration: 1.15,
     influence: 0.62,
@@ -210,6 +222,18 @@ const CATALOG = [
     duration: 0.55,
     influence: 0.5,
     text: `Bullet striking packed dirt and sand, short thud with gravel spray, soft body, ${REALISTIC}`,
+  },
+  {
+    file: 'impact-f.wav',
+    duration: 0.55,
+    influence: 0.52,
+    text: `Rifle bullet striking dry grass and loose dirt, compact dusty thud and tiny pebble spray, authentic outdoor battlefield recording, short natural decay, no gunshot, no voices, no music, no explosion, no synthetic sound`,
+  },
+  {
+    file: 'impact-g.wav',
+    duration: 0.58,
+    influence: 0.5,
+    text: `Several small arms rounds hitting sandbags and packed earth, irregular dull thumps and dust puffs, close realistic field recording, no muzzle blast, no voices, no music, no explosion, no electronic sound`,
   },
   {
     file: 'armor-ricochet-01.wav',

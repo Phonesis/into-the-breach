@@ -82,7 +82,6 @@ import {
   removeRetreatMarker,
   resolveRetreatHq,
   syncRetreatMarkers,
-  startRetreat,
 } from './RetreatBehavior.js';
 import { updateMedicHealing } from './MedicBehavior.js';
 import { updateHospitalHealing } from './HospitalBehavior.js';
@@ -170,6 +169,7 @@ import {
   addVehicleWreckCover,
   removeVehicleWreckCover,
 } from './CoverSystem.js';
+import { canSeekCover, getSeekCoverEnabled } from './CoverSeek.js';
 import { MAPS, buildMapDef } from '../data/maps.js';
 import { getDeployRadius, getStagingMoveRadius, formatMapHudLabel } from '../data/mapSizes.js';
 import { getDifficulty, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
@@ -211,7 +211,7 @@ import {
   updateLightingForTarget,
   updateSkyForCamera,
 } from '../world/SceneSetup.js';
-import { applySceneEnvironment } from '../world/EnvironmentMap.js';
+import { applySceneEnvironment, disposeEnvironment } from '../world/EnvironmentMap.js';
 
 import {
   spawnExplosion,
@@ -240,12 +240,10 @@ import {
 } from '../world/TerrainDamage.js';
 import { resolveUnitSpawnPosition, spawnArmy } from './Spawner.js';
 import {
-  seedLineEffectivenessTestMines,
-  spawnLineEffectivenessTestForces,
-} from './LineEffectivenessTest.js';
-import {
   ensureStartingRadioOperators,
   getRadioOperators,
+  getRadioOperatorSupportRange,
+  getRadioOperatorSupportRelayDestination,
   hasRadioOperator,
   activateRadioBinoculars,
   canUseRadioBinoculars,
@@ -332,6 +330,7 @@ const LARGE_BATTLE_SIM_MOVEMENT_STEP = 1 / 30;
 const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
 const GARAND_CLIP_SIZE = 8;
 const GARAND_PING_CHANCE = 0.58;
+const TOWER_DEFENSE_AI_STEP = 0.1;
 
 export class Game {
   constructor({ canvas, ui }) {
@@ -385,6 +384,7 @@ export class Game {
     this._emptyFieldHandled = false;
     this._tabHidden = false;
     this._rafActive = false;
+    this._rendererContextLost = false;
     this._postMatchRenderAccum = 0;
     this._renderPerformance = {
       frameTimeEma: 1 / 60,
@@ -404,11 +404,13 @@ export class Game {
     this._unitVisualSyncAccum = 0;
     this._largeBattleMovementAccum = 0;
     this._largeBattleTacticalVisualAccum = 0;
+    this._towerDefenseAiAccum = 0;
     this._largeBattleSimulationPerfActive = false;
     this._tabletMode = isTabletModeEnabled();
     this.showUnitFieldIcons = true;
     this.showUnitStatus = true;
     this.seekCoverMode = true;
+    this.radioOperatorAutoMove = this.ui?.radioOperatorAutoMove ?? true;
     this.pursueTargetsByDefault = this.ui?.pursueTargetsByDefault ?? false;
     this.artilleryAutoFire = this.ui?.artilleryAutoFire ?? true;
     this.autoBuildMode = false;
@@ -430,7 +432,6 @@ export class Game {
     this.playerFaction = null;
     this.enemyFaction = null;
     this.gameMode = 'campaign';
-    this.lineEffectivenessTest = false;
     this.tutorial = false;
     this.clearance = false;
     this.clearanceRole = 'attack';
@@ -556,6 +557,8 @@ export class Game {
       getPlayerTeam: () => PLAYER_TEAM,
       getPendingFireSupport: () =>
         this.running && !this.gameOver ? this.fireSupport.pending : null,
+      getPendingFireSupportStrike: () =>
+        this.running && !this.gameOver ? this.fireSupport.pendingStrike : null,
       getPendingSmokeShell: () =>
         this.running && !this.gameOver ? this.smokeShellTargeting : false,
       getPendingDefensePlacement: () =>
@@ -594,8 +597,12 @@ export class Game {
       onTrenchPlacement: (mode, x, z) => this.handleTrenchPlacement(mode, x, z),
       onMedicTentPlacement: (mode, x, z) => this.handleMedicTentPlacement(mode, x, z),
       onBaseBuildingPlacement: (mode, x, z) => this.handleBaseBuildingPlacement(mode, x, z),
-      onMoveOrder: (selected) => this.cancelPendingConstructionPlacement(selected),
+      onMoveOrder: (selected) => {
+        this.cancelPendingConstructionPlacement(selected);
+        this._cancelPendingRadioOperatorStrikeForUnits(selected);
+      },
       onSelectionChange: (sel, hq = null, baseBuilding = null) => {
+        this._cancelPendingRadioOperatorStrikeForUnits(sel);
         // Explicit re-select (click unit / box / HQ) brings the info panel back.
         this._selectionPanelDismissed = false;
         if (!this._unitSelectionShortcutApplying) this._unitSelectionCycle = null;
@@ -632,6 +639,7 @@ export class Game {
         this.ui?.updateSelection(sel, target, this.selectedHq, this);
       },
       onOrder: (type, selected) => {
+        this._cancelPendingRadioOperatorStrikeForUnits(selected);
         sounds.play('order');
         if (type === 'attack' && selected?.length) {
           const sample = selected[Math.floor(Math.random() * selected.length)];
@@ -809,6 +817,7 @@ export class Game {
     });
 
     this.onResize();
+    this._bindRendererRecovery();
     this.animate = this.animate.bind(this);
     document.addEventListener('visibilitychange', () => {
       this._tabHidden = document.hidden;
@@ -825,6 +834,54 @@ export class Game {
 
   _stopRenderLoop() {
     this._rafActive = false;
+  }
+
+  /**
+   * A GPU reset can leave WebGL alive while the first restored frame uses an
+   * incomplete shadow/material state. Re-assert the renderer contract and
+   * force the scene resources through Three.js' rebuilt context on restore.
+   */
+  _bindRendererRecovery() {
+    this.canvas.addEventListener('webglcontextlost', (event) => {
+      // Three.js also installs a handler, but keeping our own flag prevents
+      // the game from treating the lost frame as a valid visual update.
+      this._rendererContextLost = true;
+      event.preventDefault();
+    });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this._rendererContextLost = false;
+      setupRenderer(this.renderer);
+      this.renderer.setPixelRatio(this._renderPixelRatio);
+      this.onResize();
+      // The IBL is a generated render target with no CPU-side pixels to
+      // re-upload after a GPU reset; regenerate it before rebuilding materials.
+      disposeEnvironment(this.scene);
+      applySceneEnvironment(this.scene, this.renderer);
+
+      // Context restoration rebuilds Three.js' program/texture caches. Mark
+      // live materials for a clean recompile so a stale shadow/light variant
+      // cannot survive the reset as a low-contrast battlefield.
+      this.scene.traverse((object) => {
+        const materials = Array.isArray(object.material)
+          ? object.material
+          : object.material
+            ? [object.material]
+            : [];
+        for (const material of materials) {
+          material.needsUpdate = true;
+          for (const key of ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'bumpMap']) {
+            if (material[key]) material[key].needsUpdate = true;
+          }
+        }
+      });
+      if (this.lights?.sun) {
+        this.lights.sun.castShadow = !this._largeBattleSimulationPerfActive;
+        this.lights.sun.shadow.needsUpdate = true;
+      }
+      this.renderer.shadowMap.needsUpdate = true;
+      updateLightingForTarget(this.lights, this.cameraTarget.x, this.cameraTarget.z);
+      this._bootstrapBattleView();
+    });
   }
 
   /** Sync canvas size and draw one frame so restores never show a blank battlefield. */
@@ -983,8 +1040,7 @@ export class Game {
       options: startOptions,
     };
     this.gameMode = gameMode;
-    this.lineEffectivenessTest = gameMode === 'lineTest';
-    this.tutorial = gameMode === 'tutorial' || this.lineEffectivenessTest;
+    this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
     this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
     this.clearanceTimeLimitEnabled = this.clearance ? clearanceTimeLimitEnabled : false;
@@ -1277,8 +1333,7 @@ export class Game {
     if (
       !restoreSnapshot &&
       !this.towerDefense &&
-      !this.lastStand &&
-      !this.lineEffectivenessTest
+      !this.lastStand
     ) {
       if (this.clearance && !playerAttacksClearance) {
         // Player defends: dig-in force for player, AI assault from rear assembly.
@@ -1347,7 +1402,6 @@ export class Game {
       !this.tutorial &&
       !this.towerDefense &&
       !this.lastStand &&
-      !this.lineEffectivenessTest &&
       !restoreSnapshot
     ) {
       const enemyArmyScale =
@@ -1368,11 +1422,6 @@ export class Game {
           scenery: this.scenery,
         })
       );
-    }
-
-    if (this.lineEffectivenessTest && !restoreSnapshot) {
-      this.units = spawnLineEffectivenessTestForces(this);
-      seedLineEffectivenessTestMines(this);
     }
 
     if (this.campaign) applyCampaignUnitHp(this.units);
@@ -1440,10 +1489,10 @@ export class Game {
       }
       this._showDeployZoneRings(deployTeams);
     }
-    if (!this.lineEffectivenessTest) ensureFieldCommanders(this);
+    ensureFieldCommanders(this);
     // All modes with a pre-deployed force retain a radio link even when an old
     // save or a custom roster predates the radio-operator unit.
-    if (!this.lineEffectivenessTest && (!this.lastStand || isLastStandPresetForce(this))) {
+    if (!this.lastStand || isLastStandPresetForce(this)) {
       ensureStartingRadioOperators(
         this,
         this.tutorial ||
@@ -1454,15 +1503,15 @@ export class Game {
     }
     if (!restoreSnapshot) {
       this._applyEngagementStanceDefault(this.units);
-      if (this.lineEffectivenessTest) {
-        this.units
-          .find((unit) => unit.team === PLAYER_TEAM && unit.def?.type === 'infantry')
-          ?.setSelected(true);
-      }
     }
 
     if (!restoreSnapshot) {
-      resetAI(0, this.tutorial || this.towerDefense || this.lastStand ? 0 : 5);
+      this._clearanceDefenderNextWorksAt = 0;
+      resetAI(
+        0,
+        this.tutorial || this.towerDefense || this.lastStand ? 0 : 5,
+        this.clearance && this.clearanceRole !== 'defend' ? 0 : 24
+      );
     }
     this.running = true;
     this.gameOver = false;
@@ -1485,6 +1534,7 @@ export class Game {
     this._unitVisualSyncAccum = 0;
     this._largeBattleMovementAccum = 0;
     this._largeBattleTacticalVisualAccum = 0;
+    this._towerDefenseAiAccum = 0;
     this._selectionUiKey = '';
     this._hoverUiId = '';
     this._combatAccum = 0;
@@ -1513,7 +1563,6 @@ export class Game {
     this.ui.showHUD(this.playerFaction, this.mapDef, this.gameMode, {
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
-      lineTest: this.lineEffectivenessTest,
       towerDefense: this.towerDefense,
       tdEndless: !!this.towerDefense?.endless,
       tdHqDefense: isTdHqDefenseStyle(this.towerDefense),
@@ -1532,6 +1581,7 @@ export class Game {
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.showUnitStatus = this.ui.showUnitStatus !== false;
+    this.radioOperatorAutoMove = this.ui.radioOperatorAutoMove ?? true;
     this.pursueTargetsByDefault = this.ui.pursueTargetsByDefault ?? false;
     this.artilleryAutoFire = this.ui.artilleryAutoFire ?? true;
     setUnitStatusMarkersVisible(this.showUnitStatus);
@@ -1616,8 +1666,12 @@ export class Game {
     const alive = [];
     const player = [];
     const enemy = [];
+    let hasFieldCorpses = false;
     for (const u of this.units) {
-      if (u.dead) continue;
+      if (u.dead) {
+        hasFieldCorpses ||= !!u.mesh?.parent;
+        continue;
+      }
       alive.push(u);
       if (u.team === PLAYER_TEAM) player.push(u);
       else if (u.team === ENEMY_TEAM) enemy.push(u);
@@ -1625,10 +1679,12 @@ export class Game {
     this._aliveUnits = alive;
     this._playerAlive = player;
     this._enemyAlive = enemy;
+    this._hasFieldCorpses = hasFieldCorpses;
     if (alive.length > 0) this._emptyFieldHandled = false;
   }
 
   _renderFrame() {
+    if (this._rendererContextLost) return;
     updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this.renderer.render(this.scene, this.camera);
     const metrics = this._devRenderMetrics;
@@ -1676,7 +1732,7 @@ export class Game {
     const unitKey = selected
       .map(
         (u) =>
-          `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}:${u.engagementStance ?? 'hold'}:${u.def?.type === 'artillery' && u.autoFire ? 'af' : '-'}`
+          `${u.id}:${Math.ceil(u.hp)}:${u.attackOrder?.isGround ? 'g' : u.attackOrder ? 'a' : '-'}:${u.engagementStance ?? 'hold'}:${u.def?.type === 'artillery' && u.autoFire ? 'af' : '-'}:${u.seekCoverOverride === null || u.seekCoverOverride === undefined ? 'd' : u.seekCoverOverride ? 'on' : 'off'}`
       )
       .join(',');
     return `${unitKey}|${hoverKey}|${this.selectedHq?.id ?? ''}`;
@@ -1689,6 +1745,21 @@ export class Game {
     );
     if (!selected.length) return false;
     for (const unit of selected) unit.setEngagementStance(next);
+    sounds.play('order');
+    this._selectionUiKey = '';
+    this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    return true;
+  }
+
+  /** Set the per-unit Seek Cover preference for selected applicable troops. */
+  setSelectedSeekCoverOverride(value) {
+    const next = value === 'on' ? true : value === 'off' ? false : null;
+    const selected = this._playerAlive.filter(
+      (u) => u.selected && !u.dead
+    );
+    const eligible = selected.filter((u) => !u.surrendered && canSeekCover(u));
+    if (!eligible.length) return false;
+    for (const unit of eligible) unit.setSeekCoverOverride(next);
     sounds.play('order');
     this._selectionUiKey = '';
     this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
@@ -2012,6 +2083,20 @@ export class Game {
 
   setSeekCoverMode(enabled) {
     this.seekCoverMode = !!enabled;
+    this._selectionUiKey = '';
+    const selected = this._playerAlive?.filter((unit) => unit.selected) ?? [];
+    if (selected.length) {
+      this.ui?.updateSelection(selected, this.controller?.hoveredTarget, this.selectedHq, this);
+    }
+  }
+
+  setRadioOperatorAutoMove(enabled) {
+    this.radioOperatorAutoMove = !!enabled;
+    if (!this.radioOperatorAutoMove && this.fireSupport?.hasPendingStrike?.()) {
+      this.fireSupport.cancelPendingStrike();
+      this.ui?.updateFireSupport?.(this.fireSupport);
+      this._syncBattleCursor();
+    }
   }
 
   setPursueTargetsByDefault(enabled) {
@@ -2149,6 +2234,8 @@ export class Game {
       (u) => u.id === unitId && u.team === PLAYER_TEAM && !u.dead
     );
     if (!unit) return;
+
+    this._cancelPendingRadioOperatorStrikeForUnits([unit]);
 
     const teamUnits = this.units.filter((u) => u.team === PLAYER_TEAM);
     if (!additive) {
@@ -2325,9 +2412,7 @@ export class Game {
   /** Player-initiated surrender — counts as a defeat, then Main Menu from the end screen. */
   surrender() {
     if (!this.running || this.gameOver) return;
-    const detail = this.lineEffectivenessTest
-      ? 'Left the line-effectiveness test range.'
-      : this.tutorial
+    const detail = this.tutorial
       ? 'Left the training ground.'
       : 'Your forces surrendered.';
     this.endGame(false, detail);
@@ -2550,7 +2635,7 @@ export class Game {
     clearFireSupportEffects();
     clearParachuteEffects(this.scene);
     sounds.clearVehicleEngines();
-    this.fireSupport?.clearPreview();
+    this.fireSupport?.cancel();
     disposeFrontlineVisual(this.scene);
     disposeDeployZoneRings(this._deployZoneRings, this.scene);
     this.assault = null;
@@ -2566,7 +2651,6 @@ export class Game {
     this.clearanceOperational = null;
     this.clearanceReinforcements = null;
     this.campaign = false;
-    this.lineEffectivenessTest = false;
     this.production.setBuildTimeMult(1);
     for (const u of this.units) {
       if (u.mesh?.parent) u.dispose(this.scene);
@@ -2621,6 +2705,18 @@ export class Game {
 
   handleFireSupportTarget(mode, x, z) {
     if (!this.running || this.gameOver || this._isPlayerDeployZoneActive()) return;
+    if (mode === 'radio-interact') {
+      return this._cancelPendingRadioOperatorStrikeForUnits([x]);
+    }
+    if (mode === 'pending-interact') {
+      if (!this.fireSupport.isPendingStrikeAt?.(x, z)) return false;
+      if (!this.fireSupport.cancelPendingStrike()) return false;
+      sounds.play('select');
+      this.ui?.showSaveToast?.('Pending fire-support strike cancelled');
+      this.ui?.updateFireSupport(this.fireSupport);
+      this._syncBattleCursor();
+      return true;
+    }
     if (mode === 'preview') {
       this.fireSupport.updatePreview(x, z);
       return;
@@ -2630,7 +2726,28 @@ export class Game {
         this.ui?.updateFireSupport(this.fireSupport);
         this._syncBattleCursor();
       } else {
+        const half = this.mapDef.size / 2 - 8;
+        const targetX = THREE.MathUtils.clamp(x, -half, half);
+        const targetZ = THREE.MathUtils.clamp(z, -half, half);
+        const airborneTargetConflict =
+          this.fireSupport.pending === 'airborneDrop' &&
+          !this.fireSupport.isAirborneTargetAllowed(targetX, targetZ);
+        if (!airborneTargetConflict) {
+          const relay = this._orderRadioOperatorIntoSupportRange(targetX, targetZ);
+          if (relay) {
+            this.fireSupport.queuePendingStrike(
+              this.fireSupport.pending,
+              targetX,
+              targetZ,
+              {
+                covered: relay.destination.covered,
+                radioId: relay.radio.id,
+              }
+            );
+          }
+        }
         this.ui?.updateFireSupport(this.fireSupport);
+        this._syncBattleCursor();
       }
     }
   }
@@ -2905,6 +3022,7 @@ export class Game {
       (u) => u.selected && canUseRadioBinoculars(u)
     );
     if (!operators.length) return false;
+    if (this._cancelPendingRadioOperatorStrikeForUnits(operators)) return false;
     sounds.unlock();
     let used = 0;
     for (const unit of operators) {
@@ -3228,6 +3346,85 @@ export class Game {
     this.ui?.updateDefenses(this);
   }
 
+  _cancelPendingRadioOperatorStrikeForUnits(units = []) {
+    if (!this.fireSupport?.hasPendingStrike?.()) return false;
+    const touchedRadio = (units ?? []).some(
+      (unit) => unit?.team === PLAYER_TEAM && unit?.def?.type === 'radioOperator'
+    );
+    if (!touchedRadio) return false;
+
+    this.fireSupport.cancelPendingStrike();
+    this.ui?.showSaveToast?.('Pending fire-support strike cancelled — radio operator manually tasked');
+    this.ui?.updateFireSupport?.(this.fireSupport);
+    this._syncBattleCursor();
+    return true;
+  }
+
+  _resumePendingRadioOperatorStrike(queued) {
+    const radio = this.units.find((unit) => unit.id === queued?.radioId);
+    if (!radio || radio.dead || radio.moveTarget) return false;
+    return !!this._orderRadioOperatorIntoSupportRange(queued.x, queued.z, {
+      radioId: queued.radioId,
+      silent: true,
+    });
+  }
+
+  _orderRadioOperatorIntoSupportRange(x, z, { radioId = null, silent = false } = {}) {
+    if (!this.radioOperatorAutoMove || !this.fireSupport || !this.mapDef) return false;
+
+    const radios = getRadioOperators(this.units, PLAYER_TEAM).filter(
+      (radio) => radioId == null || radio.id === radioId
+    );
+    if (!radios.length) return false;
+
+    const outOfRange = radios.filter((radio) => {
+      const range = getRadioOperatorSupportRange(radio);
+      return Math.hypot(radio.position.x - x, radio.position.z - z) > range;
+    });
+    // Do not pull another operator forward merely because the closest one has
+    // a blocked LOS: this convenience order is specifically for a range miss.
+    if (outOfRange.length !== radios.length) return false;
+
+    const candidates = outOfRange
+      .map((radio) => ({
+        radio,
+        destination: getRadioOperatorSupportRelayDestination(this, radio, x, z, {
+          seekCover: getSeekCoverEnabled(radio, this.seekCoverMode),
+        }),
+      }))
+      .filter((candidate) => candidate.destination)
+      .sort(
+        (a, b) =>
+          Math.hypot(a.radio.position.x - x, a.radio.position.z - z) -
+          Math.hypot(b.radio.position.x - x, b.radio.position.z - z)
+      );
+    const selected = candidates[0];
+    if (!selected) return false;
+
+    const { radio, destination } = selected;
+    const currentGoal = radio._finalMoveGoal;
+    const alreadyOrdered =
+      radio._userMoveOrder &&
+      radio.moveTarget &&
+      currentGoal &&
+      Math.hypot(currentGoal.x - destination.x, currentGoal.z - destination.z) <= 2;
+    if (!alreadyOrdered) {
+      radio.moveTo(
+        destination.x,
+        destination.z,
+        this.mapDef,
+        true,
+        this.scenery
+      );
+      if (!silent) sounds.play('order');
+    }
+
+    this.fireSupport.targetRejectReason = destination.covered
+      ? 'Automatic radio positioning: the nearest radio operator is moving into covered support range.'
+      : 'Automatic radio positioning: the nearest radio operator is moving into support range.';
+    return selected;
+  }
+
   tryUpgradeDefense() {
     if (!this.running || this.gameOver || !this.defenses) return false;
     const ok = this.defenses.tryUpgrade((cost) => this.spendResources(PLAYER_TEAM, cost));
@@ -3287,7 +3484,6 @@ export class Game {
 
   tryProduce(unitType) {
     if (!this.running || this.gameOver) return false;
-    if (this.lineEffectivenessTest) return false;
     if (this.clearance) return false;
     if (this.towerDefense && !isTdHqDefenseStyle(this.towerDefense)) return false;
 
@@ -3330,7 +3526,7 @@ export class Game {
   }
 
   tickEconomy(dt) {
-    if (this.lastStand || this.clearance || this.lineEffectivenessTest) return;
+    if (this.lastStand || this.clearance) return;
     if (this.towerDefense) {
       if (isTdHqDefenseStyle(this.towerDefense)) {
         this.resources.player += HQ_INCOME_RATE * dt;
@@ -3637,7 +3833,7 @@ export class Game {
     this.battleStats.recordDefenseFromEntries(this.defenses?.entries);
   }
 
-  _buildBattleStatsReport() {
+  _buildBattleStatsReport(options = {}) {
     return this.battleStats.buildReport({
       playerName: this.playerFaction.name,
       enemyName: this.enemyFaction.name,
@@ -3645,12 +3841,13 @@ export class Game {
       towerDefense: !!this.towerDefense,
       tdEndless: !!this.towerDefense?.endless,
       tdWavesCleared: this.towerDefense?.wavesCleared ?? 0,
+      ...options,
     });
   }
 
   _buildCurrentBattleReport() {
     this.recordBattleLosses();
-    return this._buildBattleStatsReport();
+    return this._buildBattleStatsReport({ liveUnits: this.units });
   }
 
   _buildEndBattleReport() {
@@ -3790,23 +3987,9 @@ export class Game {
     buildingIntercept,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
+    const delayedIndirectImpact = mortarImpact || artilleryImpact;
     if (
-      this.lineEffectivenessTest &&
-      attacker?.team === PLAYER_TEAM &&
-      target?._lineTestRetreatOnFire &&
-      !target.dead &&
-      !target._lineTestRetreated
-    ) {
-      const enemyHq = this.hqs.find((hq) => hq.team === ENEMY_TEAM && !hq.dead);
-      if (enemyHq) {
-        target._lineTestRetreated = true;
-        startRetreat(target, enemyHq, {
-          mapDef: this.mapDef,
-          scenery: this.scenery,
-        });
-      }
-    }
-    if (
+      !delayedIndirectImpact &&
       !coaxFire &&
       !paratrooperAtFire &&
       (def?.type === 'antiTankGun' || def?.type === 'artillery')
@@ -4094,7 +4277,7 @@ export class Game {
     const viewActive = this.running && !this.gameOver;
     const simActive = viewActive && !this.paused;
     const fieldHasUnits = this._aliveUnits.length > 0;
-    const hasCorpses = this.units.some((u) => u.dead && u.mesh?.parent);
+    const hasCorpses = this._hasFieldCorpses === true;
 
     if (this.gameOver) {
       if (!this._endOverlayShown && this._pendingEnd) {
@@ -4230,7 +4413,10 @@ export class Game {
           syncRankMarkers(this._aliveUnits);
         }
         updateDamageSmoke(this._aliveUnits, dt);
-        updateSurrenderState(this, this.units, dt);
+        updateSurrenderState(this, this.units, dt, {
+          spawnSurrenderingVehicleCrew: (vehicle) =>
+            spawnVehicleCrewBailout(this, vehicle),
+        });
         updateRankMarkers(this._aliveUnits);
         this.tickEconomy(dt);
         if (this.lastStand && isLastStandDeployPhase(this)) {
@@ -4474,8 +4660,8 @@ export class Game {
           }
         } else {
           this._victoryCheckAccum += dt;
-          const livingPlayer = this.units.filter((u) => u.team === PLAYER_TEAM && !u.dead).length;
-          const livingEnemy = this.units.filter((u) => u.team === ENEMY_TEAM && !u.dead).length;
+          const livingPlayer = this._playerAlive.length;
+          const livingEnemy = this._enemyAlive.length;
           if (
             this._victoryCheckAccum >= 0.12 ||
             livingPlayer === 0 ||
@@ -4542,13 +4728,23 @@ export class Game {
                 { clearance: false, supportTargets }
               );
             }
-            updateAICommandSystems({
-              game: this,
-              enemyUnits: this._enemyAlive,
-              playerUnits: this._playerAlive,
-              enemyStagingPhase,
-            });
-            updateTowerDefenseEnemyAI(this._enemyAlive, this, this.defenses, dt);
+            this._towerDefenseAiAccum += dt;
+            if (this._towerDefenseAiAccum >= TOWER_DEFENSE_AI_STEP) {
+              const towerAiDt = this._towerDefenseAiAccum;
+              this._towerDefenseAiAccum = 0;
+              updateAICommandSystems({
+                game: this,
+                enemyUnits: this._enemyAlive,
+                playerUnits: this._playerAlive,
+                enemyStagingPhase,
+              });
+              updateTowerDefenseEnemyAI(
+                this._enemyAlive,
+                this,
+                this.defenses,
+                towerAiDt
+              );
+            }
           } else if (!this.tutorial && !isLastStandDeployPhase(this)) {
             updateAI({
               enemyUnits: this._enemyAlive,

@@ -17,4 +17,9 @@ export const GENERAL_ORDER_LIST = [
     short: 'Hold Ground',
     label: 'Troops stand firm — much less likely to panic-retreat for 30 seconds',
   },
+  {
+    id: 'digIn',
+    short: 'Dig In',
+    label: 'Eligible foot troops dig and occupy trenches facing the enemy',
+  },
 ];

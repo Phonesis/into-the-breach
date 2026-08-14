@@ -16,6 +16,7 @@
     "bake-elevenlabs-extra": "node scripts/bake-elevenlabs-extra.mjs",
     "bake-elevenlabs-atmos": "node scripts/bake-elevenlabs-atmos.mjs",
     "bake-elevenlabs-smallarms": "node scripts/bake-elevenlabs-smallarms.mjs",
+    "bake-elevenlabs-faction-rifles": "node scripts/bake-elevenlabs-faction-rifles.mjs",
     "bake-elevenlabs-mg-long": "node scripts/bake-elevenlabs-mg-long.mjs",
     "bake-elevenlabs-mg-extra": "node scripts/bake-elevenlabs-mg-extra.mjs",
     "bake-elevenlabs-smg": "node scripts/bake-elevenlabs-smg.mjs",
@@ -39,6 +40,7 @@
     "bake-unit-select": "node scripts/bake-unit-select.mjs",
     "bake-unit-under-fire": "node scripts/bake-unit-under-fire.mjs",
     "bake-commander-order": "node scripts/bake-commander-order.mjs",
+    "bake-elevenlabs-commander-orders": "node scripts/bake-elevenlabs-commander-orders.mjs",
     "extend-battle-atmos": "node scripts/extend-battle-atmos.mjs",
     "expand-gun-variety": "node scripts/expand-gun-variety.mjs",
     "generate-menu-music": "node scripts/bake-elevenlabs-menu-music.mjs"

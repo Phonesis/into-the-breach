@@ -61,6 +61,7 @@ export function setupSceneEnvironment(scene, mapDef, renderer) {
   skyGroup.name = 'sky';
   skyGroup.userData.skyRadius = skyRadius;
   scene.add(skyGroup);
+  scene.userData.skyGroup = skyGroup;
 
   addMapSkyBorder(scene, horizon, fog, sky, mapDef.groundColor ?? fog.getHex(), mapSize);
 
@@ -69,7 +70,8 @@ export function setupSceneEnvironment(scene, mapDef, renderer) {
 
 /** Keep the sky dome centered on the camera so edges of large maps still show sky. */
 export function updateSkyForCamera(scene, x, z) {
-  const sky = scene.getObjectByName('sky');
+  const sky = scene.userData.skyGroup ?? scene.getObjectByName('sky');
+  if (sky && !scene.userData.skyGroup) scene.userData.skyGroup = sky;
   if (sky) sky.position.set(x, 0, z);
 }
 
@@ -82,6 +84,7 @@ export function disposeSceneEnvironment(scene) {
       if (c.material) c.material.dispose();
     });
     scene.remove(group);
+    if (name === 'sky') scene.userData.skyGroup = null;
   }
 }
 
@@ -244,6 +247,14 @@ export function updateLightingForTarget(lights, x, z) {
   const texelWorldSize = shadowWidth / mapWidth;
   const snappedX = Math.round(x / texelWorldSize) * texelWorldSize;
   const snappedZ = Math.round(z / texelWorldSize) * texelWorldSize;
+  if (
+    sun.userData.shadowTargetX === snappedX &&
+    sun.userData.shadowTargetZ === snappedZ
+  ) {
+    return;
+  }
+  sun.userData.shadowTargetX = snappedX;
+  sun.userData.shadowTargetZ = snappedZ;
   const offset = sun.userData.shadowOffset ?? new THREE.Vector3(-58, 82, 44);
 
   // Move the light and target together so the shadow projection keeps a fixed

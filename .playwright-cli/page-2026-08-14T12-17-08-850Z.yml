@@ -1,0 +1,45 @@
+- generic [ref=e19]:
+  - navigation "Operation setup progress" [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]: "01"
+      - text: Operation
+    - generic [ref=e24]:
+      - generic [ref=e25]: "02"
+      - text: Command
+    - generic [ref=e27]:
+      - generic [ref=e28]: "03"
+      - text: Battlefield
+  - generic [ref=e29]:
+    - generic [ref=e30]: Step 01 · Rules of Engagement
+    - heading "Choose Operation" [level=1] [ref=e31]
+    - paragraph [ref=e32]: Select the mission structure, victory conditions, and command experience you want.
+  - generic [ref=e33]:
+    - heading "Operational Doctrine" [level=2] [ref=e34]
+    - generic [ref=e35]:
+      - button "Operation 01 Combat Training A live-fire command exercise without enemy AI. Practice movement, capture, production, targeting, and combined-arms control." [active] [ref=e36] [cursor=pointer]:
+        - generic [ref=e37]: Operation 01
+        - generic [ref=e38]: Combat Training
+        - generic [ref=e39]: A live-fire command exercise without enemy AI. Practice movement, capture, production, targeting, and combined-arms control.
+      - button "Operation 02 Frontline Command Build combat power, contest key ground, and destroy the enemy headquarters. Choose centralized production or forward base construction." [ref=e40] [cursor=pointer]:
+        - generic [ref=e41]: Operation 02
+        - generic [ref=e42]: Frontline Command
+        - generic [ref=e43]: Build combat power, contest key ground, and destroy the enemy headquarters. Choose centralized production or forward base construction.
+      - button "Operation 03 Breakthrough Command the assault force or hold the defensive sector on a Medium or Large battlefield." [ref=e44] [cursor=pointer]:
+        - generic [ref=e45]: Operation 03
+        - generic [ref=e46]: Breakthrough
+        - generic [ref=e47]: Command the assault force or hold the defensive sector on a Medium or Large battlefield.
+      - button "Operation 04 Fortified Line Break prepared positions within the optional 15-minute deadline, or command the garrison until the attackers are forced to retreat." [ref=e48] [cursor=pointer]:
+        - generic [ref=e49]: Operation 04
+        - generic [ref=e50]: Fortified Line
+        - generic [ref=e51]: Break prepared positions within the optional 15-minute deadline, or command the garrison until the attackers are forced to retreat.
+      - button "Operation 05 Hold the Line Defend a shrinking frontline against escalating attacks with prepared emplacements or a headquarters-led field force." [ref=e52] [cursor=pointer]:
+        - generic [ref=e53]: Operation 05
+        - generic [ref=e54]: Hold the Line
+        - generic [ref=e55]: Defend a shrinking frontline against escalating attacks with prepared emplacements or a headquarters-led field force.
+      - button "Operation 06 Force-on-Force Deploy a custom force or a preset combined-arms battle group. No headquarters, production, or reinforcements—only the forces in the field." [ref=e56] [cursor=pointer]:
+        - generic [ref=e57]: Operation 06
+        - generic [ref=e58]: Force-on-Force
+        - generic [ref=e59]: Deploy a custom force or a preset combined-arms battle group. No headquarters, production, or reinforcements—only the forces in the field.
+    - generic [ref=e60]:
+      - button "Headquarters" [ref=e61] [cursor=pointer]
+      - 'button "Next: Choose Command" [ref=e62] [cursor=pointer]'

@@ -141,43 +141,6 @@ export class EngineerSandbagManager {
     return team === 'player' ? this.game.playerFaction?.id : this.game.enemyFaction?.id;
   }
 
-  /** Seed a completed mine directly for authored scenarios and QA ranges. */
-  addPrelaidMine({ x, z, team = 'enemy', rotationY = 0, id = null } = {}) {
-    if (!Number.isFinite(x) || !Number.isFinite(z) || !this.game?.mapDef) return null;
-
-    const def = DEFENSE_TYPES.mine;
-    const y = sampleTerrainHeight(x, z, this.game.mapDef);
-    const mesh = createDefenseMesh('mine', 0xc9a227, this._factionId(team));
-    mesh.position.set(x, y, z);
-    mesh.rotation.y = rotationY;
-    this.game.scene.add(mesh);
-
-    const entry = {
-      id: id ?? `prelaid-mine-${this.mines.length + 1}`,
-      team,
-      x,
-      z,
-      y,
-      damage: def.damage,
-      damageByVehicleType: def.damageByVehicleType,
-      triggerRadius: def.triggerRadius,
-      blastRadius: def.blastRadius,
-      mesh,
-      prelaid: true,
-    };
-    this.mines.push(entry);
-    this._builtPositions.push({
-      id: entry.id,
-      x,
-      z,
-      team,
-      buildType: 'mine',
-      rotationY,
-      prelaid: true,
-    });
-    return entry;
-  }
-
   hasGarrisonBunkers() {
     return this.fieldBunkers.some((e) => !e.destroyed);
   }

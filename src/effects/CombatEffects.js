@@ -5,6 +5,7 @@ import {
   getFlameTexture,
   getSmokeTexture,
 } from './FireTextures.js';
+import { captureRendererState, restoreRendererState } from './RendererState.js';
 
 const MAX_EFFECTS = 64;
 // Leave room for impacts even during dense MG/tracer exchanges. Destruction
@@ -387,7 +388,7 @@ export function prewarmArtilleryExplosionAssets(renderer = null, targetScene = n
   const warmTarget = renderer.render && renderer.setRenderTarget
     ? new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false })
     : null;
-  const previousTarget = renderer.getRenderTarget?.() ?? null;
+  const rendererState = captureRendererState(renderer);
 
   try {
     // Use the live scene's lighting/environment when available. The temporary
@@ -402,10 +403,8 @@ export function prewarmArtilleryExplosionAssets(renderer = null, targetScene = n
     }
     artilleryShaderProgramsWarmed = true;
   } finally {
-    if (warmTarget) {
-      renderer.setRenderTarget(previousTarget);
-      warmTarget.dispose();
-    }
+    restoreRendererState(renderer, rendererState);
+    warmTarget?.dispose();
     materials.forEach((material) => material.dispose());
     pointMaterials.forEach((material) => material.dispose());
     craterMaterial.dispose();

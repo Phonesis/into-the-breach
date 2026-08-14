@@ -33,6 +33,7 @@ import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 import { handleFireSupportImpactMorale } from './RetreatBehavior.js';
+import { getBlastProfile } from './BlastProfile.js';
 
 const ARMOR_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
 const BUNKER_AIM_TYPES = new Set(['bunker', 'bunkerHeavy']);
@@ -429,6 +430,11 @@ export class DefenseStructureManager {
 
     const tier = getMaxBarrageTier(this.entries);
     const barrage = getBarrageDefForTier(tier);
+    const blastProfile = getBlastProfile({
+      weaponType: 'artillery',
+      caliber: tier >= 2 ? 155 : 105,
+      radius: barrage.radius,
+    });
     const enemies = this.getEnemyUnits();
     const allUnits = this.getAllUnits();
     const hqs = this.getHqs();
@@ -438,7 +444,15 @@ export class DefenseStructureManager {
       const d = Math.hypot(u.position.x - x, u.position.z - z);
       if (d <= barrage.radius) {
         const fall = Math.max(0.5, 1 - d / barrage.radius);
-        u.takeDamage(barrage.damage * fall, { explosive: true });
+        u.takeDamage(barrage.damage * fall, {
+          explosive: true,
+          blastOrigin: { x, z },
+          impactFrom: { x, z },
+          ...blastProfile,
+          blastImpulseScale:
+            blastProfile.blastImpulseScale *
+            Math.sqrt(Math.max(0.3, u.coverMult ?? 1)),
+        });
         handleFireSupportImpactMorale(u, hqs, allUnits, retreatOptions);
       }
     }
@@ -637,7 +651,31 @@ export class DefenseStructureManager {
       if (armorHit.mobilityDamaged) applyMobilityDamage(target, armorHit.mobilityDamageKind);
     }
 
-    target.takeDamage(damage, { impactFrom: { x: entry.x, z: entry.z }, armorHit });
+    const explosive =
+      def.weaponType === 'mortar' ||
+      def.weaponType === 'tank' ||
+      def.weaponType === 'superHeavyTank' ||
+      def.weaponType === 'artillery' ||
+      def.weaponType === 'antiTankGun';
+    const blastProfile = explosive
+      ? getBlastProfile({
+          weaponType: def.weaponType,
+          caliber: def.caliber,
+        })
+      : null;
+    target.takeDamage(damage, {
+      explosive,
+      blastOrigin: explosive
+        ? { x: target.position.x, z: target.position.z }
+        : undefined,
+      impactFrom: { x: entry.x, z: entry.z },
+      ...(blastProfile ?? {}),
+      blastImpulseScale: blastProfile
+        ? blastProfile.blastImpulseScale *
+          Math.sqrt(Math.max(0.3, target.coverMult ?? 1))
+        : undefined,
+      armorHit,
+    });
     entry.attackCooldown = 1 / def.attackSpeed;
 
     if (entry.maxAmmo) {

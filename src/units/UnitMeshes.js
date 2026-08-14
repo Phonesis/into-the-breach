@@ -25,7 +25,8 @@ import {
 } from './UnitTextures.js';
 import { applyInfantryShadowPolicy } from './InfantryVisuals.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
-import { SQUAD_SIZES } from '../data/squadSizes.js';
+import { SQUAD_SIZES, livingPersonnelForHp } from '../data/squadSizes.js';
+import { getBlastCaliberScale, getBlastProfile } from '../game/BlastProfile.js';
 
 export { mat };
 
@@ -44,13 +45,132 @@ const INFANTRY_TYPES = new Set([
 
 const CORPSE_FALL_SEC = 0.45;
 /** Chance a blast kill produces flying limbs (not every explosion death). */
-const EXPLOSION_GIB_CHANCE = 0.48;
+const EXPLOSION_GIB_CHANCE = 0.22;
 /** Gravity for ballistic corpse throws (world units / s²). */
 const CORPSE_THROW_GRAVITY = 16.5;
+/** Extra upward lift for bodies caught in the inner band of heavy HE. */
+const HEAVY_BLAST_VERTICAL_LIFT = Object.freeze({
+  artillery: 1.38,
+  airBomb: 1.32,
+});
 /** @type {Set<THREE.Group>} */
 const activeCorpseAnchors = new Set();
 /** @type {Set<THREE.Object3D>} */
 const activeGibs = new Set();
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Resolve a saved/live unit blast profile into the visual fields used by
+ * individual casualty bodies. A shell can be lethal over a wide footprint,
+ * but only the inner band has enough impulse to lift a soldier.
+ */
+function resolveBlastProfile(unit, blastOptions = {}) {
+  if (
+    unit?._deathCause !== 'explosion' &&
+    !blastOptions?.blastWeaponType &&
+    !blastOptions?.blastRadius &&
+    !blastOptions?.blastOrigin
+  ) {
+    return null;
+  }
+  const profile = getBlastProfile({
+    weaponType:
+      blastOptions.blastWeaponType ?? unit?._deathBlastWeaponType ?? 'artillery',
+    caliber: blastOptions.blastCaliber ?? unit?._deathBlastCaliber,
+    radius: blastOptions.blastRadius ?? unit?._deathBlastRadius,
+    launchRadius:
+      blastOptions.blastLaunchRadius ?? unit?._deathBlastLaunchRadius,
+    knockdownRadius:
+      blastOptions.blastKnockdownRadius ?? unit?._deathBlastKnockdownRadius,
+    impulseScale:
+      blastOptions.blastImpulseScale ?? unit?._deathBlastImpulseScale,
+  });
+  return {
+    ...profile,
+    blastOrigin: blastOptions.blastOrigin ?? unit?._deathBlastOrigin ?? null,
+  };
+}
+
+/**
+ * Classify a dead infantryman by distance from the detonation. The response is
+ * deliberately conservative: near-direct casualties are thrown, nearby edge
+ * casualties collapse in place, and the outer lethal fringe stays grounded.
+ */
+export function getBlastCasualtyResponse(worldPos, blastOptions = {}) {
+  const origin = blastOptions.blastOrigin;
+  const radius = Number.isFinite(blastOptions.blastRadius) ? blastOptions.blastRadius : 0;
+  if (
+    !worldPos ||
+    !origin ||
+    !Number.isFinite(origin.x) ||
+    !Number.isFinite(origin.z) ||
+    radius <= 0
+  ) {
+    return { kind: 'grounded', strength: 0, distance: Infinity };
+  }
+
+  const distance = Math.hypot(worldPos.x - origin.x, worldPos.z - origin.z);
+  const launchRadius = clamp(
+    Number.isFinite(blastOptions.blastLaunchRadius)
+      ? blastOptions.blastLaunchRadius
+      : radius * 0.46,
+    0.25,
+    radius
+  );
+  const knockdownRadius = clamp(
+    Number.isFinite(blastOptions.blastKnockdownRadius)
+      ? blastOptions.blastKnockdownRadius
+      : radius * 0.82,
+    launchRadius,
+    radius
+  );
+  const impulseScale = clamp(
+    Number.isFinite(blastOptions.blastImpulseScale)
+      ? blastOptions.blastImpulseScale
+      : 1,
+    0.25,
+    1.5
+  );
+
+  // Good cover can turn a close lethal hit into a knockdown rather than a
+  // launch. Damage has already been reduced by CoverSystem; this only scales
+  // the physical casualty response.
+  if (distance <= launchRadius && impulseScale >= 0.56) {
+    return {
+      kind: 'throw',
+      strength: clamp(1 - distance / launchRadius, 0.08, 1),
+      distance,
+      launchRadius,
+      knockdownRadius,
+      impulseScale,
+    };
+  }
+  if (distance <= knockdownRadius) {
+    return {
+      kind: 'knockdown',
+      strength: clamp(
+        1 - Math.max(0, distance - launchRadius) / Math.max(0.01, knockdownRadius - launchRadius),
+        0.08,
+        1
+      ),
+      distance,
+      launchRadius,
+      knockdownRadius,
+      impulseScale,
+    };
+  }
+  return {
+    kind: 'grounded',
+    strength: 0,
+    distance,
+    launchRadius,
+    knockdownRadius,
+    impulseScale,
+  };
+}
 
 export function createUnitMesh(type, teamColor, accentColor, factionId = 'germany') {
   const group = new THREE.Group();
@@ -375,12 +495,6 @@ function addGroundStain(mesh, spread = 2.4) {
   mesh.add(group);
 }
 
-function squadLivingCount(hp, maxHp, squadSize) {
-  if (hp <= 0) return 0;
-  if (squadSize <= 1) return 1;
-  return Math.max(1, Math.ceil((hp / Math.max(maxHp, 1)) * squadSize));
-}
-
 function getSquadMembers(mesh) {
   const members = [];
   mesh.traverse((child) => {
@@ -402,21 +516,37 @@ function removeDetachedCorpse(unit, squadIndex) {
   unit._detachedCorpses = unit._detachedCorpses?.filter((e) => e.squadIndex !== squadIndex) ?? [];
 }
 
-function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex, rotY = 0, animateFall = true) {
+function placeDetachedCorpse(
+  unit,
+  localOffset,
+  factionId,
+  unitType,
+  squadIndex,
+  rotY = 0,
+  animateFall = true,
+  blastOptions = {}
+) {
   const scene = unit.mesh?.parent;
   if (!scene || !unit.mesh) return null;
-  const crushed = unit._deathCause === 'crush';
-  const blastThrow =
-    animateFall && !crushed && unit._deathCause === 'explosion';
+  const crushed = unit._deathCause === 'crush' || blastOptions.crushed === true;
+  const blastProfile = !crushed ? resolveBlastProfile(unit, blastOptions) : null;
 
   const worldPos = new THREE.Vector3(localOffset.x, localOffset.y, localOffset.z);
   unit.mesh.localToWorld(worldPos);
+  const blastResponse = blastProfile
+    ? getBlastCasualtyResponse(worldPos, blastProfile)
+    : { kind: 'grounded', strength: 0 };
+  const blastThrow = animateFall && !crushed && blastResponse.kind === 'throw';
+  const blastKnockdown =
+    animateFall && !crushed && blastResponse.kind === 'knockdown';
 
   // Crushed bodies already lie flat under tracks — no pop-up fall animation.
   // Blast throws re-sample ground on landing (body may travel horizontally).
   const groundY = sampleTerrainHeight(worldPos.x, worldPos.z, unit._mapDef) + (crushed ? 0.008 : 0.02);
   const startY = blastThrow
-    ? worldPos.y + 0.55 + Math.random() * 0.35
+    ? worldPos.y + 0.28 + Math.random() * 0.12
+    : blastKnockdown
+      ? worldPos.y + 0.26
     : animateFall && !crushed
       ? worldPos.y + 0.52
       : groundY;
@@ -463,10 +593,12 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     : rotY + (Math.random() - 0.5) * 0.4;
 
   if (blastThrow) {
-    // Fling away from the blast origin (shell impact / HE epicentre).
+    // Fling away from the blast origin (shell impact / HE epicentre), with a
+    // modest impulse. The close-range threshold above prevents edge deaths
+    // from becoming airborne ragdolls.
     let dx = 0;
     let dz = 0;
-    const origin = unit._deathBlastOrigin;
+    const origin = blastProfile?.blastOrigin;
     if (origin && Number.isFinite(origin.x) && Number.isFinite(origin.z)) {
       dx = worldPos.x - origin.x;
       dz = worldPos.z - origin.z;
@@ -484,24 +616,49 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
     // Lateral scatter so squadmates don't all fly the same arc.
     const perpX = -dz;
     const perpZ = dx;
-    const side = (Math.random() - 0.5) * 1.15;
-    const outSpeed = 3.2 + Math.random() * 5.8;
-    const upSpeed = 5.5 + Math.random() * 7.5;
+    const proximity = blastResponse.strength ?? 0.5;
+    const caliber = getBlastCaliberScale(blastProfile?.blastCaliber);
+    const impulse = clamp(
+      (blastProfile?.blastImpulseScale ?? 1) * (0.72 + proximity * 0.42),
+      0.45,
+      1.55
+    );
+    const side = (Math.random() - 0.5) * 0.36;
+    const outSpeed = (1.05 + proximity * 1.9) * caliber * impulse;
+    const heavyLift = HEAVY_BLAST_VERTICAL_LIFT[blastProfile?.blastWeaponType] ?? 1;
+    // Heavy shells and bombs produce a taller ballistic arc without widening
+    // the launch band or increasing lateral travel. The closest casualties
+    // receive the full lift; bodies near the inner-band edge get less of it.
+    const verticalLift = 1 + (heavyLift - 1) * (0.55 + proximity * 0.45);
+    const upSpeed =
+      (2.25 + proximity * 2.35) * caliber * impulse * verticalLift;
 
-    anchor.rotation.x = (Math.random() - 0.5) * Math.PI;
-    anchor.rotation.z = (Math.random() - 0.5) * Math.PI;
+    anchor.rotation.x = (Math.random() - 0.5) * 0.55;
+    anchor.rotation.z = (Math.random() - 0.5) * 0.65;
     anchor.userData.blastFlight = {
       vx: dx * outSpeed + perpX * side * outSpeed * 0.45,
       vy: upSpeed,
       vz: dz * outSpeed + perpZ * side * outSpeed * 0.45,
-      spinX: (Math.random() - 0.5) * 14,
-      spinY: (Math.random() - 0.5) * 11,
-      spinZ: (Math.random() - 0.5) * 14,
+      spinX: (Math.random() - 0.5) * 3.6,
+      spinY: (Math.random() - 0.5) * 2.8,
+      spinZ: (Math.random() - 0.5) * 3.6,
       groundY,
       mapDef: unit._mapDef,
       settled: false,
-      bounceLeft: 1,
+      bounceLeft: 0,
       bloodPool,
+    };
+    activeCorpseAnchors.add(anchor);
+  } else if (blastKnockdown) {
+    // A casualty on the outer blast band is knocked down rather than launched.
+    anchor.rotation.x = -0.78;
+    anchor.userData.fall = {
+      elapsed: 0,
+      dur: 0.28 + Math.random() * 0.1,
+      startY,
+      endY: groundY,
+      startRotX: -0.78,
+      endRotX: (Math.random() - 0.5) * 0.12,
     };
     activeCorpseAnchors.add(anchor);
   } else if (animateFall && !crushed) {
@@ -527,7 +684,14 @@ function placeDetachedCorpse(unit, localOffset, factionId, unitType, squadIndex,
   return anchor;
 }
 
-function spawnCasualtyAtMember(unit, member, factionId, unitType) {
+function spawnCasualtyAtMember(
+  unit,
+  member,
+  factionId,
+  unitType,
+  blastOptions = {},
+  animateFall = true
+) {
   const squadIndex = member.userData.squadIndex;
   placeDetachedCorpse(
     unit,
@@ -536,7 +700,8 @@ function spawnCasualtyAtMember(unit, member, factionId, unitType) {
     unitType,
     squadIndex,
     member.rotation?.y ?? 0,
-    true
+    animateFall,
+    blastOptions
   );
   member.visible = false;
 }
@@ -613,10 +778,20 @@ function createCorpseClothMaterial(factionId, { ghillie = false, roughness = 0.9
  * Spawn occasional flying limbs when infantry die to blast/HE.
  * Chancey — not every kill, and not every limb.
  */
-function spawnExplosionGibs(unit, factionId, unitType) {
+function spawnExplosionGibs(unit, factionId, unitType, blastOptions = {}) {
   const scene = unit?.mesh?.parent;
   if (!scene || !unit?.mesh) return;
   if (Math.random() > EXPLOSION_GIB_CHANCE) return;
+
+  const blastResponse = getBlastCasualtyResponse(unit.position, blastOptions);
+  if (blastResponse.kind !== 'throw') return;
+  const caliberScale = getBlastCaliberScale(blastOptions.blastCaliber);
+  const impulseScale = clamp(
+    (blastOptions.blastImpulseScale ?? 1) *
+      (0.7 + (blastResponse.strength ?? 0.5) * 0.35),
+    0.45,
+    1.5
+  );
 
   const origin = new THREE.Vector3(
     unit.position.x,
@@ -658,17 +833,19 @@ function spawnExplosionGibs(unit, factionId, unitType) {
     drop.position.x += (Math.random() - 0.5) * 0.3;
     drop.position.z += (Math.random() - 0.5) * 0.3;
     const ang = Math.random() * Math.PI * 2;
-    const speed = 2.5 + Math.random() * 5;
+    const speed = (1.1 + Math.random() * 1.8) * caliberScale * impulseScale;
     drop.userData.gib = {
       vx: Math.cos(ang) * speed,
-      vy: 3.5 + Math.random() * 5,
+      vy: (1.7 + Math.random() * 2) * caliberScale * impulseScale,
       vz: Math.sin(ang) * speed,
-      spinX: (Math.random() - 0.5) * 12,
-      spinZ: (Math.random() - 0.5) * 12,
+      spinX: (Math.random() - 0.5) * 3.2,
+      spinZ: (Math.random() - 0.5) * 3.2,
       life: 0.9 + Math.random() * 0.6,
       elapsed: 0,
       groundY: sampleTerrainHeight(origin.x, origin.z, unit._mapDef) + 0.03,
+      mapDef: unit._mapDef,
       unitId: unit.id,
+      settled: false,
     };
     scene.add(drop);
     activeGibs.add(drop);
@@ -710,18 +887,19 @@ function spawnExplosionGibs(unit, factionId, unitType) {
     gib.position.z += (Math.random() - 0.5) * 0.4;
 
     const ang = Math.random() * Math.PI * 2;
-    const speed = 4 + Math.random() * 7;
-    const up = 5 + Math.random() * 6.5;
+    const speed = (1.5 + Math.random() * 2.2) * caliberScale * impulseScale;
+    const up = (2.2 + Math.random() * 2.5) * caliberScale * impulseScale;
     gib.userData.gib = {
       vx: Math.cos(ang) * speed,
       vy: up,
       vz: Math.sin(ang) * speed,
-      spinX: (Math.random() - 0.5) * 14,
-      spinY: (Math.random() - 0.5) * 10,
-      spinZ: (Math.random() - 0.5) * 14,
+      spinX: (Math.random() - 0.5) * 4,
+      spinY: (Math.random() - 0.5) * 3.2,
+      spinZ: (Math.random() - 0.5) * 4,
       life: 1.4 + Math.random() * 0.9,
       elapsed: 0,
       groundY: sampleTerrainHeight(origin.x, origin.z, unit._mapDef) + 0.04,
+      mapDef: unit._mapDef,
       unitId: unit.id,
       settled: false,
     };
@@ -773,23 +951,17 @@ export function updateInfantryGibs(dt) {
     s.vx *= 1 - 0.8 * dt;
     s.vz *= 1 - 0.8 * dt;
 
-    const ground = s.groundY ?? 0.04;
+    const ground = sampleTerrainHeight(gib.position.x, gib.position.z, s.mapDef) + 0.04;
+    s.groundY = ground;
     if (gib.position.y <= ground) {
       gib.position.y = ground;
-      if (Math.abs(s.vy) > 2.5) {
-        // Bounce once
-        s.vy = Math.abs(s.vy) * 0.28;
-        s.vx *= 0.55;
-        s.vz *= 0.55;
-      } else {
-        s.settled = true;
-        s.vy = 0;
-        s.vx = 0;
-        s.vz = 0;
-        // Flatten slightly on ground
-        gib.rotation.x = (Math.random() - 0.5) * 0.4;
-        gib.rotation.z = (Math.random() - 0.5) * 0.5;
-      }
+      s.settled = true;
+      s.vy = 0;
+      s.vx = 0;
+      s.vz = 0;
+      // Settle once without the repeated rubbery bounce from the old effect.
+      gib.rotation.x = (Math.random() - 0.5) * 0.3;
+      gib.rotation.z = (Math.random() - 0.5) * 0.36;
     }
 
   }
@@ -885,12 +1057,12 @@ export function clearDetachedCorpseFalls() {
   activeGibs.clear();
 }
 
-export function updateSquadCasualtyVisual(unit) {
+export function updateSquadCasualtyVisual(unit, blastOptions = {}) {
   const type = unit?.def?.type;
   const squadSize = SQUAD_SIZES[type];
   if (!squadSize || !unit?.mesh || unit.dead || unit.mesh.userData?.deathVisualApplied) return;
 
-  const living = squadLivingCount(unit.hp, unit.maxHp, squadSize);
+  const living = livingPersonnelForHp(unit.hp, unit.maxHp, squadSize);
   const prevLiving = unit._squadLiving ?? squadSize;
   if (prevLiving === living) return;
 
@@ -904,7 +1076,9 @@ export function updateSquadCasualtyVisual(unit) {
 
   if (living < prevLiving) {
     for (let i = living; i < members.length; i++) {
-      if (members[i].visible) spawnCasualtyAtMember(unit, members[i], factionId, type);
+      if (members[i].visible) {
+        spawnCasualtyAtMember(unit, members[i], factionId, type, blastOptions);
+      }
     }
   } else if (living > prevLiving) {
     for (let i = prevLiving; i < living && i < members.length; i++) {
@@ -1306,10 +1480,28 @@ function hideLivingUnitMesh(mesh) {
 }
 
 /** Fallen squad / soldier — prone bodies on the ground with faction camo. */
-export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
+function getDeathBlastOptions(unit) {
+  if (unit?._deathCause !== 'explosion') return {};
+  return (
+    resolveBlastProfile(unit, {
+      blastOrigin: unit._deathBlastOrigin,
+    }) ?? {}
+  );
+}
+
+export function applyInfantryCorpseLook(
+  mesh,
+  unitType = mesh?.userData?.type,
+  { staticRestore = false } = {}
+) {
   if (!mesh || mesh.userData.corpseApplied) return;
   mesh.userData.corpseApplied = true;
   const unit = mesh.userData?.unit;
+  const members = getSquadMembers(mesh);
+  // Capture the living members before hiding the live squad mesh. A full
+  // squad death must leave one thrown body per soldier, while members already
+  // detached by earlier splash damage remain in their existing corpse state.
+  const visibleMembers = members.filter((member) => member.visible);
   hideUnitChrome(mesh);
   hideLivingUnitMesh(mesh);
 
@@ -1319,13 +1511,20 @@ export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
   if (unit) migrateMeshCorpsesToWorld(unit);
 
   const factionId = mesh.userData.factionId ?? 'germany';
-  const members = getSquadMembers(mesh);
   const blastKill = unit?._deathCause === 'explosion';
   const crushKill = unit?._deathCause === 'crush';
+  const blastOptions = blastKill ? getDeathBlastOptions(unit) : {};
 
-  if (unit && members.length) {
-    for (const member of members) {
-      if (member.visible) spawnCasualtyAtMember(unit, member, factionId, unitType);
+  if (unit && visibleMembers.length) {
+    for (const member of visibleMembers) {
+      spawnCasualtyAtMember(
+        unit,
+        member,
+        factionId,
+        unitType,
+        blastOptions,
+        !staticRestore
+      );
     }
   } else if (unit) {
     // Blast kills scatter bodies a bit wider; crush deaths pile under the tracks.
@@ -1343,14 +1542,25 @@ export function applyInfantryCorpseLook(mesh, unitType = mesh?.userData?.type) {
         unitType,
         -1 - i,
         angle + (Math.random() - 0.5) * (crushKill ? 1.4 : 0.8),
-        blastKill && !crushKill // animate fall more often on blast
+        !staticRestore && blastKill && !crushKill,
+        blastOptions
       );
     }
   }
 
-  // Occasional flying limbs / helmets on explosive kills
-  if (unit && blastKill && !crushKill) {
-    spawnExplosionGibs(unit, factionId, unitType);
+  // Occasional flying limbs / helmets only for a near-direct explosive kill.
+  const centerBlastResponse =
+    unit && blastKill
+      ? getBlastCasualtyResponse(unit.position, blastOptions)
+      : { kind: 'grounded' };
+  if (
+    unit &&
+    blastKill &&
+    !crushKill &&
+    !staticRestore &&
+    centerBlastResponse.kind === 'throw'
+  ) {
+    spawnExplosionGibs(unit, factionId, unitType, blastOptions);
   }
 
   if (crushKill && !mesh.children.some((c) => c.name === 'corpseStain')) {
@@ -1433,7 +1643,7 @@ export function disposeUnitCorpseVisuals(unit, scene) {
 }
 
 /** Apply corpse / wreck visuals and linger timers when a unit dies. */
-export function applyUnitDeathVisual(unit) {
+export function applyUnitDeathVisual(unit, { staticRestore = false } = {}) {
   const mesh = unit?.mesh;
   const type = unit?.def?.type;
   if (!mesh || !type || mesh.userData.deathVisualApplied) return;
@@ -1460,7 +1670,7 @@ export function applyUnitDeathVisual(unit) {
     type === 'vehicleCrew'
   ) {
     unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
-    applyInfantryCorpseLook(mesh, type);
+    applyInfantryCorpseLook(mesh, type, { staticRestore });
     return;
   }
 
@@ -1478,7 +1688,14 @@ export function applyUnitDeathVisual(unit) {
     // retain the complete, normally painted field piece as battlefield cover.
     for (const member of getSquadMembers(mesh)) {
       if (member.userData.isTowedGunCrew && member.visible) {
-        spawnCasualtyAtMember(unit, member, mesh.userData.factionId ?? 'germany', type);
+        spawnCasualtyAtMember(
+          unit,
+          member,
+          mesh.userData.factionId ?? 'germany',
+          type,
+          getDeathBlastOptions(unit),
+          !staticRestore
+        );
       }
     }
     unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;

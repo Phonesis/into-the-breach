@@ -83,6 +83,8 @@ export const WEAPON_SAMPLE_FILES = {
     'smg-japan-el-01.wav',
     'smg-japan-el-02.wav',
     'smg-japan-el-03.wav',
+    'smg-japan-el-04.wav',
+    'smg-japan-el-05.wav',
   ],
   mg: [
     'mg.wav',
@@ -111,6 +113,10 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-germany-el-04.wav',
     'rifle-germany-el-05.wav',
     'rifle-germany-el-06.wav',
+    'rifle-germany-f.wav',
+    'rifle-germany-g.wav',
+    'rifle-germany-h.wav',
+    'rifle-germany-i.wav',
   ],
   rifle_usa: [
     'rifle-usa-el-01.wav',
@@ -119,6 +125,10 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-usa-el-04.wav',
     'rifle-usa-el-05.wav',
     'rifle-usa-el-06.wav',
+    'rifle-usa-f.wav',
+    'rifle-usa-g.wav',
+    'rifle-usa-h.wav',
+    'rifle-usa-i.wav',
   ],
   rifle_uk: [
     'rifle-uk-el-01.wav',
@@ -127,6 +137,10 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-uk-el-04.wav',
     'rifle-uk-el-05.wav',
     'rifle-uk-el-06.wav',
+    'rifle-uk-f.wav',
+    'rifle-uk-g.wav',
+    'rifle-uk-h.wav',
+    'rifle-uk-i.wav',
   ],
   rifle_russia: [
     'rifle-russia-el-01.wav',
@@ -135,6 +149,10 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-russia-el-04.wav',
     'rifle-russia-el-05.wav',
     'rifle-russia-el-06.wav',
+    'rifle-russia-f.wav',
+    'rifle-russia-g.wav',
+    'rifle-russia-h.wav',
+    'rifle-russia-i.wav',
   ],
   rifle_japan: [
     'rifle-japan-el-01.wav',
@@ -143,6 +161,8 @@ export const WEAPON_SAMPLE_FILES = {
     'rifle-japan-el-04.wav',
     'rifle-japan-el-05.wav',
     'rifle-japan-el-06.wav',
+    'rifle-japan-el-07.wav',
+    'rifle-japan-el-08.wav',
   ],
 
   mg_germany: [
@@ -226,6 +246,8 @@ export const WEAPON_SAMPLE_FILES = {
     'mg-japan-el-02.wav',
     'mg-japan-el-03.wav',
     'mg-japan-el-04.wav',
+    'mg-japan-el-05.wav',
+    'mg-japan-el-06.wav',
   ],
 
   tank_75_germany: [

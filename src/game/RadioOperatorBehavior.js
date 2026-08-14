@@ -1,9 +1,26 @@
 import { spawnUnitAt } from './Spawner.js';
+import { findNearestCoverPoint } from './CoverSeek.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
 const EDGE_INSET = 9;
 const STARTING_REAR_OFFSET = 8;
+// Infantry completes a move order up to 2.4 m short of its final waypoint.
+// Keep the waypoint farther inside the radio net so an outward-side stop still
+// leaves a little tolerance within the strict support radius.
+const RADIO_SUPPORT_RELAY_MARGIN = 3.5;
+const RADIO_SUPPORT_RELAY_ANGLES = [
+  0,
+  -0.16,
+  0.16,
+  -0.34,
+  0.34,
+  -0.58,
+  0.58,
+  -0.9,
+  0.9,
+  Math.PI,
+];
 
 /** Tactical support radius in game metres (the game map uses roughly 10 m/unit). */
 export const RADIO_OPERATOR_SUPPORT_RANGE = 72;
@@ -172,6 +189,110 @@ export function isRadioOperatorPointObserved(game, unit, x, z, origin = unit?.po
     ? { position: { x, z }, entry: targetBuilding }
     : { position: { x, z } };
   return !game?.scenery?.isLineOfFireBlocked?.(observer, pointTarget);
+}
+
+/**
+ * Find a covered, line-of-sight-valid relay point just inside the radio net.
+ * This is used for the optional player convenience order after an out-of-range
+ * fire-support click. The point stays at the edge of the operator's current
+ * support radius so the operator does not run farther forward than necessary.
+ */
+export function getRadioOperatorSupportRelayDestination(
+  game,
+  unit,
+  x,
+  z,
+  { seekCover = false } = {}
+) {
+  if (!game?.mapDef || !isRadioOperatorOperational(unit)) return null;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+
+  const supportRange = getRadioOperatorSupportRange(unit);
+  const targetDistance = Math.hypot(unit.position.x - x, unit.position.z - z);
+  if (targetDistance <= supportRange - RADIO_SUPPORT_RELAY_MARGIN) return null;
+
+  const half = (game.mapDef.size ?? 120) * 0.5 - 8;
+  const clampPoint = (point) => ({
+    x: Math.max(-half, Math.min(half, point.x)),
+    z: Math.max(-half, Math.min(half, point.z)),
+  });
+  const edgeDistance = Math.max(2, supportRange - RADIO_SUPPORT_RELAY_MARGIN);
+  let awayX = unit.position.x - x;
+  let awayZ = unit.position.z - z;
+  const awayLength = Math.hypot(awayX, awayZ);
+  if (awayLength < 0.001) {
+    const ownBase = game.mapDef?.playerBase ?? game.mapDef?.enemyBase;
+    awayX = (ownBase?.x ?? 0) - x;
+    awayZ = (ownBase?.z ?? 0) - z;
+  }
+  const fallbackLength = Math.hypot(awayX, awayZ) || 1;
+  awayX /= fallbackLength;
+  awayZ /= fallbackLength;
+
+  const candidates = [];
+  for (const angle of RADIO_SUPPORT_RELAY_ANGLES) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const directionX = awayX * cos - awayZ * sin;
+    const directionZ = awayX * sin + awayZ * cos;
+    const raw = clampPoint({
+      x: x + directionX * edgeDistance,
+      z: z + directionZ * edgeDistance,
+    });
+
+    const addCandidate = (point, covered) => {
+      const destination = clampPoint(point);
+      const distanceToTarget = Math.hypot(destination.x - x, destination.z - z);
+      if (distanceToTarget > supportRange - RADIO_SUPPORT_RELAY_MARGIN) return;
+      if (
+        !covered &&
+        game.scenery?.getUnitPlacementBlocker?.(destination.x, destination.z, 0.9)
+      ) {
+        return;
+      }
+      if (!isRadioOperatorPointObserved(game, unit, x, z, destination)) return;
+      candidates.push({
+        ...destination,
+        covered,
+        distanceToTarget,
+        travelDistance: Math.hypot(
+          destination.x - unit.position.x,
+          destination.z - unit.position.z
+        ),
+      });
+    };
+
+    if (seekCover) {
+      const cover = findNearestCoverPoint(
+        unit.position.x,
+        unit.position.z,
+        raw.x,
+        raw.z,
+        game.coverSystem
+      );
+      if (cover) addCandidate(cover, true);
+    }
+    addCandidate(raw, false);
+  }
+
+  const covered = candidates.filter((candidate) => candidate.covered);
+  const pool = covered.length ? covered : candidates;
+  if (!pool.length) return null;
+
+  pool.sort((a, b) => {
+    // Stay as far from the aim point as the movement-arrival tolerance safely
+    // permits, then prefer the shorter move.
+    const distanceDifference = b.distanceToTarget - a.distanceToTarget;
+    if (Math.abs(distanceDifference) > 0.01) return distanceDifference;
+    return a.travelDistance - b.travelDistance;
+  });
+  return {
+    x: pool[0].x,
+    z: pool[0].z,
+    covered: pool[0].covered,
+    distanceToTarget: pool[0].distanceToTarget,
+    supportRange,
+  };
 }
 
 function rearAssemblyAnchor(mapDef, team) {

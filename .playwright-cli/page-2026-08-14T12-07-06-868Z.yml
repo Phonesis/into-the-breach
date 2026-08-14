@@ -1,0 +1,155 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: United States
+          - generic: Normandy
+          - generic: Training — no enemy AI
+          - button "Hide capture point circles" [pressed] [ref=e388] [cursor=pointer]:
+            - generic [ref=e390]: Capture circles
+        - generic:
+          - button "Save" [ref=e391] [cursor=pointer]
+          - button "Leave Training" [ref=e392] [cursor=pointer]
+          - generic:
+            - generic: Supplies (+1/3 pts)
+            - text: "1049"
+          - generic: "Your forces: 12 · Practice mode"
+      - generic:
+        - generic "Saint-Lô Crossroads — Held (yours)":
+          - generic: Saint-Lô Crossroads ★
+          - generic: 100%
+        - generic "Carentan Road — Neutral":
+          - generic: Carentan Road
+          - generic: 0%
+        - generic "Vire Bridge — Neutral":
+          - generic: Vire Bridge
+          - generic: 0%
+      - generic "Tactical map" [ref=e393]:
+        - generic [ref=e394]:
+          - generic [ref=e395]: Tactical Map
+          - button "Hide" [pressed] [ref=e396] [cursor=pointer]
+        - generic "Battlefield overview" [ref=e397]
+        - paragraph [ref=e398]: Green — friendly · Red — enemy · Traces show live fire · Click to pan
+      - complementary "Your forces" [ref=e399]:
+        - heading "Forces" [level=3] [ref=e400]
+        - button "Field icons" [pressed] [ref=e401] [cursor=pointer]:
+          - img [ref=e403]
+          - generic [ref=e408]: Field icons
+        - button "Unit status" [pressed] [ref=e409] [cursor=pointer]:
+          - generic [ref=e410]: ✦
+          - generic [ref=e411]: Unit status
+        - generic [ref=e412]:
+          - button "57 mm Gun M1" [ref=e1352] [cursor=pointer]:
+            - img [ref=e1354]
+            - generic [ref=e1365]:
+              - generic [ref=e1366]: AT
+              - generic [ref=e1370]: 100%
+          - button "M8 Greyhound" [ref=e1372] [cursor=pointer]:
+            - img [ref=e1374]
+            - generic [ref=e1384]:
+              - generic [ref=e1385]: AC
+              - generic [ref=e1389]: 100%
+          - button "M101 Howitzer" [ref=e1391] [cursor=pointer]:
+            - img [ref=e1393]
+            - generic [ref=e1403]:
+              - generic [ref=e1404]: Arty
+              - generic [ref=e1408]: 100%
+          - button "Commanding Officer" [ref=e1410] [cursor=pointer]:
+            - img [ref=e1412]
+            - generic [ref=e1416]:
+              - generic [ref=e1417]: CMD
+              - generic [ref=e1421]: 100%
+          - button "Engineer Squad" [ref=e1423] [cursor=pointer]:
+            - img [ref=e1425]
+            - generic [ref=e1432]:
+              - generic [ref=e1433]: Eng
+              - generic [ref=e1437]: 100%
+          - generic [ref=e1438]:
+            - button "Rifle Squad, unit 1 of 3" [ref=e1439] [cursor=pointer]:
+              - img [ref=e1441]
+              - generic [ref=e1446]:
+                - generic [ref=e1447]: Inf×3
+                - generic [ref=e1451]: 100%
+            - generic "Other Inf units" [ref=e1452]:
+              - button "Rifle Squad, unit 2 of 3" [ref=e1453] [cursor=pointer]:
+                - img [ref=e1455]
+                - generic [ref=e1460]:
+                  - generic [ref=e1461]: Inf#2
+                  - generic [ref=e1465]: 100%
+              - button "Rifle Squad, unit 3 of 3" [ref=e1466] [cursor=pointer]:
+                - img [ref=e1468]
+                - generic [ref=e1473]:
+                  - generic [ref=e1474]: Inf#3
+                  - generic [ref=e1478]: 100%
+          - button "M1919 MG Team" [ref=e1480] [cursor=pointer]:
+            - img [ref=e1482]
+            - generic [ref=e1490]:
+              - generic [ref=e1491]: MG
+              - generic [ref=e1495]: 100%
+          - button "M2 Mortar Squad" [ref=e1497] [cursor=pointer]:
+            - img [ref=e1499]
+            - generic [ref=e1505]:
+              - generic [ref=e1506]: Mrt
+              - generic [ref=e1510]: 100%
+          - button "Radio Operator" [ref=e1512] [cursor=pointer]:
+            - img [ref=e1514]
+            - generic [ref=e1520]:
+              - generic [ref=e1521]: Radio
+              - generic [ref=e1525]: 100%
+          - button "Sniper Team" [ref=e1527] [cursor=pointer]:
+            - img [ref=e1529]
+            - generic [ref=e1536]:
+              - generic [ref=e1537]: Snp
+              - generic [ref=e1541]: 100%
+          - button "M4 Sherman" [ref=e1543] [cursor=pointer]:
+            - img [ref=e1545]
+            - generic [ref=e1554]:
+              - generic [ref=e1555]: Tk
+              - generic [ref=e1559]: 100%
+      - generic:
+        - generic [ref=e621]:
+          - generic [ref=e622]:
+            - heading "Rifle Squad COVER" [level=3] [ref=e1560]
+            - generic [ref=e1561]:
+              - progressbar [ref=e1562]
+              - generic [ref=e1564]: 85 / 85
+            - paragraph [ref=e1565]: U.S. Infantry Regiment · Range 500 m · Dmg 11
+            - paragraph [ref=e1566]:
+              - strong [ref=e1567]: In trench
+              - text: — dug in with cover (takes only
+              - strong [ref=e1568]: 30%
+              - text: damage). Order a
+              - strong [ref=e1569]: move
+              - text: to leave.
+          - generic [ref=e1570]:
+            - generic [ref=e1571]: ⛨
+            - generic [ref=e1572]:
+              - strong [ref=e1573]: Rifle Squad — IN COVER
+              - generic [ref=e1574]: In trench · 70% damage reduction
+              - generic [ref=e1575]: Dug in — order a move to leave the trench.
+          - generic [ref=e867]:
+            - paragraph [ref=e868]: Engagement stance
+            - generic [ref=e869]:
+              - button "Hold Ground" [pressed] [ref=e870] [cursor=pointer]
+              - button "Pursue" [ref=e871] [cursor=pointer]
+            - paragraph [ref=e872]: Attack orders close to weapon range, then hold position if the target withdraws.
+          - generic [ref=e873]:
+            - paragraph [ref=e874]: Seek Cover for selected applicable units
+            - group "Seek Cover unit override" [ref=e875]:
+              - button "Seek cover" [pressed] [ref=e876] [cursor=pointer]
+              - button "Use clicked ground" [ref=e877] [cursor=pointer]
+            - paragraph [ref=e878]: Follows Settings → Seek Cover (On).
+          - generic [ref=e879]:
+            - button "Dig trench" [disabled] [ref=e881]
+            - paragraph [ref=e882]: Selected troops are already digging or dug in.
+        - text: ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙ ⚙
+        - generic:
+          - button "Fire Support" [ref=e627] [cursor=pointer]:
+            - generic [ref=e628]: Fire Support
+            - generic [ref=e629]: ▼
+          - button "General Orders" [active] [ref=e632] [cursor=pointer]:
+            - generic [ref=e633]: General Orders
+            - generic [ref=e634]: ▼
+        - paragraph: "Tutorial: practice vs static HQ — train all unit types, capture neutral points"
+        - button "Field Manual" [ref=e635] [cursor=pointer]

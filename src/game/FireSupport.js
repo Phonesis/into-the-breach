@@ -6,6 +6,7 @@ import {
 import { PRACTICE_TARGET_HQ_DAMAGE_MULT } from '../data/gameModes.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { getIncomingDamageMultiplier } from './CoverSystem.js';
+import { getBlastProfile } from './BlastProfile.js';
 import {
   spawnStrikeWarning,
   spawnStrafePlane,
@@ -33,6 +34,7 @@ const PLAYER = 'player';
 const ENEMY = 'enemy';
 const VALID_TARGET_PREVIEW_COLOR = 0x4ade80;
 const INVALID_TARGET_PREVIEW_COLOR = 0xef4444;
+const PENDING_STRIKE_MARKER_COLOR = 0xfacc15;
 const AIRBORNE_HQ_MIN_DISTANCE = HQ_DEPLOY_RADIUS * 2;
 const MIN_FIRE_SUPPORT_OBSERVATION_RANGE = 38;
 const FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE = {
@@ -86,6 +88,8 @@ export class FireSupportManager {
     this.game = game;
     this.ownerTeam = ownerTeam;
     this.pending = null;
+    this.pendingStrike = null;
+    this.pendingStrikeMarker = null;
     this.cooldowns = makeCooldowns();
     this.events = [];
     this.preview = null;
@@ -124,6 +128,7 @@ export class FireSupportManager {
 
   reset() {
     this.pending = null;
+    this.clearPendingStrike();
     this.cooldowns = makeCooldowns();
     this.events = [];
     this.clearPreview();
@@ -170,6 +175,15 @@ export class FireSupportManager {
   arm(type) {
     if (!this.isReady(type)) return false;
     this.targetRejectReason = null;
+
+    // Re-arming the queued asset cancels it. Selecting a different asset also
+    // abandons the old waiting strike before arming the new one.
+    if (this.pendingStrike) {
+      const sameQueuedStrike = this.pendingStrike.type === type;
+      this.cancelPendingStrike();
+      if (sameQueuedStrike) return true;
+    }
+
     if (this.pending === type) {
       this.pending = null;
       this.clearPreview();
@@ -180,9 +194,157 @@ export class FireSupportManager {
   }
 
   cancel() {
+    this.clearPendingStrike();
     this.pending = null;
     this.targetRejectReason = null;
     this.clearPreview();
+  }
+
+  hasPendingStrike() {
+    return !!this.pendingStrike;
+  }
+
+  isPendingStrikeAt(x, z) {
+    if (!this.pendingStrike || !Number.isFinite(x) || !Number.isFinite(z)) {
+      return false;
+    }
+    const scale = this._previewStyle(
+      this.pendingStrike.type,
+      this.getDef(this.pendingStrike.type)
+    ).scale;
+    return Math.hypot(x - this.pendingStrike.x, z - this.pendingStrike.z) <=
+      Math.max(3.5, scale * 0.95);
+  }
+
+  _clearPendingStrikeMarker() {
+    const marker = this.pendingStrikeMarker;
+    if (!marker) return;
+    if (marker.parent) marker.parent.remove(marker);
+    const geometries = new Set();
+    const materials = new Set();
+    marker.traverse((child) => {
+      if (child.geometry) geometries.add(child.geometry);
+      if (Array.isArray(child.material)) {
+        child.material.forEach((material) => materials.add(material));
+      } else if (child.material) {
+        materials.add(child.material);
+      }
+    });
+    geometries.forEach((geometry) => geometry.dispose?.());
+    materials.forEach((material) => material.dispose?.());
+    this.pendingStrikeMarker = null;
+  }
+
+  clearPendingStrike() {
+    this.pendingStrike = null;
+    this._clearPendingStrikeMarker();
+  }
+
+  /** Cancel the waiting strike and leave normal map input available again. */
+  cancelPendingStrike() {
+    const hadPendingStrike = !!this.pendingStrike;
+    this.clearPendingStrike();
+    this.pending = null;
+    this.targetRejectReason = null;
+    this.clearPreview();
+    return hadPendingStrike;
+  }
+
+  queuePendingStrike(type, x, z, { covered = false, radioId = null } = {}) {
+    if (!type || !this.getDef(type) || !Number.isFinite(x) || !Number.isFinite(z)) {
+      return false;
+    }
+
+    this.clearPendingStrike();
+    // The target is fixed once queued. Leave targeting mode immediately so a
+    // later battlefield click cannot accidentally replace the pending strike.
+    this.pending = null;
+    this.pendingStrike = {
+      type,
+      x,
+      z,
+      covered: !!covered,
+      radioId,
+      relayRetryDelay: 0.5,
+      relayRetries: 0,
+    };
+    this.targetRejectReason = null;
+    this.clearPreview();
+
+    const def = this.getDef(type);
+    const { scale } = this._previewStyle(type, def);
+    const marker = new THREE.Group();
+    marker.name = 'pending-fire-support-marker';
+    marker.userData.pendingFireSupport = true;
+    marker.userData.age = 0;
+    marker.userData.baseScale = scale;
+
+    const material = new THREE.MeshBasicMaterial({
+      color: PENDING_STRIKE_MARKER_COLOR,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.86, 1, 40),
+      material
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.scale.set(scale, 1, scale);
+    ring.userData.pendingStrikeRing = true;
+    marker.add(ring);
+
+    const inner = new THREE.Mesh(
+      new THREE.RingGeometry(0.22, 0.34, 24),
+      material
+    );
+    inner.rotation.x = -Math.PI / 2;
+    inner.position.y = 0.04;
+    marker.add(inner);
+
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 2.8, 8),
+      material
+    );
+    beacon.position.y = 1.4;
+    marker.add(beacon);
+
+    const cap = new THREE.Mesh(
+      new THREE.ConeGeometry(0.28, 0.55, 8),
+      material
+    );
+    cap.position.y = 2.95;
+    marker.add(cap);
+
+    marker.renderOrder = 14;
+    marker.traverse((child) => {
+      child.renderOrder = 14;
+    });
+    this.game.scene.add(marker);
+    this.pendingStrikeMarker = marker;
+    this._updatePendingStrikeMarker(0);
+    return true;
+  }
+
+  _updatePendingStrikeMarker(dt) {
+    const marker = this.pendingStrikeMarker;
+    if (!marker || !this.pendingStrike || !this.game.mapDef) return;
+    marker.userData.age = (marker.userData.age ?? 0) + Math.max(0, dt);
+    const pulse = 1 + Math.sin(marker.userData.age * 5.5) * 0.08;
+    const ring = marker.children.find((child) => child.userData.pendingStrikeRing);
+    if (ring) {
+      const scale = marker.userData.baseScale ?? 1;
+      ring.scale.set(scale * pulse, 1, scale * pulse);
+    }
+    const material = marker.children.find((child) => child.material)?.material;
+    if (material) material.opacity = 0.58 + Math.sin(marker.userData.age * 5.5) * 0.14;
+    marker.position.set(
+      this.pendingStrike.x,
+      sampleTerrainHeight(this.pendingStrike.x, this.pendingStrike.z, this.game.mapDef) + 0.25,
+      this.pendingStrike.z
+    );
+    marker.rotation.y += Math.max(0, dt) * 0.45;
   }
 
   clearPreview() {
@@ -210,6 +372,7 @@ export class FireSupportManager {
 
   updatePreview(x, z) {
     if (!this.pending || !this.game.mapDef) return;
+    if (this.pendingStrike) return;
     const def = this.getDef(this.pending);
     const { scale } = this._previewStyle(this.pending, def);
     const rejectReason = this.getTargetRejectReason(this.pending, x, z);
@@ -290,13 +453,8 @@ export class FireSupportManager {
     };
   }
 
-  tryPlaceTarget(x, z) {
-    const type = this.pending;
+  _commitTarget(type, x, z) {
     if (!type || !this.isReady(type)) return false;
-
-    const half = this.game.mapDef.size / 2 - 8;
-    x = THREE.MathUtils.clamp(x, -half, half);
-    z = THREE.MathUtils.clamp(z, -half, half);
     const rejectReason = this.getTargetRejectReason(type, x, z);
     if (rejectReason) {
       this.targetRejectReason = rejectReason;
@@ -304,6 +462,7 @@ export class FireSupportManager {
     }
 
     this.pending = null;
+    this.clearPendingStrike();
     this.targetRejectReason = null;
     this.clearPreview();
     this.cooldowns[type] = this.getDef(type).cooldown;
@@ -313,6 +472,18 @@ export class FireSupportManager {
     finishRadioBinocularsAfterSupportCall(this.game, this.ownerTeam, x, z);
     sounds.play('order');
     return true;
+  }
+
+  tryPlaceTarget(x, z) {
+    const type = this.pending;
+    if (!type || !this.isReady(type)) return false;
+
+    const half = this.game.mapDef.size / 2 - 8;
+    x = THREE.MathUtils.clamp(x, -half, half);
+    z = THREE.MathUtils.clamp(z, -half, half);
+    // A click away from an existing marker replaces the waiting target.
+    this.clearPendingStrike();
+    return this._commitTarget(type, x, z);
   }
 
   tryAiStrike(type, x, z) {
@@ -721,6 +892,14 @@ export class FireSupportManager {
     const strafe = attackerType === 'strafe';
     const airBomb = attackerType === 'airBomb';
     const bombDef = FIRE_SUPPORT_TYPES.airBomb;
+    const blastProfile = !strafe
+      ? getBlastProfile({
+          weaponType: airBomb ? 'airBomb' : 'artillery',
+          caliber: airBomb ? 250 : null,
+          radius,
+          launchRadius: airBomb ? bombDef.directHitRadius : null,
+        })
+      : null;
     const retreatUnits = this.game._aliveUnits ?? this.game.units ?? [];
     const retreatOptions = {
       generalOrders: {
@@ -741,14 +920,25 @@ export class FireSupportManager {
       const d = Math.sqrt(d2);
       const t = 1 - d / radius;
       let dmg = unitDamage * t * t;
-      dmg *= getIncomingDamageMultiplier(u, cover, {
+      const incomingCoverMultiplier = getIncomingDamageMultiplier(u, cover, {
         def: { type: attackerType },
         position: { x, z },
       });
+      dmg *= incomingCoverMultiplier;
       if (airBomb && u.def && d <= (bombDef.directHitRadius ?? 2.5)) {
         dmg *= bombDef.directHitDamageMult ?? 1.15;
       }
-      u.takeDamage(dmg, { explosive: true });
+      const explosive = !strafe;
+      u.takeDamage(dmg, {
+        explosive,
+        blastOrigin: explosive ? { x, z } : undefined,
+        impactFrom: explosive ? { x, z } : undefined,
+        ...(blastProfile ?? {}),
+        blastImpulseScale: blastProfile
+          ? blastProfile.blastImpulseScale *
+            Math.sqrt(Math.max(0.3, incomingCoverMultiplier))
+          : undefined,
+      });
       if (dmg > 0) {
         handleFireSupportImpactMorale(
           u,
@@ -811,6 +1001,30 @@ export class FireSupportManager {
 
     for (const key of Object.keys(this.cooldowns)) {
       if (this.cooldowns[key] > 0) this.cooldowns[key] = Math.max(0, this.cooldowns[key] - dt);
+    }
+
+    this._updatePendingStrikeMarker(dt);
+    if (this.pendingStrike) {
+      const queued = this.pendingStrike;
+      if (!this.hasCommandLink()) {
+        this.cancelPendingStrike();
+        this.game.ui?.updateFireSupport?.(this);
+        this.game._syncBattleCursor?.();
+      } else if (!this.getTargetRejectReason(queued.type, queued.x, queued.z)) {
+        if (this._commitTarget(queued.type, queued.x, queued.z)) {
+          this.game.ui?.updateFireSupport?.(this);
+          this.game._syncBattleCursor?.();
+        }
+      } else if (this.ownerTeam === PLAYER && queued.radioId && queued.relayRetries < 2) {
+        queued.relayRetryDelay = Math.max(0, (queued.relayRetryDelay ?? 0) - dt);
+        if (
+          queued.relayRetryDelay <= 0 &&
+          this.game._resumePendingRadioOperatorStrike?.(queued)
+        ) {
+          queued.relayRetries += 1;
+          queued.relayRetryDelay = 1.25;
+        }
+      }
     }
 
     for (let i = this.events.length - 1; i >= 0; i--) {

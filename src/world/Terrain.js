@@ -201,7 +201,7 @@ function getVegetationDetailTextures() {
 function mergeCompatibleGeometries(geometries) {
   const expanded = geometries.map((geometry) => geometry.index ? geometry.toNonIndexed() : geometry.clone());
   const merged = new THREE.BufferGeometry();
-  for (const name of ['position', 'normal', 'uv']) {
+  for (const name of ['position', 'normal', 'uv', 'color']) {
     const attrs = expanded.map((geometry) => geometry.getAttribute(name)).filter(Boolean);
     if (attrs.length !== expanded.length) continue;
     const itemSize = attrs[0].itemSize;
@@ -220,7 +220,20 @@ function mergeCompatibleGeometries(geometries) {
   return merged;
 }
 
-function consolidateGroupMeshes(group, includeDescendants = false) {
+function applyGeometryTint(geometry, color) {
+  const count = geometry.getAttribute('position')?.count ?? 0;
+  if (!count || !color) return;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const offset = i * 3;
+    colors[offset] = color.r;
+    colors[offset + 1] = color.g;
+    colors[offset + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+function consolidateGroupMeshes(group, includeDescendants = false, materialAliases = null) {
   const buckets = new Map();
   let meshes;
   let rootInverse = null;
@@ -246,11 +259,13 @@ function consolidateGroupMeshes(group, includeDescendants = false) {
       : child.matrix;
     const transformed = child.geometry.clone();
     transformed.applyMatrix4(transform);
-    const bucket = buckets.get(child.material) ?? { geometries: [], castShadow: false, receiveShadow: false };
+    const material = materialAliases?.get(child.material) ?? child.material;
+    if (material !== child.material) applyGeometryTint(transformed, child.material.color);
+    const bucket = buckets.get(material) ?? { geometries: [], castShadow: false, receiveShadow: false };
     bucket.geometries.push(transformed);
     bucket.castShadow ||= child.castShadow;
     bucket.receiveShadow ||= child.receiveShadow;
-    buckets.set(child.material, bucket);
+    buckets.set(material, bucket);
     child.parent?.remove(child);
     child.geometry.dispose();
   }
@@ -309,6 +324,12 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     roughness: 0.92,
     envMapIntensity: 0.3,
   });
+  // Leaf shades use the same texture/shader. Bake their tint into vertex colors
+  // so each plant submits one foliage mesh instead of three visually identical
+  // material variants (and repeats that saving in the sun-shadow pass).
+  const leafTintMat = leafMat.clone();
+  leafTintMat.color.set(0xffffff);
+  leafTintMat.vertexColors = true;
   const rockMat = new THREE.MeshStandardMaterial({
     color: palette.rock,
     roughness: 0.93,
@@ -370,7 +391,14 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       const g =
         mapDef.terrain === 'jungle' && mapRandom() < 0.42
           ? createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat)
-          : createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, mapDef.terrain);
+          : createTreeGroup(
+              trunkMat,
+              leafMat,
+              darkLeafMat,
+              lightLeafMat,
+              leafTintMat,
+              mapDef.terrain
+            );
       g.position.set(x, y, z);
       g.rotation.y = mapRandom() * Math.PI * 2;
       if (scenery) scenery.register(g, { x, z, kind: 'tree', source: 'map' });
@@ -388,6 +416,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
       mapDef.terrain === 'desert' ? dryBushMat : bushMat,
       mapDef.terrain === 'desert' ? bushMat : lightLeafMat,
       trunkMat,
+      leafTintMat,
       mapDef.terrain
     );
     g.position.set(x, y, z);
@@ -492,7 +521,7 @@ function addWoodyLimb(group, material, start, end, baseRadius, tipRadius, radial
   group.add(limb);
 }
 
-function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, terrain) {
+function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintMat, terrain) {
   const g = new THREE.Group();
   g.name = 'vegetationTree';
   g.userData.vegetationKind = 'tree';
@@ -599,7 +628,15 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, terrain) 
     outer.receiveShadow = true;
     g.add(outer);
   }
-  return consolidateGroupMeshes(g);
+  return consolidateGroupMeshes(
+    g,
+    false,
+    new Map([
+      [leafMat, leafTintMat],
+      [darkLeafMat, leafTintMat],
+      [lightLeafMat, leafTintMat],
+    ])
+  );
 }
 
 function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
@@ -686,7 +723,7 @@ function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
   return consolidateGroupMeshes(g, true);
 }
 
-function createBushGroup(bushMat, accentMat, twigMat, terrain) {
+function createBushGroup(bushMat, accentMat, twigMat, leafTintMat, terrain) {
   const g = new THREE.Group();
   g.name = 'vegetationBush';
   g.userData.vegetationKind = 'bush';
@@ -741,7 +778,14 @@ function createBushGroup(bushMat, accentMat, twigMat, terrain) {
   baseCluster.castShadow = true;
   baseCluster.receiveShadow = true;
   g.add(baseCluster);
-  return consolidateGroupMeshes(g);
+  return consolidateGroupMeshes(
+    g,
+    false,
+    new Map([
+      [bushMat, leafTintMat],
+      [accentMat, leafTintMat],
+    ])
+  );
 }
 
 function createRockCluster(rockMat, scale = 1) {

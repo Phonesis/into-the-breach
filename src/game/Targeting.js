@@ -187,7 +187,10 @@ export function filterAcquireNearAttacker(attacker, targets, rangeMult = 2.25) {
     const dz = tz - az;
     if (dx * dx + dz * dz <= maxSq) near.push(other);
   }
-  return near.length > 0 ? near : targets;
+  // Callers already handle explicit attack orders before auto-acquisition.
+  // Returning the full opposing army when nobody is nearby only makes the
+  // subsequent range/LOS pass rescan targets that cannot possibly be chosen.
+  return near;
 }
 
 export function findNearestEnemyInRange(unit, targets, maxRangeMultiplier = 1) {
