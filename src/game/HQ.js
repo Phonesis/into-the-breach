@@ -3,10 +3,10 @@ import { sampleTerrainHeight } from '../world/Terrain.js';
 import { refreshHqDamageVisuals, removeHqBurn } from '../effects/HqBurnEffects.js';
 import { removeHqRepairMarker } from '../visual/HealMarkers.js';
 import {
-  createCamoMaterial,
   getInfantryUniformTexture,
   getVehicleCamoTexture,
 } from '../units/UnitTextures.js';
+import { createHqBuildingMesh } from '../visual/HqBuildingMeshes.js';
 
 export class HQ {
   constructor({ team, position, mapDef, scene, label, maxHp = 800, faction = null }) {
@@ -20,69 +20,33 @@ export class HQ {
     this.mapDef = mapDef;
 
     const isPlayer = team === 'player';
-    const wallColor = isPlayer ? 0x3a5a7a : 0x6a3a3a;
-    const roofColor = 0x2a2a2a;
-    const sandbag = 0x8a7a5a;
-    const factionId = faction?.id ?? null;
+    const factionId = faction?.id ?? 'germany';
     const vehicleCamo = factionId ? getVehicleCamoTexture(factionId) : null;
     const infantryCamo = factionId ? getInfantryUniformTexture(factionId) : null;
 
-    const group = new THREE.Group();
-    const wallMat = createCamoMaterial(wallColor, vehicleCamo, [3.2, 2.4]);
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: roofColor,
-      roughness: 0.9,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-    });
-    const bagMat = createCamoMaterial(sandbag, infantryCamo ?? vehicleCamo, [2.4, 1.6]);
+    const building = createHqBuildingMesh({ factionId, vehicleCamo, infantryCamo });
+    const group = building.group;
 
-    const base = new THREE.Mesh(new THREE.BoxGeometry(8, 2.2, 8), wallMat);
-    base.position.y = 1.1;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    base.userData.baseColor = new THREE.Color(vehicleCamo ? 0xffffff : wallColor);
-    group.add(base);
-
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(6, 1.5, 6), wallMat);
-    upper.position.y = 2.9;
-    upper.castShadow = true;
-    upper.userData.baseColor = new THREE.Color(vehicleCamo ? 0xffffff : wallColor);
-    group.add(upper);
-
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(4.5, 2, 4), roofMat);
-    roof.position.y = 4.6;
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    roof.userData.baseColor = new THREE.Color(roofColor);
-    group.add(roof);
-
-    this._wallMeshes = [base, upper];
-    this._roofMesh = roof;
-    this._bagMeshes = [];
+    this._wallMeshes = building.wallMeshes;
+    this._roofMesh = building.roofMesh;
+    this._bagMeshes = building.bagMeshes;
     this._impactMarks = [];
     this._structureStage = 0;
 
-    for (const [bx, bz] of [
-      [-4.2, 0],
-      [4.2, 0],
-      [0, -4.2],
-      [0, 4.2],
-    ]) {
-      const bags = new THREE.Mesh(new THREE.BoxGeometry(3, 0.9, 1.2), bagMat);
-      bags.position.set(bx, 0.45, bz);
-      bags.rotation.y = bx === 0 ? 0 : Math.PI / 2;
-      bags.castShadow = true;
-      bags.userData.baseColor = new THREE.Color(infantryCamo || vehicleCamo ? 0xffffff : sandbag);
-      this._bagMeshes.push(bags);
-      group.add(bags);
-    }
-
+    const flagMount = building.flagMount ?? {
+      x: 2.9,
+      z: -1.7,
+      baseY: 0.55,
+      height: 6.2,
+      direction: 1,
+    };
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.08, 5, 8),
       new THREE.MeshStandardMaterial({ color: 0x3a3028 })
     );
-    pole.position.y = 5;
+    pole.position.set(flagMount.x, flagMount.baseY + flagMount.height * 0.5, flagMount.z);
+    pole.scale.y = flagMount.height / 5;
+    pole.castShadow = true;
     group.add(pole);
 
     const flagColor = faction?.accent ?? (isPlayer ? 0x3b82f6 : 0xef4444);
@@ -108,7 +72,13 @@ export class HQ {
     flagPositions.needsUpdate = true;
     flagGeometry.computeVertexNormals();
     const flag = new THREE.Mesh(flagGeometry, flagMat);
-    flag.position.set(flagWidth * 0.5, 6.2, 0);
+    const flagDirection = flagMount.direction ?? 1;
+    flag.position.set(
+      flagMount.x + flagDirection * flagWidth * 0.5,
+      flagMount.baseY + flagMount.height - flagHeight * 0.5 - 0.12,
+      flagMount.z
+    );
+    flag.scale.x = flagDirection;
     flag.castShadow = true;
     if (faction?.flag) {
       new THREE.TextureLoader().load(faction.flag, (tex) => {
@@ -140,10 +110,10 @@ export class HQ {
     group.add(ring);
 
     const pick = new THREE.Mesh(
-      new THREE.BoxGeometry(10, 6, 10),
+      new THREE.BoxGeometry(10, 7.4, 10),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    pick.position.y = 3;
+    pick.position.y = 3.7;
     pick.name = 'hqPickBox';
     group.add(pick);
 

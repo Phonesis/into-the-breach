@@ -110,6 +110,10 @@ function addImpactMark(hq) {
 
   const wall = hq._wallMeshes[Math.floor(Math.random() * hq._wallMeshes.length)];
   const isBase = wall === hq._wallMeshes[0];
+  const dimensions = wall.geometry?.parameters ?? {};
+  const wallWidth = dimensions.width ?? (isBase ? 8 : 6);
+  const wallHeight = dimensions.height ?? (isBase ? 2.2 : 1.5);
+  const wallDepth = dimensions.depth ?? (isBase ? 8 : 6);
   const holeMat = new THREE.MeshBasicMaterial({
     color: 0x050403,
     transparent: true,
@@ -121,9 +125,9 @@ function addImpactMark(hq) {
     holeMat
   );
   hole.position.set(
-    (Math.random() - 0.5) * (isBase ? 6.5 : 5),
-    (Math.random() - 0.5) * (isBase ? 1.6 : 1.2),
-    isBase ? 4.06 : 3.06
+    (Math.random() - 0.5) * Math.max(0.4, wallWidth - 0.35),
+    (Math.random() - 0.5) * Math.max(0.25, wallHeight - 0.25),
+    wallDepth * 0.5 + 0.02
   );
   hole.rotation.y = (Math.random() - 0.5) * 0.5;
   wall.add(hole);
