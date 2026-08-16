@@ -5725,10 +5725,12 @@ function updateAIGeneralOrders(game, enemyUnits, playerUnits, { clearance = fals
     enemySummary.hpRatio < 0.42 && forceRatio < 0.78 ||
     (enemySummary.hpRatio < 0.55 && forceRatio < 0.58);
 
-  // Clear Defenses has role-specific regroup logic and intentionally does not
-  // turn the garrison into a generic retreat. Its normal AI still uses the
-  // commander aura and radio support above.
-  if (!clearance && desperate && manager.isReady('fullRetreat')) {
+  // Fortified Line's prepared garrison must not abandon its defensive belt,
+  // but an enemy assault force is still allowed to make the same emergency
+  // withdrawal as other AI forces when the player is defending.
+  const enemyIsPreparedGarrison =
+    clearance && game?.clearanceRole !== 'defend';
+  if (!enemyIsPreparedGarrison && desperate && manager.isReady('fullRetreat')) {
     return manager.issue('fullRetreat');
   }
 
