@@ -46,6 +46,7 @@ import {
 import {
   canDismountRiders,
   canHostRiders,
+  canUnitEnterVehicle,
   getTankRiderIds,
 } from '../game/TankRiders.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
@@ -818,6 +819,20 @@ export class UIManager {
           Map
         </button>
 
+        <button
+          type="button"
+          class="vehicle-entry-action interactive hidden"
+          id="vehicle-entry-action"
+          aria-label="Get selected unit into vehicle"
+          title="Get in"
+        >
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <path class="vehicle-entry-arrow" d="M16 3v13m-5-5 5 5 5-5" />
+            <path class="vehicle-entry-hull" d="M5 20h22l2 6H3l2-6Zm4 0 2-4h10l2 4" />
+          </svg>
+          <span>Get in</span>
+        </button>
+
         <aside class="unit-roster interactive" id="unit-roster" aria-label="Your forces">
           <h3 class="unit-roster-title">Forces</h3>
           <button
@@ -907,10 +922,10 @@ export class UIManager {
             </div>
             <div class="tank-rider-actions hidden" id="tank-rider-actions">
               <button type="button" class="btn btn-secondary interactive" id="btn-dismount-riders">
-                Dismount infantry
+                Disembark riders
               </button>
               <p class="tank-rider-hint" id="tank-rider-hint">
-                Riders bail out beside the tank. Under fire they dismount automatically.
+                Riders also disembark automatically when the vehicle comes under fire.
               </p>
             </div>
             <div class="engineer-build-actions hidden" id="engineer-build-actions">
@@ -1902,6 +1917,19 @@ export class UIManager {
     this.root.querySelector('#btn-engage-target').onclick = () => {
       if (this.callbacks.onConfirmTarget) this.callbacks.onConfirmTarget();
     };
+    const vehicleEntryAction = this.root.querySelector('#vehicle-entry-action');
+    vehicleEntryAction?.addEventListener('pointerenter', () => {
+      this.callbacks.onVehicleEntryHover?.(true);
+    });
+    vehicleEntryAction?.addEventListener('pointerleave', () => {
+      this.callbacks.onVehicleEntryHover?.(false);
+    });
+    vehicleEntryAction?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetId = Number(event.currentTarget.dataset.targetId);
+      if (Number.isFinite(targetId)) this.callbacks.onVehicleEntry?.(targetId);
+    });
     this.root.querySelector('#btn-stance-hold')?.addEventListener('click', () => {
       this.callbacks.onSetEngagementStance?.('hold');
     });
@@ -2937,22 +2965,46 @@ export class UIManager {
     if (stateEl) stateEl.textContent = this.autoBuildMode && !cheatBlocked ? 'On' : 'Off';
   }
 
-  updateTankRiderActions(units) {
+  updateTankRiderActions(units, game = null) {
     const panel = this.root.querySelector('#tank-rider-actions');
     const hint = this.root.querySelector('#tank-rider-hint');
+    const button = this.root.querySelector('#btn-dismount-riders');
     if (!panel) return;
 
-    const tanks = (units ?? []).filter(
-      (u) => canHostRiders(u.def?.type) && canDismountRiders(u)
+    const selected = units ?? [];
+    const allUnits = game?.units ?? selected;
+    const selectedTankIds = new Set(
+      selected
+        .filter((unit) => canHostRiders(unit.def?.type) && canDismountRiders(unit))
+        .map((tank) => tank.id)
     );
-    const riderCount = tanks.reduce((n, t) => n + getTankRiderIds(t).length, 0);
+    const selectedRiders = selected.filter(
+      (unit) => unit._mountedOnTankId && !unit._replacementCrewVehicleId
+    );
+    const tankIds = new Set([
+      ...selectedTankIds,
+      ...selectedRiders.map((rider) => rider._mountedOnTankId),
+    ]);
+    const tanks = [...tankIds]
+      .map((id) => allUnits.find((unit) => unit.id === id))
+      .filter((tank) => tank && canDismountRiders(tank));
+    const readyTanks = tanks.filter((tank) => !tank.moveTarget);
+    const riderCount = tanks.reduce((n, tank) => {
+      if (selectedTankIds.has(tank.id)) {
+        return n + getTankRiderIds(tank).filter((id) => id !== tank._replacementCrewUnitId).length;
+      }
+      return n + selectedRiders.filter((rider) => rider._mountedOnTankId === tank.id).length;
+    }, 0);
     const show = tanks.length > 0 && riderCount > 0;
     panel.classList.toggle('hidden', !show);
+    if (button) button.disabled = show && readyTanks.length === 0;
+    if (button && show) button.textContent = riderCount === 1 ? 'Disembark rider' : 'Disembark riders';
     if (hint && show) {
-      hint.textContent =
-        riderCount === 1
-          ? '1 rider aboard — they will bail out if the tank is hit.'
-          : `${riderCount} riders aboard — they bail out automatically if the tank is hit.`;
+      hint.textContent = readyTanks.length === 0
+        ? 'Stop the selected vehicle to disembark manually; riders bail out automatically under fire.'
+        : riderCount === 1
+          ? '1 rider aboard — disembark manually, or they will bail out automatically under fire.'
+          : `${riderCount} riders aboard — disembark manually, or they will bail out automatically under fire.`;
     }
   }
 
@@ -4103,11 +4155,59 @@ export class UIManager {
     this.callbacks.onTabletFireMode?.(false);
     this.updateHqThreat(null);
     this.root.querySelector('#hud').classList.add('hidden');
+    this.root.querySelector('#vehicle-entry-action')?.classList.add('hidden');
     this.root.querySelector('#hud')?.classList.remove('hud-chrome-hidden');
     this.hideTdBreachAlert();
     const panel = this.root.querySelector('#firesupport-panel');
     if (panel) panel.classList.remove('targeting');
     this.refreshTitleSaveButton();
+  }
+
+  updateVehicleEntryAction(target, entrants, camera, canvas, visible = true) {
+    const button = this.root.querySelector('#vehicle-entry-action');
+    if (
+      !button ||
+      !visible ||
+      !target?.position ||
+      target.dead ||
+      !entrants?.length ||
+      !camera ||
+      !canvas
+    ) {
+      button?.classList.add('hidden');
+      return;
+    }
+
+    const point = target.position.clone();
+    const type = target.def?.type;
+    point.y += type === 'superHeavyTank'
+      ? 5.8
+      : type === 'tank' || type === 'tankDestroyer'
+        ? 4.8
+        : 4;
+    point.project(camera);
+    if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.08) {
+      button.classList.add('hidden');
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const projectedLeft = rect.left + (point.x + 1) * 0.5 * rect.width;
+    const projectedTop = rect.top + (1 - point.y) * 0.5 * rect.height;
+    button.style.left = `${Math.max(rect.left + 36, Math.min(rect.right - 36, projectedLeft))}px`;
+    button.style.top = `${Math.max(rect.top + 38, projectedTop)}px`;
+    button.dataset.targetId = String(target.id);
+    const ownCrew = entrants.some((unit) => unit.def?.type === 'vehicleCrew');
+    const label = ownCrew ? 'Re-enter' : target._crewless ? 'Get in' : 'Get on';
+    const text = button.querySelector('span');
+    if (text) text.textContent = label;
+    button.setAttribute('aria-label', `${label} ${target.name ?? target.def?.name ?? 'vehicle'}`);
+    button.title = target._crewless
+      ? ownCrew
+        ? 'Return this crew to its repaired vehicle'
+        : 'Enter and crew this operational vehicle'
+      : 'Mount selected troops as riders on this vehicle';
+    button.classList.remove('hidden');
   }
 
   updateHqThreat(threat) {
@@ -4844,7 +4944,18 @@ export class UIManager {
         : hq && !hq.dead && hq.team === 'player';
     if (!this._hudBaseBuilding) this._setProductionPanelVisible(showProduction);
 
-    const targetName = hoverTarget && !hoverTarget.dead ? TargetIndicators.getTargetLabel(hoverTarget) : null;
+    const vehicleEntryAvailable = !!(
+      hoverTarget &&
+      units.some((unit) => canUnitEnterVehicle(unit, hoverTarget))
+    );
+    const friendlyUnit = !!(
+      hoverTarget?.def &&
+      units[0] &&
+      hoverTarget.team === units[0].team
+    );
+    const targetName = hoverTarget && !hoverTarget.dead && !vehicleEntryAvailable && !friendlyUnit
+      ? TargetIndicators.getTargetLabel(hoverTarget)
+      : null;
     const tabletOn = this.tabletCamera?.shouldEnable() ?? isTabletLikeDevice();
     const targetHint = this.root.querySelector('#target-offer-hint');
     if (offer) {
@@ -4880,7 +4991,7 @@ export class UIManager {
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
-      this.updateTankRiderActions([]);
+      this.updateTankRiderActions([], game);
       return;
     }
 
@@ -4909,7 +5020,7 @@ export class UIManager {
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
-      this.updateTankRiderActions(units);
+      this.updateTankRiderActions(units, game);
       return;
     }
 
@@ -4923,7 +5034,7 @@ export class UIManager {
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
-      this.updateTankRiderActions(units);
+      this.updateTankRiderActions(units, game);
       return;
     }
 
@@ -5011,15 +5122,20 @@ export class UIManager {
         ? `<p class="unit-morale-status inspired"><strong>Inspired</strong> — within ${COMMANDER_AURA_RANGE} m of a living field commander; automatic retreat and surrender pressure is greatly reduced.</p>`
         : '';
       const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
+      const ridingVehicle = u._mountedOnTankId
+        ? game?.units?.find((unit) => unit.id === u._mountedOnTankId)
+        : null;
       const riderBlock =
-        u._crewless
-          ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — infantry or airborne from either side can capture this operational tank. Select a squad and RMB the vehicle; two troops take control and the rest ride on the hull.</p>'
+        ridingVehicle && !u._replacementCrewVehicleId
+          ? `<p class="unit-support-status"><strong>Riding ${ridingVehicle.name ?? ridingVehicle.def?.name ?? 'vehicle'}</strong> — use Disembark rider below to put this unit down manually; incoming fire also makes riders bail out.</p>`
+          : u._crewless
+          ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — its surviving bailed crew can reclaim this hull, or infantry/airborne from either side can capture it. Select an eligible unit and RMB the vehicle.</p>'
           : u._replacementCrewUnitId
             ? `<p class="unit-support-status"><strong>Replacement crew aboard</strong> — two troops operate the tank; the remaining squad members ride on the hull${riderN > 1 ? ` with ${riderN - 1} additional rider unit${riderN > 2 ? 's' : ''}` : ''}.</p>`
             : riderN > 0
-          ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — RMB friendly infantry onto this tank to mount more; dismount when stationary.</p>`
+          ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — use Get on or RMB with selected infantry to mount more. Stop the vehicle and press Disembark riders to put them down manually; incoming fire makes them bail out automatically.</p>`
           : canHostRiders(u.def?.type) && u.def?.type !== 'armoredCar'
-            ? '<p class="unit-support-status">RMB with infantry selected to mount riders on this tank.</p>'
+            ? '<p class="unit-support-status">Select infantry and use Get on or RMB to mount riders on this tank.</p>'
             : '';
       const mobilityBlock = u._mobilityDamaged
         ? `<p class="unit-support-status unit-mobility-status"><strong>${u._mobilityDamageKind === 'wheel' ? 'WHEEL DAMAGE' : 'BROKEN TRACK'} — IMMOBILE</strong> — keep a combat engineer within ~16 m to repair the running gear (${Math.round((u._mobilityRepairProgress ?? 0) * 100)}%). The weapon remains operational.</p>`
@@ -5043,14 +5159,14 @@ export class UIManager {
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
-      this.updateTankRiderActions([u]);
+      this.updateTankRiderActions([u], game);
       return;
     }
 
     this.updateEngineerBuild(game);
     this.updateArtilleryAutoFire(game);
     this.updateSmokeShell(game);
-    this.updateTankRiderActions(units);
+    this.updateTankRiderActions(units, game);
 
     const types = {};
     for (const u of units) types[u.type] = (types[u.type] || 0) + 1;

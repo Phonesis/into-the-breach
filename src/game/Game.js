@@ -106,7 +106,7 @@ import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
 import { applyObstaclePath } from './MovePath.js';
-import { dismountAllRiders, updateTankRiders } from './TankRiders.js';
+import { dismountAllRiders, releaseFromTank, updateTankRiders } from './TankRiders.js';
 import {
   isBaseBuildingCampaign,
   getPlayerProductionUnitTypes,
@@ -626,7 +626,8 @@ export class Game {
         this._syncBattleCursor();
       },
       onHoverTarget: (target) => {
-        this.targetIndicators?.setHoverTarget(target);
+        const action = this.controller?.getEligibleVehicleEntrants(target).length > 0;
+        this.targetIndicators?.setHoverTarget(target, { action });
         if (this._selectionPanelDismissed) return;
         const sel = this._playerAlive.filter((u) => u.selected);
         if (sel.length === 0) return;
@@ -1685,6 +1686,15 @@ export class Game {
 
   _renderFrame() {
     if (this._rendererContextLost) return;
+    const entryTarget = this.controller?.hoveredTarget ?? null;
+    const entrants = this.controller?.getEligibleVehicleEntrants(entryTarget) ?? [];
+    this.ui?.updateVehicleEntryAction(
+      entryTarget,
+      entrants,
+      this.camera,
+      this.canvas,
+      this.running && !this.gameOver && !this.paused
+    );
     updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this.renderer.render(this.scene, this.camera);
     const metrics = this._devRenderMetrics;
@@ -2141,10 +2151,21 @@ export class Game {
 
   dismountSelectedTankRiders() {
     const selected = this._playerAlive.filter((u) => u.selected);
-    for (const tank of selected) {
-      if (!tank.moveTarget) {
-        dismountAllRiders(tank, this.units, this.mapDef);
-      }
+    const selectedTanks = selected.filter((unit) =>
+      unit._tankRiderIds?.some((id) => id !== unit._replacementCrewUnitId)
+    );
+    const selectedTankIds = new Set(selectedTanks.map((tank) => tank.id));
+
+    for (const tank of selectedTanks) {
+      if (!tank.moveTarget) dismountAllRiders(tank, this.units, this.mapDef);
+    }
+    for (const rider of selected) {
+      if (!rider._mountedOnTankId || rider._replacementCrewVehicleId) continue;
+      if (selectedTankIds.has(rider._mountedOnTankId)) continue;
+      const tank = this.units.find((unit) => unit.id === rider._mountedOnTankId);
+      if (!tank || tank.moveTarget) continue;
+      const index = Math.max(0, tank._tankRiderIds?.indexOf(rider.id) ?? 0);
+      releaseFromTank(rider, this.units, this.mapDef, index);
     }
     this._selectionUiKey = '';
     const sel = this._playerAlive.filter((u) => u.selected);
@@ -2424,6 +2445,16 @@ export class Game {
       this.controller.clearTabletTargetConfirm();
       // Info panel is dismissed in onOrder; units stay selected for follow-ups.
     }
+  }
+
+  issueSelectedVehicleEntry(targetId) {
+    if (!this.running || this.gameOver || this.paused) return false;
+    const vehicle = this.units.find((unit) => unit.id === targetId) ?? null;
+    return this.controller?.issueVehicleEntry(vehicle) ?? false;
+  }
+
+  setVehicleEntryActionHovered(hovered) {
+    this.controller?.setVehicleEntryActionHovered(hovered);
   }
 
   setTabletTargetMode(on) {

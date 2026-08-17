@@ -96,6 +96,7 @@ import { isUnitGarrisoned } from './BunkerGarrison.js';
 import {
   clampVehicleMoveAgainstUnits,
   resolveVehicleOverlaps,
+  updateFriendlyTrafficYield,
   updateVehicleWreckTraversalPose,
 } from './VehicleCollision.js';
 
@@ -1936,6 +1937,24 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit._userMoveOrder = false;
       unit._chasingAttack = false;
       updateUnitTerrainPose(unit, mapDef, dt);
+      continue;
+    }
+
+    if (
+      updateFriendlyTrafficYield(unit, collisionUnits, mapDef, dt, collisionOptions)
+    ) {
+      unit._mapDef = mapDef;
+      updateVehicleWreckTraversalPose(unit, collisionUnits, {
+        directionX: unit.position.x - (unit._wreckPosePrevX ?? unit.position.x),
+        directionZ: unit.position.z - (unit._wreckPosePrevZ ?? unit.position.z),
+        dt,
+        mapDef,
+        sampleTerrainHeight,
+      });
+      unit._wreckPosePrevX = unit.position.x;
+      unit._wreckPosePrevZ = unit.position.z;
+      updateUnitTerrainPose(unit, mapDef, dt);
+      updateInfantryWalkAnimation(unit, dt);
       continue;
     }
 

@@ -1,11 +1,15 @@
-import { isVehicleUnit } from '../units/VehicleTypes.js';
+import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 import { unitPathRadius } from './MovePath.js';
+import { advanceUnitOnTerrain } from '../world/Terrain.js';
 
 // Leave a small visible gap between hulls and wrecks. The path radius is the
 // existing gameplay/collision footprint, so this does not change vehicle
 // visuals or effects; it only prevents physical vehicle bodies from stacking.
 const VEHICLE_SEPARATION_GAP = 0.35;
 const COLLISION_EPSILON = 1e-6;
+const TRAFFIC_YIELD_EXTRA_CLEARANCE = 0.8;
+const TRAFFIC_YIELD_REACH = 0.75;
+const TRAFFIC_YIELD_TURN_RATE = 0.9;
 const WRECK_TRAVERSAL_HEIGHT = Object.freeze({
   superHeavyTank: 0.72,
   tankDestroyer: 0.58,
@@ -66,8 +70,247 @@ function isActivelyMovingVehicle(unit) {
     !unit.surrendered &&
     !unit._captureExit &&
     !unit._crewless &&
-    unit.moveTarget
+    (unit.moveTarget || unit._trafficYield)
   );
+}
+
+function canYieldToFriendlyTraffic(unit) {
+  return !!(
+    unit &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._crewless &&
+    !unit._mobilityDamaged &&
+    !unit.retreating &&
+    !unit.moveTarget &&
+    !unit._trafficYield
+  );
+}
+
+function isYieldPointClear(unit, requester, units, x, z, options) {
+  const radius = getCollisionRadius(unit);
+  const half = (options?.mapDef?.size ?? 120) * 0.5 - radius - 1;
+  if (Math.abs(x) > half || Math.abs(z) > half) return false;
+  if (
+    options?.scenery?.getUnitPlacementBlocker?.(x, z, radius, {
+      allowTrackedBuildingCrush: false,
+    })
+  ) {
+    return false;
+  }
+
+  for (const other of units ?? []) {
+    if (other === unit || other === requester || !isPhysicalVehicle(other)) continue;
+    const separation =
+      radius + getCollisionRadius(other) + VEHICLE_SEPARATION_GAP;
+    if (Math.hypot(x - other.position.x, z - other.position.z) < separation) {
+      return false;
+    }
+    if (
+      firstSegmentCircleHit(
+        unit.position.x,
+        unit.position.z,
+        x,
+        z,
+        other.position.x,
+        other.position.z,
+        separation
+      ) !== null
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function requestFriendlyTrafficYield(
+  requester,
+  blocker,
+  units,
+  directionX,
+  directionZ,
+  options
+) {
+  if (
+    requester?._trafficYield ||
+    blocker?.team !== requester?.team ||
+    !canYieldToFriendlyTraffic(blocker)
+  ) {
+    return false;
+  }
+
+  const length = Math.hypot(directionX, directionZ);
+  if (length <= COLLISION_EPSILON) return false;
+  const forwardX = directionX / length;
+  const forwardZ = directionZ / length;
+  const sideX = -forwardZ;
+  const sideZ = forwardX;
+  const clearance =
+    getCollisionRadius(requester) +
+    getCollisionRadius(blocker) +
+    VEHICLE_SEPARATION_GAP +
+    TRAFFIC_YIELD_EXTRA_CLEARANCE;
+
+  // Prefer a pure lateral pull-out. The two slightly forward alternatives
+  // help a blocker beside a wall find room without backing into the requester.
+  const candidates = [
+    { side: 1, forward: 0 },
+    { side: -1, forward: 0 },
+    { side: 1, forward: 0.45 },
+    { side: -1, forward: 0.45 },
+  ];
+  for (const candidate of candidates) {
+    const x =
+      blocker.position.x +
+      sideX * clearance * candidate.side +
+      forwardX * clearance * candidate.forward;
+    const z =
+      blocker.position.z +
+      sideZ * clearance * candidate.side +
+      forwardZ * clearance * candidate.forward;
+    if (!isYieldPointClear(blocker, requester, units, x, z, options)) continue;
+    blocker._trafficYield = {
+      requesterId: requester.id,
+      originX: blocker.position.x,
+      originZ: blocker.position.z,
+      asideX: x,
+      asideZ: z,
+      phase: 'aside',
+    };
+    blocker._reverseMoveOrder = false;
+    return true;
+  }
+  return false;
+}
+
+function isTrafficYieldOriginClear(unit, units, state) {
+  const radius = getCollisionRadius(unit);
+  for (const other of units ?? []) {
+    if (other === unit || !isPhysicalVehicle(other)) continue;
+    const separation =
+      radius + getCollisionRadius(other) + VEHICLE_SEPARATION_GAP + 0.25;
+    if (
+      Math.hypot(state.originX - other.position.x, state.originZ - other.position.z) <
+      separation
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Temporarily pull an idle friendly vehicle/gun out of a moving unit's lane,
+ * wait for the lane to clear, then return it to its exact starting position.
+ * This does not replace its combat order; a newly assigned move order cancels
+ * the transient yield immediately.
+ */
+export function updateFriendlyTrafficYield(unit, units, mapDef, dt, options = {}) {
+  const state = unit?._trafficYield;
+  if (!state) return false;
+  if (
+    unit.dead ||
+    unit.surrendered ||
+    unit._captureExit ||
+    unit._crewless ||
+    unit._mobilityDamaged ||
+    unit.retreating ||
+    unit.moveTarget
+  ) {
+    unit._trafficYield = null;
+    unit._reverseMoveOrder = false;
+    return false;
+  }
+
+  if (state.phase === 'wait') {
+    if (!isTrafficYieldOriginClear(unit, units, state)) return true;
+    state.phase = 'return';
+    // Tracked vehicles can back into the position they just vacated instead
+    // of spending a long time rotating 180 degrees in the cleared lane.
+    unit._reverseMoveOrder = isTankType(unit.def?.type);
+  }
+
+  const target = state.phase === 'aside'
+    ? { x: state.asideX, z: state.asideZ }
+    : { x: state.originX, z: state.originZ };
+  const beforeX = unit.position.x;
+  const beforeY = unit.position.y;
+  const beforeZ = unit.position.z;
+  const targetDx = target.x - beforeX;
+  const targetDz = target.z - beforeZ;
+  const reverseIntoOrigin = state.phase === 'return' && isTankType(unit.def?.type);
+  const desiredYaw = Math.atan2(
+    reverseIntoOrigin ? -targetDx : targetDx,
+    reverseIntoOrigin ? -targetDz : targetDz
+  );
+  const yawBeforeMove = unit.mesh?.rotation?.y ?? desiredYaw;
+  const turnDelta = Math.abs(
+    Math.atan2(
+      Math.sin(desiredYaw - yawBeforeMove),
+      Math.cos(desiredYaw - yawBeforeMove)
+    )
+  );
+  advanceUnitOnTerrain(unit, target, mapDef, dt, { horizReach: TRAFFIC_YIELD_REACH });
+  // A traffic-clearing tank should pivot, then pull straight out. Allowing it
+  // to start driving during a large turn creates a broad arc through the very
+  // lane it is meant to clear and can send it circling around the side point.
+  if (isTankType(unit.def?.type) && turnDelta > 0.28) {
+    unit.position.x = beforeX;
+    unit.position.y = beforeY;
+    unit.position.z = beforeZ;
+    if (unit.mesh) {
+      const signedTurn = Math.atan2(
+        Math.sin(desiredYaw - yawBeforeMove),
+        Math.cos(desiredYaw - yawBeforeMove)
+      );
+      unit.mesh.rotation.y = yawBeforeMove + Math.max(
+        -TRAFFIC_YIELD_TURN_RATE * dt,
+        Math.min(TRAFFIC_YIELD_TURN_RATE * dt, signedTurn)
+      );
+    }
+  }
+  clampVehicleMoveAgainstUnits(unit, units, beforeX, beforeZ, {
+    ...options,
+    mapDef,
+    dt,
+    ignoreVehicleId: state.requesterId,
+  });
+
+  const moved = Math.hypot(unit.position.x - beforeX, unit.position.z - beforeZ) > 0.01;
+  if (moved && options?.scenery) {
+    const blocked = options.scenery.blockVehicleAtBuildings?.(
+      unit,
+      beforeX,
+      beforeZ,
+      getCollisionRadius(unit),
+      {
+        vehicleClass: unit.def?.type === 'armoredCar' ? 'light' : 'tracked',
+        directionX: unit.position.x - beforeX,
+        directionZ: unit.position.z - beforeZ,
+      }
+    );
+    if (blocked) {
+      unit.position.x = beforeX;
+      unit.position.z = beforeZ;
+      // A candidate was clear when chosen but its short segment was not. Let
+      // ordinary traffic retry later instead of leaving a permanent side order.
+      unit._trafficYield = null;
+      unit._reverseMoveOrder = false;
+      return false;
+    }
+  }
+
+  if (Math.hypot(unit.position.x - target.x, unit.position.z - target.z) <= TRAFFIC_YIELD_REACH) {
+    unit.position.x = target.x;
+    unit.position.z = target.z;
+    if (state.phase === 'aside') state.phase = 'wait';
+    else {
+      unit._trafficYield = null;
+      unit._reverseMoveOrder = false;
+    }
+  }
+  return true;
 }
 
 function isPushableWreck(unit) {
@@ -453,9 +696,14 @@ export function clampVehicleMoveAgainstUnits(
   if (travelDistance <= COLLISION_EPSILON) return false;
 
   let firstLiveVehicleHit = 1;
+  let firstLiveVehicleCollision = null;
   let firstWreckCollision = null;
   for (const other of units ?? []) {
     if (other === unit || !isPhysicalVehicle(other)) continue;
+    // A yielding blocker must be able to move laterally away from the vehicle
+    // that requested the manoeuvre. Clamping that separating movement against
+    // the requester stops it almost immediately at the original contact point.
+    if (other.id === options.ignoreVehicleId) continue;
     if (canTrackedArmorOverrunLiveGun(unit, other)) continue;
     if (canVehicleTraverseWreck(unit, other)) continue;
 
@@ -475,9 +723,25 @@ export function clampVehicleMoveAgainstUnits(
       if (!firstWreckCollision || hit < firstWreckCollision.hit) {
         firstWreckCollision = { wreck: other, hit, requiredDistance };
       }
-    } else {
-      firstLiveVehicleHit = Math.min(firstLiveVehicleHit, hit);
+    } else if (hit < firstLiveVehicleHit) {
+      firstLiveVehicleHit = hit;
+      firstLiveVehicleCollision = { blocker: other, hit };
     }
+  }
+
+  if (
+    firstLiveVehicleCollision &&
+    firstLiveVehicleHit < 1 - COLLISION_EPSILON &&
+    (!firstWreckCollision || firstLiveVehicleHit < firstWreckCollision.hit)
+  ) {
+    requestFriendlyTrafficYield(
+      unit,
+      firstLiveVehicleCollision.blocker,
+      units,
+      dx,
+      dz,
+      options
+    );
   }
 
   let pushedWreck = false;

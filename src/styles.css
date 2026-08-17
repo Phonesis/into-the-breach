@@ -3108,6 +3108,80 @@ body.phone-unsupported .mobile-support-screen {
   display: none;
 }
 
+.vehicle-entry-action {
+  position: fixed;
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  gap: 0.26rem;
+  min-height: 1.9rem;
+  padding: 0.26rem 0.52rem 0.26rem 0.36rem;
+  transform: translate(-50%, -100%);
+  transform-origin: 50% 100%;
+  border: 1px solid rgba(151, 255, 184, 0.9);
+  border-radius: 999px;
+  color: #edfff2;
+  background: linear-gradient(180deg, rgba(33, 111, 63, 0.97), rgba(16, 67, 37, 0.98));
+  box-shadow:
+    0 0 0 2px rgba(7, 18, 12, 0.72),
+    0 0 18px rgba(74, 222, 128, 0.45),
+    0 0.4rem 0.8rem rgba(0, 0, 0, 0.5);
+  font: 800 0.62rem/1 'Source Sans 3', system-ui, sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  animation: vehicle-entry-pulse 1.4s ease-in-out infinite;
+}
+
+.vehicle-entry-action::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 999px;
+}
+
+.vehicle-entry-action.hidden {
+  display: none;
+}
+
+.vehicle-entry-action:hover,
+.vehicle-entry-action:focus-visible {
+  border-color: #d9ffe5;
+  background: linear-gradient(180deg, #318a50, #185f34);
+  outline: none;
+  filter: brightness(1.08);
+}
+
+.vehicle-entry-action svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  overflow: visible;
+}
+
+.vehicle-entry-arrow,
+.vehicle-entry-hull {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes vehicle-entry-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(7, 18, 12, 0.72),
+      0 0 14px rgba(74, 222, 128, 0.35),
+      0 0.4rem 0.8rem rgba(0, 0, 0, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(7, 18, 12, 0.72),
+      0 0 22px rgba(74, 222, 128, 0.68),
+      0 0.4rem 0.8rem rgba(0, 0, 0, 0.5);
+  }
+}
+
 .tablet-camera {
   position: absolute;
   right: 0.75rem;

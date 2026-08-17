@@ -140,6 +140,11 @@ export class Unit {
     // instantly. This is transient movement state, not saved battle state.
     this._driveSpeed = 0;
     this._trackCrushEscapeUntil = 0;
+    // Set on a spawned bailout team so it can reclaim only its original hull.
+    this._bailoutSourceVehicleId = null;
+    // Friendly-traffic manoeuvre state. Battle saves retain it so a unit saved
+    // while pulled aside still knows to return to its original position.
+    this._trafficYield = null;
 
     this.mesh = createUnitMesh(def.type, faction.color, faction.accent, faction.id);
     this.mesh.position.set(position.x, 0, position.z);
@@ -381,6 +386,9 @@ export class Unit {
       this._userMoveOrder = false;
       return;
     }
+    // A real order always takes priority over a temporary request to clear a
+    // friendly unit's lane.
+    this._trafficYield = null;
     // Preserve enter-building order across clearAttackOrder (which resets entry id).
     const allowBuildingId = options.allowBuildingId ?? null;
     if (playerOrder && !allowBuildingId) {

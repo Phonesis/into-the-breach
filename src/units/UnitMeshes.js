@@ -344,11 +344,11 @@ export function setSelectionRing(mesh, visible) {
   }
 }
 
-export function setTargetHighlight(mesh, visible, engaged = false) {
+export function setTargetHighlight(mesh, visible, engaged = false, action = false) {
   const ring = mesh.getObjectByName('targetHighlightRing');
   if (ring) {
     ring.material.opacity = visible ? (engaged ? 0.75 : 0.95) : 0;
-    ring.material.color.setHex(engaged ? 0xff8800 : 0xff3333);
+    ring.material.color.setHex(action ? 0x62e58b : engaged ? 0xff8800 : 0xff3333);
   }
 }
 

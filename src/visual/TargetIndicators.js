@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { setTargetHighlight } from '../units/UnitMeshes.js';
 import { getSceneryTargetLabel, isSceneryTarget } from '../game/SceneryTarget.js';
 import { getBaseBuildingTargetLabel, isBaseBuildingTarget } from '../game/BaseBuildingTarget.js';
+import { canUnitEnterVehicle } from '../game/TankRiders.js';
 
 const MAX_LINES = 48;
 
@@ -23,6 +24,7 @@ export class TargetIndicators {
   constructor(scene) {
     this.scene = scene;
     this.hoverTarget = null;
+    this.hoverAction = false;
     this.engagedTargets = new Set();
     this._hqHoverRing = null;
     this._sceneryHoverRing = null;
@@ -73,11 +75,12 @@ export class TargetIndicators {
     this._lastUnits = [];
   }
 
-  setHoverTarget(target) {
-    if (this.hoverTarget === target) return;
+  setHoverTarget(target, { action = false } = {}) {
+    if (this.hoverTarget === target && this.hoverAction === action) return;
     this._clearHoverVisual(this.hoverTarget);
     this.hoverTarget = target;
-    this._applyHoverVisual(target, false);
+    this.hoverAction = !!action;
+    this._applyHoverVisual(target, false, this.hoverAction);
   }
 
   _clearHoverVisual(target) {
@@ -97,7 +100,7 @@ export class TargetIndicators {
     }
   }
 
-  _applyHoverVisual(target, engaged) {
+  _applyHoverVisual(target, engaged, action = false) {
     if (!target || target.dead) return;
     if (isSceneryTarget(target) && target.mesh) {
       if (target.entry?.baseScale) target.mesh.scale.copy(target.entry.baseScale);
@@ -126,7 +129,7 @@ export class TargetIndicators {
       return;
     }
     if (target.mesh && target.def) {
-      setTargetHighlight(target.mesh, true, engaged);
+      setTargetHighlight(target.mesh, true, engaged, action);
       return;
     }
     if (target.mesh) {
@@ -179,8 +182,16 @@ export class TargetIndicators {
       if (t.mesh && t.def) setTargetHighlight(t.mesh, true, true);
     }
 
+    const hoverAction = !!(
+      this.hoverTarget &&
+      selectedUnits.some((unit) => canUnitEnterVehicle(unit, this.hoverTarget))
+    );
+    if (hoverAction !== this.hoverAction && this.hoverTarget) {
+      this._clearHoverVisual(this.hoverTarget);
+      this.hoverAction = hoverAction;
+    }
     if (this.hoverTarget && !this.hoverTarget.dead && !engaged.has(this.hoverTarget)) {
-      this._applyHoverVisual(this.hoverTarget, false);
+      this._applyHoverVisual(this.hoverTarget, false, this.hoverAction);
     } else if (this._hqHoverRing && (!this.hoverTarget || engaged.has(this.hoverTarget))) {
       if (!this.hoverTarget || engaged.has(this.hoverTarget)) {
         /* hq ring handled in setHoverTarget */

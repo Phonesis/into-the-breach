@@ -294,6 +294,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       mobilityRepairProgress: u._mobilityRepairProgress ?? 0,
       surrenderOnRetreat: !!u._surrenderOnRetreat,
       crewBailedOut: !!u._crewBailedOut,
+      bailoutSourceVehicleId: u._bailoutSourceVehicleId ?? null,
       crewless: !!u._crewless,
       replacementCrewUnitId: u._replacementCrewUnitId ?? null,
       replacementCrewVehicleId: u._replacementCrewVehicleId ?? null,
@@ -333,6 +334,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       _movePath: u._movePath?.map((p) => ({ x: p.x, z: p.z })) ?? null,
       _userMoveOrder: !!u._userMoveOrder,
       _reverseMoveOrder: !!u._reverseMoveOrder,
+      _trafficYield: u._trafficYield ? { ...u._trafficYield } : null,
       _chasingAttack: !!u._chasingAttack,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
       autoFire: !!u.autoFire,
@@ -1500,6 +1502,7 @@ export function applyBattleSave(game, snapshot) {
     unit._mobilityRepairProgress = uData.mobilityRepairProgress ?? 0;
     unit._surrenderOnRetreat = !!uData.surrenderOnRetreat;
     unit._crewBailedOut = !!uData.crewBailedOut;
+    unit._bailoutSourceVehicleId = uData.bailoutSourceVehicleId ?? null;
     unit._crewless = !!uData.crewless;
     unit._replacementCrewUnitId = uData.replacementCrewUnitId ?? null;
     unit._replacementCrewVehicleId = uData.replacementCrewVehicleId ?? null;
@@ -1534,6 +1537,7 @@ export function applyBattleSave(game, snapshot) {
     unit._binocularCooldown = uData.binocularCooldown ?? 0;
     unit._userMoveOrder = !!uData._userMoveOrder;
     unit._reverseMoveOrder = !!uData._reverseMoveOrder;
+    unit._trafficYield = uData._trafficYield ? { ...uData._trafficYield } : null;
     unit._chasingAttack = !!uData._chasingAttack;
     unit._attackOrderReachedRange = !!uData.attackOrderReachedRange;
     unit.engagementStance = Object.prototype.hasOwnProperty.call(uData, 'engagementStance')

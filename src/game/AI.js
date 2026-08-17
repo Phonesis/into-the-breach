@@ -20,6 +20,7 @@ import { MEDIC_AURA_RANGE } from './MedicBehavior.js';
 import { ENGINEER_AURA_RANGE, ENGINEER_HQ_REPAIR_RANGE } from './EngineerBehavior.js';
 import { canReceiveFieldTentHeal, TENT_MIN_SPACING } from './MedicFieldHospital.js';
 import {
+  canHostRiders,
   canSupplyReplacementCrew,
   issueMountOrder,
 } from './TankRiders.js';
@@ -2930,8 +2931,9 @@ export function updateAI({
 }
 
 /**
- * Infantry from either side may operate an abandoned, still-functional tank.
- * Enemy AI prioritizes nearby captures before resuming its normal battle task.
+ * Infantry from either side may operate an abandoned vehicle; surviving
+ * bailout crews may reclaim their own repaired hull. Enemy AI prioritizes
+ * nearby opportunities before resuming its normal battle task.
  */
 export function tryAssignCrewlessTankRecovery(unit, game, claims = new Set()) {
   if (!game?.units || !canSupplyReplacementCrew(unit)) return false;
@@ -2944,7 +2946,8 @@ export function tryAssignCrewlessTankRecovery(unit, game, claims = new Set()) {
       !tank?._crewless ||
       tank.dead ||
       tank.surrendered ||
-      !isTankType(tank.def?.type) ||
+      !canHostRiders(tank.def?.type) ||
+      !canSupplyReplacementCrew(unit, tank) ||
       claims.has(tank.id)
     ) {
       continue;

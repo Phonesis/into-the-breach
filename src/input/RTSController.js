@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { spreadGroupMoveDestinations } from '../game/GroupMovement.js';
 import {
-  canHostRiders,
-  canRideTanks,
+  canUnitEnterVehicle,
   issueMountOrder,
+  resolveMountedHost,
 } from '../game/TankRiders.js';
 import {
   getSeekCoverEnabled,
@@ -33,6 +33,7 @@ const HQ_ATTACK_PROXIMITY = 18;
  * order tracks the living unit instead of becoming a fixed ground-fire mission.
  */
 const UNIT_ATTACK_PROXIMITY_PAD = 3.8;
+const VEHICLE_ACTION_HOVER_GRACE_MS = 1100;
 
 export class RTSController {
   constructor({
@@ -131,6 +132,8 @@ export class RTSController {
     this.hoveredTarget = null;
     this._modifierShift = false;
     this._lastHoverRayAt = 0;
+    this._vehicleActionHovered = false;
+    this._vehicleHoverClearTimer = null;
     this._tabletMode = isTabletModeEnabled();
     this._tabletTargetMode = false;
     this._tabletFireMode = false;
@@ -155,6 +158,9 @@ export class RTSController {
 
   disable() {
     this.enabled = false;
+    if (this._vehicleHoverClearTimer) clearTimeout(this._vehicleHoverClearTimer);
+    this._vehicleHoverClearTimer = null;
+    this._vehicleActionHovered = false;
     this.domElement.removeEventListener('pointerdown', this._onPointerDown);
     this.domElement.removeEventListener('pointermove', this._onPointerMove);
     this.domElement.removeEventListener('pointerup', this._onPointerUp);
@@ -282,10 +288,11 @@ export class RTSController {
 
     let best = null;
     let bestDist = Infinity;
+    const units = this.getUnits();
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !obj.userData?.unit) obj = obj.parent;
-      const unit = obj?.userData?.unit;
+      const unit = resolveMountedHost(obj?.userData?.unit, units);
       if (!unit || unit.dead) continue;
       if (teamFilter && unit.team !== teamFilter) continue;
       if (hit.distance < bestDist) {
@@ -319,6 +326,7 @@ export class RTSController {
       if (u.dead || u.team === player || u.surrendered || u._captureExit || u._dropping) {
         continue;
       }
+      if (u._mountedOnTankId) continue;
       const d = Math.hypot(x - u.position.x, z - u.position.z);
       const reach = this._unitAttackProximity(u);
       if (d > reach) continue;
@@ -345,10 +353,11 @@ export class RTSController {
 
     let best = null;
     let bestDist = Infinity;
+    const units = this.getUnits();
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !obj.userData?.unit) obj = obj.parent;
-      const unit = obj?.userData?.unit;
+      const unit = resolveMountedHost(obj?.userData?.unit, units);
       if (!unit || unit.dead || unit.team === player) continue;
       if (hit.distance < bestDist) {
         bestDist = hit.distance;
@@ -584,6 +593,34 @@ export class RTSController {
     if (this.onHoverTarget) this.onHoverTarget(target);
   }
 
+  _cancelVehicleHoverClear() {
+    if (this._vehicleHoverClearTimer) clearTimeout(this._vehicleHoverClearTimer);
+    this._vehicleHoverClearTimer = null;
+  }
+
+  _scheduleVehicleHoverClear() {
+    if (
+      this._vehicleActionHovered ||
+      this._vehicleHoverClearTimer ||
+      this.getEligibleVehicleEntrants(this.hoveredTarget).length === 0
+    ) {
+      return;
+    }
+    const retainedTarget = this.hoveredTarget;
+    this._vehicleHoverClearTimer = setTimeout(() => {
+      this._vehicleHoverClearTimer = null;
+      if (!this._vehicleActionHovered && this.hoveredTarget === retainedTarget) {
+        this.setHoveredTarget(null);
+      }
+    }, VEHICLE_ACTION_HOVER_GRACE_MS);
+  }
+
+  setVehicleEntryActionHovered(hovered) {
+    this._vehicleActionHovered = !!hovered;
+    if (this._vehicleActionHovered) this._cancelVehicleHoverClear();
+    else this._scheduleVehicleHoverClear();
+  }
+
   updateHoverTarget() {
     if (
       !this.enabled ||
@@ -613,7 +650,57 @@ export class RTSController {
         return;
       }
     }
-    this.setHoveredTarget(this.raycastAttackTarget());
+    const vehicle = this.raycastUnit();
+    if (vehicle && this.getEligibleVehicleEntrants(vehicle).length > 0) {
+      this._cancelVehicleHoverClear();
+      this.setHoveredTarget(vehicle);
+      return;
+    }
+    const attackTarget = this.raycastAttackTarget();
+    if (attackTarget) {
+      this._cancelVehicleHoverClear();
+      this.setHoveredTarget(attackTarget);
+      return;
+    }
+    if (this.getEligibleVehicleEntrants(this.hoveredTarget).length > 0) {
+      this._scheduleVehicleHoverClear();
+      return;
+    }
+    this._cancelVehicleHoverClear();
+    this.setHoveredTarget(null);
+  }
+
+  getEligibleVehicleEntrants(vehicle = this.hoveredTarget) {
+    if (!vehicle) return [];
+    return this.getSelectedPlayerUnits().filter((unit) =>
+      canUnitEnterVehicle(unit, vehicle)
+    );
+  }
+
+  issueVehicleEntry(vehicle, { requireAllSelected = false } = {}) {
+    if (this._inputBlocked() || !vehicle) return false;
+    const selected = this.getSelectedPlayerUnits();
+    const entrants = selected.filter((unit) => canUnitEnterVehicle(unit, vehicle));
+    if (
+      entrants.length === 0 ||
+      (requireAllSelected && entrants.length !== selected.length)
+    ) {
+      return false;
+    }
+    const issued = issueMountOrder(
+      entrants,
+      vehicle,
+      this.getUnits(),
+      this.getGarrisonSources?.()
+    );
+    if (issued <= 0) return false;
+    this._vehicleActionHovered = false;
+    this._cancelVehicleHoverClear();
+    this.setHoveredTarget(null);
+    this._lastOrderAt = Date.now();
+    this.onMoveOrder?.(entrants);
+    this.onOrder?.('mount', entrants);
+    return true;
   }
 
   issueAttackOn(target, { inRangeOnly = false } = {}) {
@@ -961,6 +1048,10 @@ export class RTSController {
 
       for (const u of units) {
         if (u.dead) continue;
+        if (u._mountedOnTankId) {
+          u.setSelected(false);
+          continue;
+        }
         const p = u.mesh.position.clone().project(this.camera);
         const inside = p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY && p.z < 1;
         u.setSelected(inside);
@@ -1065,31 +1156,12 @@ export class RTSController {
 
     const selected = this.getSelectedPlayerUnits();
     if (selected.length === 0) return;
+    const player = this.getPlayerTeam();
 
     this._lastOrderAt = Date.now();
 
-    const player = this.getPlayerTeam();
-    const riders = selected.filter((u) => canRideTanks(u.def?.type));
     const mountTarget = this.raycastUnit();
-    if (
-      mountTarget &&
-      canHostRiders(mountTarget.def?.type) &&
-      (mountTarget.team === player || mountTarget._crewless) &&
-      riders.length > 0 &&
-      riders.length === selected.length
-    ) {
-      const mounted = issueMountOrder(
-        riders,
-        mountTarget,
-        this.getUnits(),
-        this.getGarrisonSources?.()
-      );
-      if (mounted > 0) {
-        this.onMoveOrder?.(selected);
-        if (this.onOrder) this.onOrder('mount', riders);
-        return;
-      }
-    }
+    if (this.issueVehicleEntry(mountTarget, { requireAllSelected: true })) return;
 
     if (!this.getDeployZoneActive()) {
       const attackTarget = this.raycastAttackTarget();

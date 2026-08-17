@@ -1148,6 +1148,7 @@ export function updateInfantryWeaponPose(unit, dt) {
       unit._walkBlend ?? 0,
       unit._walkRunBlend ?? 0
     );
+    if (unit._mountedOnTankId) applyTankRiderSitPose(child);
   });
 }
 
@@ -1268,6 +1269,147 @@ export function resetInfantryWalkPose(unit) {
     child.userData.proneBlend = 0;
     applySoldierPronePose(child, 0);
     applySoldierWeaponPose(child, child.userData.weaponAimBlend ?? 0, 0);
+  });
+}
+
+const RIDER_GROUND_KIT_KEEP = new Set([
+  'squadMember',
+  'selectionHitbox',
+  'selectionRing',
+  'targetHighlightRing',
+  'fieldUnitIcon',
+  'healthBar',
+  'inspiredMarker',
+  'healMarker',
+  'coverMarker',
+]);
+
+/** Tight clusters that fit on a rear-deck / fender rider slot. */
+const RIDER_SEAT_LAYOUTS = {
+  1: [{ x: 0, z: 0 }],
+  2: [
+    { x: -0.18, z: 0.05 },
+    { x: 0.18, z: -0.04 },
+  ],
+  3: [
+    { x: -0.2, z: 0.08 },
+    { x: 0.2, z: 0.06 },
+    { x: 0.02, z: -0.16 },
+  ],
+  4: [
+    { x: -0.2, z: 0.12 },
+    { x: 0.2, z: 0.1 },
+    { x: -0.18, z: -0.14 },
+    { x: 0.18, z: -0.16 },
+  ],
+  5: [
+    { x: 0.06, z: 0.2 },
+    { x: -0.08, z: 0.06 },
+    { x: 0.08, z: -0.08 },
+    { x: -0.06, z: -0.2 },
+    { x: 0.02, z: -0.34 },
+  ],
+};
+
+function setRiderGroundKitVisible(mesh, visible) {
+  if (!mesh) return;
+  for (const child of mesh.children) {
+    if (RIDER_GROUND_KIT_KEEP.has(child.name) || child.isSprite) continue;
+    child.visible = visible;
+  }
+}
+
+function applyTankRiderSitPose(soldier) {
+  const rest = soldier.userData.walkRest;
+  if (!rest) return;
+  const torso = soldier.children.find((child) => child.userData.infantryPart === 'torso');
+  if (torso && rest.torso) {
+    torso.position.y = rest.torso.position.y - 0.13;
+    torso.rotation.x = rest.torso.rotation.x + 0.38;
+  }
+  for (const partName of ['legL', 'legR']) {
+    const leg = soldier.children.find((child) => child.userData.infantryPart === partName);
+    const legRest = rest[partName];
+    if (!leg || !legRest) continue;
+    leg.rotation.x = legRest.rotation.x + 0.98;
+    leg.position.y = legRest.position.y + 0.07;
+    const knee = leg.userData.kneePivot;
+    if (knee) knee.rotation.x = (knee.userData.restRotationX ?? 0) + 0.48;
+  }
+}
+
+const _riderSeatBox = new THREE.Box3();
+const _riderDeckPoint = new THREE.Vector3();
+
+function snapSeatedSoldierToDeck(soldier) {
+  soldier.updateWorldMatrix(true, true);
+  _riderSeatBox.makeEmpty();
+  soldier.traverse((child) => {
+    if (!child.isMesh) return;
+    const part = child.userData.infantryPart;
+    if (part === 'weapon' || part === 'barrel' || part === 'head' || part === 'helmet') return;
+    _riderSeatBox.expandByObject(child);
+  });
+  if (_riderSeatBox.isEmpty()) return;
+  if (soldier.parent) {
+    soldier.parent.localToWorld(_riderDeckPoint.set(soldier.position.x, 0, soldier.position.z));
+  } else {
+    _riderDeckPoint.set(0, 0, 0);
+  }
+  // Drop the seated body until the lowest hull-contact mesh meets the deck.
+  soldier.position.y -= _riderSeatBox.min.y - _riderDeckPoint.y - 0.008;
+}
+
+function collectSquadMembers(mesh) {
+  const members = [];
+  mesh.traverse((child) => {
+    if (child.name === 'squadMember') members.push(child);
+  });
+  members.sort((a, b) => (a.userData.squadIndex ?? 0) - (b.userData.squadIndex ?? 0));
+  return members;
+}
+
+/**
+ * Pack a mounted squad onto its deck slot and sit them on the hull.
+ * Ground kits (tripods, mortars, crates) are hidden so they do not hover
+ * beside the vehicle. Call with mounted=false to restore the field layout.
+ */
+export function applyMountedRiderVisuals(unit, mounted) {
+  if (!unit?.mesh) return;
+  setRiderGroundKitVisible(unit.mesh, !mounted);
+
+  const members = collectSquadMembers(unit.mesh);
+  if (!mounted) {
+    for (const soldier of members) {
+      const saved = soldier.userData._preMountRest;
+      if (saved) {
+        if (soldier.userData.walkRest?.group && saved.group) {
+          soldier.userData.walkRest.group.copy(saved.group);
+        }
+        delete soldier.userData._preMountRest;
+      }
+      restoreWalkRest(soldier);
+    }
+    return;
+  }
+
+  const seated = members.filter((soldier) => soldier.visible);
+  const layout =
+    RIDER_SEAT_LAYOUTS[Math.min(5, Math.max(1, seated.length))] ?? RIDER_SEAT_LAYOUTS[1];
+  seated.forEach((soldier, index) => {
+    if (!soldier.userData._preMountRest) {
+      const group = soldier.userData.walkRest?.group ?? soldier.position;
+      soldier.userData._preMountRest = {
+        group: group.clone(),
+      };
+    }
+    const seat = layout[index] ?? layout[layout.length - 1];
+    soldier.position.set(seat.x, 0, seat.z);
+    applyTankRiderSitPose(soldier);
+    snapSeatedSoldierToDeck(soldier);
+    if (soldier.userData.walkRest?.group) {
+      soldier.userData.walkRest.group.copy(soldier.position);
+    }
   });
 }
 

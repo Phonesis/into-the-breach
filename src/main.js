@@ -113,6 +113,12 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
   onConfirmTarget() {
     game?.confirmTargetAttack();
   },
+  onVehicleEntry(targetId) {
+    game?.issueSelectedVehicleEntry(targetId);
+  },
+  onVehicleEntryHover(hovered) {
+    game?.setVehicleEntryActionHovered(hovered);
+  },
   onSetEngagementStance(stance) {
     game?.setSelectedEngagementStance(stance);
   },

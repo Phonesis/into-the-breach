@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { distanceBetween } from './Targeting.js';
 import { releaseFromBunker, getGarrisonBunkerSources } from './BunkerGarrison.js';
-import { resetInfantryWalkPose } from '../units/InfantryVisuals.js';
+import { applyMountedRiderVisuals, resetInfantryWalkPose } from '../units/InfantryVisuals.js';
+import { getVehicleDesign } from '../units/vehicleDesigns.js';
 import { SQUAD_SIZES } from '../data/squadSizes.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
 
@@ -27,19 +28,43 @@ const HOST_CAPACITY = {
   armoredCar: 1,
 };
 
-/** Rider offsets in tank local space (deck height from vehicleDesigns hull top). */
-const RIDER_OFFSETS = {
-  tank: [
-    { x: -0.95, z: -1.55, y: 0.96 },
-    { x: 0.95, z: -1.55, y: 0.96 },
-  ],
-  superHeavyTank: [
-    { x: -1.05, z: -2.05, y: 1.14 },
-    { x: 1.05, z: -2.05, y: 1.14 },
-    { x: 0, z: -2.45, y: 1.14 },
-  ],
-  armoredCar: [{ x: 0, z: -0.72, y: 0.82 }],
-};
+/** Place the rider group origin on the hull roof; seated bodies snap down onto it. */
+const DECK_EMBED = 0.015;
+
+function hullDeckHeight(hull) {
+  return hull.y + hull.h * 0.5 - DECK_EMBED;
+}
+
+/**
+ * Rider slot in vehicle local space. Height follows this hull's roof so
+ * shorter tanks (Chi-Nu, T-34) no longer leave troops floating above the deck.
+ */
+export function getRiderDeckOffset(tank, slotIndex = 0) {
+  const design = getVehicleDesign(tank?.faction?.id, tank?.def?.type);
+  const hull = design?.hull;
+  if (!hull) return { x: 0, z: -1.55, y: 0.96 };
+
+  const y = hullDeckHeight(hull);
+  const rearZ = (hull.z ?? 0) - hull.d * 0.42;
+  const type = tank.def?.type;
+  if (type === 'superHeavyTank') {
+    const slots = [
+      { x: -hull.w * 0.34, z: rearZ, y },
+      { x: hull.w * 0.34, z: rearZ, y },
+      { x: 0, z: rearZ - Math.min(0.28, hull.d * 0.06), y },
+    ];
+    return slots[slotIndex] ?? slots[slots.length - 1];
+  }
+  if (type === 'armoredCar') {
+    return { x: 0, z: (hull.z ?? 0) - hull.d * 0.28, y };
+  }
+  const inset = hull.w * 0.34;
+  const slots = [
+    { x: -inset, z: rearZ, y },
+    { x: inset, z: rearZ, y },
+  ];
+  return slots[slotIndex] ?? slots[slots.length - 1];
+}
 
 const DISMOUNT_OFFSETS = [
   { x: -1.7, z: -2.4 },
@@ -62,8 +87,37 @@ export function canHostRiders(unitType) {
   return HOST_TYPES.has(unitType);
 }
 
+/** True when this specific unit can currently enter this specific vehicle. */
+export function canUnitEnterVehicle(unit, tank) {
+  if (
+    !unit ||
+    unit.dead ||
+    unit.surrendered ||
+    unit._captureExit ||
+    unit._mountedOnTankId ||
+    !tank ||
+    tank.dead ||
+    tank.surrendered ||
+    !canHostRiders(tank.def?.type)
+  ) {
+    return false;
+  }
+  if (unit._pendingMountTankId === tank.id) return false;
+  if (tank._crewless) return canSupplyReplacementCrew(unit, tank);
+  if (unit.team !== tank.team || !canRideTanks(unit.def?.type)) return false;
+  if (!RIDER_DECK_TYPES.has(tank.def?.type)) return false;
+  return getTankRiderIds(tank).length < getTankRiderCapacity(tank);
+}
+
 export function isUnitMounted(unit) {
   return !!unit?._mountedOnTankId;
+}
+
+/** Clicks on a rider count as the host vehicle so the hull stays selectable. */
+export function resolveMountedHost(unit, units) {
+  if (!unit?._mountedOnTankId) return unit;
+  const host = units?.find((candidate) => candidate.id === unit._mountedOnTankId);
+  return host && !host.dead ? host : unit;
 }
 
 export function getTankRiderCapacity(tank) {
@@ -99,11 +153,17 @@ function squadLivingCount(unit) {
   return Math.max(1, Math.ceil((unit.hp / Math.max(unit.maxHp, 1)) * size));
 }
 
-export function canSupplyReplacementCrew(unit) {
-  return (
-    (unit?.def?.type === 'infantry' || unit?.def?.type === 'paratrooper') &&
-    squadLivingCount(unit) >= REPLACEMENT_CREW_COUNT
-  );
+export function canSupplyReplacementCrew(unit, tank = null) {
+  if (squadLivingCount(unit) < REPLACEMENT_CREW_COUNT) return false;
+  if (unit?.def?.type === 'infantry' || unit?.def?.type === 'paratrooper') {
+    return true;
+  }
+  if (unit?.def?.type !== 'vehicleCrew' || unit._bailoutSourceVehicleId == null) {
+    return false;
+  }
+  // Bailed crews know their own vehicle and may only reclaim that hull. They
+  // are not a general-purpose source of replacement crews for other armor.
+  return !tank || tank.id === unit._bailoutSourceVehicleId;
 }
 
 function syncEmbeddedCrewVisibility(rider, embedded) {
@@ -119,8 +179,7 @@ function syncEmbeddedCrewVisibility(rider, embedded) {
 }
 
 function syncRiderSlot(rider, tank, slotIndex) {
-  const offsets = RIDER_OFFSETS[tank.def.type] ?? RIDER_OFFSETS.tank;
-  const offset = offsets[slotIndex] ?? offsets[offsets.length - 1];
+  const offset = getRiderDeckOffset(tank, slotIndex);
   if (!rider.mesh || !tank.mesh) return;
 
   tank.mesh.updateMatrixWorld(true);
@@ -136,6 +195,7 @@ function syncRiderSlot(rider, tank, slotIndex) {
   rider.mesh.visible = true;
   setMountedRenderOrder(rider.mesh, true);
   syncEmbeddedCrewVisibility(rider, rider._replacementCrewVehicleId === tank.id);
+  applyMountedRiderVisuals(rider, true);
 }
 
 function dismountPosition(tank, index, mapDef) {
@@ -170,6 +230,7 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
   if (rider.mesh) {
     rider.mesh.visible = true;
     setMountedRenderOrder(rider.mesh, false);
+    applyMountedRiderVisuals(rider, false);
   }
   if (tank && mapDef && dismountIndex != null) {
     const pos = dismountPosition(tank, dismountIndex, mapDef);
@@ -181,7 +242,7 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
 
 export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null) {
   if (!tank?._crewless || tank.dead || !canHostRiders(tank.def?.type)) return false;
-  if (!canSupplyReplacementCrew(rider)) return false;
+  if (!canSupplyReplacementCrew(rider, tank)) return false;
 
   // An abandoned operational vehicle is neutral for remanning. Clear any
   // stranded riders from the former side before checking deck capacity.
@@ -245,12 +306,21 @@ export function tryMountTank(rider, tank, units, garrisonSources = null) {
   if (!rider || rider.dead || rider.surrendered || rider._captureExit) return false;
   if (!tank || tank.dead || tank.surrendered) return false;
   if (tank.team !== rider.team && !tank._crewless) return false;
-  if (!canRideTanks(rider.def?.type) || !canHostRiders(tank.def?.type)) return false;
+  const reclaimingOwnVehicle =
+    tank._crewless && canSupplyReplacementCrew(rider, tank);
+  if (
+    (!canRideTanks(rider.def?.type) && !reclaimingOwnVehicle) ||
+    !canHostRiders(tank.def?.type)
+  ) {
+    return false;
+  }
   if (!tank._crewless && !RIDER_DECK_TYPES.has(tank.def?.type)) return false;
 
   const riders = ensureRiderList(tank);
   const cap = getTankRiderCapacity(tank);
-  if (riders.length >= cap) return false;
+  // Crewless vehicles reserve an internal crew position even when the hull has
+  // no external rider deck (for example, a tank destroyer).
+  if (!tank._crewless && riders.length >= cap) return false;
   if (distanceBetween(rider, tank) > TANK_MOUNT_RANGE) return false;
 
   if (garrisonSources) releaseFromBunker(rider, garrisonSources);
@@ -281,7 +351,7 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
         rider &&
         !rider.dead &&
         !rider.surrendered &&
-        canSupplyReplacementCrew(rider)
+        canSupplyReplacementCrew(rider, tank)
     );
     if (!replacement) return 0;
     replacement.clearAttackOrder();
@@ -318,10 +388,7 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
 
 export function canDismountRiders(tank) {
   if (!tank || tank.dead || !canHostRiders(tank.def?.type)) return false;
-  if (!tank.moveTarget) {
-    return getTankRiderIds(tank).some((id) => id !== tank._replacementCrewUnitId);
-  }
-  return false;
+  return getTankRiderIds(tank).some((id) => id !== tank._replacementCrewUnitId);
 }
 
 export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
@@ -337,7 +404,7 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
         continue;
       }
       const isReplacementCrew = unit._replacementCrewVehicleId === tank.id;
-      if (!isReplacementCrew && (unit.moveTarget || unit.retreating || unit.surrendered)) {
+      if (!isReplacementCrew && unit.surrendered) {
         releaseFromTank(unit, units, mapDef);
         continue;
       }
@@ -345,6 +412,14 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
         const idx = tank._tankRiderIds?.indexOf(unit.id) ?? 0;
         releaseFromTank(unit, units, mapDef, idx);
         continue;
+      }
+      if (!isReplacementCrew) {
+        // Discard stray individual movement state instead of interpreting it
+        // as an implicit bail-out order. Manual disembarking uses the vehicle
+        // action; incoming fire remains an automatic emergency bail-out.
+        unit.moveTarget = null;
+        unit._movePath = null;
+        unit.retreating = false;
       }
       const slot = Math.max(0, tank._tankRiderIds?.indexOf(unit.id) ?? 0);
       syncRiderSlot(unit, tank, slot);
