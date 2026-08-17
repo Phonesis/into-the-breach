@@ -1451,7 +1451,9 @@ export class UIManager {
         .join('');
       return `
       <button class="card-btn interactive faction-card" data-id="${f.id}">
-        <img class="faction-flag" src="${f.flag}" alt="" loading="lazy" draggable="false" />
+        <span class="faction-flag-frame">
+          <img class="faction-flag" src="${f.flag}" alt="" draggable="false" />
+        </span>
         <span class="card-index">Field Army ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${f.name}</span>
         <span class="meta">${f.era}</span>
