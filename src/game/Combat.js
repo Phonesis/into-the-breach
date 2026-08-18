@@ -33,9 +33,12 @@ import {
   isInCoaxRange,
   isPointInRange,
   isCoaxSoftTarget,
+  isSpotterRifleInRange,
+  sniperHasSpotter,
   canEngageManualOrder,
   getGroundFireMoveDest,
   getStandoffPosition,
+  getUnitWeaponRange,
   tankCanEngageTarget,
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
@@ -851,6 +854,12 @@ export function updateCombat(
       mainGunStationary &&
       !inMainGunRange &&
       isInArtilleryCrewSmallArmsRange(attacker, target);
+    const spotterRifle = attacker.def?.spotterRifle;
+    const spotterRifleInRange =
+      attacker.def.type === 'sniper' &&
+      !!spotterRifle &&
+      sniperHasSpotter(attacker) &&
+      isSpotterRifleInRange(attacker, target);
     const coaxInRange =
       !target.isGround && isTankType(attacker.def.type) && isInCoaxRange(attacker, target);
     const independentMg = coaxInRange && hasIndependentMgPivot(attacker.mesh);
@@ -907,7 +916,7 @@ export function updateCombat(
     const coaxEngagingArmor =
       canFireCoax && isTankType(target.def?.type);
 
-    if (!canFireMain && !canFireCoax && !canFireCrewSmallArms) continue;
+    if (!canFireMain && !canFireCoax && !canFireCrewSmallArms && !spotterRifleInRange) continue;
 
     if (canFireCrewSmallArms && crewSmallArms && attacker.mgCooldown <= 0) {
       const firedCrewWeapon = fire(
@@ -929,6 +938,29 @@ export function updateCombat(
       );
       if (firedCrewWeapon !== false) {
         attacker.mgCooldown = 1 / crewSmallArms.attackSpeed;
+      }
+    }
+
+    if (spotterRifleInRange && spotterRifle && attacker.mgCooldown <= 0 && weaponOnBearing) {
+      const firedSpotter = fire(
+        attacker,
+        target,
+        targets,
+        aliveUnits,
+        scene,
+        mapDef,
+        onFire,
+        lx,
+        lz,
+        coverSystem,
+        enemyDamageMult,
+        scenery,
+        hqs,
+        options,
+        { spotterRifle: true }
+      );
+      if (firedSpotter !== false) {
+        attacker.mgCooldown = 1 / Math.max(spotterRifle.attackSpeed, 0.2);
       }
     }
 
@@ -1120,7 +1152,7 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
       ? WEAPON_RANGE_SLACK
       : 1;
   const maxAcquireRange = Math.max(
-    attacker.def.range,
+    getUnitWeaponRange(attacker),
     isTankType(attacker.def.type) ? attacker.def.coaxMG?.range ?? 0 : 0
   ) * directArmorRangeSlack;
   const visibleAcquireTargets = validAcquireTargets.filter(
@@ -1133,9 +1165,9 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
 
 const _muzzleFrom = new THREE.Vector3();
 
-function resolveMuzzleFrom(attacker, map, vfxType, coax) {
+function resolveMuzzleFrom(attacker, map, vfxType, coax, muzzleType = vfxType) {
   if (usesInfantryMuzzleOrigin(attacker)) {
-    getInfantryMuzzleWorldPosition(attacker, vfxType, _muzzleFrom);
+    getInfantryMuzzleWorldPosition(attacker, muzzleType, _muzzleFrom);
     return { from: _muzzleFrom, exactOrigin: true };
   }
   if (usesIndependentVehicleMgMuzzleOrigin(attacker, coax)) {
@@ -1171,13 +1203,17 @@ function fire(
 ) {
   const crewSmallArms =
     fireOpts.crewSmallArms === true ? attacker.def.crewSmallArms : null;
+  const spotterRifle =
+    fireOpts.spotterRifle === true ? attacker.def.spotterRifle : null;
   // Crew rifles share the auxiliary-small-arms hit path: no shell splash,
   // shell casing, or howitzer report.
   const coax = !!crewSmallArms || (fireOpts.coax === true && attacker.def.coaxMG);
   const mg = crewSmallArms ?? attacker.def.coaxMG;
-  const eventDef = crewSmallArms
-    ? { ...attacker.def, mgWeaponSound: crewSmallArms.weaponSound }
-    : attacker.def;
+  const eventDef = spotterRifle
+    ? { ...attacker.def, weaponSound: spotterRifle.weaponSound }
+    : crewSmallArms
+      ? { ...attacker.def, mgWeaponSound: crewSmallArms.weaponSound }
+      : attacker.def;
   const isParatrooper = attacker.def.type === 'paratrooper';
   const paratrooperAt = isParatrooper && isParatrooperAtShot(attacker, target, fireOpts);
   let paratrooperUseMg = false;
@@ -1186,10 +1222,19 @@ function fire(
     paratrooperUseMg = attacker.def.usesMG && attacker._mgVolley % 2 !== 0;
   }
 
-  const weaponRange = coax ? mg.range : attacker.def.range;
-  let weaponDamage = coax ? mg.damage : attacker.def.damage;
-  let attackerType = coax ? 'machineGun' : attacker.def.type;
-  let vfxType = coax ? 'machineGun' : attacker.def.type;
+  const weaponRange = spotterRifle
+    ? spotterRifle.range
+    : coax
+      ? mg.range
+      : getUnitWeaponRange(attacker);
+  let weaponDamage = spotterRifle
+    ? spotterRifle.damage
+    : coax
+      ? mg.damage
+      : attacker.def.damage;
+  let attackerType = spotterRifle ? 'infantry' : coax ? 'machineGun' : attacker.def.type;
+  let vfxType = spotterRifle ? 'infantry' : coax ? 'machineGun' : attacker.def.type;
+  const muzzleType = spotterRifle ? 'spotterRifle' : vfxType;
 
   if (isParatrooper && !coax) {
     if (paratrooperAt) {
@@ -1205,6 +1250,7 @@ function fire(
     vfxType = 'tank';
   } else if (
     !coax &&
+    !spotterRifle &&
     (attacker.def.type === 'engineer' || attacker.def.type === 'vehicleCrew')
   ) {
     // Combat engineers and bailed crews use the standard small-arms VFX.
@@ -1272,7 +1318,13 @@ function fire(
       const showVfx =
         attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
       if (showVfx && scene) {
-        const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
+        const { from, exactOrigin } = resolveMuzzleFrom(
+          attacker,
+          map,
+          vfxType,
+          coax,
+          muzzleType
+        );
         const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
         const to = { x: missImpact.x, y: toY, z: missImpact.z };
         spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
@@ -1313,8 +1365,8 @@ function fire(
   const paceMult = options.paceDamageMult ?? 1;
   const shotScatter = 0.88 + Math.random() * 0.24;
   let damage = weaponDamage * falloff * shotScatter * paceMult;
-  if (!coax && attacker.def.type === 'sniper' && !target.isGround) {
-    const rangeRatio = dist / Math.max(attacker.def.range, 1);
+  if (!coax && !spotterRifle && attacker.def.type === 'sniper' && !target.isGround) {
+    const rangeRatio = dist / Math.max(weaponRange, 1);
     if (rangeRatio > 0.45) damage *= 1.12 + (rangeRatio - 0.45) * 0.35;
   }
   if (attacker.team === 'enemy') damage *= enemyDamageMult;
@@ -1356,7 +1408,13 @@ function fire(
     const showVfx =
       attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
     if (showVfx && scene) {
-      const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
+      const { from, exactOrigin } = resolveMuzzleFrom(
+        attacker,
+        map,
+        vfxType,
+        coax,
+        muzzleType
+      );
       const toY = map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1;
       const to = { x: impact.x, y: toY, z: impact.z };
       spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
@@ -1486,7 +1544,7 @@ function fire(
     if (!Number.isFinite(lockX) || !Number.isFinite(lockZ)) return false;
     const flight =
       kind === 'artillery' ? artilleryFlightTimeSec(dist) : mortarFlightTimeSec(dist);
-    const muzzle = resolveMuzzleFrom(attacker, map, vfxType, coax);
+    const muzzle = resolveMuzzleFrom(attacker, map, vfxType, coax, muzzleType);
     const showVfx =
       attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
     if (showVfx && scene) {
@@ -1690,7 +1748,13 @@ function fire(
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
 
   if (showVfx && scene) {
-    const { from, exactOrigin } = resolveMuzzleFrom(attacker, map, vfxType, coax);
+    const { from, exactOrigin } = resolveMuzzleFrom(
+      attacker,
+      map,
+      vfxType,
+      coax,
+      muzzleType
+    );
     const toY =
       armorHit?.impactPosition?.y ??
       (map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1);
@@ -2076,7 +2140,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             : 0.88;
         const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
           ? unit.def.coaxMG.range * rangeSlack
-          : unit.def.range * rangeSlack;
+          : getUnitWeaponRange(unit) * rangeSlack;
         if (blockedPursuit) {
           // A straight-line standoff point may lie inside a Berlin block.
           // Route toward the target's street and stop as soon as both weapon

@@ -27,6 +27,27 @@ function artilleryCrewSmallArms(factionId) {
   };
 }
 
+/** Spotter service rifle — same engagement range as that faction’s rifle squad. */
+const SNIPER_SPOTTER_RIFLE = {
+  germany: { damage: 8, range: 42, rangeMeters: 420, attackSpeed: 1.15 },
+  usa: { damage: 7, range: 38, rangeMeters: 500, attackSpeed: 1.05 },
+  uk: { damage: 7, range: 36, rangeMeters: 450, attackSpeed: 1.0 },
+  russia: { damage: 8, range: 40, rangeMeters: 430, attackSpeed: 1.12 },
+  japan: { damage: 7, range: 38, rangeMeters: 450, attackSpeed: 1.05 },
+};
+
+function withSniperTeam(factionId, spec) {
+  const rifle = SNIPER_SPOTTER_RIFLE[factionId] ?? SNIPER_SPOTTER_RIFLE.germany;
+  return {
+    ...spec,
+    type: 'sniper',
+    spotterRifle: {
+      ...rifle,
+      weaponSound: `rifle_${factionId}`,
+    },
+  };
+}
+
 function vehicleCrewDef(factionId) {
   return {
     type: 'vehicleCrew',
@@ -177,21 +198,23 @@ const scoutGermany = {
     buildTime: 13,
     weaponSound: 'mg_germany',
   },
-  sniper: {
-    type: 'sniper',
-    name: 'Scharfschütze',
-    designation: 'Kar98k mit ZF39',
-    description: 'Long-range precision fire — lethal to ~900 m.',
-    hp: 50,
+  sniper: withSniperTeam('germany', {
+    name: 'Scharfschützen-Trupp',
+    designation: 'Kar98k ZF39 + Beobachter',
+    description:
+      'Two-man hide in Splittertarn — scoped fire to ~900 m while the spotter observes; spotter Kar98k to ~420 m. Losing the spotter cuts scoped range to ~580 m.',
+    hp: 70,
     damage: 36,
     range: 74,
     rangeMeters: 900,
+    soloRange: 48,
+    soloRangeMeters: 580,
     speed: 4,
     attackSpeed: 0.48,
-    cost: 72,
+    cost: 78,
     buildTime: 11,
     weaponSound: 'rifle_germany',
-  },
+  }),
 };
 
 const scoutUSA = {
@@ -210,21 +233,23 @@ const scoutUSA = {
     buildTime: 13,
     weaponSound: 'mg_usa',
   },
-  sniper: {
-    type: 'sniper',
+  sniper: withSniperTeam('usa', {
     name: 'Sniper Team',
-    designation: 'M1903A4 Springfield',
-    description: 'Scoped rifle team — picks off targets to ~1,000 m.',
-    hp: 48,
+    designation: 'M1903A4 + observer',
+    description:
+      'Marksman and spotter in helmet scrim and burlap — ~1,000 m with the observer calling fall of shot; spotter M1 to ~500 m. Without the spotter, scoped range falls to ~650 m.',
+    hp: 68,
     damage: 34,
     range: 76,
     rangeMeters: 1000,
+    soloRange: 49,
+    soloRangeMeters: 650,
     speed: 4.2,
     attackSpeed: 0.5,
-    cost: 72,
+    cost: 78,
     buildTime: 11,
     weaponSound: 'rifle_usa',
-  },
+  }),
 };
 
 const scoutRussia = {
@@ -243,21 +268,23 @@ const scoutRussia = {
     buildTime: 13,
     weaponSound: 'mg_russia',
   },
-  sniper: {
-    type: 'sniper',
-    name: 'Sniper',
-    designation: 'Mosin-Nagant 1891/30 PU',
-    description: 'Scoped marksman — long-range eliminations to ~920 m.',
-    hp: 50,
+  sniper: withSniperTeam('russia', {
+    name: 'Sniper Pair',
+    designation: 'Mosin PU + nablyudatel',
+    description:
+      'Amoeba oversuit pair — PU-scoped Mosin to ~920 m with the observer; spotter rifle to ~430 m. A dead spotter drops scoped range to ~600 m.',
+    hp: 70,
     damage: 36,
     range: 74,
     rangeMeters: 920,
+    soloRange: 48,
+    soloRangeMeters: 600,
     speed: 4.0,
     attackSpeed: 0.47,
-    cost: 72,
+    cost: 78,
     buildTime: 11,
     weaponSound: 'rifle_russia',
-  },
+  }),
 };
 
 const scoutUK = {
@@ -276,21 +303,23 @@ const scoutUK = {
     buildTime: 13,
     weaponSound: 'mg_uk',
   },
-  sniper: {
-    type: 'sniper',
+  sniper: withSniperTeam('uk', {
     name: 'Sniper Patrol',
-    designation: 'No.4 Mk I (T) sniper rifle',
-    description: 'Concealed marksman — long-range eliminations to ~950 m.',
-    hp: 49,
+    designation: 'No.4 Mk I (T) + observer',
+    description:
+      'Hessian ghillie pair — No.32-scoped rifle to ~950 m while the spotter watches; Lee–Enfield to ~450 m. Losing the observer cuts scoped range to ~620 m.',
+    hp: 69,
     damage: 35,
     range: 75,
     rangeMeters: 950,
+    soloRange: 49,
+    soloRangeMeters: 620,
     speed: 4.1,
     attackSpeed: 0.46,
-    cost: 72,
+    cost: 78,
     buildTime: 11,
     weaponSound: 'rifle_uk',
-  },
+  }),
 };
 
 const scoutJapan = {
@@ -309,21 +338,23 @@ const scoutJapan = {
     buildTime: 13,
     weaponSound: 'mg_japan',
   },
-  sniper: {
-    type: 'sniper',
-    name: 'Sogekihei',
-    designation: 'Type 97 sniper rifle',
-    description: 'Concealed marksman with an offset 2.5× optic — precision fire to ~800 m.',
-    hp: 48,
+  sniper: withSniperTeam('japan', {
+    name: 'Sogeki-han',
+    designation: 'Type 97 + kansoku-hei',
+    description:
+      'Two-man hide in helmet netting and sedge — offset 2.5× Type 97 to ~800 m with the observer; spotter Arisaka to ~450 m. Without the spotter, scoped range falls to ~520 m.',
+    hp: 68,
     damage: 34,
     range: 72,
     rangeMeters: 800,
+    soloRange: 47,
+    soloRangeMeters: 520,
     speed: 4.2,
     attackSpeed: 0.48,
-    cost: 70,
+    cost: 76,
     buildTime: 11,
     weaponSound: 'rifle_japan',
-  },
+  }),
 };
 
 const medicGermany = {

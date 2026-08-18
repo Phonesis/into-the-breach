@@ -36,7 +36,7 @@ import {
   shouldUseTacticalReverse,
   TANK_TYPES,
 } from './VehicleTypes.js';
-import { sounds, isInfantryUnitType } from '../audio/SoundManager.js';
+import { sounds, isInfantryUnitType, isVehicleCrewVoiceType } from '../audio/SoundManager.js';
 import { removeWreckEffect } from '../effects/WreckEffects.js';
 import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
 import { sampleTerrainMeshHeight } from '../world/Terrain.js';
@@ -505,6 +505,9 @@ export class Unit {
     // Keep the most recent HE profile on living squads so a save/load or a
     // second casualty update can recreate the same physical response.
     this._blastProfile = blastProfile;
+    if (opts.impactFrom && Number.isFinite(opts.impactFrom.x) && Number.isFinite(opts.impactFrom.z)) {
+      this._lastImpactFrom = { x: opts.impactFrom.x, z: opts.impactFrom.z };
+    }
 
     // A lethal hit is rendered in one pass below, after its cause is known.
     // Nonlethal explosive damage still removes individual squad members here,
@@ -512,12 +515,17 @@ export class Unit {
     if (this.hp > 0) {
       updateSquadCasualtyVisual(
         this,
-        crushingHit ? { crushed: true } : blastProfile ?? {}
+        crushingHit
+          ? { crushed: true }
+          : blastProfile ?? { impactFrom: this._lastImpactFrom ?? opts.impactFrom }
       );
     }
 
-    // Foot troops yell when hit (not on the killing blow — death lines handle that)
-    if (this.hp > 0 && isInfantryUnitType(this.def?.type)) {
+    // Foot troops and AFV crews yell when hit (not on the killing blow).
+    if (
+      this.hp > 0 &&
+      (isInfantryUnitType(this.def?.type) || isVehicleCrewVoiceType(this.def?.type))
+    ) {
       const now = performance.now();
       // Per-unit cooldown so one squad doesn't spam every bullet
       if (now - (this._lastUnderFireVoiceAt ?? 0) > 2400) {
@@ -531,6 +539,7 @@ export class Unit {
             {
               team: this.team,
               radio: this.team === 'player',
+              unitType: this.def?.type,
             }
           );
         }
@@ -565,7 +574,8 @@ export class Unit {
         this._deathBlastImpulseScale = opts.blastImpulseScale ?? null;
         this._deathBlastWeaponType = opts.blastWeaponType ?? null;
       } else {
-        this._deathCause = null;
+        this._deathCause = 'bullet';
+        this._deathImpactFrom = this._lastImpactFrom ?? opts.impactFrom ?? null;
         this._deathBlastOrigin = null;
         this._deathBlastRadius = null;
         this._deathBlastCaliber = null;

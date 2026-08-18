@@ -63,12 +63,14 @@ const ICONS = {
   </svg>`,
 
   sniper: `<svg viewBox="0 0 32 32" aria-hidden="true">
-    <ellipse cx="16" cy="22" rx="11" ry="3.5" fill="currentColor" opacity="0.2"/>
-    <circle cx="10" cy="14" r="2.8" fill="currentColor"/>
-    <path d="M8 24c2-4 4-6 7-6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-    <path d="M12 17.5l14-4.5v2l-11 3.8v6.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="22" cy="13.8" r="1.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
-    <path d="M6 20c3 1.5 6 2 10 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+    <ellipse cx="16" cy="24" rx="12" ry="3.2" fill="currentColor" opacity="0.18"/>
+    <circle cx="8.5" cy="13.5" r="2.4" fill="currentColor"/>
+    <path d="M6.8 23c1.6-3.4 3.2-5.2 5.8-5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M10.4 16.6l12.4-3.8v1.7l-9.6 3.3v5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="20.4" cy="13.2" r="1.15" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <circle cx="21.5" cy="16.2" r="2.15" fill="currentColor"/>
+    <path d="M19.8 24c1.4-2.8 2.8-4.2 5-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M19.2 17.4h3.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.75"/>
   </svg>`,
 
   mortar: `<svg viewBox="0 0 32 32" aria-hidden="true">

@@ -213,6 +213,21 @@ const UNIT_RETREAT_COUNT = 6;
 const UNIT_RETREAT_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 const UNIT_ATTACK_COUNT = 4;
 const UNIT_ATTACK_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
+const VEHICLE_CREW_VOICE_TYPES = new Set([
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
+  'armoredCar',
+]);
+const VEHICLE_CREW_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
+const VEHICLE_SELECT_COUNT = 4;
+const VEHICLE_ATTACK_COUNT = 4;
+const VEHICLE_MOVE_COUNT = 4;
+const VEHICLE_RETREAT_COUNT = 4;
+const VEHICLE_UNDERFIRE_COUNT = 6;
+/** After the first move ack, keep that vehicle quiet for a random stretch. */
+const VEHICLE_MOVE_VOICE_GAP_MIN_MS = 14000;
+const VEHICLE_MOVE_VOICE_GAP_MAX_MS = 28000;
 /** Fire-support + general-order commander radio lines (baked edge-tts). */
 const COMMANDER_ORDER_KINDS = [
   'strafe',
@@ -244,6 +259,28 @@ function unitSelectVoiceKey(factionId) {
     return id;
   }
   return 'usa';
+}
+
+export function isVehicleCrewVoiceType(type) {
+  return VEHICLE_CREW_VOICE_TYPES.has(type);
+}
+
+/** True until this AFV has spoken a move ack, then only after its quiet window. */
+export function isVehicleMoveVoiceDue(unit, now = performance.now()) {
+  if (!unit || !isVehicleCrewVoiceType(unit.def?.type)) return false;
+  return now >= (unit._vehicleMoveVoiceReadyAt ?? 0);
+}
+
+function nextVehicleMoveVoiceReadyAt(now) {
+  return (
+    now +
+    VEHICLE_MOVE_VOICE_GAP_MIN_MS +
+    Math.random() * (VEHICLE_MOVE_VOICE_GAP_MAX_MS - VEHICLE_MOVE_VOICE_GAP_MIN_MS)
+  );
+}
+
+function emptyFactionVoiceMap() {
+  return { usa: [], uk: [], germany: [], russia: [], japan: [] };
 }
 
 function unitUnderFireVoiceKey(factionId) {
@@ -361,6 +398,11 @@ export class SoundManager {
     this.unitRetreatBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
     /** @type {Record<string, AudioBuffer[]>} */
     this.unitAttackBuffers = { usa: [], uk: [], germany: [], russia: [], japan: [] };
+    this.vehicleSelectBuffers = emptyFactionVoiceMap();
+    this.vehicleAttackBuffers = emptyFactionVoiceMap();
+    this.vehicleMoveBuffers = emptyFactionVoiceMap();
+    this.vehicleRetreatBuffers = emptyFactionVoiceMap();
+    this.vehicleUnderFireBuffers = emptyFactionVoiceMap();
     /**
      * Commander order lines: buffers[faction][kind] = AudioBuffer
      * @type {Record<string, Record<string, AudioBuffer>>}
@@ -719,6 +761,35 @@ export class SoundManager {
       }
     }
     await Promise.all(attackLoads);
+
+    const vehicleVoiceLoads = [];
+    const loadVehicleVoice = (kind, count, target) => {
+      for (const faction of VEHICLE_CREW_FACTIONS) {
+        const n = this._constrainedAudio ? Math.min(2, count) : count;
+        for (let i = 1; i <= n; i++) {
+          const num = String(i).padStart(2, '0');
+          vehicleVoiceLoads.push(
+            (async () => {
+              try {
+                const buf = await this._loadDecodedSample(
+                  publicUrl(`sounds/vehicle-${kind}-${faction}-${num}.wav`)
+                );
+                if (!buf) return;
+                target[faction].push(buf);
+              } catch {
+                /* missing */
+              }
+            })()
+          );
+        }
+      }
+    };
+    loadVehicleVoice('select', VEHICLE_SELECT_COUNT, this.vehicleSelectBuffers);
+    loadVehicleVoice('attack', VEHICLE_ATTACK_COUNT, this.vehicleAttackBuffers);
+    loadVehicleVoice('move', VEHICLE_MOVE_COUNT, this.vehicleMoveBuffers);
+    loadVehicleVoice('retreat', VEHICLE_RETREAT_COUNT, this.vehicleRetreatBuffers);
+    loadVehicleVoice('underfire', VEHICLE_UNDERFIRE_COUNT, this.vehicleUnderFireBuffers);
+    await Promise.all(vehicleVoiceLoads);
 
     const commanderLoads = [];
     for (const faction of COMMANDER_ORDER_FACTIONS) {
@@ -1313,7 +1384,9 @@ export class SoundManager {
     this._runWhenReady(() => {
       const key = unitSelectVoiceKey(factionId);
       // Keep language tied to faction — no English fallback for non-English factions
-      const bufs = this.unitSelectBuffers[key];
+      const bufs = isVehicleCrewVoiceType(opts.unitType)
+        ? this.vehicleSelectBuffers[key]
+        : this.unitSelectBuffers[key];
       if (!bufs?.length) return;
 
       const now = performance.now();
@@ -1348,7 +1421,9 @@ export class SoundManager {
   playAttackOrder(factionId = null, worldPos = null, opts = {}) {
     this._runWhenReady(() => {
       const key = unitUnderFireVoiceKey(factionId);
-      const bufs = this.unitAttackBuffers[key];
+      const bufs = isVehicleCrewVoiceType(opts.unitType)
+        ? this.vehicleAttackBuffers[key]
+        : this.unitAttackBuffers[key];
       if (!bufs?.length) return;
 
       const now = performance.now();
@@ -1374,7 +1449,47 @@ export class SoundManager {
         staticLevel: 0.21,
         presence: 1.02,
         delay,
-        ...opts,
+      });
+    });
+  }
+
+  /**
+   * AFV driver acknowledgement after a player move order.
+   * First order on a vehicle always plays; later orders only after a random
+   * quiet window so click-micro does not spam "driver, advance".
+   */
+  playVehicleMoveOrder(factionId = null, worldPos = null, opts = {}) {
+    this._runWhenReady(() => {
+      if (!isVehicleCrewVoiceType(opts.unitType)) return;
+      const key = unitSelectVoiceKey(factionId);
+      const bufs = this.vehicleMoveBuffers[key];
+      if (!bufs?.length) return;
+
+      const now = performance.now();
+      if (opts.unit && !isVehicleMoveVoiceDue(opts.unit, now)) return;
+      if (now < (this._moveVoiceBusyUntil ?? 0)) return;
+      const buf = this._pickFromPool(bufs, '_lastVehicleMoveVoice');
+      if (!buf) return;
+      if (opts.unit) opts.unit._vehicleMoveVoiceReadyAt = nextVehicleMoveVoiceReadyAt(now);
+
+      const delay =
+        now - (this._lastByType._unitSelect ?? 0) < 900
+          ? 0.26
+          : 0.04;
+      const rate = 0.98 + Math.random() * 0.035;
+      this._moveVoiceBusyUntil =
+        now + delay * 1000 + (buf.duration / rate) * 1000 + 380;
+
+      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
+      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
+      const vol = Math.min(1.12, this._distanceGain(dist) * 0.98);
+      this._playRadioVoice(buf, {
+        pan,
+        vol,
+        rate,
+        staticLevel: 0.2,
+        presence: 1,
+        delay,
       });
     });
   }
@@ -1447,7 +1562,9 @@ export class SoundManager {
     this._runWhenReady(() => {
       const key = unitUnderFireVoiceKey(factionId);
       // Never fall back to another language — silent is better than English on German troops
-      const bufs = this.unitUnderFireBuffers[key];
+      const bufs = isVehicleCrewVoiceType(opts.unitType)
+        ? this.vehicleUnderFireBuffers[key]
+        : this.unitUnderFireBuffers[key];
       if (!bufs?.length) return;
 
       const now = performance.now();
@@ -1498,7 +1615,9 @@ export class SoundManager {
   playRetreat(worldPos = null, factionId = null, opts = {}) {
     this._runWhenReady(() => {
       const key = unitUnderFireVoiceKey(factionId);
-      const bufs = this.unitRetreatBuffers[key];
+      const bufs = isVehicleCrewVoiceType(opts.unitType)
+        ? this.vehicleRetreatBuffers[key]
+        : this.unitRetreatBuffers[key];
       if (!bufs?.length) return;
 
       const now = performance.now();

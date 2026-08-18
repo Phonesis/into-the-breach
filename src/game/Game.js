@@ -289,6 +289,8 @@ import {
   mgProfileForFaction,
   smgProfileForFaction,
   isInfantryUnitType,
+  isVehicleCrewVoiceType,
+  isVehicleMoveVoiceDue,
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import { setActiveVehicleTheatre } from '../units/UnitTextures.js';
@@ -610,13 +612,18 @@ export class Game {
         this.selectedBaseBuilding = baseBuilding;
         if (sel.length > 0) {
           sounds.play('select');
-          const sample = sel[Math.floor(Math.random() * sel.length)];
+          const sample =
+            sel.find((unit) => isVehicleCrewVoiceType(unit.def?.type)) ??
+            sel[Math.floor(Math.random() * sel.length)];
           const factionId = sample?.faction?.id ?? this.playerFaction?.id;
           const pos = sample?.position
             ? { x: sample.position.x, z: sample.position.z }
             : null;
-          // All unit radio acks use radio static (squad + AFV nets)
-          sounds.playUnitSelect(factionId, pos, { radio: true });
+          // Infantry use the squad net; AFVs use a separate crew intercom pack.
+          sounds.playUnitSelect(factionId, pos, {
+            radio: true,
+            unitType: sample?.def?.type,
+          });
         } else if (hq || baseBuilding) {
           sounds.play('select');
         }
@@ -642,13 +649,32 @@ export class Game {
       onOrder: (type, selected) => {
         this._cancelPendingRadioOperatorStrikeForUnits(selected);
         sounds.play('order');
-        if (type === 'attack' && selected?.length) {
-          const sample = selected[Math.floor(Math.random() * selected.length)];
-          const factionId = sample?.faction?.id ?? this.playerFaction?.id;
-          const pos = sample?.position
-            ? { x: sample.position.x, z: sample.position.z }
-            : null;
-          sounds.playAttackOrder(factionId, pos, { radio: true });
+        if (selected?.length && (type === 'attack' || type === 'move')) {
+          if (type === 'attack') {
+            const sample =
+              selected.find((unit) => isVehicleCrewVoiceType(unit.def?.type)) ??
+              selected[Math.floor(Math.random() * selected.length)];
+            const factionId = sample?.faction?.id ?? this.playerFaction?.id;
+            const pos = sample?.position
+              ? { x: sample.position.x, z: sample.position.z }
+              : null;
+            sounds.playAttackOrder(factionId, pos, {
+              radio: true,
+              unitType: sample?.def?.type,
+            });
+          } else {
+            const sample = selected.find((unit) => isVehicleMoveVoiceDue(unit));
+            if (sample) {
+              const factionId = sample.faction?.id ?? this.playerFaction?.id;
+              const pos = sample.position
+                ? { x: sample.position.x, z: sample.position.z }
+                : null;
+              sounds.playVehicleMoveOrder(factionId, pos, {
+                unitType: sample.def.type,
+                unit: sample,
+              });
+            }
+          }
         }
         // Hide the unit info panel after an order, but keep units selected so
         // follow-up move/attack orders still apply. Clicking a selected unit

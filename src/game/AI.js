@@ -1,6 +1,7 @@
 import {
   getStandoffPosition,
   findNearestEnemy,
+  getUnitWeaponRange,
   isInRange,
   isSmokeShellReady,
 } from './Targeting.js';
@@ -727,7 +728,7 @@ function getStandardAiRoleTarget(unit, players, game, plan, strictRange = false)
       if ((unit.def?.minRange ?? 0) > distance) return false;
       return strictRange
         ? isInRange(unit, target)
-        : distance <= unit.def.range * 1.5;
+        : distance <= getUnitWeaponRange(unit) * 1.5;
     }
   );
   if (!candidates.length) return null;
@@ -2897,7 +2898,7 @@ export function updateAI({
     if (unit.moveTarget && Math.random() > idleAdvanceChance) continue;
 
     const nearest = findNearestVisibleEnemy(unit, alivePlayers, game?.scenery);
-    if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.35) {
+    if (nearest && unit.distanceTo(nearest) < getUnitWeaponRange(unit) * 1.35) {
       unit.setAttackOrder(nearest);
       continue;
     }
@@ -3380,7 +3381,7 @@ function tryAiSmokeScreen(enemyUnits, playerUnits, game, difficulty) {
 
     for (const gun of guns) {
       const missionDistance = Math.hypot(gun.position.x - x, gun.position.z - z);
-      if (missionDistance > gun.def.range * 0.96) continue;
+      if (missionDistance > getUnitWeaponRange(gun) * 0.96) continue;
       const threatValue = threat.def?.type === 'antiTankGun' ? 120 : threat.def?.type === 'superHeavyTank' ? 85 : 65;
       const score = threatValue + screeningArmor.length * 28 + screeningInfantry.length * 8 - missionDistance * 0.06;
       if (score > bestScore) {
@@ -6596,8 +6597,8 @@ function shouldPrioritizeCapture(unit, points, players, assault, campaign) {
     const nearestPlayer = findNearestEnemy(unit, players);
     if (!nearestPlayer) return true;
     const distEnemy = unit.distanceTo(nearestPlayer);
-    if (campaign) return distCp < 55 || distEnemy > unit.def.range * 1.05;
-    return distCp < 42 || distEnemy > unit.def.range * 1.2;
+    if (campaign) return distCp < 55 || distEnemy > getUnitWeaponRange(unit) * 1.05;
+    return distCp < 42 || distEnemy > getUnitWeaponRange(unit) * 1.2;
   }
 
   if (isTankType(unit.def.type)) {
@@ -6624,7 +6625,7 @@ function pickPresetAttackTarget(unit, players, scenery) {
       if (foe.dead || foe.team === unit.team) continue;
       if (!isVisibleAttackTarget(unit, foe, scenery)) continue;
       const d = unit.distanceTo(foe);
-      if (d > unit.def.range * 1.25) continue;
+      if (d > getUnitWeaponRange(unit) * 1.25) continue;
       const vehicle = isVehicleUnit(foe.def?.type);
       const tank = isTankType(foe.def?.type);
       const score = d - (tank ? 100 : vehicle ? 55 : 0);
@@ -6854,7 +6855,7 @@ function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) 
         const distToHold = hold ? Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z) : Infinity;
         const chaseRadius = hold ? hold.radius * 2.4 : 22;
         if (
-          unit.distanceTo(focus) < unit.def.range * 1.05 ||
+          unit.distanceTo(focus) < getUnitWeaponRange(unit) * 1.05 ||
           (hold && distToHold < chaseRadius && Math.random() < engageChance)
         ) {
           unit.moveTarget = getStandoffPosition(unit, focus);
@@ -6896,7 +6897,7 @@ function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) 
   if (unit.attackOrder && !unit.attackOrder.dead) return;
 
   const nearest = findNearestVisibleEnemy(unit, players, scenery);
-  if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.75) {
+  if (nearest && unit.distanceTo(nearest) < getUnitWeaponRange(unit) * 1.75) {
     unit.setAttackOrder(nearest);
     unit.moveTarget = getStandoffPosition(unit, nearest);
     return;
@@ -6989,7 +6990,7 @@ function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game
   if (unit.attackOrder && !unit.attackOrder.dead) return;
 
   const nearest = findNearestVisibleEnemy(unit, players, game?.scenery);
-  if (nearest && unit.distanceTo(nearest) < unit.def.range * 1.6) {
+  if (nearest && unit.distanceTo(nearest) < getUnitWeaponRange(unit) * 1.6) {
     unit.setAttackOrder(nearest);
     unit.moveTarget = getStandoffPosition(unit, nearest);
     return;
@@ -7123,9 +7124,9 @@ function pickAttackTarget(unit, players, scenery = null) {
   const nearest = findNearestVisibleEnemy(unit, players, scenery);
   if (!nearest) return null;
   const d = unit.distanceTo(nearest);
-  if (d <= unit.def.range * 1.15) return nearest;
+  if (d <= getUnitWeaponRange(unit) * 1.15) return nearest;
   if (
-    d < unit.def.range * 1.5 &&
+    d < getUnitWeaponRange(unit) * 1.5 &&
     (unit.def.type === 'infantry' ||
       unit.def.type === 'engineer' ||
       unit.def.type === 'sniper')

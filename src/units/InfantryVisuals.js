@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { getInfantryMaterials } from './UnitTextures.js';
-import { isInRange, isSmokeShellTarget } from '../game/Targeting.js';
+import {
+  isInRange,
+  isSmokeShellTarget,
+  isSpotterRifleInRange,
+} from '../game/Targeting.js';
 
 const POSE_YAW = [0, 0.18, -0.14, 0.24, -0.2, 0.1, -0.26, 0.16];
 const POSE_LEAN = [0, 0.04, -0.03, 0.05, -0.04, 0.02, -0.05, 0.03];
@@ -638,8 +642,60 @@ function createWeaponGroup(soldier, { crouching = false, kind = 'rifle' } = {}) 
   return weapon;
 }
 
-function addFactionRifle(soldier, mats, factionId, { crouching = false } = {}) {
-  const weapon = createWeaponGroup(soldier, { crouching, kind: 'rifle' });
+function addSniperScope(weapon, mats, factionId) {
+  const dark = mats.dark;
+  const metal = mats.metal;
+  const scope = new THREE.Group();
+  scope.name = 'sniperScope';
+
+  if (factionId === 'usa') {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.02, 0.28, 8), dark);
+    tube.rotation.z = Math.PI / 2;
+    tube.position.set(0.1, 0.055, 0.055);
+    const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.022, 0.05, 8), metal);
+    eye.rotation.z = Math.PI / 2;
+    eye.position.set(-0.02, 0.055, 0.055);
+    const obj = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.045, 8), metal);
+    obj.rotation.z = Math.PI / 2;
+    obj.position.set(0.24, 0.055, 0.055);
+    scope.add(tube, eye, obj);
+  } else if (factionId === 'russia') {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.018, 0.16, 8), dark);
+    tube.rotation.z = Math.PI / 2;
+    tube.position.set(0.02, 0.055, 0.055);
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.03, 8), metal);
+    ring.rotation.z = Math.PI / 2;
+    ring.position.set(-0.05, 0.055, 0.055);
+    scope.add(tube, ring);
+  } else if (factionId === 'uk') {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.045, 0.04), dark);
+    body.position.set(0.06, 0.058, 0.05);
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.03, 8), metal);
+    drum.position.set(0.04, 0.082, 0.05);
+    scope.add(body, drum);
+  } else if (factionId === 'japan') {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.017, 0.18, 8), dark);
+    tube.rotation.z = Math.PI / 2;
+    tube.position.set(0.08, 0.05, 0.09);
+    scope.add(tube);
+  } else {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.26, 8), dark);
+    tube.rotation.z = Math.PI / 2;
+    tube.position.set(0.12, 0.055, 0.05);
+    const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.04, 8), metal);
+    bell.rotation.z = Math.PI / 2;
+    bell.position.set(0.25, 0.055, 0.05);
+    scope.add(tube, bell);
+  }
+
+  weapon.add(scope);
+}
+
+function addFactionRifle(soldier, mats, factionId, { crouching = false, sniper = false } = {}) {
+  const weapon = createWeaponGroup(soldier, {
+    crouching,
+    kind: sniper ? 'sniperRifle' : 'rifle',
+  });
   const dark = mats.dark;
   const wood = mats.wood;
 
@@ -691,9 +747,11 @@ function addFactionRifle(soldier, mats, factionId, { crouching = false } = {}) {
     barrel.position.set(0.19, 0.01, 0.07);
     barrel.rotation.z = Math.PI / 2;
     weapon.add(barrel);
-    const bayonet = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.012, 0.022), mats.metal);
-    bayonet.position.set(0.48, -0.005, 0.07);
-    weapon.add(bayonet);
+    if (!sniper) {
+      const bayonet = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.012, 0.022), mats.metal);
+      bayonet.position.set(0.48, -0.005, 0.07);
+      weapon.add(bayonet);
+    }
   } else {
     const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.065), wood);
     stock.position.set(-0.1, 0, 0.07);
@@ -712,9 +770,14 @@ function addFactionRifle(soldier, mats, factionId, { crouching = false } = {}) {
   if (rifleBarrel?.geometry?.parameters?.height !== undefined) {
     rifleBarrel.userData.muzzleTipSign = -1;
   }
+  if (sniper) addSniperScope(weapon, mats, factionId);
   addWeaponHands(weapon, mats);
 
   return weapon;
+}
+
+export function addFactionSniperRifle(soldier, mats, factionId, { crouching = true } = {}) {
+  return addFactionRifle(soldier, mats, factionId, { crouching, sniper: true });
 }
 
 function getWeaponAimPresets(kind, crouching, gunner) {
@@ -782,6 +845,9 @@ function isSoldierAiming(unit, soldier) {
   const kind = weapon?.userData.weaponKind ?? 'rifle';
   if (kind === 'atLauncher') {
     return ARMOR_TARGET_TYPES.has(target.def?.type) && isInRange(unit, target);
+  }
+  if (unit.def?.type === 'sniper' && soldier.userData.sniperRole === 'spotter') {
+    return isSpotterRifleInRange(unit, target);
   }
 
   return isInRange(unit, target);
@@ -895,6 +961,20 @@ function meshMuzzleWorldPos(mesh, out) {
 function pickFiringSoldier(unit, weaponType, soldiers) {
   if (weaponType === 'paratrooperAt') {
     return soldiers.find((s) => s.userData.squadIndex === 0) ?? soldiers[0];
+  }
+  if (weaponType === 'spotterRifle') {
+    return (
+      soldiers.find((s) => s.userData.sniperRole === 'spotter') ??
+      soldiers.find((s) => s.userData.squadIndex === 1) ??
+      soldiers[soldiers.length - 1]
+    );
+  }
+  if (unit.def?.type === 'sniper') {
+    return (
+      soldiers.find((s) => s.userData.sniperRole === 'sniper') ??
+      soldiers.find((s) => s.userData.squadIndex === 0) ??
+      soldiers[0]
+    );
   }
 
   let pool = soldiers;
@@ -1149,6 +1229,44 @@ export function updateInfantryWeaponPose(unit, dt) {
       unit._walkRunBlend ?? 0
     );
     if (unit._mountedOnTankId) applyTankRiderSitPose(child);
+  });
+
+  updateSniperSpotterOptics(unit);
+}
+
+function updateSniperSpotterOptics(unit) {
+  if (unit.def?.type !== 'sniper' || !unit.mesh) return;
+  unit.mesh.traverse((child) => {
+    if (child.name !== 'squadMember' || !child.visible) return;
+    if (child.userData.sniperRole !== 'spotter') return;
+    const optics = child.userData.spotterOptics;
+    if (!optics?.binoculars || !optics.rest || !optics.raised) return;
+
+    const target = getEngagementTarget(unit);
+    const spotting =
+      !!target &&
+      isInRange(unit, target) &&
+      !isSpotterRifleInRange(unit, target) &&
+      (unit._walkBlend ?? 0) < 0.08;
+    const next = spotting ? 1 : 0;
+    optics.blend = THREE.MathUtils.lerp(optics.blend ?? 0, next, 0.18);
+    const t = optics.blend;
+    optics.binoculars.position.lerpVectors(optics.rest.position, optics.raised.position, t);
+    optics.binoculars.rotation.x = THREE.MathUtils.lerp(
+      optics.rest.rotation.x,
+      optics.raised.rotation.x,
+      t
+    );
+    optics.binoculars.rotation.y = THREE.MathUtils.lerp(
+      optics.rest.rotation.y,
+      optics.raised.rotation.y,
+      t
+    );
+    optics.binoculars.rotation.z = THREE.MathUtils.lerp(
+      optics.rest.rotation.z,
+      optics.raised.rotation.z,
+      t
+    );
   });
 }
 

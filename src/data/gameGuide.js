@@ -286,12 +286,12 @@ export const GUIDE_UNIT_CARDS = [
   },
   {
     type: 'sniper',
-    name: 'Sniper',
-    cost: 72,
+    name: 'Sniper team',
+    cost: 78,
     build: 11,
-    range: '~900–1,000 m',
-    desc: 'Long-range precision; fragile, deadly vs infantry and cars.',
-    tags: ['Cover'],
+    range: '~800–1,000 m (solo ~520–650 m)',
+    desc: 'Two-man hide: scoped marksman plus observer, both in period concealment (British hessian ghillie, U.S. helmet scrim and burlap, German splinter smock, Soviet amoeba oversuit, or Japanese sedge netting). The spotter carries a service rifle at standard infantry range. If the spotter is killed, the sniper’s effective range drops until the team is restored.',
+    tags: ['Cover', 'Team'],
   },
   {
     type: 'mortar',

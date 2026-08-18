@@ -14,6 +14,13 @@ import {
   isUrbanCanalBridge,
   nearestUrbanCanalBridgeZ,
 } from './UrbanScenery.js';
+import {
+  createFarmBuilding,
+  createFarmMaterials,
+  createJungleHut,
+  createStoneWall,
+  disposeFarmMaterials,
+} from './RuralBuildings.js';
 
 let activeMapRandom = null;
 const mapRandom = () => (activeMapRandom ? activeMapRandom() : Math.random());
@@ -986,7 +993,7 @@ function addFarmClusters(mapDef, scene, size, seed, scenery) {
   }
   const scale = mapDef.sizeScale ?? 1;
   const count = scale >= 2.4 ? 5 : scale >= 1.7 ? 3 : 1;
-  const mats = createFarmMaterials(mapDef);
+  const pack = createFarmMaterials(mapDef);
   let placed = 0;
 
   for (let i = 0; i < count && placed < count; i++) {
@@ -994,10 +1001,10 @@ function addFarmClusters(mapDef, scene, size, seed, scenery) {
     const x = side * (size * (0.12 + mapRandom() * 0.24));
     const z = (mapRandom() - 0.5) * size * 0.62;
     if (isReservedMapSpace(x, z, mapDef, 20 * scale)) continue;
-    addFarmCluster(mapDef, scene, seed, scenery, x, z, mapRandom() * Math.PI * 2, mats);
+    addFarmCluster(mapDef, scene, seed, scenery, x, z, mapRandom() * Math.PI * 2, pack);
     placed++;
   }
-  Object.values(mats).forEach((mat) => mat.dispose());
+  disposeFarmMaterials(pack);
 }
 
 function addJungleVillageClusters(mapDef, scene, size, seed, scenery) {
@@ -1035,76 +1042,7 @@ function addJungleVillageClusters(mapDef, scene, size, seed, scenery) {
   Object.values(mats).forEach((material) => material.dispose());
 }
 
-function createJungleHut(mats, large = false) {
-  const g = new THREE.Group();
-  const w = large ? 4.4 : 3.2;
-  const d = large ? 3.4 : 2.7;
-  const floorY = 0.58;
-  const wallH = large ? 1.75 : 1.45;
-  const bamboo = mats.bamboo.clone();
-  const timber = mats.timber.clone();
-  const thatch = mats.thatch.clone();
-  const shadow = mats.shadow.clone();
-
-  for (const x of [-w * 0.42, w * 0.42]) {
-    for (const z of [-d * 0.38, d * 0.38]) {
-      const stilt = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, floorY + 0.18, 7), timber);
-      stilt.position.set(x, (floorY + 0.18) * 0.5, z);
-      stilt.castShadow = true;
-      g.add(stilt);
-    }
-  }
-
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), timber);
-  floor.position.y = floorY;
-  floor.castShadow = true;
-  floor.receiveShadow = true;
-  g.add(floor);
-
-  const walls = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), bamboo);
-  walls.name = 'buildingWall';
-  walls.position.y = floorY + wallH * 0.5;
-  walls.castShadow = true;
-  walls.receiveShadow = true;
-  g.add(walls);
-
-  for (const x of [-w * 0.24, w * 0.24]) {
-    const window = new THREE.Mesh(new THREE.BoxGeometry(w * 0.2, 0.48, 0.06), shadow);
-    window.name = 'buildingWindow';
-    window.position.set(x, floorY + wallH * 0.58, d * 0.505);
-    g.add(window);
-  }
-  const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.2, wallH * 0.68, 0.07), shadow);
-  door.name = 'buildingDoor';
-  door.position.set(0, floorY + wallH * 0.34, -d * 0.505);
-  g.add(door);
-
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.64, 1.25, 4), thatch);
-  roof.name = 'buildingRoof';
-  roof.position.y = floorY + wallH + 0.54;
-  roof.rotation.y = Math.PI * 0.25;
-  roof.scale.set(w > d ? 1.18 : 1, 0.72, d > w ? 1.15 : 0.9);
-  roof.castShadow = true;
-  roof.receiveShadow = true;
-  g.add(roof);
-
-  g.userData.buildingDimensions = { width: w, depth: d, height: floorY + wallH + 1.1 };
-  return g;
-}
-
-function createFarmMaterials(mapDef) {
-  const desert = mapDef.terrain === 'desert';
-  return {
-    wall: new THREE.MeshStandardMaterial({ color: desert ? 0xb59666 : 0x9b8a72, roughness: 0.82, envMapIntensity: 0.35 }),
-    barn: new THREE.MeshStandardMaterial({ color: desert ? 0x8f7551 : 0x7a2f25, roughness: 0.86, envMapIntensity: 0.3 }),
-    roof: new THREE.MeshStandardMaterial({ color: desert ? 0x6d5943 : 0x34383a, roughness: 0.78, metalness: 0.05, envMapIntensity: 0.38 }),
-    timber: new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.9, envMapIntensity: 0.25 }),
-    window: new THREE.MeshStandardMaterial({ color: 0x1b2325, roughness: 0.5, metalness: 0.05, envMapIntensity: 0.6 }),
-    stone: new THREE.MeshStandardMaterial({ color: 0x77705f, roughness: 0.9, envMapIntensity: 0.28 }),
-  };
-}
-
-function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, mats) {
+function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, pack) {
   const pieces = [
     { kind: 'farmHouse', x: -3.2, z: -1.4, rot: 0.05 },
     { kind: 'barn', x: 4.4, z: 1.2, rot: Math.PI * 0.5 },
@@ -1115,7 +1053,7 @@ function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, mats) {
     const wx = cx + Math.cos(rot) * p.x - Math.sin(rot) * p.z;
     const wz = cz + Math.sin(rot) * p.x + Math.cos(rot) * p.z;
     const wy = heightAt(wx, wz, mapDef, seed);
-    const g = createFarmBuilding(p.kind, mats);
+    const g = createFarmBuilding(p.kind, pack, mapRandom);
     g.position.set(wx, wy, wz);
     g.rotation.y = rot + p.rot;
     if (scenery) scenery.register(g, { x: wx, z: wz, kind: p.kind, source: 'map' });
@@ -1127,109 +1065,12 @@ function addFarmCluster(mapDef, scene, seed, scenery, cx, cz, rot, mats) {
     const wx = cx + Math.cos(rot) * 0 - Math.sin(rot) * offZ;
     const wz = cz + Math.sin(rot) * 0 + Math.cos(rot) * offZ;
     const wy = heightAt(wx, wz, mapDef, seed);
-    const wall = createStoneWall(mats.stone);
+    const wall = createStoneWall(pack.mats.stone, mapRandom);
     wall.position.set(wx, wy, wz);
     wall.rotation.y = rot + Math.PI * 0.5;
     if (scenery) scenery.register(wall, { x: wx, z: wz, kind: 'stoneWall', source: 'map' });
     else scene.add(wall);
   }
-}
-
-function createFarmBuilding(kind, mats) {
-  const g = new THREE.Group();
-  const isBarn = kind === 'barn';
-  const isOutbuilding = kind === 'outbuilding';
-  const w = isBarn ? 5.2 : isOutbuilding ? 3.1 : 4.2;
-  const d = isBarn ? 3.6 : isOutbuilding ? 2.6 : 3.4;
-  const h = isBarn ? 2.7 : isOutbuilding ? 1.85 : 2.35;
-  const local = {
-    wall: mats.wall.clone(),
-    barn: mats.barn.clone(),
-    roof: mats.roof.clone(),
-    timber: mats.timber.clone(),
-    window: mats.window.clone(),
-    stone: mats.stone.clone(),
-  };
-
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), isBarn ? local.barn : local.wall);
-  body.name = 'buildingWall';
-  body.position.y = h * 0.5;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  g.add(body);
-
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.58, 1.05, 4), local.roof);
-  roof.name = 'buildingRoof';
-  roof.position.y = h + 0.48;
-  roof.rotation.y = Math.PI * 0.25;
-  roof.scale.set(w > d ? 1.2 : 1, 0.78, d > w ? 1.15 : 0.9);
-  roof.castShadow = true;
-  roof.receiveShadow = true;
-  g.add(roof);
-
-  const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.2, h * 0.48, 0.08), local.timber);
-  door.name = 'buildingDoor';
-  door.position.set(-w * 0.2, h * 0.24, d * 0.51);
-  door.castShadow = true;
-  g.add(door);
-
-  if (!isOutbuilding) {
-    for (const sx of [-0.32, 0.32]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.36, 0.07), local.window);
-      win.name = 'buildingWindow';
-      win.position.set(w * sx, h * 0.62, d * 0.515);
-      g.add(win);
-    }
-  }
-
-  if (kind === 'farmHouse') {
-    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.88, 0.36), local.stone);
-    chimney.name = 'buildingChimney';
-    chimney.position.set(w * 0.24, h + 0.75, -d * 0.12);
-    chimney.castShadow = true;
-    g.add(chimney);
-  }
-
-  g.userData.damageBounds = { width: w, depth: d, height: h };
-  g.userData.roofDamageProfile = {
-    bodyHeight: h,
-    roofHeight: 0.82,
-    width: w,
-    depth: d,
-    heightAt(localX, localZ) {
-      // The rural buildings use a shallow four-sided pitched roof. Keep impact
-      // marks on its visible surface instead of floating at a generic height.
-      const edgeRatio = Math.max(
-        Math.abs(localX) / Math.max(0.5, w * 0.58),
-        Math.abs(localZ) / Math.max(0.5, d * 0.52)
-      );
-      return h + 0.06 + 0.82 * Math.max(0, 1 - edgeRatio);
-    },
-    normalAt(localX, localZ) {
-      const halfWidth = Math.max(0.5, w * 0.58);
-      const halfDepth = Math.max(0.5, d * 0.52);
-      if (Math.abs(localX) / halfWidth >= Math.abs(localZ) / halfDepth) {
-        return { x: Math.sign(localX) * 0.82 / halfWidth, y: 1, z: 0 };
-      }
-      return { x: 0, y: 1, z: Math.sign(localZ) * 0.82 / halfDepth };
-    },
-  };
-
-  return g;
-}
-
-function createStoneWall(mat) {
-  const g = new THREE.Group();
-  const localMat = mat.clone();
-  for (let i = 0; i < 6; i++) {
-    const block = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.55 + mapRandom() * 0.18, 0.55), localMat);
-    block.position.set((i - 2.5) * 0.92, 0.28, (mapRandom() - 0.5) * 0.14);
-    block.rotation.y = (mapRandom() - 0.5) * 0.08;
-    block.castShadow = true;
-    block.receiveShadow = true;
-    g.add(block);
-  }
-  return g;
 }
 
 function addTerrainClutter(mapDef, scene, size, seed, scenery) {

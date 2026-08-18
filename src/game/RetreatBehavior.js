@@ -252,6 +252,7 @@ export function startRetreat(unit, hq, options = {}) {
       {
         team: unit.team,
         radio: unit.team === 'player',
+        unitType: unit.def?.type,
         // Let an immediately preceding hit reaction finish before the withdrawal call.
         delay: Math.max(options.voiceDelay ?? 0, recentlyCalledUnderFire ? 1.05 : 0),
       }

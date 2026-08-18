@@ -1,4 +1,5 @@
 import { sounds } from '../audio/SoundManager.js';
+import { getUnitWeaponRange } from './Targeting.js';
 import { Unit } from '../units/Unit.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
@@ -664,12 +665,13 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
 
 function pickNearestDefenseInRange(unit, defenses) {
   const targets = defenses?.getAttackTargets?.() ?? [];
+  const range = getUnitWeaponRange(unit);
   let best = null;
-  let bestD = unit.def.range;
+  let bestD = range;
   for (const t of targets) {
     if (t.dead) continue;
     const d = Math.hypot(unit.position.x - t.position.x, unit.position.z - t.position.z);
-    if (d <= unit.def.range && d < bestD) {
+    if (d <= range && d < bestD) {
       bestD = d;
       best = t;
     }

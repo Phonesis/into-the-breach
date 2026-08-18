@@ -8,6 +8,7 @@ import {
   buildAtGunFromDesign,
 } from './VehicleMeshKit.js';
 import {
+  addFactionSniperRifle,
   buildSquadSoldier,
   configureTacticalSquadFormation,
 } from './InfantryVisuals.js';
@@ -1019,55 +1020,213 @@ export function buildFactionParatrooper(group, _body, dark, factionId) {
   group.userData.hitRadius = 1.2;
 }
 
-export function buildFactionSniper(group, _body, _detail, dark, factionId, ghillieMat) {
-  buildSquadSoldier(group, {
-    factionId,
-    squadIndex: 0,
-    x: 0,
-    z: 0,
-    crouching: true,
-    withPack: false,
-    withRifle: false,
-    extraMeshes: (_soldier, mats) => {
-      const weapon = new THREE.Group();
-      weapon.name = 'infantryWeapon';
-      weapon.userData.infantryPart = 'weapon';
-      weapon.userData.weaponKind = 'sniperRifle';
-      weapon.position.set(0.05, 0.34, 0.05);
+const SNIPER_STRIP_COLORS = {
+  uk: [0x5a5434, 0x3d4a2c, 0x6b5a38, 0x4a5230, 0x7a6a44],
+  usa: [0x4c5634, 0x5a5238, 0x3a422c, 0x6a6440],
+  germany: [0x5a5238, 0x3d4530, 0x6b4a32, 0x4a5534],
+  russia: [0x6b6840, 0x4a5534, 0x8a7a4c, 0x3d4a30],
+  japan: [0x6b663d, 0x4a5230, 0x8a7a48, 0x3a4528],
+};
 
-      const rifleLen = factionId === 'usa' ? 0.82 : 0.75;
-      const rifle = new THREE.Mesh(new THREE.BoxGeometry(rifleLen, 0.05, 0.05), mats.dark);
-      rifle.userData.infantryPart = 'barrel';
-      rifle.position.set(0.14, 0.04, 0.05);
-      rifle.rotation.y = 0.2;
-      weapon.add(rifle);
+function ghillieStripMat(color) {
+  return mat(color, { rough: 0.96, metal: 0.02 });
+}
 
-      const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.24, 8), mats.dark);
-      scope.rotation.z = Math.PI / 2;
-      scope.position.set(0.36, 0.08, 0.03);
-      weapon.add(scope);
+function addGhillieStrips(parent, colors, count, origin, spread, length, seed) {
+  let value = seed >>> 0;
+  const rand = () => {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    return value / 4294967296;
+  };
+  const mats = colors.map((color) => ghillieStripMat(color));
+  for (let i = 0; i < count; i++) {
+    const stripLen = length * (0.55 + rand() * 0.7);
+    const strip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.018 + rand() * 0.03, stripLen, 0.008 + rand() * 0.012),
+      mats[i % mats.length]
+    );
+    strip.position.set(
+      origin.x + (rand() - 0.5) * spread.x,
+      origin.y - stripLen * 0.35,
+      origin.z + (rand() - 0.5) * spread.z
+    );
+    strip.rotation.set((rand() - 0.5) * 0.7, rand() * Math.PI, (rand() - 0.5) * 0.55);
+    tagEquipShadow(strip, 'receive');
+    parent.add(strip);
+  }
+}
 
-      _soldier.add(weapon);
-    },
-  });
+function addHelmetCover(helmet, material, { brim = 0.02, drop = 0.05 } = {}) {
+  if (!helmet) return;
+  const cover = new THREE.Mesh(
+    new THREE.SphereGeometry(0.132, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.58),
+    material
+  );
+  cover.position.y = brim;
+  cover.scale.set(1.08, 0.92, 1.1);
+  tagEquipShadow(cover, 'receive');
+  helmet.add(cover);
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, drop, 10, 1, true), material);
+  skirt.position.y = -0.02;
+  tagEquipShadow(skirt, 'receive');
+  helmet.add(skirt);
+}
 
-  const ghillieMaterial =
+function addSniperConcealment(soldier, factionId, mats, ghillieMat, role, seed) {
+  const cloth =
     ghillieMat ??
-    mat(factionId === 'usa' ? 0x3a4230 : 0x3d4a32, {
+    mat(SNIPER_STRIP_COLORS[factionId]?.[0] ?? 0x3d4a32, { rough: 0.95, metal: 0.05 });
+  cloth.side = THREE.DoubleSide;
+  const helmet = soldier.children.find((child) => child.userData?.infantryPart === 'helmet');
+  const colors = SNIPER_STRIP_COLORS[factionId] ?? SNIPER_STRIP_COLORS.uk;
+  const hide = new THREE.Group();
+  hide.name = 'sniperConcealment';
+
+  if (factionId === 'uk') {
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.72), cloth);
+    hood.position.set(0, 0.78, -0.02);
+    hood.scale.set(1.05, 0.85, 1.15);
+    tagEquipShadow(hood);
+    hide.add(hood);
+    const cape = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, 0.42, 10, 1, true), cloth);
+    cape.position.set(0, 0.48, -0.04);
+    cape.scale.set(1.15, 1, 0.85);
+    tagEquipShadow(cape, 'receive');
+    hide.add(cape);
+    addGhillieStrips(hide, colors, 18, { x: 0, y: 0.72, z: 0 }, { x: 0.38, z: 0.32 }, 0.22, seed);
+    if (helmet) helmet.visible = false;
+  } else if (factionId === 'usa') {
+    addHelmetCover(helmet, cloth, { brim: 0.01, drop: 0.04 });
+    const veil = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 0.28, 10, 1, true), cloth);
+    veil.position.set(0, 0.5, -0.03);
+    veil.scale.set(1.08, 1, 0.82);
+    tagEquipShadow(veil, 'receive');
+    hide.add(veil);
+    addGhillieStrips(hide, colors, 11, { x: 0, y: 0.78, z: 0.02 }, { x: 0.28, z: 0.24 }, 0.16, seed + 3);
+  } else if (factionId === 'germany') {
+    const smock = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.2, 0.38, 10), cloth);
+    smock.position.set(0, 0.42, 0);
+    smock.scale.set(1.08, 1, 0.78);
+    tagEquipShadow(smock, 'receive');
+    hide.add(smock);
+    addHelmetCover(helmet, cloth, { brim: 0.015, drop: 0.045 });
+    addGhillieStrips(hide, colors, 8, { x: 0, y: 0.74, z: 0 }, { x: 0.26, z: 0.22 }, 0.12, seed + 7);
+    for (const side of [-1, 1]) {
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 5), ghillieStripMat(colors[1]));
+      tuft.position.set(side * 0.1, 0.82, 0.02);
+      tuft.rotation.z = side * 0.35;
+      hide.add(tuft);
+    }
+  } else if (factionId === 'russia') {
+    const suit = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.22, 0.46, 10), cloth);
+    suit.position.set(0, 0.4, 0);
+    suit.scale.set(1.12, 1, 0.8);
+    tagEquipShadow(suit, 'receive');
+    hide.add(suit);
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.155, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.7), cloth);
+    hood.position.set(0, 0.76, -0.01);
+    hood.scale.set(1.08, 0.82, 1.12);
+    tagEquipShadow(hood);
+    hide.add(hood);
+    addGhillieStrips(hide, colors, 10, { x: 0, y: 0.58, z: 0.02 }, { x: 0.32, z: 0.26 }, 0.14, seed + 11);
+    if (helmet) helmet.visible = false;
+  } else {
+    addHelmetCover(helmet, cloth, { brim: 0.0, drop: 0.05 });
+    const cape = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.26, 0.36, 10, 1, true), cloth);
+    cape.position.set(0, 0.46, -0.04);
+    cape.scale.set(1.1, 1, 0.84);
+    tagEquipShadow(cape, 'receive');
+    hide.add(cape);
+    addGhillieStrips(hide, colors, 16, { x: 0, y: 0.76, z: 0 }, { x: 0.3, z: 0.28 }, 0.18, seed + 13);
+    for (let i = 0; i < 6; i++) {
+      const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.012, 0.16, 0.006),
+        ghillieStripMat(colors[i % colors.length])
+      );
+      blade.position.set((i - 2.5) * 0.035, 0.86, 0.04);
+      blade.rotation.z = (i - 2.5) * 0.12;
+      hide.add(blade);
+    }
+  }
+
+  soldier.add(hide);
+  void mats;
+  void role;
+}
+
+function addSpotterBinoculars(soldier, mats) {
+  const binoculars = new THREE.Group();
+  binoculars.name = 'spotterBinoculars';
+  binoculars.position.set(0.06, -0.22, 0.1);
+  for (const bx of [-0.038, 0.038]) {
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.034, 0.11, 8), mats.dark);
+    glass.rotation.x = Math.PI / 2;
+    glass.position.x = bx;
+    binoculars.add(glass);
+  }
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.03), mats.dark);
+  binoculars.add(bridge);
+  const head = soldier.children.find((child) => child.userData?.infantryPart === 'head');
+  (head ?? soldier).add(binoculars);
+  soldier.userData.spotterOptics = {
+    binoculars,
+    blend: 0,
+    rest: {
+      position: binoculars.position.clone(),
+      rotation: binoculars.rotation.clone(),
+    },
+    raised: {
+      position: new THREE.Vector3(0, 0.02, 0.13),
+      rotation: new THREE.Euler(-0.28, 0.04, 0),
+    },
+  };
+}
+
+export function buildFactionSniper(group, _body, _detail, dark, factionId, ghillieMat) {
+  const hideMat =
+    ghillieMat ??
+    mat(SNIPER_STRIP_COLORS[factionId]?.[0] ?? 0x3d4a32, {
       rough: 0.95,
       metal: 0.05,
     });
-  ghillieMaterial.side = THREE.DoubleSide;
+  hideMat.side = THREE.DoubleSide;
 
-  const ghillie = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.1, 0.5, 0.48, 16, 1, true),
-    ghillieMaterial
-  );
-  ghillie.position.y = 0.34;
-  ghillie.scale.set(1.05, 1, 1.08);
-  tagEquipShadow(ghillie);
-  group.add(ghillie);
-  group.userData.hitRadius = 1.4;
+  const sniper = buildSquadSoldier(group, {
+    factionId,
+    squadIndex: 0,
+    x: 0.36,
+    z: 0.16,
+    crouching: true,
+    withPack: false,
+    withRifle: false,
+    extraMeshes: (soldier, mats) => {
+      addFactionSniperRifle(soldier, mats, factionId, { crouching: true });
+      addSniperConcealment(soldier, factionId, mats, hideMat, 'sniper', 0x1944);
+      soldier.userData.sniperRole = 'sniper';
+    },
+  });
+  sniper.userData.sniperRole = 'sniper';
+
+  const spotter = buildSquadSoldier(group, {
+    factionId,
+    squadIndex: 1,
+    x: -0.44,
+    z: -0.34,
+    crouching: true,
+    withPack: false,
+    withRifle: true,
+    extraMeshes: (soldier, mats) => {
+      addSpotterBinoculars(soldier, mats);
+      addSniperConcealment(soldier, factionId, mats, hideMat, 'spotter', 0x1939);
+      soldier.userData.sniperRole = 'spotter';
+    },
+  });
+  spotter.userData.sniperRole = 'spotter';
+
+  group.userData.squadSize = 2;
+  group.userData.sniperSpotterIndex = 1;
+  group.userData.hitRadius = 1.75;
+  void dark;
 }
 
 const VEHICLE_BUILDERS = {

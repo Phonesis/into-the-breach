@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getUnitWeaponRange, sniperHasSpotter } from '../game/Targeting.js';
 
 const SEGMENTS = 64;
 /** Lift above unit feet so flat rings clear local terrain; depthTest off handles slopes. */
@@ -37,7 +38,7 @@ export class RangeRingManager {
 
   /** Primary ring = combat weapon range (radio operators use rifle range). */
   _displayRange(unit) {
-    const r = unit?.def?.range;
+    const r = getUnitWeaponRange(unit);
     return Number.isFinite(r) && r > 0 ? r : 10;
   }
 
@@ -112,6 +113,11 @@ export class RangeRingManager {
           secondaryName = 'radioBinocularRangeRing';
           secondaryOpacity = 0.52;
         }
+      } else if (unit.def?.type === 'sniper' && sniperHasSpotter(unit)) {
+        secondaryRange = unit.def.spotterRifle?.range ?? 0;
+        secondaryColor = 0x86efac;
+        secondaryName = 'spotterRifleRangeRing';
+        secondaryOpacity = 0.28;
       } else {
         secondaryRange = unit.def?.minRange ?? 0;
       }

@@ -16,6 +16,7 @@ import {
 import { isTankType } from './VehicleTypes.js';
 import {
   getBodyTexture,
+  getFactionGhillieTexture,
   getGhillieTexture,
   getInfantryUniformTexture,
   getInfantryMaterials,
@@ -44,6 +45,8 @@ const INFANTRY_TYPES = new Set([
 ]);
 
 const CORPSE_FALL_SEC = 0.45;
+/** Small-arms death flop — kept as the lower bound; most styles last longer. */
+const BULLET_DEATH_MIN_SEC = 0.34;
 /** Chance a blast kill produces flying limbs (not every explosion death). */
 const EXPLOSION_GIB_CHANCE = 0.22;
 /** Gravity for ballistic corpse throws (world units / s²). */
@@ -231,7 +234,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     buildFactionParatrooper(group, body, dark, factionId);
     built = true;
   } else if (type === 'sniper') {
-    const ghillieTex = getGhillieTexture();
+    const ghillieTex = getFactionGhillieTexture(factionId) ?? getGhillieTexture();
     const ghillie = ghillieTex
       ? mat(0xffffff, { rough: 0.95, metal: 0.05, map: ghillieTex })
       : null;
@@ -260,7 +263,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     vehicleCrew: 1.55,
     paratrooper: 2.25,
     machineGun: 2,
-    sniper: 1.5,
+    sniper: 1.85,
     mortar: 2.2,
     medic: 1.4,
     engineer: 2.25,
@@ -341,6 +344,14 @@ export function setSelectionRing(mesh, visible) {
   if (ring) {
     ring.material.opacity = visible ? 0.9 : 0;
     ring.material.color.setHex(visible ? 0x4ade80 : 0x4ade80);
+  }
+  // Cover rings use the same ground-level visual language as selection rings,
+  // but are maintained by CoverSystem. Mirror the selection state here so a
+  // deselected unit cannot leave its blue cover ring behind until the next
+  // cover-system tick.
+  const coverRing = mesh.getObjectByName('coverRing');
+  if (coverRing) {
+    coverRing.visible = !!visible && coverRing.userData?.coverActive === true;
   }
 }
 
@@ -479,6 +490,244 @@ function addBloodPoolAt(parent, x, z, radius, squadIndex = null) {
   parent.add(inner);
 }
 
+function incomingFireDir(unit, worldPos, blastOptions = {}) {
+  const from =
+    unit?._deathImpactFrom ??
+    unit?._lastImpactFrom ??
+    blastOptions?.impactFrom ??
+    null;
+  if (from && Number.isFinite(from.x) && Number.isFinite(from.z)) {
+    const dx = worldPos.x - from.x;
+    const dz = worldPos.z - from.z;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.25) return { x: dx / len, z: dz / len };
+  }
+  const yaw = unit?.mesh?.rotation?.y ?? 0;
+  return { x: Math.sin(yaw), z: Math.cos(yaw) };
+}
+
+function easeFall(t, kind) {
+  const x = THREE.MathUtils.clamp(t, 0, 1);
+  if (kind === 'in') return x * x;
+  if (kind === 'out') return 1 - (1 - x) * (1 - x);
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Varied small-arms death motions. The fallen mesh is built prone along +X;
+ * rotZ stands that body up (head high) so a lerp to 0 reads as a real fall.
+ */
+function pickBulletDeathMotion(unit, worldPos, groundY, rotY, blastOptions = {}) {
+  const away = incomingFireDir(unit, worldPos, blastOptions);
+  const right = { x: -away.z, z: away.x };
+  const roll = Math.random();
+  const jitter = () => (Math.random() - 0.5);
+
+  const startY = worldPos.y + 0.58 + Math.random() * 0.16;
+  const base = {
+    startX: worldPos.x,
+    startY,
+    startZ: worldPos.z,
+    startRotY: rotY + jitter() * 0.18,
+    endX: worldPos.x,
+    endY: groundY,
+    endZ: worldPos.z,
+    endRotX: jitter() * 0.16,
+    endRotY: rotY + jitter() * 0.55,
+    endRotZ: jitter() * 0.1,
+    pose: 'prone',
+    ease: 'smooth',
+    mid: null,
+    easeA: 'out',
+    easeB: 'in',
+  };
+
+  if (roll < 0.22) {
+    // Sudden crumple — legs go and the body folds almost in place.
+    return {
+      ...base,
+      style: 'crumple',
+      dur: BULLET_DEATH_MIN_SEC + Math.random() * 0.12,
+      startY: worldPos.y + 0.38 + Math.random() * 0.1,
+      startRotX: jitter() * 0.2,
+      startRotZ: 0.72 + Math.random() * 0.22,
+      endX: worldPos.x + away.x * 0.18 + jitter() * 0.12,
+      endZ: worldPos.z + away.z * 0.18 + jitter() * 0.12,
+      endRotZ: jitter() * 0.08,
+      ease: 'in',
+    };
+  }
+
+  if (roll < 0.42) {
+    // Chest hit: stagger away from the shooter, then drop.
+    const back = 0.55 + Math.random() * 0.55;
+    return {
+      ...base,
+      style: 'stumbleBack',
+      dur: 0.58 + Math.random() * 0.22,
+      startRotX: jitter() * 0.15,
+      startRotZ: 1.18 + Math.random() * 0.22,
+      mid: {
+        at: 0.42,
+        x: worldPos.x + away.x * back * 0.55,
+        y: startY - 0.12,
+        z: worldPos.z + away.z * back * 0.55,
+        rotX: jitter() * 0.2,
+        rotY: rotY + jitter() * 0.25,
+        rotZ: 1.42 + Math.random() * 0.18,
+      },
+      endX: worldPos.x + away.x * back,
+      endZ: worldPos.z + away.z * back,
+      endY: groundY + 0.035,
+      endRotZ: Math.PI + jitter() * 0.12,
+      pose: 'back',
+      easeA: 'out',
+      easeB: 'in',
+    };
+  }
+
+  if (roll < 0.6) {
+    // Pitch forward onto the face — common when advancing into fire.
+    const ahead = 0.42 + Math.random() * 0.38;
+    return {
+      ...base,
+      style: 'pitchForward',
+      dur: 0.42 + Math.random() * 0.16,
+      startRotX: jitter() * 0.12,
+      startRotZ: 1.05 + Math.random() * 0.2,
+      endX: worldPos.x - away.x * ahead + jitter() * 0.1,
+      endZ: worldPos.z - away.z * ahead + jitter() * 0.1,
+      endRotZ: jitter() * 0.08,
+      ease: 'in',
+    };
+  }
+
+  if (roll < 0.73) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const slide = 0.28 + Math.random() * 0.32;
+    return {
+      ...base,
+      style: 'sideCollapse',
+      dur: 0.4 + Math.random() * 0.16,
+      startRotX: side * (0.18 + Math.random() * 0.16),
+      startRotZ: 0.95 + Math.random() * 0.2,
+      endX: worldPos.x + right.x * side * slide,
+      endZ: worldPos.z + right.z * side * slide,
+      endRotX: side * (0.85 + Math.random() * 0.22),
+      endRotZ: jitter() * 0.12,
+      pose: side < 0 ? 'sideL' : 'sideR',
+      ease: 'in',
+    };
+  }
+
+  if (roll < 0.85) {
+    const spin = (Math.random() < 0.5 ? -1 : 1) * (1.1 + Math.random() * 1.4);
+    return {
+      ...base,
+      style: 'spinFall',
+      dur: 0.5 + Math.random() * 0.18,
+      startRotX: jitter() * 0.25,
+      startRotZ: 1.08 + Math.random() * 0.2,
+      endX: worldPos.x + away.x * 0.28 + right.x * jitter() * 0.35,
+      endZ: worldPos.z + away.z * 0.28 + right.z * jitter() * 0.35,
+      endRotY: rotY + spin,
+      endRotZ: jitter() * 0.14,
+      pose: Math.random() < 0.4 ? 'sideR' : 'prone',
+      ease: 'smooth',
+    };
+  }
+
+  if (roll < 0.93) {
+    // Knees buckle, a beat of sitting, then topple.
+    const ontoBack = Math.random() < 0.45;
+    return {
+      ...base,
+      style: 'sitThenFall',
+      dur: 0.72 + Math.random() * 0.2,
+      startRotX: jitter() * 0.12,
+      startRotZ: 1.22 + Math.random() * 0.14,
+      mid: {
+        at: 0.38,
+        x: worldPos.x + away.x * 0.12,
+        y: groundY + 0.28,
+        z: worldPos.z + away.z * 0.12,
+        rotX: jitter() * 0.15,
+        rotY: rotY + jitter() * 0.2,
+        rotZ: 0.85 + Math.random() * 0.12,
+      },
+      endX: worldPos.x + away.x * 0.34,
+      endZ: worldPos.z + away.z * 0.34,
+      endY: groundY + (ontoBack ? 0.035 : 0),
+      endRotZ: ontoBack ? Math.PI + jitter() * 0.1 : jitter() * 0.1,
+      pose: ontoBack ? 'back' : 'prone',
+      easeA: 'out',
+      easeB: 'in',
+    };
+  }
+
+  // Drop onto the back from a near-standing lean.
+  return {
+    ...base,
+    style: 'fallBack',
+    dur: 0.5 + Math.random() * 0.18,
+    startRotX: jitter() * 0.12,
+    startRotZ: 1.38 + Math.random() * 0.16,
+    endX: worldPos.x + away.x * (0.4 + Math.random() * 0.28),
+    endZ: worldPos.z + away.z * (0.4 + Math.random() * 0.28),
+    endY: groundY + 0.035,
+    endRotZ: Math.PI + jitter() * 0.1,
+    pose: 'back',
+    ease: 'smooth',
+  };
+}
+
+function sampleFallPose(fall, t) {
+  const clampT = THREE.MathUtils.clamp(t, 0, 1);
+  const start = {
+    x: fall.startX,
+    y: fall.startY,
+    z: fall.startZ,
+    rotX: fall.startRotX ?? 0,
+    rotY: fall.startRotY ?? 0,
+    rotZ: fall.startRotZ ?? 0,
+  };
+  const end = {
+    x: fall.endX ?? fall.startX,
+    y: fall.endY,
+    z: fall.endZ ?? fall.startZ,
+    rotX: fall.endRotX ?? 0,
+    rotY: fall.endRotY ?? fall.startRotY ?? 0,
+    rotZ: fall.endRotZ ?? 0,
+  };
+  let a = start;
+  let b = end;
+  let u = clampT;
+  if (fall.mid && Number.isFinite(fall.mid.at) && fall.mid.at > 0.04 && fall.mid.at < 0.96) {
+    if (clampT < fall.mid.at) {
+      b = fall.mid;
+      u = easeFall(clampT / fall.mid.at, fall.easeA ?? 'out');
+    } else {
+      a = fall.mid;
+      u = easeFall((clampT - fall.mid.at) / (1 - fall.mid.at), fall.easeB ?? 'in');
+    }
+  } else {
+    u = easeFall(clampT, fall.ease ?? 'smooth');
+  }
+  return {
+    x: THREE.MathUtils.lerp(a.x, b.x, u),
+    y: THREE.MathUtils.lerp(a.y, b.y, u),
+    z: THREE.MathUtils.lerp(a.z, b.z, u),
+    rotX: THREE.MathUtils.lerp(a.rotX ?? 0, b.rotX ?? 0, u),
+    rotY: THREE.MathUtils.lerp(a.rotY ?? 0, b.rotY ?? 0, u),
+    rotZ: THREE.MathUtils.lerp(a.rotZ ?? 0, b.rotZ ?? 0, u),
+  };
+}
+
+function applyFallPose(anchor, pose) {
+  anchor.position.set(pose.x, pose.y, pose.z);
+  anchor.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
+}
+
 function addGroundStain(mesh, spread = 2.4) {
   const group = new THREE.Group();
   group.name = 'corpseStain';
@@ -581,8 +830,8 @@ function placeDetachedCorpse(
     bloodPool = new THREE.Group();
     bloodPool.name = 'bloodPool';
     addBloodPoolAt(bloodPool, 0, 0, 0.3 + Math.random() * 0.16, squadIndex);
-    // Hide pool until the thrown body hits dirt so it does not float mid-air.
-    if (blastThrow) bloodPool.visible = false;
+    // Hide pool until the body hits dirt so it does not float mid-air.
+    if (animateFall && !crushed) bloodPool.visible = false;
     anchor.add(bloodPool);
   }
   anchor.add(body);
@@ -655,21 +904,36 @@ function placeDetachedCorpse(
     anchor.userData.fall = {
       elapsed: 0,
       dur: 0.28 + Math.random() * 0.1,
+      startX: worldPos.x,
       startY,
-      endY: groundY,
+      startZ: worldPos.z,
       startRotX: -0.78,
+      startRotY: rotY,
+      startRotZ: 0,
+      endX: worldPos.x,
+      endY: groundY,
+      endZ: worldPos.z,
       endRotX: (Math.random() - 0.5) * 0.12,
+      endRotY: rotY,
+      endRotZ: 0,
+      ease: 'in',
+      bloodPool,
     };
     activeCorpseAnchors.add(anchor);
   } else if (animateFall && !crushed) {
-    anchor.rotation.x = -1.05;
+    const motion = pickBulletDeathMotion(unit, worldPos, groundY, rotY, blastOptions);
+    applyFallPose(anchor, {
+      x: motion.startX,
+      y: motion.startY,
+      z: motion.startZ,
+      rotX: motion.startRotX ?? 0,
+      rotY: motion.startRotY ?? rotY,
+      rotZ: motion.startRotZ ?? 0,
+    });
     anchor.userData.fall = {
+      ...motion,
       elapsed: 0,
-      dur: CORPSE_FALL_SEC,
-      startY,
-      endY: groundY,
-      startRotX: -1.05,
-      endRotX: (Math.random() - 0.5) * 0.12,
+      bloodPool,
     };
     activeCorpseAnchors.add(anchor);
   } else {
@@ -758,7 +1022,9 @@ function migrateMeshCorpsesToWorld(unit) {
  * back to the white tint used for textured uniforms.
  */
 function createCorpseClothMaterial(factionId, { ghillie = false, roughness = 0.94 } = {}) {
-  const uniformTex = ghillie ? getGhillieTexture() : getInfantryUniformTexture(factionId);
+  const uniformTex = ghillie
+    ? getFactionGhillieTexture(factionId) ?? getGhillieTexture()
+    : getInfantryUniformTexture(factionId);
   if (uniformTex) {
     return createCamoMaterial(
       0xffffff,
@@ -1032,13 +1298,18 @@ export function updateDetachedCorpseFalls(dt) {
       continue;
     }
     fall.elapsed += dt;
-    const t = Math.min(1, fall.elapsed / fall.dur);
-    const eased = t * t * (3 - 2 * t);
-    anchor.position.y = THREE.MathUtils.lerp(fall.startY, fall.endY, eased);
-    anchor.rotation.x = THREE.MathUtils.lerp(fall.startRotX, fall.endRotX, eased);
+    const t = Math.min(1, fall.elapsed / Math.max(fall.dur ?? CORPSE_FALL_SEC, 0.12));
+    applyFallPose(anchor, sampleFallPose(fall, t));
+    if (fall.bloodPool && t >= 0.82) {
+      fall.bloodPool.visible = true;
+      fall.bloodPool.position.y = 0;
+    }
     if (t >= 1) {
-      anchor.position.y = fall.endY;
-      anchor.rotation.x = fall.endRotX;
+      applyFallPose(anchor, sampleFallPose(fall, 1));
+      if (fall.bloodPool) {
+        fall.bloodPool.visible = true;
+        fall.bloodPool.position.y = 0;
+      }
       delete anchor.userData.fall;
       finished.push(anchor);
     }
@@ -1103,6 +1374,7 @@ function corpseBodyCount(unitType) {
     case 'paratrooper':
       return 2 + Math.floor(Math.random() * 2);
     case 'machineGun':
+    case 'sniper':
       return 2;
     case 'mortar':
       return 1 + Math.floor(Math.random() * 2);
@@ -1667,7 +1939,8 @@ export function applyUnitDeathVisual(unit, { staticRestore = false } = {}) {
     type === 'mortar' ||
     type === 'medic' ||
     type === 'engineer' ||
-    type === 'vehicleCrew'
+    type === 'vehicleCrew' ||
+    type === 'commander'
   ) {
     unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
     applyInfantryCorpseLook(mesh, type, { staticRestore });

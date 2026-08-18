@@ -1,5 +1,6 @@
 /** Combat targeting helpers — ranges in game meters (~10 m per unit). */
 
+import { currentLivingPersonnel } from '../data/squadSizes.js';
 import { isTankType } from '../units/VehicleTypes.js';
 
 /** Small boundary tolerance used by weapon checks to prevent range-edge flicker. */
@@ -42,17 +43,55 @@ export function distanceToPoint(unit, point) {
   return Math.sqrt(dx * dx + dz * dz);
 }
 
+/** True while the sniper team's observer is still on his feet. */
+export function sniperHasSpotter(unit) {
+  return unit?.def?.type === 'sniper' && currentLivingPersonnel(unit) >= 2;
+}
+
+/**
+ * Effective weapon range for this unit. A sniper without his spotter loses
+ * observer corrections, so scoped range drops to the team's solo figure.
+ */
+export function getUnitWeaponRange(unit) {
+  const def = unit?.def;
+  if (!def) return 0;
+  if (def.type === 'sniper' && !sniperHasSpotter(unit)) {
+    if (Number.isFinite(def.soloRange)) return def.soloRange;
+    return (def.range ?? 0) * 0.65;
+  }
+  return def.range ?? 0;
+}
+
+export function getUnitWeaponRangeMeters(unit) {
+  const def = unit?.def;
+  if (!def) return 0;
+  if (def.type === 'sniper' && !sniperHasSpotter(unit)) {
+    if (Number.isFinite(def.soloRangeMeters)) return def.soloRangeMeters;
+    return Math.round(getUnitWeaponRange(unit) * 10);
+  }
+  return def.rangeMeters ?? Math.round((def.range ?? 0) * 10);
+}
+
+export function isSpotterRifleInRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
+  const rifle = attacker?.def?.spotterRifle;
+  if (attacker?.def?.type !== 'sniper' || !rifle || !sniperHasSpotter(attacker)) {
+    return false;
+  }
+  if (!target || target.dead || target.isGround || target.isSmokeShell) return false;
+  return distanceBetween(attacker, target) <= rifle.range * slack;
+}
+
 export function isInRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   if (!target || target.dead) return false;
   const distance = distanceBetween(attacker, target);
   const minRange = attacker.def?.minRange ?? 0;
-  return distance <= attacker.def.range * slack && distance >= minRange / slack;
+  return distance <= getUnitWeaponRange(attacker) * slack && distance >= minRange / slack;
 }
 
 export function isPointInRange(unit, point, slack = WEAPON_RANGE_SLACK) {
   const distance = distanceToPoint(unit, point);
   const minRange = unit.def?.minRange ?? 0;
-  return distance <= unit.def.range * slack && distance >= minRange / slack;
+  return distance <= getUnitWeaponRange(unit) * slack && distance >= minRange / slack;
 }
 
 export function isInCoaxRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
@@ -90,7 +129,7 @@ export function getStandoffRange(attacker, target) {
   if (isTankType(attacker.def?.type) && attacker.def?.coaxMG && isCoaxSoftTarget(target)) {
     return attacker.def.coaxMG.range * 0.9;
   }
-  return attacker.def.range * 0.82;
+  return getUnitWeaponRange(attacker) * 0.82;
 }
 
 export function tankCanEngageTarget(attacker, target) {
@@ -141,7 +180,7 @@ export function getGroundFireMoveDest(unit, point, fraction = 0.85) {
   const dx = point.x - unit.position.x;
   const dz = point.z - unit.position.z;
   const dist = Math.sqrt(dx * dx + dz * dz) || 1;
-  const stopDist = unit.def.range * fraction;
+  const stopDist = getUnitWeaponRange(unit) * fraction;
   if (dist <= stopDist) return null;
   const ratio = (dist - stopDist) / dist;
   return {
@@ -169,7 +208,7 @@ export function getStandoffPosition(attacker, target, fraction = null) {
 /** Limit auto-target scans to enemies within this multiple of attack range. */
 export function filterAcquireNearAttacker(attacker, targets, rangeMult = 2.25) {
   if (!targets?.length) return targets;
-  const maxSq = (attacker.def.range * rangeMult) ** 2;
+  const maxSq = (getUnitWeaponRange(attacker) * rangeMult) ** 2;
   const ax = attacker.position.x;
   const az = attacker.position.z;
   const near = [];
@@ -198,7 +237,7 @@ export function findNearestEnemyInRange(unit, targets, maxRangeMultiplier = 1) {
   let bestUnitDist = Infinity;
   let bestStructure = null;
   let bestStructureDist = Infinity;
-  let maxR = unit.def.range * maxRangeMultiplier;
+  let maxR = getUnitWeaponRange(unit) * maxRangeMultiplier;
   if (isTankType(unit.def?.type) && unit.def?.coaxMG) {
     maxR = Math.max(maxR, unit.def.coaxMG.range * maxRangeMultiplier);
   }

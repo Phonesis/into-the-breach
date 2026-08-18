@@ -425,6 +425,158 @@ export function getGhillieTexture() {
   return cache.get('ghillie') ?? null;
 }
 
+const GHILLIE_SPECS = {
+  uk: {
+    base: '#5a5434',
+    accents: ['#3d4a2c', '#6b5a38', '#4a5230', '#7a6a44', '#2e3824'],
+    pattern: 'hessian',
+  },
+  usa: {
+    base: '#4c5634',
+    accents: ['#3a422c', '#6a6440', '#5a5238', '#2f3626'],
+    pattern: 'scrim',
+  },
+  germany: {
+    base: '#5a5238',
+    accents: ['#3d4530', '#6b4a32', '#4a5534', '#7a6a48'],
+    pattern: 'splinter',
+  },
+  russia: {
+    base: '#6b6840',
+    accents: ['#4a5534', '#8a7a4c', '#3d4a30', '#5c5638'],
+    pattern: 'amoeba',
+  },
+  japan: {
+    base: '#6b663d',
+    accents: ['#4a5230', '#8a7a48', '#3a4528', '#5c5634'],
+    pattern: 'sedge',
+  },
+};
+
+function createFactionGhillieTexture(factionId) {
+  if (typeof document === 'undefined') return null;
+  const spec = GHILLIE_SPECS[factionId] ?? GHILLIE_SPECS.uk;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const random = seededRandom(stringSeed(`ghillie:${factionId}`));
+
+  ctx.fillStyle = spec.base;
+  ctx.fillRect(0, 0, size, size);
+
+  if (spec.pattern === 'splinter') {
+    ctx.lineJoin = 'miter';
+    for (let i = 0; i < 42; i++) {
+      ctx.fillStyle = spec.accents[i % spec.accents.length];
+      ctx.globalAlpha = 0.55 + random() * 0.3;
+      ctx.beginPath();
+      const x = random() * size;
+      const y = random() * size;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.35) * 180, y + (random() - 0.5) * 70);
+      ctx.lineTo(x + (random() - 0.5) * 90, y + 40 + random() * 110);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (spec.pattern === 'amoeba') {
+    ctx.filter = 'blur(3px)';
+    for (let i = 0; i < 28; i++) {
+      ctx.fillStyle = spec.accents[i % spec.accents.length];
+      ctx.globalAlpha = 0.5 + random() * 0.28;
+      ctx.beginPath();
+      ctx.ellipse(
+        random() * size,
+        random() * size,
+        36 + random() * 70,
+        22 + random() * 48,
+        random() * Math.PI,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    }
+    ctx.filter = 'none';
+  } else if (spec.pattern === 'sedge') {
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 220; i++) {
+      ctx.strokeStyle = spec.accents[i % spec.accents.length];
+      ctx.globalAlpha = 0.45 + random() * 0.35;
+      ctx.lineWidth = 1.2 + random() * 3.4;
+      const x = random() * size;
+      const y = random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x + (random() - 0.5) * 18, y - 18, x + (random() - 0.5) * 10, y - 28 - random() * 36);
+      ctx.stroke();
+    }
+  } else if (spec.pattern === 'scrim') {
+    ctx.filter = 'blur(1px)';
+    for (let i = 0; i < 48; i++) {
+      ctx.fillStyle = spec.accents[i % spec.accents.length];
+      ctx.globalAlpha = 0.4 + random() * 0.25;
+      ctx.fillRect(random() * size, random() * size, 18 + random() * 70, 8 + random() * 22);
+    }
+    ctx.filter = 'none';
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = '#2a2e22';
+    ctx.lineWidth = 2;
+    for (let x = 0; x < size; x += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let y = 0; y < size; y += 28) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+  } else {
+    ctx.filter = 'blur(1.4px)';
+    for (let i = 0; i < 90; i++) {
+      ctx.fillStyle = spec.accents[i % spec.accents.length];
+      ctx.globalAlpha = 0.42 + random() * 0.3;
+      const x = random() * size;
+      ctx.fillRect(x, 0, 6 + random() * 16, size);
+    }
+    ctx.filter = 'none';
+  }
+
+  ctx.globalAlpha = 0.1;
+  for (let i = 0; i < 2400; i++) {
+    const shade = 80 + Math.floor(random() * 90);
+    ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+    ctx.fillRect(random() * size, random() * size, 1 + random() * 2, 1 + random() * 3);
+  }
+  ctx.globalAlpha = 1;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.2, 2.2);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export function getFactionGhillieTexture(factionId) {
+  const key = `ghillie:${factionId}`;
+  if (cache.has(key)) return cache.get(key);
+  const generated = createFactionGhillieTexture(factionId);
+  if (generated) {
+    cache.set(key, generated);
+    return generated;
+  }
+  return cache.get('ghillie') ?? null;
+}
+
 /** Procedural weave normal — generated once, shared by all infantry uniforms. */
 export function getFabricNormalMap() {
   if (fabricNormalMap) return fabricNormalMap;

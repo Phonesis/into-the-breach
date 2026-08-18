@@ -31,6 +31,10 @@ const GENERAL_ORDER_CANCEL_LABELS = {
 };
 import { formatAssaultHud } from '../game/AssaultMode.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
+import {
+  getUnitWeaponRangeMeters,
+  sniperHasSpotter,
+} from '../game/Targeting.js';
 import { getCoverStatus } from '../game/CoverSystem.js';
 import { canSeekCover } from '../game/CoverSeek.js';
 import {
@@ -205,7 +209,7 @@ const FACTION_ROSTER_LABELS = {
   medic: 'Medic section',
   engineer: 'Engineer section',
   machineGun: 'MG team',
-  sniper: 'Sniper',
+  sniper: 'Sniper team',
   mortar: 'Mortar',
   antiTankGun: 'AT gun',
   armoredCar: 'Armored car',
@@ -5043,7 +5047,7 @@ export class UIManager {
 
     if (units.length === 1) {
       const u = units[0];
-      const maxRangeMeters = u.def.rangeMeters ?? u.def.range * 10;
+      const maxRangeMeters = getUnitWeaponRangeMeters(u);
       const rangeLabel = u.def.minRange
         ? `${u.def.minRangeMeters ?? u.def.minRange * 10}–${maxRangeMeters} m`
         : `${maxRangeMeters} m`;
@@ -5053,6 +5057,10 @@ export class UIManager {
       const crewSmallArmsLine = u.def.crewSmallArms
         ? ` · Crew rifles ${u.def.crewSmallArms.rangeMeters ?? u.def.crewSmallArms.range * 10} m`
         : '';
+      const spotterRifleLine =
+        u.def?.type === 'sniper' && sniperHasSpotter(u) && u.def.spotterRifle
+          ? ` · Spotter rifle ${u.def.spotterRifle.rangeMeters ?? u.def.spotterRifle.range * 10} m`
+          : '';
       const orderLine = u.attackOrder
         ? u.attackOrder.isSmokeShell
           ? ' · Smoke shell mission'
@@ -5106,11 +5114,18 @@ export class UIManager {
             ' Can raise <strong>binoculars</strong> (up to 45 s extended range; 3 min cooldown after calling support while scanning).';
         }
         coverBlock = `<p class="unit-support-status">Signals operator — rifle only; keeps off-map fire support and airborne calls available within ~720 m, with clear line of sight.${binLine} Can dig a fighting trench. Multiple radio operators can cover separate positions.</p>`;
+      } else if (u.def?.type === 'sniper') {
+        const spotterUp = sniperHasSpotter(u);
+        const soloM = u.def.soloRangeMeters ?? Math.round((u.def.soloRange ?? u.def.range * 0.65) * 10);
+        const teamM = u.def.rangeMeters ?? u.def.range * 10;
+        const rifleM = u.def.spotterRifle?.rangeMeters ?? u.def.spotterRifle?.range * 10;
+        coverBlock = spotterUp
+          ? `<p class="unit-cover-status exposed"><strong>Sniper team</strong> — marksman plus spotter. Scoped fire to ~${teamM} m; spotter rifle to ~${rifleM} m. Dig a trench or take cover to stay hidden.</p>`
+          : `<p class="unit-cover-status exposed"><strong>Spotter down</strong> — no observer; scoped range reduced to ~${soloM} m until the team is restored.</p>`;
       } else if (
         u.def?.type === 'infantry' ||
         u.def?.type === 'paratrooper' ||
-        u.def?.type === 'machineGun' ||
-        u.def?.type === 'sniper'
+        u.def?.type === 'machineGun'
       ) {
         coverBlock =
           '<p class="unit-cover-status exposed"><strong>Exposed</strong> — dig a trench or move into sandbags / hedges for cover.</p>';
@@ -5149,7 +5164,7 @@ export class UIManager {
               : ''
         }${inspired ? ' <span class="cover-tag inspired-tag">INSPIRED</span>' : ''}${u.surrendered ? ' <span class="cover-tag">SURRENDERED</span>' : ''}${u._mobilityDamaged ? ' <span class="cover-tag">IMMOBILE</span>' : ''}</h3>
         ${hpBarMarkup(u.hp, u.maxHp)}
-        <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${orderLine}</p>
+        <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${spotterRifleLine}${orderLine}</p>
         ${surrenderBlock}
         ${moraleBlock}
         ${mobilityBlock}

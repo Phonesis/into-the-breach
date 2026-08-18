@@ -422,7 +422,11 @@ export function setCoverVisual(mesh, inCover, mult = 0.5, tier = 'medium') {
     mesh.add(ring);
   }
   if (ring) {
-    ring.visible = inCover;
+    // The ground ring is a selection aid, not the persistent cover-status
+    // marker. Keep the cover state on the mesh so Unit.setSelected() can
+    // reveal it immediately when the unit is selected again.
+    ring.userData.coverActive = !!inCover;
+    ring.visible = !!inCover && !!mesh.userData?.unit?.selected;
     if (inCover) {
       ring.material.color.setHex(COVER_RING_COLORS[tier] ?? COVER_RING_COLORS.medium);
       ring.material.opacity = 0.45 + (1 - mult) * 0.4;

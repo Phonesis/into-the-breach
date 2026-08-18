@@ -9,7 +9,7 @@ export const SQUAD_SIZES = {
   medic: 2,
   engineer: 4,
   mortar: 2,
-  sniper: 1,
+  sniper: 2,
   vehicleCrew: 2,
 };
 
