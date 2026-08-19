@@ -1983,6 +1983,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
 
   for (const unit of units) {
     unit._terrainMesh = options.terrainMesh ?? unit._terrainMesh ?? null;
+    unit._infantryTrenches = options.infantryTrenches ?? unit._infantryTrenches ?? null;
     if (unit.def?.type === 'armoredCar' && !unit.moveTarget) {
       unit._driveSpeed = 0;
     }
@@ -2051,13 +2052,17 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
           unit._autoMoveOrderX = dest.x;
           unit._autoMoveOrderZ = dest.z;
           unit._pathRepathAttempts = 0;
-          if (options.scenery) {
+          if (options.scenery || options.infantryTrenches) {
             const routed = applyObstaclePath(
               unit,
               dest.x,
               dest.z,
               mapDef,
-              options.scenery
+              options.scenery,
+              {
+                trenchManager: options.infantryTrenches,
+                unitTeam: unit.team,
+              }
             );
             if (unit.retreating && routed && unit._finalMoveGoal) {
               unit._retreatDestination = { ...unit._finalMoveGoal };
@@ -2206,8 +2211,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             if (isTankType(unit.def?.type) && !unit.retreating) {
               unit._reverseMoveOrder = shouldUseTacticalReverse(unit, dest.x, dest.z);
             }
-            if (options.scenery) {
-              applyObstaclePath(unit, dest.x, dest.z, mapDef, options.scenery);
+            if (options.scenery || options.infantryTrenches) {
+              applyObstaclePath(unit, dest.x, dest.z, mapDef, options.scenery, {
+                trenchManager: options.infantryTrenches,
+                unitTeam: unit.team,
+              });
             } else {
               unit._movePath = null;
             }
@@ -2329,6 +2337,9 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
                   preferUrbanRoads:
                     isVehicleUnit(unit.def?.type) || mapDef?.terrain === 'urban',
                   allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(unit.def?.type),
+                  trenchManager: options.infantryTrenches,
+                  unitTeam: unit.team,
+                  unitType: unit.def?.type,
                 }
               );
               if (path?.length) {
@@ -2373,6 +2384,9 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
                     allowTrackedBuildingCrush: TRACK_CRUSH_VEHICLE_TYPES.has(
                       unit.def?.type
                     ),
+                    trenchManager: options.infantryTrenches,
+                    unitTeam: unit.team,
+                    unitType: unit.def?.type,
                   }
                 );
                 if (retry?.length) {

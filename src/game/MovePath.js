@@ -92,19 +92,51 @@ function cellToWorld(ix, iz, half, cell) {
   };
 }
 
-function movementBlockedAt(
-  scenery,
-  x,
-  z,
-  radius,
-  allowBuildingId = null,
-  allowTrackedBuildingCrush = false
-) {
-  const options = { allowBuildingId, allowTrackedBuildingCrush };
-  if (scenery.isMovementBlocked) {
-    return scenery.isMovementBlocked(x, z, radius, options) === true;
+function hasFriendlyTrenchAvoidance(options = {}) {
+  return (
+    TANK_TYPES.has(options.unitType) &&
+    (options.unitTeam === 'player' || options.unitTeam === 'enemy') &&
+    !!options.trenchManager &&
+    ((options.trenchManager.trenches?.length ?? 0) > 0 ||
+      (options.trenchManager.sites?.length ?? 0) > 0)
+  );
+}
+
+function getTrenchObstacleRadius(trench, unitRadius) {
+  const length = trench?.mesh?.userData?.trenchLength ?? 4.2;
+  const width = trench?.mesh?.userData?.trenchWidth ?? 2.4;
+  // Keep the hull clear of the whole earthwork, not just the centre of the
+  // excavation. The path-planning radius is already inflated for vehicles;
+  // use a restrained fraction of it so a trench does not create an enormous
+  // no-go circle on otherwise open ground.
+  const footprintRadius = Math.hypot(length * 0.5, width * 0.5);
+  const hullClearance = Math.min(1.65, Math.max(0.8, unitRadius * 0.42));
+  return footprintRadius + hullClearance;
+}
+
+function friendlyTrenchBlockedAt(x, z, unitRadius, options = {}) {
+  if (!hasFriendlyTrenchAvoidance(options)) return false;
+  const manager = options.trenchManager;
+  const pathRadius = options.trenchRadius ?? unitRadius;
+  const check = (trench) => {
+    if (!trench || trench.destroyed || trench.team !== options.unitTeam) return false;
+    const clearance = getTrenchObstacleRadius(trench, pathRadius);
+    return Math.hypot(trench.x - x, trench.z - z) <= clearance;
+  };
+  return (manager.trenches ?? []).some(check) || (manager.sites ?? []).some(check);
+}
+
+function movementBlockedAt(scenery, x, z, radius, pathOptions = {}) {
+  const sceneryOptions = {
+    allowBuildingId: pathOptions.allowBuildingId ?? null,
+    allowTrackedBuildingCrush: pathOptions.allowTrackedBuildingCrush === true,
+  };
+  if (scenery?.isMovementBlocked) {
+    if (scenery.isMovementBlocked(x, z, radius, sceneryOptions) === true) return true;
+  } else if (scenery?.isVehiclePlacementBlocked?.(x, z, radius, sceneryOptions) === true) {
+    return true;
   }
-  return scenery.isVehiclePlacementBlocked?.(x, z, radius, options) === true;
+  return friendlyTrenchBlockedAt(x, z, radius, pathOptions);
 }
 
 function lineBlocked(
@@ -114,12 +146,17 @@ function lineBlocked(
   bz,
   scenery,
   radius,
-  allowBuildingId = null,
-  allowTrackedBuildingCrush = false
+  pathOptions = {}
 ) {
   if (!scenery?.segmentHitsBuilding) {
     // Fallback: sample along the segment.
-    if (!scenery?.isMovementBlocked && !scenery?.isVehiclePlacementBlocked) return false;
+    if (
+      !scenery?.isMovementBlocked &&
+      !scenery?.isVehiclePlacementBlocked &&
+      !hasFriendlyTrenchAvoidance(pathOptions)
+    ) {
+      return false;
+    }
     const dist = Math.hypot(bx - ax, bz - az);
     const steps = Math.max(1, Math.ceil(dist / 2.4));
     for (let i = 1; i <= steps; i++) {
@@ -132,8 +169,7 @@ function lineBlocked(
           x,
           z,
           radius,
-          allowBuildingId,
-          allowTrackedBuildingCrush
+          pathOptions
         )
       ) {
         return true;
@@ -141,10 +177,28 @@ function lineBlocked(
     }
     return false;
   }
-  return scenery.segmentHitsBuilding(ax, az, bx, bz, radius, {
-    allowBuildingId,
-    allowTrackedBuildingCrush,
-  });
+  if (scenery.segmentHitsBuilding(ax, az, bx, bz, radius, pathOptions)) return true;
+  if (!hasFriendlyTrenchAvoidance(pathOptions)) return false;
+
+  // Building collision has a geometric segment query, while trenches are
+  // dynamic fieldworks. Sample those separately so smoothing cannot create a
+  // straight route through a friendly trench.
+  const dist = Math.hypot(bx - ax, bz - az);
+  const steps = Math.max(1, Math.ceil(dist / 2.4));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    if (
+      friendlyTrenchBlockedAt(
+        ax + (bx - ax) * t,
+        az + (bz - az) * t,
+        radius,
+        pathOptions
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -163,9 +217,14 @@ export function buildBuildingAvoidPath(
   radius = 1.8,
   options = {}
 ) {
-  if (!mapDef || !scenery) return null;
-  const allowBuildingId = options.allowBuildingId ?? null;
-  const allowTrackedBuildingCrush = options.allowTrackedBuildingCrush === true;
+  const avoidFriendlyTrenches = hasFriendlyTrenchAvoidance(options);
+  if (!mapDef || (!scenery && !avoidFriendlyTrenches)) return null;
+  const pathOptions = {
+    ...options,
+    allowBuildingId: options.allowBuildingId ?? null,
+    allowTrackedBuildingCrush: options.allowTrackedBuildingCrush === true,
+  };
+  const allowBuildingId = pathOptions.allowBuildingId;
 
   // Clear straight shot — no detour needed.
   if (
@@ -176,8 +235,7 @@ export function buildBuildingAvoidPath(
       toZ,
       scenery,
       radius,
-      allowBuildingId,
-      allowTrackedBuildingCrush
+      pathOptions
     )
   ) {
     return null;
@@ -204,8 +262,7 @@ export function buildBuildingAvoidPath(
       p.x,
       p.z,
       radius,
-      allowBuildingId,
-      allowTrackedBuildingCrush
+      pathOptions
     );
   };
 
@@ -347,8 +404,7 @@ export function buildBuildingAvoidPath(
       toX,
       toZ,
       radius * 0.85,
-      allowBuildingId,
-      allowTrackedBuildingCrush
+      pathOptions
     )
   ) {
     points.push({ x: toX, z: toZ });
@@ -370,8 +426,7 @@ export function buildBuildingAvoidPath(
           points[j].z,
           scenery,
           radius * 0.92,
-          allowBuildingId,
-          allowTrackedBuildingCrush
+          pathOptions
         )
       ) {
         break;
@@ -415,10 +470,10 @@ export function buildMovePath(
 ) {
   const scenery = options.scenery ?? null;
   const radius = options.radius ?? 1.8;
-  const avoidBuildings = options.avoidBuildings !== false && scenery;
-  const allowBuildingId = options.allowBuildingId ?? null;
+  const avoidObstacles =
+    options.avoidBuildings !== false &&
+    (scenery || hasFriendlyTrenchAvoidance(options));
   const preferUrbanRoads = options.preferUrbanRoads === true;
-  const allowTrackedBuildingCrush = options.allowTrackedBuildingCrush === true;
 
   const refineWaypoints = (waypoints) => {
     const refined = [];
@@ -452,8 +507,7 @@ export function buildMovePath(
           // near-full planning radius falsely disconnects Berlin's rendered
           // carriageways and pushes otherwise valid routes into fallback A*.
           Math.max(1, radius * 0.58),
-          allowBuildingId,
-          allowTrackedBuildingCrush
+          options
         )
     );
     if (roadPath?.length) return refineWaypoints(roadPath);
@@ -464,10 +518,9 @@ export function buildMovePath(
     // radius still keep the resulting recovery route out of intact masonry.
   }
 
-  if (avoidBuildings) {
+  if (avoidObstacles) {
     const detour = buildBuildingAvoidPath(fromX, fromZ, toX, toZ, mapDef, scenery, radius, {
-      allowBuildingId,
-      allowTrackedBuildingCrush,
+      ...options,
     });
     if (detour === false) {
       // Never turn an exhausted/blocked search into a direct route through a
@@ -614,9 +667,10 @@ export function vehiclePathRadius(unitType) {
   return unitPathRadius(unitType);
 }
 
-/** Assign a building-aware path onto a unit that already has a moveTarget. */
-export function applyObstaclePath(unit, destX, destZ, mapDef, scenery) {
-  if (!unit || !mapDef || !scenery) return false;
+/** Assign an obstacle-aware path onto a unit that already has a moveTarget. */
+export function applyObstaclePath(unit, destX, destZ, mapDef, scenery, pathOptions = {}) {
+  const trenchManager = pathOptions.trenchManager ?? unit?._infantryTrenches ?? null;
+  if (!unit || !mapDef || (!scenery && !trenchManager)) return false;
   const snapped = snapUrbanRoadDestination(
     destX,
     destZ,
@@ -640,6 +694,9 @@ export function applyObstaclePath(unit, destX, destZ, mapDef, scenery) {
     preferUrbanRoads:
       isVehicleUnit(unit.def?.type) || mapDef?.terrain === 'urban',
     allowTrackedBuildingCrush: TANK_TYPES.has(unit.def?.type),
+    trenchManager,
+    unitTeam: pathOptions.unitTeam ?? unit.team,
+    unitType: unit.def?.type,
   });
   if (!path?.length) return false;
   unit._movePath = path;

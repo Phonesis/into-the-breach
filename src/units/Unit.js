@@ -376,7 +376,8 @@ export class Unit {
    * @param {object} [mapDef]
    * @param {boolean} [playerOrder] — player-issued moves are not cancelled by combat auto-fire
    * @param {object|null} [scenery]
-   * @param {{ allowBuildingId?: string|null }} [options] — building id to enter (garrison)
+   * @param {{ allowBuildingId?: string|null, trenchManager?: object|null }} [options]
+   *   — building id to enter (garrison) and live trench state for vehicle routing
    */
   moveTo(x, z, mapDef = null, playerOrder = false, scenery = null, options = {}) {
     if (this.surrendered || this._captureExit) return;
@@ -391,6 +392,7 @@ export class Unit {
     this._trafficYield = null;
     // Preserve enter-building order across clearAttackOrder (which resets entry id).
     const allowBuildingId = options.allowBuildingId ?? null;
+    const trenchManager = options.trenchManager ?? this._infantryTrenches ?? null;
     if (playerOrder && !allowBuildingId) {
       const snapped = snapUrbanRoadDestination(
         x,
@@ -427,7 +429,7 @@ export class Unit {
 
     // All ground units path around buildings unless ordered into one (garrison).
     // Use inflated plan radius so vehicles stay in the carriageway, not façades.
-    if (mapDef && (playerOrder || scenery)) {
+    if (mapDef && (playerOrder || scenery || trenchManager)) {
       const { pathSegment } = getMoveReachConfig(this.def.type);
       const radius = unitPathPlanRadius(this.def.type, mapDef);
       this._movePath = buildMovePath(
@@ -445,6 +447,9 @@ export class Unit {
           preferUrbanRoads:
             isVehicleUnit(this.def.type) || mapDef?.terrain === 'urban',
           allowTrackedBuildingCrush: TANK_TYPES.has(this.def.type),
+          trenchManager,
+          unitTeam: this.team,
+          unitType: this.def.type,
         }
       );
       while (

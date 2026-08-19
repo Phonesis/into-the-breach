@@ -40,6 +40,31 @@ function trenchOverrunSurvivalChance(crusherType) {
   return 0.58;
 }
 
+function trenchSurfaceRecovery(trench, worldX, worldZ) {
+  const length = trench?.mesh?.userData?.trenchLength ?? 4.2;
+  const width = trench?.mesh?.userData?.trenchWidth ?? 2.4;
+  const yaw = trench?.rotationY ?? trench?.mesh?.userData?.trenchYaw ?? 0;
+  const dx = worldX - (trench?.x ?? 0);
+  const dz = worldZ - (trench?.z ?? 0);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const localX = dx * rightX + dz * rightZ;
+  const localZ = dx * forwardX + dz * forwardZ;
+  const halfLength = Math.max(0.8, length * 0.44);
+  const halfWidth = Math.max(0.42, width * 0.3);
+  const lengthFade = Math.max(0.28, length * 0.09);
+  const widthFade = Math.max(0.22, width * 0.1);
+  const edgeX = Math.max(Math.abs(localX) - halfLength, 0);
+  const edgeZ = Math.max(Math.abs(localZ) - halfWidth, 0);
+  const edgeDistance = Math.hypot(edgeX / lengthFade, edgeZ / widthFade);
+  if (edgeDistance >= 1) return 0;
+  const t = THREE.MathUtils.clamp(1 - edgeDistance, 0, 1);
+  const smooth = t * t * (3 - 2 * t);
+  return TRENCH_PIT_DEPTH * smooth;
+}
+
 const DIG_TYPES = new Set([
   'commander',
   'radioOperator',
@@ -696,7 +721,9 @@ export class InfantryTrenchManager {
     });
     for (const side of [-1, 1]) {
       const track = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.42, 4.9),
+        // Subdivide the scar so it can follow the local terrain instead of
+        // becoming a single floating rectangle across a sloped trench.
+        new THREE.PlaneGeometry(0.42, 4.9, 2, 12),
         trackMaterial
       );
       track.name = 'trenchTrackScar';
@@ -763,6 +790,57 @@ export class InfantryTrenchManager {
     }
 
     mesh.add(damage);
+    this._conformOverrunDamageToTerrain(trench, damage);
+  }
+
+  _conformOverrunDamageToTerrain(trench, damage) {
+    const mesh = trench?.mesh;
+    const mapDef = this.game.mapDef;
+    if (!mesh || !damage || !mapDef) return;
+
+    const terrainUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
+    const parentScaleY = Math.max(0.001, Math.abs(mesh.scale.y || 1));
+    const sample = this.game._terrainMesh
+      ? (x, z) => sampleTerrainMeshHeight(this.game._terrainMesh, x, z, mapDef)
+      : (x, z) => sampleTerrainHeight(x, z, mapDef);
+
+    for (const child of damage.children) {
+      if (!child.isMesh || !child.geometry?.attributes?.position) continue;
+
+      // Bake each scar/fragment's local transform, then let every vertex find
+      // the terrain beneath its own world X/Z. Track marks retain their
+      // existing height above the trench centre while gaining the local slope.
+      child.updateMatrix();
+      child.geometry.applyMatrix4(child.matrix);
+      child.position.set(0, 0, 0);
+      child.rotation.set(0, 0, 0);
+      child.scale.set(1, 1, 1);
+
+      const positions = child.geometry.attributes.position;
+      const worldBase = new THREE.Vector3();
+      const localVertex = new THREE.Vector3();
+      for (let i = 0; i < positions.count; i++) {
+        localVertex.fromBufferAttribute(positions, i);
+        worldBase
+          .set(localVertex.x, 0, localVertex.z)
+          .applyQuaternion(mesh.quaternion)
+          .add(mesh.position);
+        // TerrainDamage lowers the rendered ground beneath the excavation.
+        // Raise that sample back to the local earthwork surface before
+        // conforming the scar; otherwise the fix for slope-floating marks
+        // would place them down on the old pit floor.
+        const groundY =
+          sample(worldBase.x, worldBase.z) +
+          trenchSurfaceRecovery(trench, worldBase.x, worldBase.z);
+        localVertex.y +=
+          (groundY + 0.025 - worldBase.y) / (terrainUp.y * parentScaleY);
+        positions.setXYZ(i, localVertex.x, localVertex.y, localVertex.z);
+      }
+      positions.needsUpdate = true;
+      child.geometry.computeVertexNormals();
+      child.geometry.computeBoundingBox();
+      child.geometry.computeBoundingSphere();
+    }
   }
 
   _scrambleFromCollapsedTrench(unit, trench, options = {}, survivorIndex = 0) {
@@ -857,6 +935,10 @@ export class InfantryTrenchManager {
     let crushed = 0;
     for (const trench of this.trenches) {
       if (trench.destroyed) continue;
+      // Friendly fieldworks are protected by tank pathing. Keep this guard as
+      // a runtime backstop for stale AI paths, direct movement orders, and a
+      // tank that was already overlapping a trench when a save was restored.
+      if (options.crusherTeam && trench.team === options.crusherTeam) continue;
       const hitRadius = radius + Math.max(1.6, (trench.mesh?.userData?.trenchLength ?? 4.2) * 0.28);
       if (Math.hypot(trench.x - x, trench.z - z) > hitRadius) continue;
       this.destroyTrench(trench, {

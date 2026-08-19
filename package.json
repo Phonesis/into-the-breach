@@ -33,6 +33,7 @@
     "bake-elevenlabs-faction-death": "node scripts/bake-elevenlabs-faction-death.mjs",
     "bake-elevenlabs-attack-orders": "node scripts/bake-elevenlabs-attack-orders.mjs",
     "bake-elevenlabs-vehicle-crew": "node scripts/bake-elevenlabs-vehicle-crew.mjs",
+    "bake-elevenlabs-unit-voices": "node scripts/bake-elevenlabs-unit-voices.mjs",
     "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
     "bake-elevenlabs-japan": "node scripts/bake-elevenlabs-japan.mjs",
     "bake-elevenlabs-building-collapse": "node scripts/bake-elevenlabs-building-collapse.mjs",

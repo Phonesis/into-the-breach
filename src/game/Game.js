@@ -290,7 +290,8 @@ import {
   smgProfileForFaction,
   isInfantryUnitType,
   isVehicleCrewVoiceType,
-  isVehicleMoveVoiceDue,
+  isMoveVoiceDue,
+  unitVoiceClass,
 } from '../audio/SoundManager.js';
 import { isTankType } from '../units/VehicleTypes.js';
 import { setActiveVehicleTheatre } from '../units/UnitTextures.js';
@@ -333,6 +334,32 @@ const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
 const GARAND_CLIP_SIZE = 8;
 const GARAND_PING_CHANCE = 0.58;
 const TOWER_DEFENSE_AI_STEP = 0.1;
+
+function pickUnitForVoice(units) {
+  if (!units?.length) return null;
+  const vehicle = units.find((unit) => isVehicleCrewVoiceType(unit?.def?.type));
+  if (vehicle) return vehicle;
+  const distinctive = units.find((unit) => {
+    const voiceClass = unitVoiceClass(unit?.def?.type);
+    return voiceClass && voiceClass !== 'infantry';
+  });
+  if (distinctive) return distinctive;
+  return units[Math.floor(Math.random() * units.length)];
+}
+
+function pickUnitForMoveVoice(units) {
+  if (!units?.length) return null;
+  return (
+    units.find(
+      (unit) => isVehicleCrewVoiceType(unit?.def?.type) && isMoveVoiceDue(unit)
+    ) ??
+    units.find((unit) => {
+      const voiceClass = unitVoiceClass(unit?.def?.type);
+      return voiceClass && voiceClass !== 'infantry' && isMoveVoiceDue(unit);
+    }) ??
+    units.find((unit) => isMoveVoiceDue(unit))
+  );
+}
 
 export class Game {
   constructor({ canvas, ui }) {
@@ -612,9 +639,7 @@ export class Game {
         this.selectedBaseBuilding = baseBuilding;
         if (sel.length > 0) {
           sounds.play('select');
-          const sample =
-            sel.find((unit) => isVehicleCrewVoiceType(unit.def?.type)) ??
-            sel[Math.floor(Math.random() * sel.length)];
+          const sample = pickUnitForVoice(sel);
           const factionId = sample?.faction?.id ?? this.playerFaction?.id;
           const pos = sample?.position
             ? { x: sample.position.x, z: sample.position.z }
@@ -651,9 +676,7 @@ export class Game {
         sounds.play('order');
         if (selected?.length && (type === 'attack' || type === 'move')) {
           if (type === 'attack') {
-            const sample =
-              selected.find((unit) => isVehicleCrewVoiceType(unit.def?.type)) ??
-              selected[Math.floor(Math.random() * selected.length)];
+            const sample = pickUnitForVoice(selected);
             const factionId = sample?.faction?.id ?? this.playerFaction?.id;
             const pos = sample?.position
               ? { x: sample.position.x, z: sample.position.z }
@@ -663,13 +686,13 @@ export class Game {
               unitType: sample?.def?.type,
             });
           } else {
-            const sample = selected.find((unit) => isVehicleMoveVoiceDue(unit));
+            const sample = pickUnitForMoveVoice(selected);
             if (sample) {
               const factionId = sample.faction?.id ?? this.playerFaction?.id;
               const pos = sample.position
                 ? { x: sample.position.x, z: sample.position.z }
                 : null;
-              sounds.playVehicleMoveOrder(factionId, pos, {
+              sounds.playMoveOrder(factionId, pos, {
                 unitType: sample.def.type,
                 unit: sample,
               });
@@ -1695,6 +1718,11 @@ export class Game {
     const enemy = [];
     let hasFieldCorpses = false;
     for (const u of this.units) {
+      // Movement orders can be issued from UI and specialist controllers
+      // between simulation ticks. Keep each unit linked to the live fieldwork
+      // manager so Unit.moveTo() applies the same friendly-trench clearance as
+      // the combat movement/repath path.
+      u._infantryTrenches = this.infantryTrenches ?? null;
       if (u.dead) {
         hasFieldCorpses ||= !!u.mesh?.parent;
         continue;
