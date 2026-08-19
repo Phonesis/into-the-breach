@@ -685,7 +685,6 @@ export class FireSupportManager {
         fn: () => {
           const releaseY = sampleTerrainHeight(releaseX, releaseZ, mapDef) + altitude - 0.8;
           const impactY = sampleTerrainHeight(tx, tz, mapDef) + 0.15;
-          sounds.playBombWhistle({ x: releaseX, z: releaseZ });
           spawnFallingBomb(
             scene,
             { x: releaseX, y: releaseY, z: releaseZ },

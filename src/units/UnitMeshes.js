@@ -731,7 +731,9 @@ function applyFallPose(anchor, pose) {
 function addGroundStain(mesh, spread = 2.4) {
   const group = new THREE.Group();
   group.name = 'corpseStain';
-  group.renderOrder = 1;
+  // Leave Group.renderOrder at 0. Three.js sorts groupOrder before each
+  // object's renderOrder, so a stain Group at 1 would draw after HUD sprites
+  // (field icons, health bars) even when those sprites use renderOrder 22+.
 
   addBloodPoolAt(group, 0, 0, spread * 0.3);
   addBloodPoolAt(
@@ -1839,7 +1841,6 @@ export function applyInfantryCorpseLook(
     // Darker, wider mud/blood scar under the whole squad stamp.
     const stain = new THREE.Group();
     stain.name = 'corpseStain';
-    stain.renderOrder = 1;
     addCrushedGroundMess(stain, null);
     mesh.add(stain);
   }

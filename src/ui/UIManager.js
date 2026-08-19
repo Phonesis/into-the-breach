@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { FACTION_LIST } from '../data/factions.js';
 import { MAP_LIST, MAPS } from '../data/maps.js';
 import {
@@ -203,6 +204,8 @@ function loadAutoBuildPreference(campaignStyle = 'classic') {
 }
 
 
+const _selectionProj = new THREE.Vector3();
+
 const FACTION_ROSTER_LABELS = {
   commander: 'Field commander',
   radioOperator: 'Radio operator',
@@ -260,6 +263,7 @@ export class UIManager {
     this._hudAutoBuildAvailable = false;
     this._unitRosterHoveredUnitId = null;
     this._unitRosterFocusedUnitId = null;
+    this._selectionDockRight = false;
     this.fireSupportExpanded = false;
     this.generalOrdersExpanded = false;
     this.defenseExpanded = false;
@@ -4981,11 +4985,94 @@ export class UIManager {
     }
   }
 
+  _subjectWorldPoint(subject, target) {
+    if (!subject) return null;
+    const pos = subject.position;
+    if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.z)) {
+      target.set(pos.x, (pos.y ?? 0) + 1.2, pos.z);
+      return target;
+    }
+    if (Number.isFinite(subject.x) && Number.isFinite(subject.z)) {
+      target.set(subject.x, (subject.y ?? 0) + 1.2, subject.z);
+      return target;
+    }
+    const meshPos = subject.mesh?.position;
+    if (meshPos && Number.isFinite(meshPos.x) && Number.isFinite(meshPos.z)) {
+      target.set(meshPos.x, (meshPos.y ?? 0) + 1.2, meshPos.z);
+      return target;
+    }
+    return null;
+  }
+
+  /**
+   * Keep the selection card off selected units. The card defaults to
+   * bottom-left, which hides troops standing on the left of the view.
+   */
+  _layoutSelectionPanel(units, hq, game) {
+    const hud = this.root.querySelector('#hud');
+    if (!hud) return;
+
+    const subjects = [];
+    if (hq && !hq.dead) subjects.push(hq);
+    else if (game?.selectedBaseBuilding && !game.selectedBaseBuilding.destroyed) {
+      subjects.push(game.selectedBaseBuilding);
+    } else if (units?.length) {
+      for (const unit of units) {
+        if (unit && !unit.dead) subjects.push(unit);
+      }
+    }
+
+    if (subjects.length === 0) {
+      this._selectionDockRight = false;
+      hud.classList.remove('selection-dock-right');
+      return;
+    }
+
+    const camera = game?.camera;
+    const canvas = game?.renderer?.domElement;
+    if (!camera || !canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) return;
+
+    let counted = 0;
+    let sumX = 0;
+    let lowCount = 0;
+    for (const subject of subjects) {
+      if (!this._subjectWorldPoint(subject, _selectionProj)) continue;
+      _selectionProj.project(camera);
+      if (_selectionProj.z < -1 || _selectionProj.z > 1) continue;
+      if (Math.abs(_selectionProj.x) > 1.15 || Math.abs(_selectionProj.y) > 1.15) continue;
+      const nx = (_selectionProj.x + 1) * 0.5;
+      const ny = (1 - _selectionProj.y) * 0.5;
+      counted += 1;
+      sumX += nx;
+      if (ny > 0.48) lowCount += 1;
+    }
+
+    if (counted === 0) return;
+
+    const avgX = sumX / counted;
+    const inPanelBand = lowCount >= Math.max(1, counted * 0.4);
+    let dockRight = this._selectionDockRight;
+    if (!inPanelBand) {
+      dockRight = false;
+    } else if (this._selectionDockRight) {
+      dockRight = avgX < 0.58;
+    } else {
+      dockRight = avgX < 0.46;
+    }
+
+    this._selectionDockRight = dockRight;
+    hud.classList.toggle('selection-dock-right', dockRight);
+  }
+
   updateSelection(units, hoverTarget = null, hq = null, game = null) {
     const body = this.root.querySelector('#selection-body');
     const offer = this.root.querySelector('#target-offer');
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
+    try {
     this.updateEngagementStance(hq ? [] : units);
     this.updateSeekCoverOverride(hq ? [] : units, game);
 
@@ -5124,16 +5211,12 @@ export class UIManager {
       const dig = game?.infantryTrenches?.getDiggerStatus?.(u);
       const engBuild = game?.engineerSandbags?.getEngineerBuildStatus?.(u);
       let coverBlock = '';
-      if (garrisoned) {
-        coverBlock = `<p class="unit-cover-status in-garrison"><strong>Inside building</strong> — garrisoned with heavy cover (takes only <strong>${Math.round((cover.mult ?? 0.12) * 100)}%</strong> damage). Order a <strong>move</strong> to exit. Armed lookouts remain visible at the windows beneath the green <strong>INSIDE</strong> marker.</p>`;
-      } else if (engBuild) {
+      if (engBuild) {
         coverBlock = `<p class="unit-support-status unit-building-status"><strong>Building ${engBuild.label}</strong> — ${engBuild.pct}% complete — watch the site marker on the map</p>`;
       } else if (dig) {
         coverBlock = `<p class="unit-support-status unit-building-status"><strong>${dig.label}</strong> — ${Math.round(dig.progress * 100)}% complete — watch the dig site marker</p>`;
-      } else if (u._trenchId || cover.inTrench) {
-        coverBlock = `<p class="unit-cover-status in-cover"><strong>In trench</strong> — dug in with cover (takes only <strong>${Math.round((cover.mult ?? 0.3) * 100)}%</strong> damage). Order a <strong>move</strong> to leave.</p>`;
-      } else if (cover.inCover) {
-        coverBlock = `<p class="unit-cover-status in-cover"><strong>In cover:</strong> ${cover.label} — takes only <strong>${Math.round(cover.mult * 100)}%</strong> of incoming damage (${cover.reduction}% reduction). Leave cover or destroy the position to lose protection.</p>`;
+      } else if (garrisoned || cover.inCover) {
+        // Cover / garrison / trench details already sit on the selection-cover banner.
       } else if (u.def?.type === 'engineer') {
         const fieldWorks = game?.baseBuildings?.active
           ? 'can erect <strong>garrison bunkers</strong> and lay <strong>AT mines</strong> in the field.'
@@ -5181,9 +5264,6 @@ export class UIManager {
       const surrenderBlock = u.surrendered
         ? '<p class="unit-surrender-status"><strong>Surrendered</strong> — move a friendly unit within ~11 m to liberate; enemy contact captures them.</p>'
         : '';
-      const moraleBlock = inspired
-        ? `<p class="unit-morale-status inspired"><strong>Inspired</strong> — within ${COMMANDER_AURA_RANGE} m of a living field commander; automatic retreat and surrender pressure is greatly reduced.</p>`
-        : '';
       const riderN = canHostRiders(u.def?.type) ? getTankRiderIds(u).length : 0;
       const ridingVehicle = u._mountedOnTankId
         ? game?.units?.find((unit) => unit.id === u._mountedOnTankId)
@@ -5214,7 +5294,6 @@ export class UIManager {
         ${hpBarMarkup(u.hp, u.maxHp)}
         <p class="selection-unit-meta">${u.def.designation} · Range ${rangeLabel} · Dmg ${u.def.damage}${coaxLine}${crewSmallArmsLine}${spotterRifleLine}${orderLine}</p>
         ${surrenderBlock}
-        ${moraleBlock}
         ${mobilityBlock}
         ${riderBlock}
         ${coverBlock}
@@ -5252,6 +5331,9 @@ export class UIManager {
       <p>${summary}</p>
       ${orderNote}
     `;
+    } finally {
+      this._layoutSelectionPanel(units, hq, game);
+    }
   }
 
   updateEngagementStance(units = []) {

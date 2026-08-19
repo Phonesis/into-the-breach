@@ -159,11 +159,6 @@ const BOMB_EXPLOSION_FILES = [
   'bomb-explosion-02.wav',
   'bomb-explosion-03.wav',
 ];
-const BOMB_WHISTLE_FILES = [
-  'bomb-whistle-01.wav',
-  'bomb-whistle-02.wav',
-  'bomb-whistle-03.wav',
-];
 /** Occasional US rifle reload cue — M1 Garand en-bloc clip eject. */
 const GARAND_PING_FILES = ['m1-garand-ping-el-01.wav'];
 
@@ -381,8 +376,6 @@ export class SoundManager {
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     /** @type {AudioBuffer[]} */
     this.bombExplosionBuffers = [];
-    /** @type {AudioBuffer[]} */
-    this.bombWhistleBuffers = [];
     /** @type {AudioBuffer[]} */
     this.garandPingBuffers = [];
     /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
@@ -942,7 +935,6 @@ export class SoundManager {
     this.artilleryImpactBuffers = [];
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this.bombExplosionBuffers = [];
-    this.bombWhistleBuffers = [];
     this.garandPingBuffers = [];
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     const limit = (files, tabletCount) => this._constrainedAudio ? files.slice(0, tabletCount) : files;
@@ -962,7 +954,6 @@ export class SoundManager {
     loadPool(RADIO_OPEN_FILES, this.radioOpenBuffers);
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
-    loadPool(BOMB_WHISTLE_FILES, this.bombWhistleBuffers);
     loadPool(GARAND_PING_FILES, this.garandPingBuffers);
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
@@ -1388,22 +1379,6 @@ export class SoundManager {
 
   startStrafeFlyby(opts) {
     this.strafeAircraft?.startFlyby(opts);
-  }
-
-  /** Descending tail-fin whistle as a support bomb leaves the rack. */
-  playBombWhistle(worldPos = null) {
-    this._runWhenReady(() => {
-      const buf = this._pickFromPool(this.bombWhistleBuffers, '_lastBombWhistleFile');
-      if (!buf) return;
-      const pan = worldPos ? this._calcPan(worldPos.x, worldPos.z) : 0;
-      const dist = worldPos ? this._calcDist(worldPos.x, worldPos.z) : 0;
-      this._playBuffer(buf, {
-        pan,
-        vol: this._distanceGain(dist) * 1.05,
-        rate: 0.97 + Math.random() * 0.05,
-        wet: 0.14 + Math.random() * 0.06,
-      });
-    });
   }
 
   /** Large aerial bomb detonation (deeper / longer than artillery shelllets). */
