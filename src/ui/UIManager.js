@@ -109,6 +109,7 @@ import {
   countLastStandPresetUnits,
   isLastStandPresetDeployMode,
 } from '../data/lastStandForces.js';
+import { countLastStandCombatUnits } from '../game/LastStandMode.js';
 
 const PRODUCE_LABELS = {
   commander: 'CMD',
@@ -625,7 +626,7 @@ export class UIManager {
               <span>Capture circles</span>
             </button>
             <div class="laststand-banner hidden" id="laststand-banner">
-              Battle Simulation — deploy your army, then engage. No HQ or reinforcements.
+              Battle Simulation — no HQ or reinforcements.
             </div>
           </div>
           <div class="hud-top-right">
@@ -1237,14 +1238,18 @@ export class UIManager {
     const grid = this.root.querySelector('#campaign-style-grid');
     if (!grid) return;
     const onLargeMap = canUseBaseBuildingOnMap(this.selectedMapSize ?? 'medium');
+    const mapAllowsLarge = getMapSizeOptions(MAPS[this.selectedMap]).includes('large');
     grid.innerHTML = CAMPAIGN_STYLE_LIST.map((s) => {
       const selected = s.id === this.selectedCampaignStyle;
+      const blocked = s.id === 'baseBuilding' && !mapAllowsLarge;
       let meta = s.subtitle;
-      if (s.id === 'baseBuilding' && !onLargeMap) {
+      if (blocked) {
+        meta = 'Requires Large theater — not available on this map';
+      } else if (s.id === 'baseBuilding' && !onLargeMap) {
         meta = 'Selects Large map automatically · garrison, depots & sector building';
       }
       return `
-      <button type="button" class="card-btn interactive campaign-style-card${selected ? ' selected' : ''}" data-id="${s.id}">
+      <button type="button" class="card-btn interactive campaign-style-card${selected ? ' selected' : ''}${blocked ? ' disabled' : ''}" data-id="${s.id}" ${blocked ? 'disabled' : ''}>
         <span class="name">${s.name}</span>
         <span class="meta">${meta}</span>
       </button>
@@ -1279,11 +1284,19 @@ export class UIManager {
   }
 
   updateCampaignStyleMapSizeLock() {
+    const mapAllowsLarge = getMapSizeOptions(MAPS[this.selectedMap]).includes('large');
+    if (
+      this.selectedGameMode === 'campaign' &&
+      this.selectedCampaignStyle === 'baseBuilding' &&
+      !mapAllowsLarge
+    ) {
+      this.selectedCampaignStyle = 'classic';
+    }
     const lockBaseBuilding =
       this.selectedGameMode === 'campaign' && this.selectedCampaignStyle === 'baseBuilding';
     const note = this.root.querySelector('#campaign-style-note');
     if (note) note.classList.toggle('hidden', !lockBaseBuilding);
-    if (lockBaseBuilding && this.selectedMapSize !== BASE_BUILDING_MIN_MAP_SIZE) {
+    if (lockBaseBuilding && mapAllowsLarge && this.selectedMapSize !== BASE_BUILDING_MIN_MAP_SIZE) {
       this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
     }
     this.renderCampaignStyles();
@@ -1762,7 +1775,9 @@ export class UIManager {
       btn.classList.add('selected');
       this.selectedCampaignStyle = btn.dataset.id;
       if (this.selectedCampaignStyle === 'baseBuilding') {
-        this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
+        const allowed = getMapSizeOptions(MAPS[this.selectedMap]);
+        if (allowed.includes('large')) this.selectedMapSize = BASE_BUILDING_MIN_MAP_SIZE;
+        else this.selectedCampaignStyle = 'classic';
       }
       this.updateCampaignStyleMapSizeLock();
     });
@@ -1812,6 +1827,7 @@ export class UIManager {
       if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
       this.renderMapSizes();
       this.renderLastStandPresetSizes();
+      this.updateCampaignStyleMapSizeLock();
       this.root.querySelector('#btn-launch').disabled = false;
     });
 
@@ -1828,7 +1844,7 @@ export class UIManager {
           mapBase,
           this.selectedMapSize ?? 'medium'
         );
-        const mapSize = baseBuildingStyle
+        const mapSize = baseBuildingStyle && getMapSizeOptions(mapBase).includes('large')
           ? BASE_BUILDING_MIN_MAP_SIZE
           : this.selectedGameMode === 'assault'
             ? resolveAssaultMapSize(resolvedMapSize)
@@ -2459,6 +2475,9 @@ export class UIManager {
     this.hideTdBreachAlert();
     const lastStandBanner = this.root.querySelector('#laststand-banner');
     lastStandBanner?.classList.toggle('hidden', !lastStand);
+    if (lastStand && lastStandBanner) {
+      lastStandBanner.textContent = 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.';
+    }
     this._hudTowerDefense = towerDefense;
     this._hudTdHqDefense = tdHqDefense;
     this._hudHasFrontline = assault || towerDefense;
@@ -2521,7 +2540,7 @@ export class UIManager {
         this._defaultHudHint =
           options.clearanceRole === 'defend'
             ? clearanceTimeLimitEnabled
-              ? 'Fortified Line (Defend): hold for 15 minutes or destroy the assault force · attackers retreat when time expires'
+              ? 'Fortified Line (Defend): hold for 15 minutes or destroy the assault force'
               : 'Fortified Line (Defend): hold the line or destroy the assault force · no deadline'
             : clearanceReinforced
               ? clearanceTimeLimitEnabled
@@ -2532,7 +2551,9 @@ export class UIManager {
                 : 'Fortified Line (Attack): wipe all defenders · no deadline · no HQ or sector economy';
       } else if (assault) {
         this._defaultHudHint =
-          'Assault: capture & hold the frontline (45s) · Shift+RMB fire support · Flank points earn supplies';
+          options.assaultRole === 'defend'
+            ? 'Breakthrough (Defend): hold the frontline for 8 minutes or destroy the assault HQ'
+            : 'Breakthrough (Attack): capture & hold the frontline (45s) or destroy the defender HQ';
       } else if (towerDefense && tdHqDefense) {
         this._defaultHudHint = options.tdEndless
           ? 'Tower Defence (HQ Defense · Endless): train any unit at HQ · hold your side of the frontline · lose if HQ falls'
@@ -3102,9 +3123,9 @@ export class UIManager {
     });
 
     const upgradeBtn = this.root.querySelector('#btn-defense-upgrade');
-    upgradeBtn?.addEventListener('click', () => this.callbacks.onUpgradeDefense?.());
+    if (upgradeBtn) upgradeBtn.onclick = () => this.callbacks.onUpgradeDefense?.();
     const resupplyBtn = this.root.querySelector('#btn-defense-resupply');
-    resupplyBtn?.addEventListener('click', () => this.callbacks.onResupplyDefense?.());
+    if (resupplyBtn) resupplyBtn.onclick = () => this.callbacks.onResupplyDefense?.();
   }
 
   renderBaseBuildButtons() {
@@ -4314,17 +4335,32 @@ export class UIManager {
     }
   }
 
-  updateResources(supplies, capturePoints, cheatMode = false) {
+  updateResources(supplies, capturePoints, cheatMode = false, options = {}) {
+    const lastStand = !!options.lastStand;
+    const lastStandDeploy = !!options.lastStandDeploy;
     const el = this.root.querySelector('#hud-resources');
-    if (el) el.textContent = cheatMode ? '∞' : String(supplies);
+    if (el) {
+      el.textContent = cheatMode
+        ? '∞'
+        : lastStand && !lastStandDeploy
+          ? '—'
+          : String(supplies);
+    }
 
     const owned = capturePoints?.filter((p) => p.owner === 'player').length ?? 0;
     const total = capturePoints?.length ?? 0;
     const label = this.root.querySelector('.resource-label');
     if (label) {
-      label.textContent = cheatMode
-        ? 'Supplies (unlimited)'
-        : `Supplies (+${owned}/${total} pts)`;
+      if (cheatMode) label.textContent = 'Supplies (unlimited)';
+      else if (lastStand) {
+        label.textContent = lastStandDeploy ? 'Deployment budget' : 'Supplies';
+      } else if (options.towerDefense) {
+        label.textContent = options.tdHqDefense ? 'Supplies' : 'Defense pts';
+      } else if (!total) {
+        label.textContent = 'Supplies';
+      } else {
+        label.textContent = `Supplies (+${owned}/${total} pts)`;
+      }
     }
   }
 
@@ -4413,9 +4449,19 @@ export class UIManager {
     const fill = this.root.querySelector('#opening-countdown-fill');
     const launchBtn = this.root.querySelector('#btn-launch-battle-now');
     const qEl = this.root.querySelector('#queue-text');
-    const playerCount = game._playerAlive?.length ?? 0;
-    const enemyCount = game._enemyAlive?.length ?? 0;
+    const playerCount = countLastStandCombatUnits(game.units, 'player');
+    const enemyCount = countLastStandCombatUnits(game.units, 'enemy');
     const supplies = game.cheatMode ? '∞' : game.lastStand.supplies.player;
+
+    const lastStandBanner = this.root.querySelector('#laststand-banner');
+    if (lastStandBanner) {
+      lastStandBanner.textContent =
+        game.lastStand.phase === 'deploy'
+          ? preset
+            ? 'Battle Simulation — preset forces deployed. Begin battle when ready.'
+            : 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.'
+          : LAST_STAND_BATTLE_HINT;
+    }
 
     if (game.lastStand.phase !== 'deploy') {
       banner?.classList.add('hidden');
@@ -4448,7 +4494,9 @@ export class UIManager {
     if (value) value.textContent = String(playerCount);
     if (sub) {
       if (preset) {
-        sub.textContent = `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations on a large theater`;
+        const theater =
+          MAP_SIZE_LIST.find((size) => size.id === game.mapDef?.mapSize)?.name ?? 'Medium';
+        sub.textContent = `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations · ${theater} theater`;
       } else {
         const plan = game.lastStand.enemyTactic?.name;
         const matchNote =
@@ -4475,7 +4523,7 @@ export class UIManager {
       if (preset) {
         const plan = game.lastStand.enemyTactic?.name;
         qEl.textContent = plan
-          ? `Preset forces deployed — SIGINT indicates enemy plan: <strong>${plan}</strong>`
+          ? `Preset forces deployed — SIGINT indicates enemy plan: ${plan}`
           : 'Preset force — rifle line, support weapons, and armor echelons are in position';
       } else {
         const pending = game.lastStand.pendingType;

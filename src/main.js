@@ -3,6 +3,9 @@ import { UIManager } from './ui/UIManager.js';
 import { sounds } from './audio/SoundManager.js';
 import { preloadUnitTextures } from './units/UnitTextures.js';
 import { isPhoneLikeDevice, isIPadLikeDevice } from './lib/tabletDetect.js';
+import { applyPublicAssetCssVars } from './lib/publicUrl.js';
+
+applyPublicAssetCssVars();
 
 const phoneUnsupported = isPhoneLikeDevice();
 const iPadConstrained = isIPadLikeDevice();
@@ -90,15 +93,17 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
     const audioReady = sounds.primeForCombat();
     await preloadUnitTextures();
     if (!iPadConstrained) await audioReady;
-    sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
       wireSelectBox(canvas, ui);
     }
     if (!game.loadBattle(saveId)) {
       ui.showSaveToast?.('Could not load that save.');
+      sounds.leaveBattle();
+      ui.hideHUD();
       return;
     }
+    sounds.enterBattle();
     ui.refreshTitleSaveButton();
   },
   onReplay() {

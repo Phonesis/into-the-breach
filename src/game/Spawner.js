@@ -496,7 +496,17 @@ export function spawnArmy({
     forwardZ = (target.z - base.z) / len;
     lateralX = -forwardZ;
     lateralZ = forwardX;
-  } else if ((clearanceSpawn || tutorial) && mapDef?.playerBase && mapDef?.enemyBase) {
+  } else if (clearanceSpawn && mapDef && base) {
+    const target = mapDef.frontline ?? {
+      x: ((mapDef.playerBase?.x ?? 0) + (mapDef.enemyBase?.x ?? 0)) * 0.5,
+      z: ((mapDef.playerBase?.z ?? 0) + (mapDef.enemyBase?.z ?? 0)) * 0.5,
+    };
+    const len = Math.hypot(target.x - base.x, target.z - base.z) || 1;
+    forwardX = (target.x - base.x) / len;
+    forwardZ = (target.z - base.z) / len;
+    lateralX = -forwardZ;
+    lateralZ = forwardX;
+  } else if (tutorial && mapDef?.playerBase && mapDef?.enemyBase) {
     const own = team === 'enemy' ? mapDef.enemyBase : mapDef.playerBase;
     const foe = team === 'enemy' ? mapDef.playerBase : mapDef.enemyBase;
     const len = Math.hypot(foe.x - own.x, foe.z - own.z) || 1;
@@ -561,7 +571,7 @@ export function spawnArmy({
       const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef, {
         // Breakthrough can swap the teams' physical map sides. Let urban
         // artillery infer its rear from the requested formation position.
-        team: assaultDeployment ? null : team,
+        team: assaultDeployment || clearanceSpawn ? null : team,
         forceAssemblyRear: true,
       });
       if (!position) continue;
@@ -584,8 +594,20 @@ export function spawnArmy({
   return units;
 }
 
-export function spawnUnitAt({ def, faction, team, x, z, scene, mapDef = null, scenery = null }) {
-  const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef, { team });
+export function spawnUnitAt({
+  def,
+  faction,
+  team,
+  x,
+  z,
+  scene,
+  mapDef = null,
+  scenery = null,
+  skipTeamBias = false,
+}) {
+  const position = resolveUnitSpawnPosition(def, x, z, scenery, mapDef, {
+    team: skipTeamBias ? null : team,
+  });
   if (!position) return null;
   const unit = new Unit({
     def,

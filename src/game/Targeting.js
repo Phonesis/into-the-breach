@@ -20,6 +20,9 @@ export const COAX_SOFT_TARGET_TYPES = new Set([
   'medic',
   'engineer',
   'vehicleCrew',
+  'radioOperator',
+  'commander',
+  'paratrooper',
   'armoredCar',
 ]);
 

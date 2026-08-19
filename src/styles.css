@@ -1,3 +1,16 @@
+:root {
+  --menu-bg-title: url('/menu/menu-title.jpg');
+  --menu-bg-mode: url('/menu/menu-mode.jpg');
+  --menu-bg-assault: url('/menu/menu-assault.jpg');
+  --menu-bg-faction: url('/menu/menu-faction.jpg');
+  --menu-bg-faction-germany: url('/menu/menu-faction-germany.jpg');
+  --menu-bg-faction-usa: url('/menu/menu-faction-usa.jpg');
+  --menu-bg-faction-uk: url('/menu/menu-faction-uk.jpg');
+  --menu-bg-faction-russia: url('/menu/menu-faction-russia.jpg');
+  --menu-bg-faction-japan: url('/menu/menu-faction-japan.jpg');
+  --menu-bg-map: url('/menu/menu-map.jpg');
+}
+
 *,
 *::before,
 *::after {
@@ -32,7 +45,7 @@ body,
   color: #f3f0e8;
   background:
     linear-gradient(180deg, rgba(8, 12, 18, 0.74), rgba(8, 12, 18, 0.96)),
-    url('/menu/menu-title.jpg') center / cover;
+    var(--menu-bg-title) center / cover;
 }
 
 .mobile-support-screen[hidden] {
@@ -188,24 +201,24 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 #screen-title {
-  background-image: url('/menu/menu-title.jpg');
+  background-image: var(--menu-bg-title);
 }
 
 #screen-settings {
-  background-image: url('/menu/menu-title.jpg');
+  background-image: var(--menu-bg-title);
   background-attachment: fixed;
 }
 
 #screen-mode {
-  background-image: url('/menu/menu-mode.jpg');
+  background-image: var(--menu-bg-mode);
 }
 
 #screen-assault-role {
-  background-image: url('/menu/menu-assault.jpg');
+  background-image: var(--menu-bg-assault);
 }
 
 #screen-faction {
-  background-image: url('/menu/menu-faction.jpg');
+  background-image: var(--menu-bg-faction);
 }
 
 #screen-faction .panel {
@@ -238,27 +251,27 @@ body.phone-unsupported .mobile-support-screen {
 }
 
 #screen-faction.faction-bg-germany {
-  background-image: url('/menu/menu-faction-germany.jpg');
+  background-image: var(--menu-bg-faction-germany);
 }
 
 #screen-faction.faction-bg-usa {
-  background-image: url('/menu/menu-faction-usa.jpg');
+  background-image: var(--menu-bg-faction-usa);
 }
 
 #screen-faction.faction-bg-uk {
-  background-image: url('/menu/menu-faction-uk.jpg');
+  background-image: var(--menu-bg-faction-uk);
 }
 
 #screen-faction.faction-bg-russia {
-  background-image: url('/menu/menu-faction-russia.jpg');
+  background-image: var(--menu-bg-faction-russia);
 }
 
 #screen-faction.faction-bg-japan {
-  background-image: url('/menu/menu-faction-japan.jpg');
+  background-image: var(--menu-bg-faction-japan);
 }
 
 #screen-map {
-  background-image: url('/menu/menu-map.jpg');
+  background-image: var(--menu-bg-map);
   background-attachment: fixed;
 }
 
@@ -5029,7 +5042,7 @@ body.phone-unsupported .mobile-support-screen {
 
 .saves-screen {
   justify-content: center;
-  background-image: url('/menu/menu-title.jpg');
+  background-image: var(--menu-bg-title);
 }
 
 .saves-screen .saves-panel {

@@ -218,7 +218,7 @@ export class CapturePoint {
     let enemyCount = 0;
 
     for (const u of units) {
-      if (u.dead) continue;
+      if (u.dead || u.surrendered || u._captureExit || u._dropping || u._crewless) continue;
       const dx = u.position.x - this.x;
       const dz = u.position.z - this.z;
       if (dx * dx + dz * dz <= RADIUS * RADIUS) {
@@ -257,9 +257,10 @@ export class CapturePoint {
         this.progress = Math.min(1, this.progress - push);
         if (this.progress >= 1) this.owner = 'enemy';
       }
-    } else if (this.owner && !this.capturingTeam) {
+    } else if (this.owner) {
+      this.capturingTeam = null;
       this.progress = 1;
-    } else if (!this.owner) {
+    } else {
       this.progress = Math.max(0, this.progress - dt * 0.05);
       if (this.progress <= 0.001) this.capturingTeam = null;
     }

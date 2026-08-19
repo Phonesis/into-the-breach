@@ -14,6 +14,8 @@ import { canAddRadioOperator } from './RadioOperatorBehavior.js';
 
 /** Minimum gap between placed units (game meters). */
 export const LAST_STAND_MIN_SPACING = 3.8;
+/** Accept a nearby clear pad so Berlin streets are placeable without an exact click. */
+const LAST_STAND_PLACE_SNAP = 3.2;
 
 const ENEMY_DEPLOY_INTERVAL = 0.85;
 const ENEMY_DEPLOY_BURST = 4;
@@ -139,18 +141,26 @@ export function createLastStandState(deployMode = 'manual', presetSize = 'medium
   };
 }
 
+export function snapLastStandPlacement(x, z, def, scenery, mapDef) {
+  if (!def || !scenery?.findClearVehiclePlacement) return { x, z };
+  const resolved = resolveUnitSpawnPosition(def, x, z, scenery, mapDef);
+  if (!resolved) return null;
+  if (Math.hypot(resolved.x - x, resolved.z - z) > LAST_STAND_PLACE_SNAP) return null;
+  return resolved;
+}
+
 export function canPlaceUnitAt(x, z, mapDef, units, def = null, scenery = null) {
   const half = (mapDef?.size ?? 120) * 0.5 - 4;
   if (Math.abs(x) > half || Math.abs(z) > half) return false;
 
+  const pad = snapLastStandPlacement(x, z, def, scenery, mapDef);
+  if (!pad) return false;
+  if (Math.abs(pad.x) > half || Math.abs(pad.z) > half) return false;
+
   for (const u of units) {
     if (u.dead) continue;
-    const d = Math.hypot(u.position.x - x, u.position.z - z);
+    const d = Math.hypot(u.position.x - pad.x, u.position.z - pad.z);
     if (d < LAST_STAND_MIN_SPACING) return false;
-  }
-  if (def && scenery?.findClearVehiclePlacement) {
-    const resolved = resolveUnitSpawnPosition(def, x, z, scenery, mapDef);
-    if (!resolved || resolved.x !== x || resolved.z !== z) return false;
   }
   return true;
 }
@@ -164,13 +174,17 @@ function pickDeployPosition(mapDef, units, biasBase, def = null, scenery = null)
     const dist = 4 + Math.random() * Math.min(half * 0.92, 52);
     const x = Math.max(-half, Math.min(half, base.x + Math.cos(angle) * dist));
     const z = Math.max(-half, Math.min(half, base.z + Math.sin(angle) * dist));
-    if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) return { x, z };
+    if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) {
+      return snapLastStandPlacement(x, z, def, scenery, mapDef) ?? { x, z };
+    }
   }
   return null;
 }
 
 function findFormationPosition(mapDef, units, x, z, def = null, scenery = null) {
-  if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) return { x, z };
+  if (canPlaceUnitAt(x, z, mapDef, units, def, scenery)) {
+    return snapLastStandPlacement(x, z, def, scenery, mapDef) ?? { x, z };
+  }
 
   for (let ring = 1; ring <= 6; ring++) {
     const step = LAST_STAND_MIN_SPACING * 0.85;
@@ -178,7 +192,9 @@ function findFormationPosition(mapDef, units, x, z, def = null, scenery = null) 
       const angle = (a / 12) * Math.PI * 2;
       const tx = x + Math.cos(angle) * step * ring;
       const tz = z + Math.sin(angle) * step * ring;
-      if (canPlaceUnitAt(tx, tz, mapDef, units, def, scenery)) return { x: tx, z: tz };
+      if (canPlaceUnitAt(tx, tz, mapDef, units, def, scenery)) {
+        return snapLastStandPlacement(tx, tz, def, scenery, mapDef) ?? { x: tx, z: tz };
+      }
     }
   }
   return null;
@@ -232,6 +248,7 @@ function spawnPresetUnit(game, { faction, team, unitType, echelon, index, count,
     scene: game.scene,
     mapDef: game.mapDef,
     scenery: game.scenery,
+    skipTeamBias: true,
   });
   if (!unit) return false;
   unit._mapDef = game.mapDef;
@@ -363,6 +380,7 @@ function placeEnemyUnit(game, unitType, { free = false } = {}) {
     scene: game.scene,
     mapDef: game.mapDef,
     scenery: game.scenery,
+    skipTeamBias: true,
   });
   if (!unit) return false;
   unit._mapDef = game.mapDef;
@@ -398,7 +416,8 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
 
   const cheatFree = game.cheatMode;
   if (!cheatFree && state.supplies.player < def.cost) return { ok: false, reason: 'no_supplies' };
-  if (!canPlaceUnitAt(x, z, game.mapDef, game.units, def, game.scenery)) {
+  const pad = snapLastStandPlacement(x, z, def, game.scenery, game.mapDef);
+  if (!pad || !canPlaceUnitAt(pad.x, pad.z, game.mapDef, game.units, def, game.scenery)) {
     return { ok: false, reason: 'blocked' };
   }
 
@@ -406,11 +425,12 @@ export function tryPlacePlayerUnit(game, unitType, x, z) {
     def,
     faction,
     team: 'player',
-    x,
-    z,
+    x: pad.x,
+    z: pad.z,
     scene: game.scene,
     mapDef: game.mapDef,
     scenery: game.scenery,
+    skipTeamBias: true,
   });
   if (!unit) return { ok: false, reason: 'blocked' };
   unit._mapDef = game.mapDef;
@@ -571,9 +591,22 @@ export function assignLastStandEnemyStances(game) {
 function livingTeamCount(units, team) {
   let n = 0;
   for (const u of units) {
-    if (u.team === team && !u.dead && u.def?.type !== 'commander') n++;
+    if (
+      u.team === team &&
+      !u.dead &&
+      !u.surrendered &&
+      !u._captureExit &&
+      u.def?.type !== 'commander'
+    ) {
+      n++;
+    }
   }
   return n;
+}
+
+/** Fighting force in Force-on-Force — commanders do not count toward deploy/win. */
+export function countLastStandCombatUnits(units, team) {
+  return livingTeamCount(units, team);
 }
 
 export function checkLastStandVictory(game) {

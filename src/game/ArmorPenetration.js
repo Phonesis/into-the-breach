@@ -23,6 +23,11 @@ const ARMOR_PROFILES = {
   'T-34-85': { armor: 0.96, frontSlope: 1.2 },
   'SU-100': { armor: 1.06, frontSlope: 1.23 },
   'IS-2': { armor: 1.31, frontSlope: 1.12 },
+  'Type 92 Chiyoda': { armor: 0.38, frontSlope: 1.02, openTop: true },
+  'Shinhoto Chi-Ha': { armor: 0.72, frontSlope: 1.08 },
+  'Type 1 Ho-Ni I': { armor: 0.68, frontSlope: 1.04, openTop: true },
+  // Chi-Nu fills the super-heavy roster slot but is a late-war medium tank.
+  'Type 3 Chi-Nu': { armor: 0.9, frontSlope: 1.08 },
 };
 
 const DEFAULT_ARMOR = {
@@ -49,6 +54,10 @@ const GUN_PROFILES = {
   'T-34-85': 1.06,
   'SU-100': 1.34,
   'IS-2': 1.34,
+  'Type 1 47 mm AT Gun': 0.82,
+  'Shinhoto Chi-Ha': 0.84,
+  'Type 1 Ho-Ni I': 1.04,
+  'Type 3 Chi-Nu': 1.06,
 };
 
 const DEFAULT_GUN_POWER = {

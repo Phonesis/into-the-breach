@@ -116,10 +116,20 @@ export function checkAssaultVictory(game) {
   if (!a) return null;
 
   const playerAlive = game.units.filter(
-    (u) => u.team === PLAYER && !u.dead && u.def?.type !== 'commander'
+    (u) =>
+      u.team === PLAYER &&
+      !u.dead &&
+      !u.surrendered &&
+      !u._captureExit &&
+      u.def?.type !== 'commander'
   );
   const enemyAlive = game.units.filter(
-    (u) => u.team === ENEMY && !u.dead && u.def?.type !== 'commander'
+    (u) =>
+      u.team === ENEMY &&
+      !u.dead &&
+      !u.surrendered &&
+      !u._captureExit &&
+      u.def?.type !== 'commander'
   );
   const playerHQ = game.hqs.find((h) => h.team === PLAYER);
   const enemyHQ = game.hqs.find((h) => h.team === ENEMY);
@@ -207,7 +217,7 @@ export function formatAssaultHud(assault) {
       objective: attackerHolds
         ? `Hold frontline: ${holdPct}% (${Math.ceil(assault.holdTimeRequired - assault.holdTimer)}s left)`
         : `Capture ${cp?.name ?? 'frontline'} and hold ${assault.holdTimeRequired}s`,
-      timer: `Defender reinforcements: ${timeLeft}s`,
+      timer: `Assault time left: ${timeLeft}s`,
       holdPct,
       attackerHolds,
     };

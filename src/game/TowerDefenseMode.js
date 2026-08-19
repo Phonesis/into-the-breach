@@ -479,15 +479,18 @@ export function updateTowerDefenseMode(game, dt) {
 
     td.spawnTimer = (td.spawnTimer ?? 0) - dt;
     while (td.spawnTimer <= 0 && td.spawnQueue.length > 0) {
-      const type = td.spawnQueue.shift();
-      spawnWaveUnit(game, type);
-      td.spawned += 1;
+      const type = td.spawnQueue[0];
+      if (spawnWaveUnit(game, type)) {
+        td.spawnQueue.shift();
+        td.spawned += 1;
+      } else {
+        // Radio cap or a blocked urban pad — drop this one unit rather than stall the wave.
+        td.spawnQueue.shift();
+      }
       td.spawnTimer += td.spawnInterval;
     }
 
-    const enemiesAlive = game._enemyAlive.filter(
-      (u) => u.def?.type !== 'commander' && u.def?.type !== 'radioOperator'
-    ).length;
+    const enemiesAlive = game._enemyAlive.filter((u) => u._tdAttacker).length;
     if (td.spawnQueue.length === 0 && enemiesAlive === 0) {
       onWaveCleared(game, td);
     }
@@ -496,23 +499,28 @@ export function updateTowerDefenseMode(game, dt) {
 
 function spawnWaveUnit(game, type) {
   const def = game.enemyFaction.units[type];
-  if (!def) return;
-  if (type === 'radioOperator' && !canAddRadioOperator(game.units, ENEMY)) return;
+  if (!def) return false;
+  if (type === 'radioOperator' && !canAddRadioOperator(game.units, ENEMY)) return false;
 
   const td = game.towerDefense;
   const sectors = td?.assaultSectors?.length ? td.assaultSectors : pickWaveAssaultSectors(td?.wave ?? 1).sectors;
   const profile = td?.assaultProfile ?? getWaveAssaultProfile(td?.wave ?? 1);
-  const sector = sectors[td?.spawned % sectors.length];
-  const spawn = computeSpawnForSector(game, sector, profile);
-  const position = resolveUnitSpawnPosition(
-    def,
-    spawn.x,
-    spawn.z,
-    game.scenery,
-    game.mapDef,
-    { team: ENEMY }
-  );
-  if (!position) return;
+  let spawn = null;
+  let position = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const sector = sectors[(td?.spawned + attempt) % sectors.length];
+    spawn = computeSpawnForSector(game, sector, profile);
+    position = resolveUnitSpawnPosition(
+      def,
+      spawn.x,
+      spawn.z,
+      game.scenery,
+      game.mapDef,
+      { team: ENEMY }
+    );
+    if (position) break;
+  }
+  if (!position || !spawn) return false;
 
   const unit = new Unit({
     def,
@@ -522,13 +530,16 @@ function spawnWaveUnit(game, type) {
     scene: game.scene,
   });
   unit._mapDef = game.mapDef;
-  unit._tdAttacker = true;
+  // Radios stay at the enemy rear and do not assault; tagging them as wave
+  // attackers would stall wave-clear after the first signals unit appears.
+  unit._tdAttacker = type !== 'radioOperator' && type !== 'commander';
   unit._tdFrontlineTarget = { x: spawn.targetX, z: spawn.targetZ };
   unit._tdSpawnSector = spawn.sectorLabel;
   unit.position.y = sampleTerrainHeight(position.x, position.z, game.mapDef);
   unit.moveTarget = { x: spawn.targetX, z: spawn.targetZ };
   game.units.push(unit);
   game._rebuildUnitCaches();
+  return true;
 }
 
 function onWaveCleared(game, td) {

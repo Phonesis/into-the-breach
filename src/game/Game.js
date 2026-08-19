@@ -42,6 +42,7 @@ import {
   checkLastStandVictory,
   isLastStandDeployPhase,
   tryPlacePlayerUnit,
+  countLastStandCombatUnits,
 } from './LastStandMode.js';
 import {
   isLastStandPresetDeployMode,
@@ -171,7 +172,13 @@ import {
 } from './CoverSystem.js';
 import { canSeekCover, getSeekCoverEnabled } from './CoverSeek.js';
 import { MAPS, buildMapDef } from '../data/maps.js';
-import { getDeployRadius, getStagingMoveRadius, formatMapHudLabel } from '../data/mapSizes.js';
+import {
+  getDeployRadius,
+  getStagingMoveRadius,
+  formatMapHudLabel,
+  getMapSizeOptions,
+  resolveMapSizeId,
+} from '../data/mapSizes.js';
 import { getDifficulty, DEFAULT_DIFFICULTY } from '../data/difficulty.js';
 import {
   isCampaignMode,
@@ -507,7 +514,12 @@ export class Game {
             : isEnemyStagingPhase(this),
       getUnitLimit: () => (this.gameMode === 'campaign' ? STANDARD_UNIT_LIMIT : null),
       getDeployedUnitCount: (team) =>
-        this.units.reduce((count, unit) => count + (!unit.dead && unit.team === team ? 1 : 0), 0),
+        this.units.reduce((count, unit) => {
+          if (!unit || unit.dead || unit.team !== team) return count;
+          if (unit.surrendered || unit._crewless || unit._captureExit) return count;
+          if (unit.def?.type === 'commander') return count;
+          return count + 1;
+        }, 0),
       getUnits: () => this.units,
       getSpawnPos: (team, unitType) => {
         if (isBaseBuildingCampaign(this)) {
@@ -1121,16 +1133,19 @@ export class Game {
     if (isAssaultMode(gameMode)) {
       mapSizeId = resolveAssaultMapSize(mapSizeId);
     }
-    // Preset battle groups no longer force a large theater — any map size works.
+    const mapBase = MAPS[mapId];
+    const mapAllowsLarge = getMapSizeOptions(mapBase).includes('large');
+    // Forward Bases needs Large. Berlin cannot field Large, so fall back to Central Command.
     if (this.campaign && baseBuildingRequiresLargeMap(campaignStyle)) {
-      mapSizeId = 'large';
+      if (mapAllowsLarge) mapSizeId = 'large';
+      else campaignStyle = 'classic';
     }
-    // Maps like Berlin may only allow certain sizes (enforced in buildMapDef).
+    mapSizeId = resolveMapSizeId(mapBase, mapSizeId);
     if (campaignStyle === 'baseBuilding' && !canUseBaseBuildingOnMap(mapSizeId)) {
       campaignStyle = 'classic';
     }
     this.campaignStyle = campaignStyle;
-    this.mapDef = buildMapDef(MAPS[mapId], mapSizeId);
+    this.mapDef = buildMapDef(mapBase, mapSizeId);
     if (this.campaign) {
       this.mapDef = spreadCampaignCapturePoints(this.mapDef);
     }
@@ -1344,10 +1359,6 @@ export class Game {
       for (const cp of this.capturePoints) {
         cp.owner = null;
         cp.progress = 0;
-      }
-      if (this.capturePoints[0]) {
-        this.capturePoints[0].owner = PLAYER_TEAM;
-        this.capturePoints[0].progress = 1;
       }
     } else if (this.lastStand) {
       for (const cp of this.capturePoints) {
@@ -1902,7 +1913,9 @@ export class Game {
         total: BATTLE_OPENING_TIME,
         title: 'Quiet sector',
         subtitle: assault
-          ? 'Stay inside your HQ ring — capture the frontline or destroy the enemy HQ'
+          ? this.assaultRole === 'defend'
+            ? 'Stay inside your HQ ring — hold the frontline or destroy the assault HQ'
+            : 'Stay inside your HQ ring — capture the frontline or destroy the enemy HQ'
           : 'Victory: destroy the enemy headquarters · Stay in your HQ ring — launch when ready',
         canLaunchEarly: true,
       };
@@ -2095,7 +2108,11 @@ export class Game {
         unit.position.z,
         this.scenery,
         this.mapDef,
-        { team: unit.team, forceAssemblyRear: unit.def?.type === 'artillery' }
+        {
+          // Breakthrough / Fortified Line can put a team on the opposite map half.
+          team: this.clearance || this.assault ? null : unit.team,
+          forceAssemblyRear: unit.def?.type === 'artillery',
+        }
       );
       if (!position) continue;
       unit.position.x = position.x;
@@ -2260,6 +2277,7 @@ export class Game {
     if (!this.running || this.gameOver) return;
     if (this.paused && this.ui?.isPausedSettingsOpen?.()) {
       this.ui.closePausedSettings();
+      return;
     }
     this.paused = !this.paused;
     this.ui?.setGamePaused(
@@ -2540,7 +2558,7 @@ export class Game {
 
   launchLastStandBattle() {
     if (!this.lastStand || this.lastStand.phase !== 'deploy') return false;
-    if (this._playerAlive.length === 0) return false;
+    if (countLastStandCombatUnits(this.units, PLAYER_TEAM) === 0) return false;
 
     if (isLastStandPresetForce(this)) {
       assignLastStandPresetStances(this);
@@ -2581,7 +2599,16 @@ export class Game {
     if (!type) return;
 
     const result = tryPlacePlayerUnit(this, type, x, z);
-    if (!result.ok) return;
+    if (!result.ok) {
+      if (result.reason === 'radio_cap') {
+        this.ui?.showSaveToast?.('Radio net is at capacity (3).');
+      } else if (result.reason === 'blocked') {
+        this.ui?.showSaveToast?.('Cannot place there.');
+      } else if (result.reason === 'no_supplies') {
+        this.ui?.showSaveToast?.('Not enough supplies.');
+      }
+      return;
+    }
 
     this._applyEngagementStanceDefault([result.unit]);
     this._applyArtilleryAutoFireDefault([result.unit]);
@@ -2858,14 +2885,6 @@ export class Game {
       this._playCommanderOrder(type);
     }
     this.ui?.updateGeneralOrders(this.generalOrders);
-  }
-
-  _orderClearanceDeadlineRetreat(team) {
-    const manager = team === PLAYER_TEAM ? this.generalOrders : this.enemyGeneralOrders;
-    if (!manager?.forceFullRetreat?.()) return false;
-    this._playTeamCommanderOrder('fullRetreat', team);
-    if (team === PLAYER_TEAM) this.ui?.updateGeneralOrders(this.generalOrders);
-    return true;
   }
 
   /** Faction command-net acknowledgement for fire support / general orders. */
@@ -3580,10 +3599,20 @@ export class Game {
       if (this.lastStand.phase !== 'deploy') return false;
       const def = this.playerFaction?.units?.[unitType];
       if (!def) return false;
+      if (this.lastStand.pendingType === unitType) {
+        this.lastStand.pendingType = null;
+        sounds.play('select');
+        this.ui?.updateLastStandDeploy(this);
+        this.ui?.updateProduction(this);
+        this._syncPlacementCapture();
+        this._syncBattleCursor();
+        return true;
+      }
       if (
         unitType === 'radioOperator' &&
         !canAddRadioOperator(this.units, PLAYER_TEAM)
       ) {
+        this.ui?.showSaveToast?.('Radio net is at capacity (3).');
         return false;
       }
       if (!this.cheatMode && this.lastStand.supplies.player < def.cost) return false;
@@ -3746,7 +3775,18 @@ export class Game {
       defenseCount: this.defenses?.entries.filter((e) => !e.destroyed).length ?? 0,
       wipeHint: this._getArmyWipeHint(playerAlive),
     });
-    this.ui.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
+    const lastStandDeploy = !!(this.lastStand && this.lastStand.phase === 'deploy');
+    const hudSupplies = this.lastStand
+      ? lastStandDeploy && !isLastStandPresetForce(this)
+        ? this.lastStand.supplies.player
+        : 0
+      : this.resources.player;
+    this.ui.updateResources(Math.floor(hudSupplies), this.capturePoints, this.cheatMode, {
+      lastStand: !!this.lastStand,
+      lastStandDeploy,
+      towerDefense: !!this.towerDefense,
+      tdHqDefense,
+    });
     if (!this.towerDefense) this.ui.updateCapturePoints(this.capturePoints);
     if (!this.towerDefense || tdHqDefense) this.ui.updateProduction(this, { skipResources: true });
     if (this.baseBuildings?.active) this.ui.updateBaseBuild(this);
@@ -3777,7 +3817,7 @@ export class Game {
       if (!gracePeriod && enemyHQDead) {
         this.endGame(
           true,
-          'Practice complete! You destroyed the target HQ. Return to the menu to play Standard mode.'
+          'Practice complete! You destroyed the target HQ. Return to the menu to play Frontline Command.'
         );
       }
       return;
@@ -3804,9 +3844,6 @@ export class Game {
     if (this.clearance) {
       const result = checkClearanceVictory(this);
       if (result) {
-        if (result.retreatTeam) {
-          this._orderClearanceDeadlineRetreat(result.retreatTeam);
-        }
         this.endGame(result.victory, result.detail);
       }
       return;
@@ -3820,8 +3857,8 @@ export class Game {
       return;
     }
 
-    const playerEliminated = teamIsEliminated(PLAYER_TEAM, this, playerAlive.length);
-    const enemyEliminated = teamIsEliminated(ENEMY_TEAM, this, enemyAlive.length);
+    const playerEliminated = teamIsEliminated(PLAYER_TEAM, this, playerAlive);
+    const enemyEliminated = teamIsEliminated(ENEMY_TEAM, this, enemyAlive);
 
     if (enemyHQDead || enemyEliminated) {
       this.endGame(
@@ -4511,7 +4548,12 @@ export class Game {
           if (this._lastStandUiAccum >= 0.15) {
             this._lastStandUiAccum = 0;
             this.ui?.updateLastStandDeploy(this);
-            this.ui?.updateResources(this.lastStand.supplies.player, this.capturePoints, this.cheatMode);
+            this.ui?.updateResources(
+              this.lastStand.supplies.player,
+              this.capturePoints,
+              this.cheatMode,
+              { lastStand: true, lastStandDeploy: true }
+            );
           }
         } else if (!this.towerDefense) {
           this.updateCapturePoints(dt);
@@ -4653,7 +4695,7 @@ export class Game {
           this._hqAlertPlayed = false;
         }
 
-        if (this._aliveUnits.length > 0 && this._combatAccum >= combatStep) {
+        if (this._combatAccum >= combatStep) {
           const cdt = this._combatAccum;
           this._combatAccum = 0;
           const combatBuildings = this._combatBuildingTargets;
@@ -4678,7 +4720,7 @@ export class Game {
             this.difficulty.enemyDamageMult,
             this.scenery,
             {
-              protectPlayerHq: this.towerDefense,
+              protectPlayerHq: this.towerDefense && !isTdHqDefenseStyle(this.towerDefense),
               tutorialPassiveNoHq: this.tutorial,
               practiceHqDamageMult: this.tutorial ? PRACTICE_TARGET_HQ_DAMAGE_MULT : 1,
               openingCeasefire:
@@ -4688,6 +4730,10 @@ export class Game {
                 !this.clearance &&
                 this.matchTime < BATTLE_OPENING_TIME,
               enemyCeasefire:
+                this.clearance &&
+                this.clearanceRole === 'defend' &&
+                this.matchTime < CLEARANCE_DEFENDER_PREP_TIME,
+              prepCeasefire:
                 this.clearance &&
                 this.clearanceRole === 'defend' &&
                 this.matchTime < CLEARANCE_DEFENDER_PREP_TIME,

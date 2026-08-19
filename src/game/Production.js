@@ -83,7 +83,7 @@ export class ProductionManager {
     const faction = this.getFaction(team);
     if (!faction) return false;
     const def = faction.units[unitType];
-    if (!def) return false;
+    if (!def || def.hidden) return false;
     if (team === 'player' && this.getPlayerProductionUnits && !options.ignoreSelection) {
       const allowed = this.getPlayerProductionUnits(team);
       if (allowed && !allowed.includes(unitType)) return false;
@@ -161,7 +161,7 @@ export class ProductionManager {
     }
     const faction = this.getFaction(team);
     const def = faction?.units[unitType];
-    if (!def || this.queues[team].length >= MAX_QUEUE || this.isAtUnitLimit(team)) return false;
+    if (!def || def.hidden || this.queues[team].length >= MAX_QUEUE || this.isAtUnitLimit(team)) return false;
     if (unitType === 'radioOperator' && !this._canAddRadioOperator(team)) return false;
     const playerCheat = this.cheatMode && team === 'player';
     if (!playerCheat && !spendResources(def.cost)) return false;
@@ -189,12 +189,15 @@ export class ProductionManager {
       job.remaining -= dt;
 
       if (job.remaining <= 0) {
-        q.shift();
         const unit = this._spawn(team, job.def, job.unitType);
-        if (unit) {
-          unitsArray.push(unit);
-          if (this.onSpawn) this.onSpawn(team, job.unitType, unit);
+        if (!unit) {
+          // Dense urban pads can fail a spawn; retry instead of eating a paid unit.
+          job.remaining = 0.35;
+          continue;
         }
+        q.shift();
+        unitsArray.push(unit);
+        if (this.onSpawn) this.onSpawn(team, job.unitType, unit);
         if (this.onQueueChange) this.onQueueChange(team);
       }
     }

@@ -45,6 +45,10 @@ import { wrapBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { wrapDefenseTarget } from './DefenseTarget.js';
 import { createSmokeShellTarget } from './Targeting.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
+import {
+  isLastStandPresetDeployMode,
+  resolveLastStandPresetSize,
+} from '../data/lastStandForces.js';
 import { syncUnitFieldIcon } from '../visual/UnitFieldIcons.js';
 import { syncRankMarkers } from './EliteBehavior.js';
 import {
@@ -489,6 +493,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       ? {
           phase: game.lastStand.phase,
           deployMode: game.lastStand.deployMode,
+          presetSize: game.lastStand.presetSize ?? null,
           supplies: { ...game.lastStand.supplies },
           pendingType: game.lastStand.pendingType,
           enemyDeployTimer: game.lastStand.enemyDeployTimer,
@@ -1301,6 +1306,12 @@ export function applyBattleSave(game, snapshot) {
     }
     if (game.lastStand.briefingShown == null) {
       game.lastStand.briefingShown = game.lastStand.phase !== 'deploy';
+    }
+    if (
+      isLastStandPresetDeployMode(game.lastStand.deployMode) &&
+      !game.lastStand.presetSize
+    ) {
+      game.lastStand.presetSize = resolveLastStandPresetSize('medium', game.mapDef);
     }
   }
 

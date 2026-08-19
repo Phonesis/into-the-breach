@@ -106,6 +106,17 @@ const CLEARANCE_PROBE_TYPES = new Set([
 
 const ANTI_ARMOR = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'artillery', 'antiTankGun', 'paratrooper']);
 
+/** Service rifles, SMGs, and MGs — including support teams that share those weapons. */
+const SMALL_ARMS_VS_ARMOR = new Set([
+  'infantry',
+  'vehicleCrew',
+  'machineGun',
+  'radioOperator',
+  'engineer',
+  'commander',
+  'medic',
+]);
+
 /** Tanks ignore rifle/MG fire; dedicated anti-armor weapons hurt. */
 export function getArmorDamageMultiplier(attackerType, target) {
   if (!target?.def) return 1;
@@ -113,12 +124,7 @@ export function getArmorDamageMultiplier(attackerType, target) {
 
   if (t === 'tank' || t === 'tankDestroyer' || t === 'superHeavyTank') {
     const isSuper = t === 'superHeavyTank';
-    if (
-      attackerType === 'infantry' ||
-      attackerType === 'vehicleCrew' ||
-      attackerType === 'machineGun' ||
-      attackerType === 'armoredCar'
-    ) {
+    if (SMALL_ARMS_VS_ARMOR.has(attackerType) || attackerType === 'armoredCar') {
       return 0;
     }
     if (attackerType === 'sniper') return 0;
@@ -135,12 +141,7 @@ export function getArmorDamageMultiplier(attackerType, target) {
   }
 
   if (t === 'armoredCar') {
-    if (
-      attackerType === 'infantry' ||
-      attackerType === 'vehicleCrew' ||
-      attackerType === 'machineGun'
-    )
-      return 0.32;
+    if (SMALL_ARMS_VS_ARMOR.has(attackerType)) return 0.32;
     if (attackerType === 'sniper') return 0;
     if (attackerType === 'mortar') return 1.05;
     if (attackerType === 'tank' || attackerType === 'tankDestroyer' || attackerType === 'superHeavyTank' || attackerType === 'artillery') {
@@ -481,7 +482,10 @@ function spawnReinforcementPackage(game, team, types, wave) {
       requestedPosition.z,
       game.scenery,
       game.mapDef,
-      { team, forceAssemblyRear: true }
+      {
+        team: game.mapDef?.terrain === 'urban' ? null : team,
+        forceAssemblyRear: true,
+      }
     );
     if (!position) continue;
     const unit = new Unit({ def, faction, team, position, scene: game.scene });
@@ -774,7 +778,8 @@ export function spawnClearanceDefenders({
         position = { x: berlinAtAmbush.x, z: berlinAtAmbush.z };
       } else {
         position = resolveUnitSpawnPosition(def, position.x, position.z, scenery, mapDef, {
-          team,
+          // Garrison occupies the enemy-base half regardless of who is human.
+          team: mapDef?.terrain === 'urban' ? null : team,
           forceAssemblyRear: def?.type === 'artillery',
         });
       }
@@ -802,13 +807,31 @@ export function spawnClearanceDefenders({
 
 export function checkClearanceVictory(game) {
   const enemyAlive = game.units.filter(
-    (u) => u.team === 'enemy' && !u.dead && u.def?.type !== 'commander'
+    (u) =>
+      u.team === 'enemy' &&
+      !u.dead &&
+      !u.surrendered &&
+      !u._captureExit &&
+      u.def?.type !== 'commander'
   ).length;
   const playerAlive = game.units.filter(
-    (u) => u.team === 'player' && !u.dead && u.def?.type !== 'commander'
+    (u) =>
+      u.team === 'player' &&
+      !u.dead &&
+      !u.surrendered &&
+      !u._captureExit &&
+      u.def?.type !== 'commander'
   ).length;
   const playerAttacks = isClearancePlayerAttacker(game);
 
+  if (enemyAlive === 0 && playerAlive === 0) {
+    return {
+      victory: false,
+      detail: playerAttacks
+        ? 'Mutual annihilation — the assault collapsed with the garrison.'
+        : 'Mutual annihilation — the garrison fell with the assault force.',
+    };
+  }
   if (enemyAlive === 0) {
     return {
       victory: true,
@@ -828,10 +851,9 @@ export function checkClearanceVictory(game) {
   if (game.clearanceTimeLimitEnabled !== false && game.matchTime >= CLEARANCE_TIME_LIMIT) {
     return {
       victory: !playerAttacks,
-      retreatTeam: playerAttacks ? 'player' : 'enemy',
       detail: playerAttacks
-        ? 'The 15-minute assault window expired — the fortified line held and a general retreat was ordered.'
-        : 'The fortified line held for 15 minutes — the enemy assault has been ordered into general retreat!',
+        ? 'The 15-minute assault window expired — the fortified line held.'
+        : 'The fortified line held for 15 minutes — the assault has failed.',
     };
   }
   return null;

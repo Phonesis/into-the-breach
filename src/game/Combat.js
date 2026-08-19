@@ -113,7 +113,21 @@ const SMALL_ARMS_TYPES = new Set([
   'armoredCar',
   'paratrooper',
   'vehicleCrew',
+  'commander',
+  'medic',
 ]);
+
+function usesInfantryFireAimPose(type) {
+  return (
+    type === 'infantry' ||
+    type === 'radioOperator' ||
+    type === 'engineer' ||
+    type === 'vehicleCrew' ||
+    type === 'paratrooper' ||
+    type === 'sniper' ||
+    type === 'commander'
+  );
+}
 
 export function isSmallArmsFireType(type) {
   return SMALL_ARMS_TYPES.has(type);
@@ -292,7 +306,7 @@ export function updatePendingIndirectImpacts(dt) {
 function resolveIndirectShellImpact(shell) {
   if (shell.epoch !== indirectImpactEpoch) return;
   if (!Number.isFinite(shell.x) || !Number.isFinite(shell.z)) return;
-  if (!shell.attacker?.def || shell.attacker.dead) return;
+  if (!shell.attacker?.def) return;
   // Scenery was torn down with the previous battle.
   if (shell.scenery && !Array.isArray(shell.scenery.objects)) return;
 
@@ -788,6 +802,7 @@ export function updateCombat(
     }
     if (openingCeasefire && !attacker.attackOrder) continue;
     if (enemyCeasefire && attacker.team === 'enemy') continue;
+    if (options.prepCeasefire) continue;
 
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
@@ -895,15 +910,7 @@ export function updateCombat(
 
     const weaponOnBearing = canWeaponBearOnTarget(attacker, target);
     const canFireMain = mainGunCanAim && weaponOnBearing;
-    if (
-      canFireMain &&
-      (attacker.def.type === 'infantry' ||
-        attacker.def.type === 'radioOperator' ||
-        attacker.def.type === 'engineer' ||
-        attacker.def.type === 'vehicleCrew' ||
-        attacker.def.type === 'paratrooper' ||
-        attacker.def.type === 'sniper')
-    ) {
+    if (canFireMain && usesInfantryFireAimPose(attacker.def.type)) {
       markInfantryFireAim(attacker, 0.28);
     }
     const mgOnBearing = independentMg
@@ -1787,14 +1794,7 @@ function fire(
       }
     }
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
-    if (
-      attacker.def.type === 'infantry' ||
-      attacker.def.type === 'radioOperator' ||
-      attacker.def.type === 'engineer' ||
-      attacker.def.type === 'vehicleCrew' ||
-      attacker.def.type === 'paratrooper' ||
-      attacker.def.type === 'sniper'
-    ) {
+    if (usesInfantryFireAimPose(attacker.def.type)) {
       markInfantryFireAim(attacker, 0.55);
     }
   }
