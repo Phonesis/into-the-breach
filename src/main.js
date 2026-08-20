@@ -2,21 +2,19 @@ import { Game } from './game/Game.js';
 import { UIManager } from './ui/UIManager.js';
 import { sounds } from './audio/SoundManager.js';
 import { preloadUnitTextures } from './units/UnitTextures.js';
-import { isPhoneLikeDevice, isIPadLikeDevice } from './lib/tabletDetect.js';
+import {
+  isConstrainedMobileAudio,
+  isPortraitOrientation,
+  requiresLandscapeOrientation,
+} from './lib/tabletDetect.js';
 import { applyPublicAssetCssVars } from './lib/publicUrl.js';
 
 applyPublicAssetCssVars();
 
-const phoneUnsupported = isPhoneLikeDevice();
-const iPadConstrained = isIPadLikeDevice();
+const constrainedAudio = isConstrainedMobileAudio();
+let orientationHeldPause = false;
 
-if (phoneUnsupported) {
-  document.body.classList.add('phone-unsupported');
-  document.getElementById('app')?.setAttribute('aria-hidden', 'true');
-  document.getElementById('mobile-support-message')?.removeAttribute('hidden');
-} else {
-  preloadUnitTextures().catch((err) => console.warn('Unit camo textures failed to load:', err));
-}
+preloadUnitTextures().catch((err) => console.warn('Unit camo textures failed to load:', err));
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
@@ -48,17 +46,50 @@ function restoreAudioContext() {
 
 // Capture gestures before UI handlers start asynchronous work. The click
 // fallback covers keyboard/assistive activation that does not emit pointerdown.
-if (!phoneUnsupported) {
-  window.addEventListener('pointerdown', resumeAudioContext, { capture: true });
-  window.addEventListener('keydown', resumeAudioContext, { capture: true });
-  window.addEventListener('click', resumeAudioContext, { capture: true });
-  window.addEventListener('pageshow', restoreAudioContext);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) restoreAudioContext();
-  });
+window.addEventListener('pointerdown', resumeAudioContext, { capture: true });
+window.addEventListener('keydown', resumeAudioContext, { capture: true });
+window.addEventListener('click', resumeAudioContext, { capture: true });
+window.addEventListener('pageshow', restoreAudioContext);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) restoreAudioContext();
+});
+
+function applyLandscapeGate() {
+  const blocked = requiresLandscapeOrientation() && isPortraitOrientation();
+  document.body.classList.toggle('portrait-blocked', blocked);
+  const app = document.getElementById('app');
+  const message = document.getElementById('mobile-support-message');
+  if (blocked) {
+    message?.removeAttribute('hidden');
+    app?.setAttribute('aria-hidden', 'true');
+    if (game?.running && !game.gameOver && !game.paused) {
+      game.setPaused(true, { silent: true });
+      orientationHeldPause = true;
+    }
+    return;
+  }
+  message?.setAttribute('hidden', '');
+  app?.removeAttribute('aria-hidden');
+  if (orientationHeldPause) {
+    game?.setPaused(false, { silent: true });
+    orientationHeldPause = false;
+  }
 }
 
-const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
+function tryLockLandscape() {
+  if (!requiresLandscapeOrientation()) return;
+  const orientation = globalThis.screen?.orientation;
+  if (!orientation?.lock) return;
+  void orientation.lock('landscape').catch(() => {});
+}
+
+applyLandscapeGate();
+window.addEventListener('resize', applyLandscapeGate);
+window.addEventListener('orientationchange', applyLandscapeGate);
+globalThis.screen?.orientation?.addEventListener?.('change', applyLandscapeGate);
+window.addEventListener('pointerdown', tryLockLandscape, { capture: true });
+
+const ui = new UIManager(uiRoot, {
   onMenuVisible(visible) {
     if (sounds.inBattle) {
       if (!visible) sounds.setMenuMusicActive(false);
@@ -70,9 +101,9 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
     primeAudio();
     const audioReady = sounds.primeForCombat();
     await preloadUnitTextures();
-    // Preserve the established desktop gate. Only tablet-class browsers avoid
-    // waiting for the large combat library before constructing the battlefield.
-    if (!iPadConstrained) await audioReady;
+    // Preserve the established desktop gate. Phones and tablets skip waiting
+    // for the large combat library before constructing the battlefield.
+    if (!constrainedAudio) await audioReady;
     sounds.enterBattle();
     if (!game) {
       game = new Game({ canvas, ui });
@@ -92,7 +123,7 @@ const ui = phoneUnsupported ? null : new UIManager(uiRoot, {
     primeAudio();
     const audioReady = sounds.primeForCombat();
     await preloadUnitTextures();
-    if (!iPadConstrained) await audioReady;
+    if (!constrainedAudio) await audioReady;
     if (!game) {
       game = new Game({ canvas, ui });
       wireSelectBox(canvas, ui);

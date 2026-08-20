@@ -2,7 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="screen-orientation" content="landscape" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Into the Breach</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,10 +20,13 @@
   <body>
     <div id="mobile-support-message" class="mobile-support-screen" hidden>
       <div class="mobile-support-card" role="alert" aria-labelledby="mobile-support-title">
-        <span class="mobile-support-kicker">Device compatibility</span>
-        <h1 id="mobile-support-title">Desktop or tablet required</h1>
-        <p>This game only supports desktop browsers and tablet devices.</p>
-        <p class="mobile-support-detail">Please open Into the Breach on a desktop browser or tablet to play.</p>
+        <span class="mobile-support-kicker">Landscape required</span>
+        <div class="mobile-support-rotate" aria-hidden="true">
+          <span class="mobile-support-device"></span>
+        </div>
+        <h1 id="mobile-support-title">Turn your device sideways</h1>
+        <p>Phones and tablets can play Into the Breach in landscape only.</p>
+        <p class="mobile-support-detail">Rotate to a horizontal view to continue.</p>
       </div>
     </div>
     <div id="app">

@@ -262,7 +262,7 @@ Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infant
 | **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
 | **Production buttons** | Queue unit at your HQ (when HQ is alive) |
 | **Strafe / Bomb / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
-| **Tablet / touch** | **Camera pad** (bottom-right): pan, rotate, zoom · **pinch** on battlefield to zoom · **tap** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
+| **Tablet / touch** | Phones and tablets play in **landscape only**. **Camera pad**: pan, rotate, zoom · **pinch** on battlefield to zoom · **tap** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
 | **Cheat mode** | Type **`iddqd`** during a battle, or open the game with **`?cheat=1`** in the URL (unlimited supplies, instant builds) |
 
 **Manual fire** (Shift + LMB): any selected combat unit in range can fire at open ground or destroy cover scenery. Ground bombardment units (MG, mortar, armored car, tank, super heavy, artillery) use **fire missions** on open ground. Anti-tank guns use direct fire only. **RMB move** or **Esc** cancels an active fire mission.
@@ -456,7 +456,7 @@ src/
     TabletCameraControls.js # On-screen camera pad for touch devices
     unitIcons.js          # SVG icons for roster & manual
   lib/
-    tabletDetect.js       # Tablet detection and phone compatibility gate
+    tabletDetect.js       # Tablet/phone detection and landscape orientation gate
   input/
     RTSController.js      # Select, move, attack, fire missions
     BattleCursor.js       # Shift fire-mission reticle

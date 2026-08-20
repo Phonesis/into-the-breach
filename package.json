@@ -45,7 +45,8 @@
     "bake-elevenlabs-commander-orders": "node scripts/bake-elevenlabs-commander-orders.mjs",
     "extend-battle-atmos": "node scripts/extend-battle-atmos.mjs",
     "expand-gun-variety": "node scripts/expand-gun-variety.mjs",
-    "generate-menu-music": "node scripts/bake-elevenlabs-menu-music.mjs"
+    "generate-menu-music": "node scripts/bake-elevenlabs-menu-music.mjs",
+    "generate-end-music": "node scripts/bake-elevenlabs-end-music.mjs"
   },
   "dependencies": {
     "three": "^0.172.0"

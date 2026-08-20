@@ -95,11 +95,44 @@ body,
   font-size: 0.95rem;
 }
 
-body.phone-unsupported #app {
+.mobile-support-rotate {
+  display: flex;
+  justify-content: center;
+  margin: 0 auto 1.15rem;
+}
+
+.mobile-support-device {
+  width: 2.35rem;
+  height: 3.55rem;
+  border: 3px solid #f0c95a;
+  border-radius: 0.48rem;
+  box-shadow: inset 0 -0.35rem 0 rgba(240, 201, 90, 0.35);
+  animation: mobile-rotate-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes mobile-rotate-hint {
+  0%,
+  18% {
+    transform: rotate(0deg);
+  }
+  42%,
+  100% {
+    transform: rotate(90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-support-device {
+    animation: none;
+    transform: rotate(90deg);
+  }
+}
+
+body.portrait-blocked #app {
   display: none;
 }
 
-body.phone-unsupported .mobile-support-screen {
+body.portrait-blocked .mobile-support-screen {
   display: flex;
 }
 

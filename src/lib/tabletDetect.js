@@ -64,7 +64,7 @@ export function isTabletModeEnabled() {
   }
 }
 
-/** True for phone-sized mobile browsers; tablets and desktop browsers remain supported. */
+/** True for phone-sized mobile browsers. */
 export function isPhoneLikeDevice() {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
 
@@ -89,4 +89,31 @@ export function isPhoneLikeDevice() {
   const noHover = window.matchMedia?.('(hover: none)').matches ?? false;
   const shortEdge = Math.min(window.innerWidth, window.innerHeight);
   return touch && coarse && noHover && shortEdge < 480;
+}
+
+/** Phones and tablets must play in landscape. Desktop windows may be any shape. */
+export function requiresLandscapeOrientation() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  if (isPhoneLikeDevice() || isIPadLikeDevice()) return true;
+
+  const userAgent = navigator.userAgent || '';
+  if (/Android/i.test(userAgent) && !/Mobile/i.test(userAgent)) return true;
+
+  const touch = navigator.maxTouchPoints > 0;
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const noHover = window.matchMedia?.('(hover: none)').matches ?? false;
+  return touch && coarse && noHover;
+}
+
+export function isPortraitOrientation() {
+  if (typeof window === 'undefined') return false;
+  const type = globalThis.screen?.orientation?.type;
+  if (typeof type === 'string') return type.startsWith('portrait');
+  if (window.matchMedia?.('(orientation: portrait)')?.matches) return true;
+  return window.innerHeight > window.innerWidth;
+}
+
+/** iOS/Android browsers that need the lighter combat-audio path. */
+export function isConstrainedMobileAudio() {
+  return isIPadLikeDevice() || isPhoneLikeDevice();
 }

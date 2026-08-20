@@ -5,8 +5,9 @@
 import { VehicleEngineAudio } from './VehicleEngineAudio.js';
 import { StrafeAircraftAudio } from './StrafeAircraftAudio.js';
 import { MenuMusic } from './MenuMusic.js';
+import { EndMusic } from './EndMusic.js';
 import { publicUrl } from '../lib/publicUrl.js';
-import { isIPadLikeDevice } from '../lib/tabletDetect.js';
+import { isConstrainedMobileAudio } from '../lib/tabletDetect.js';
 import {
   getAllWeaponSampleUrls,
   pickSampleFile,
@@ -398,6 +399,7 @@ export class SoundManager {
     this.vehicleEngines = null;
     this.strafeAircraft = null;
     this.menuMusic = null;
+    this.endMusic = null;
     this.menuMusicVisible = false;
     this.inBattle = false;
     this._resumePromise = null;
@@ -408,7 +410,7 @@ export class SoundManager {
     this._battleLockGain = null;
     this._htmlLock = null;
     this._samplesReady = false;
-    this._constrainedAudio = isIPadLikeDevice();
+    this._constrainedAudio = isConstrainedMobileAudio();
     this._sampleLoadsActive = 0;
     this._sampleLoadWaiters = [];
     this._coreLoadPromise = null;
@@ -562,6 +564,7 @@ export class SoundManager {
       this.vehicleEngines = new VehicleEngineAudio(this);
       this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
+      this.endMusic = new EndMusic(this);
       // Put the small menu theme ahead of the large combat sample batch so a
       // cold cache can start music promptly after the first user gesture.
       this.menuMusic.ensureLoaded();
@@ -1029,6 +1032,35 @@ export class SoundManager {
       } catch {
         /* unavailable */
       }
+      this._tabletAtmosAudio.volume = 0.34;
+    }
+  }
+
+  _fadeOutBattleAtmos(sec = 0.7) {
+    const duration = Math.max(0.05, sec);
+    if (this._atmosGain && this.ctx) {
+      const t0 = this.ctx.currentTime;
+      this._atmosGain.gain.cancelScheduledValues(t0);
+      this._atmosGain.gain.setValueAtTime(this._atmosGain.gain.value, t0);
+      this._atmosGain.gain.linearRampToValueAtTime(0.001, t0 + duration);
+      const src = this._atmosSrc;
+      setTimeout(() => {
+        if (this._atmosSrc === src) this._stopBattleAtmos();
+      }, duration * 1000 + 40);
+    } else if (this._tabletAtmosAudio && !this._tabletAtmosAudio.paused) {
+      const audio = this._tabletAtmosAudio;
+      const from = audio.volume;
+      const tStart = performance.now();
+      const tick = () => {
+        if (this._tabletAtmosAudio !== audio) return;
+        const u = Math.min(1, (performance.now() - tStart) / (duration * 1000));
+        audio.volume = Math.max(0, from * (1 - u));
+        if (u < 1) requestAnimationFrame(tick);
+        else this._stopBattleAtmos();
+      };
+      requestAnimationFrame(tick);
+    } else {
+      this._stopBattleAtmos();
     }
   }
 
@@ -1329,7 +1361,8 @@ export class SoundManager {
       this.clearVehicleEngines();
       this._stopBattleAtmos();
       this.menuMusic?.stopImmediate();
-    } else if (this.inBattle) {
+      this.endMusic?.stopImmediate();
+    } else if (this.inBattle && !this.endMusic?.isPlaying) {
       this._startBattleAtmos();
     }
   }
@@ -1339,6 +1372,7 @@ export class SoundManager {
     this.inBattle = true;
     this.menuMusicVisible = false;
     this.menuMusic?.stopImmediate();
+    this.endMusic?.stopImmediate();
     void this.ensureLoaded().then(() => {
       void this._resumeContext().then(() => {
         if (this.inBattle) {
@@ -1354,7 +1388,24 @@ export class SoundManager {
     this.inBattle = false;
     this._stopBattleAudioLock();
     this._stopBattleAtmos();
+    this.endMusic?.fadeOut();
     this._pendingPlays = [];
+  }
+
+  preloadEndMusic(factionId) {
+    this.endMusic?.preload(factionId);
+  }
+
+  /**
+   * Faction victory / defeat stinger when a match ends.
+   * Fades the battlefield bed so the cue can be heard under the results panel.
+   */
+  playEndMusic(victory, factionId) {
+    this._fadeOutBattleAtmos(0.7);
+    this._runWhenReady(() => {
+      const started = this.endMusic?.play(factionId, victory);
+      if (!started) this.play(victory ? 'victory' : 'defeat');
+    }, () => this.play(victory ? 'victory' : 'defeat'));
   }
 
   setMenuMusicActive(active) {

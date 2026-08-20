@@ -1129,6 +1129,7 @@ export class Game {
     this.difficulty = getDifficulty(startOptions.difficulty ?? readDifficultySetting());
     this.playerFaction = FACTIONS[factionId];
     this.enemyFaction = getEnemyFaction(factionId);
+    sounds.preloadEndMusic(factionId);
     let mapSizeId = startOptions.mapSize ?? 'medium';
     if (isAssaultMode(gameMode)) {
       mapSizeId = resolveAssaultMapSize(mapSizeId);
@@ -2279,11 +2280,20 @@ export class Game {
       this.ui.closePausedSettings();
       return;
     }
-    this.paused = !this.paused;
-    this.ui?.setGamePaused(
-      this.paused,
-      this.paused ? this._buildCurrentBattleReport() : null
-    );
+    this.setPaused(!this.paused);
+  }
+
+  setPaused(paused, { silent = false } = {}) {
+    if (!this.running || this.gameOver) return;
+    const next = !!paused;
+    if (this.paused === next) return;
+    this.paused = next;
+    if (!silent) {
+      this.ui?.setGamePaused(
+        this.paused,
+        this.paused ? this._buildCurrentBattleReport() : null
+      );
+    }
     if (this.paused) sounds.clearVehicleEngines();
     this._syncBattleCursor();
   }
@@ -3944,7 +3954,7 @@ export class Game {
         if (h.dead) this.battleStats.recordHq(h.team);
       }
       this.ui?.updateEndStats(this._buildEndBattleReport());
-      sounds.play(victory ? 'victory' : 'defeat');
+      sounds.playEndMusic(victory, this.playerFaction?.id);
     });
   }
 
@@ -4057,6 +4067,7 @@ export class Game {
     this._pendingEnd = { victory, detail };
     this._showEndOverlayNow(victory, detail);
     this.ui?.updateEndStats(this._buildEndBattleReport());
+    sounds.playEndMusic(victory, this.playerFaction?.id);
   }
 
   recordBattleLosses() {
