@@ -31,6 +31,7 @@ import {
   tryAssignCrewlessTankRecovery,
   tryAssignSupportCare,
   tryAssignSupportRearMove,
+  tryAssignAiTankManeuver,
   diversifyAiMoveOrders,
   updateAiIncomingFireReactions,
   updateAiAbandonedTrenchCapture,
@@ -653,6 +654,19 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
     if (tryAssignSupportCare(unit, enemyUnits, game, game?.mapDef, careClaims)) continue;
     if (tryAssignSupportRearMove(unit, enemyUnits, game, game?.mapDef)) continue;
+    if (
+      tryAssignAiTankManeuver(
+        unit,
+        game?._playerAlive ?? [],
+        enemyUnits,
+        game?.mapDef,
+        game,
+        game?.difficulty,
+        { allowFlank: true, allowAdvance: true }
+      )
+    ) {
+      continue;
+    }
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
 
     const nearDefense = pickNearestDefenseInRange(unit, defenses);

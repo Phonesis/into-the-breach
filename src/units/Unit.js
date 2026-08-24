@@ -24,6 +24,7 @@ import {
   canEngageManualOrder,
   distanceBetween,
   getStandoffPosition,
+  isCrewlessVehicleTarget,
 } from '../game/Targeting.js';
 import {
   buildMovePath,
@@ -174,6 +175,7 @@ export class Unit {
 
   setAttackOrder(target, { manualFire = false, respectStance = false } = {}) {
     if (this.surrendered || this._captureExit) return false;
+    if (isCrewlessVehicleTarget(target)) return false;
     if (
       this.def?.type === 'artillery' &&
       target?.def === undefined &&

@@ -2,8 +2,10 @@ import {
   getStandoffPosition,
   findNearestEnemy,
   getUnitWeaponRange,
+  getEnemyArmorStandoffRange,
   isInRange,
   isSmokeShellReady,
+  isCrewlessVehicleTarget,
 } from './Targeting.js';
 import { isTankType, isVehicleUnit, isFootSoldier } from '../units/VehicleTypes.js';
 import { unitPathRadius } from './MovePath.js';
@@ -82,6 +84,18 @@ const AI_TANK_FLANK_MIN_REAR_OFFSET = 12;
 const AI_TANK_FLANK_MAX_REAR_OFFSET = 21;
 const AI_TANK_FLANK_MIN_LATERAL_OFFSET = 14;
 const AI_TANK_FLANK_MAX_LATERAL_OFFSET = 22;
+const AI_TANK_CREEP_MIN_DISTANCE = 7;
+const AI_TANK_CREEP_MAX_DISTANCE = 13;
+const AI_TANK_CREEP_DANGER_DISTANCE = 6;
+const AI_TANK_THREAT_SCAN_MIN = 40;
+const AI_TANK_CLOSE_INFANTRY_RADIUS = 22;
+const AI_TANK_FRIENDLY_SUPPORT_RADIUS = 32;
+const AI_TANK_SURROUND_SECTORS = 4;
+const AI_TANK_FLANK_WEIGHT = 1.55;
+const AI_TANK_HOLD_REASSESS_MIN = 3.4;
+const AI_TANK_HOLD_REASSESS_MAX = 5.8;
+const AI_TANK_CREEP_REASSESS_MIN = 4.2;
+const AI_TANK_CREEP_REASSESS_MAX = 7;
 const AI_RADIO_RELAY_REASSESS_MIN = 8;
 const AI_RADIO_RELAY_REASSESS_MAX = 14;
 const AI_RADIO_RELAY_CLUSTER_RADIUS = 16;
@@ -145,16 +159,21 @@ const AI_FIELDWORK_HOSPITAL_WOUNDED_RATIO = 0.8;
 const AI_FIELDWORK_HOSPITAL_CRITICAL_RATIO = 0.58;
 const AI_FIELDWORK_HOSPITAL_REAR_OFFSET = 10;
 const AI_FIELDWORK_HOSPITAL_MIN_ENEMY_DISTANCE = 24;
-const LAST_STAND_OPERATIONAL_REASSESS_MIN = 11;
-const LAST_STAND_OPERATIONAL_REASSESS_MAX = 16;
-const LAST_STAND_OPENING_REASSESS_DELAY = 13;
-const LAST_STAND_ATTACK_PULSE_INTERVAL = 14;
+const LAST_STAND_OPERATIONAL_REASSESS_MIN = 10;
+const LAST_STAND_OPERATIONAL_REASSESS_MAX = 15;
+const LAST_STAND_OPENING_REASSESS_DELAY = 6;
+const LAST_STAND_ATTACK_PULSE_INTERVAL = 16;
+const LAST_STAND_PROBE_MIN_DURATION = 16;
 const LAST_STAND_REGROUP_MIN_DURATION = 10;
 const LAST_STAND_DEFEND_MIN_DURATION = 16;
 /** A stationary Force-on-Force player force eventually draws a response. */
 const LAST_STAND_PLAYER_CAMP_MOVE_THRESHOLD = 6;
-const LAST_STAND_PLAYER_CAMP_DURATION = 30;
-const LAST_STAND_CAMP_ATTACK_COOLDOWN = 18;
+const LAST_STAND_PLAYER_CAMP_DURATION = 28;
+const LAST_STAND_CAMP_ATTACK_COOLDOWN = 20;
+const LAST_STAND_PLAYER_APPROACH_MOVE = 3.5;
+const LAST_STAND_PLAYER_FLANK_LATERAL = 0.48;
+const LAST_STAND_CONTACT_DISTANCE = 46;
+const LAST_STAND_CLOSE_CONTACT_DISTANCE = 28;
 const CLEARANCE_OPERATIONAL_REASSESS_MIN = 12;
 const CLEARANCE_OPERATIONAL_REASSESS_MAX = 17;
 const CLEARANCE_OPENING_REASSESS_DELAY = 12;
@@ -214,7 +233,7 @@ const LAST_STAND_FORCE_WEIGHTS = {
 };
 
 function isVisibleAttackTarget(unit, target, scenery) {
-  if (!target) return false;
+  if (!target || isCrewlessVehicleTarget(target)) return false;
   if (MORTAR_INDIRECT_TYPES.has(unit.def?.type)) return true;
   // Artillery: shells clear buildings outside the min-range ring; only large
   // obstacles inside that dead zone can block the shot.
@@ -263,6 +282,242 @@ function clampAiTankDestination(mapDef, x, z) {
   };
 }
 
+function getAiTankFacingYaw(unit, toX = null, toZ = null) {
+  if (Number.isFinite(toX) && Number.isFinite(toZ)) {
+    const dx = toX - unit.position.x;
+    const dz = toZ - unit.position.z;
+    if (Math.hypot(dx, dz) > 1.2) return Math.atan2(dx, dz);
+  }
+  return unit.mesh?.rotation?.y ?? 0;
+}
+
+function getAiTankAspectAt(tankX, tankZ, tankYaw, threatX, threatZ) {
+  const dx = threatX - tankX;
+  const dz = threatZ - tankZ;
+  const length = Math.max(0.001, Math.hypot(dx, dz));
+  const x = dx / length;
+  const z = dz / length;
+  const forwardX = Math.sin(tankYaw);
+  const forwardZ = Math.cos(tankYaw);
+  const rightX = Math.cos(tankYaw);
+  const rightZ = -Math.sin(tankYaw);
+  const forwardDot = x * forwardX + z * forwardZ;
+  const sideDot = x * rightX + z * rightZ;
+  if (Math.abs(forwardDot) >= Math.abs(sideDot)) {
+    return forwardDot >= 0 ? 'front' : 'rear';
+  }
+  return 'side';
+}
+
+function getAiTankThreatWeight(foe, dist) {
+  const type = foe?.def?.type;
+  if (type === 'antiTankGun') return dist < 72 ? 3.5 : 2.2;
+  if (type === 'tankDestroyer') return 2.7;
+  if (type === 'superHeavyTank') return 2.5;
+  if (type === 'tank') return 2.1;
+  if (foe?.isDefense) {
+    const weapon = foe.entry?.def?.weaponType;
+    const caliber = foe.entry?.def?.caliber ?? 0;
+    if (weapon === 'tank' || caliber >= 50) return 3.1;
+    return dist < 28 ? 0.55 : 0.22;
+  }
+  if (type === 'armoredCar') return 0.75;
+  if (type === 'artillery' || type === 'mortar') return 0.32;
+  if (
+    type === 'infantry' ||
+    type === 'paratrooper' ||
+    type === 'machineGun' ||
+    type === 'engineer' ||
+    type === 'commander'
+  ) {
+    if (dist <= 14) return 1.15;
+    if (dist <= AI_TANK_CLOSE_INFANTRY_RADIUS) return 0.55;
+    if (dist <= 36) return 0.22;
+    if (dist <= 52) return 0.08;
+    return 0;
+  }
+  return 0;
+}
+
+function collectAiTankThreats(players, game, originX, originZ, radius) {
+  const threats = [];
+  const pushThreat = (foe) => {
+    if (!foe || foe.dead || foe.surrendered || foe._captureExit) return;
+    const x = foe.position?.x ?? foe.mesh?.position?.x;
+    const z = foe.position?.z ?? foe.mesh?.position?.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    const dist = Math.hypot(x - originX, z - originZ);
+    if (dist > radius) return;
+    const weight = getAiTankThreatWeight(foe, dist);
+    if (weight <= 0) return;
+    threats.push({ foe, x, z, dist, weight });
+  };
+  for (const foe of players ?? []) pushThreat(foe);
+  const defenses = game?.defenses?.getAttackTargets?.();
+  if (defenses?.length) {
+    for (const defense of defenses) pushThreat(defense);
+  }
+  return threats;
+}
+
+function assessAiTankEnvelope(unit, players, game, x, z, yaw) {
+  const range = unit.def?.range ?? 55;
+  const radius = Math.max(AI_TANK_THREAT_SCAN_MIN, range * 0.92);
+  const threats = collectAiTankThreats(players, game, x, z, radius);
+  const sectors = new Array(8).fill(0);
+  let frontWeight = 0;
+  let sideWeight = 0;
+  let rearWeight = 0;
+  let antiArmorCount = 0;
+  let infantryClose = 0;
+  let nearestAntiArmor = Infinity;
+  let nearestThreat = Infinity;
+
+  for (const threat of threats) {
+    nearestThreat = Math.min(nearestThreat, threat.dist);
+    const aspect = getAiTankAspectAt(x, z, yaw, threat.x, threat.z);
+    if (aspect === 'front') frontWeight += threat.weight;
+    else if (aspect === 'rear') rearWeight += threat.weight;
+    else sideWeight += threat.weight;
+
+    const angle = Math.atan2(threat.x - x, threat.z - z);
+    const sector = ((Math.round(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8) + 8) % 8;
+    sectors[sector] += threat.weight;
+
+    const type = threat.foe?.def?.type;
+    const defenseCaliber = threat.foe?.entry?.def?.caliber ?? 0;
+    const antiArmor =
+      type === 'antiTankGun' ||
+      isTankType(type) ||
+      (threat.foe?.isDefense && (threat.foe.entry?.def?.weaponType === 'tank' || defenseCaliber >= 50));
+    if (antiArmor) {
+      antiArmorCount += 1;
+      nearestAntiArmor = Math.min(nearestAntiArmor, threat.dist);
+    }
+    if (
+      threat.dist <= AI_TANK_CLOSE_INFANTRY_RADIUS &&
+      (type === 'infantry' ||
+        type === 'paratrooper' ||
+        type === 'machineGun' ||
+        type === 'engineer')
+    ) {
+      infantryClose += 1;
+    }
+  }
+
+  const occupiedSectors = sectors.filter((weight) => weight >= 0.4).length;
+  const oppositeCoverage = [0, 1, 2, 3].reduce(
+    (count, i) => count + (sectors[i] >= 0.4 && sectors[i + 4] >= 0.4 ? 1 : 0),
+    0
+  );
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  let forwardContacts = 0;
+  for (const foe of players ?? []) {
+    if (!foe || foe.dead || foe.surrendered || foe._captureExit) continue;
+    const dx = foe.position.x - x;
+    const dz = foe.position.z - z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > range * 1.12 || dist < 0.5) continue;
+    if ((dx * forwardX + dz * forwardZ) / dist >= 0.12) forwardContacts += 1;
+  }
+  const flankedWeight = sideWeight + rearWeight;
+  const surrounded =
+    occupiedSectors >= AI_TANK_SURROUND_SECTORS ||
+    (occupiedSectors >= 3 && oppositeCoverage >= 1 && flankedWeight > frontWeight);
+  const flanked =
+    flankedWeight >= AI_TANK_FLANK_WEIGHT && flankedWeight >= frontWeight * 0.8;
+  const denseLine =
+    infantryClose >= 4 ||
+    (infantryClose >= 2 && antiArmorCount >= 1) ||
+    forwardContacts >= 4;
+  const killZone =
+    surrounded ||
+    (denseLine && antiArmorCount >= 1 && nearestAntiArmor <= range * 0.72) ||
+    flankedWeight >= 2.6;
+  const score =
+    flankedWeight * 1.35 +
+    (surrounded ? 4.5 : 0) +
+    infantryClose * 0.55 +
+    antiArmorCount * 0.85 +
+    (nearestAntiArmor < 28 ? 2.2 : 0);
+
+  return {
+    threats,
+    frontWeight,
+    sideWeight,
+    rearWeight,
+    flankedWeight,
+    antiArmorCount,
+    infantryClose,
+    occupiedSectors,
+    nearestAntiArmor,
+    nearestThreat,
+    forwardContacts,
+    surrounded,
+    flanked,
+    denseLine,
+    killZone,
+    score,
+    hasContact: threats.length > 0,
+  };
+}
+
+function countNearbyFriendlyArmor(unit, allies, radius = AI_TANK_FRIENDLY_SUPPORT_RADIUS) {
+  let count = 0;
+  for (const ally of allies ?? []) {
+    if (
+      ally === unit ||
+      ally.dead ||
+      !isTankType(ally.def?.type)
+    ) {
+      continue;
+    }
+    if (unit.distanceTo(ally) <= radius) count += 1;
+  }
+  return count;
+}
+
+function bindAiTankTarget(unit, target) {
+  if (!target || target.dead) return;
+  if (unit.attackOrder !== target) unit.setAttackOrder(target);
+  unit._chasingAttack = false;
+  if (isInRange(unit, target)) unit._attackOrderReachedRange = true;
+}
+
+function issueAiTankOrder(unit, destination, kind, target, now, duration, extra = {}) {
+  bindAiTankTarget(unit, target);
+  unit._userMoveOrder = false;
+  unit._chasingAttack = false;
+  if (kind === 'hold' || !destination) {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._reverseMoveOrder = false;
+    unit._aiTankManeuver = {
+      kind: 'hold',
+      targetId: target?.id ?? null,
+      x: unit.position.x,
+      z: unit.position.z,
+      until: now + duration,
+      ...extra,
+    };
+    return;
+  }
+  unit.moveTarget = { x: destination.x, z: destination.z };
+  unit._movePath = null;
+  unit._finalMoveGoal = { x: destination.x, z: destination.z };
+  unit._reverseMoveOrder = kind === 'reverse';
+  unit._aiTankManeuver = {
+    kind,
+    targetId: target?.id ?? null,
+    x: destination.x,
+    z: destination.z,
+    until: now + duration,
+    ...extra,
+  };
+}
+
 function getAiTankReverseDestination(unit, mapDef, game, random = Math.random) {
   const yaw = unit.mesh?.rotation?.y ?? 0;
   const distance =
@@ -277,6 +532,45 @@ function getAiTankReverseDestination(unit, mapDef, game, random = Math.random) {
     if (isAiTankDestinationOpen(game, point.x, point.z)) return point;
   }
   return null;
+}
+
+function getAiTankWithdrawDestination(unit, players, mapDef, game, envelope) {
+  const yaw = unit.mesh?.rotation?.y ?? 0;
+  const reverse = getAiTankReverseDestination(unit, mapDef, game);
+  if (reverse) {
+    const next = assessAiTankEnvelope(
+      unit,
+      players,
+      game,
+      reverse.x,
+      reverse.z,
+      yaw
+    );
+    if (!next.killZone || next.score <= (envelope?.score ?? 0)) return reverse;
+  }
+
+  let cx = 0;
+  let cz = 0;
+  let weight = 0;
+  for (const threat of envelope?.threats ?? []) {
+    cx += threat.x * threat.weight;
+    cz += threat.z * threat.weight;
+    weight += threat.weight;
+  }
+  if (weight <= 0) return reverse;
+  cx /= weight;
+  cz /= weight;
+  const dx = unit.position.x - cx;
+  const dz = unit.position.z - cz;
+  const length = Math.hypot(dx, dz) || 1;
+  const distance = AI_TANK_REVERSE_MIN_DISTANCE + 4;
+  const point = clampAiTankDestination(
+    mapDef,
+    unit.position.x + (dx / length) * distance,
+    unit.position.z + (dz / length) * distance
+  );
+  if (isAiTankDestinationOpen(game, point.x, point.z)) return point;
+  return reverse;
 }
 
 function getAiTankFlankDestination(
@@ -345,34 +639,131 @@ function pickAiTankManeuverTarget(unit, players, scenery) {
   return best;
 }
 
+function pickAiTankApproachTarget(unit, players, scenery) {
+  const preferred = pickAiTankManeuverTarget(unit, players, scenery);
+  if (preferred) return preferred;
+  return findNearestVisibleEnemy(unit, players, scenery);
+}
+
+function isAiTankAdvanceGoal(unit, dest, players) {
+  if (!dest || !Number.isFinite(dest.x) || !Number.isFinite(dest.z)) return false;
+  const nearest = findNearestEnemy(unit, players);
+  if (!nearest) return false;
+  const nowDist = unit.distanceTo(nearest);
+  const destDist = Math.hypot(dest.x - nearest.position.x, dest.z - nearest.position.z);
+  return destDist < nowDist - 1.6;
+}
+
+function getAiTankGoalStandoff(unit, target) {
+  if (!target) return null;
+  return getStandoffPosition(unit, target, getEnemyArmorStandoffRange(unit));
+}
+
+function getAiTankCautiousDestination(
+  unit,
+  goal,
+  players,
+  allies,
+  mapDef,
+  game,
+  envelope,
+  random = Math.random
+) {
+  if (!goal || !Number.isFinite(goal.x) || !Number.isFinite(goal.z)) return null;
+  const dx = goal.x - unit.position.x;
+  const dz = goal.z - unit.position.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 3.2) return null;
+
+  const yaw = getAiTankFacingYaw(unit, goal.x, goal.z);
+  const danger = envelope?.killZone || envelope?.flanked || envelope?.surrounded;
+  const isolated = countNearbyFriendlyArmor(unit, allies) === 0;
+  const maxStep = danger || (envelope?.denseLine && isolated)
+    ? AI_TANK_CREEP_DANGER_DISTANCE
+    : envelope?.denseLine
+      ? AI_TANK_CREEP_MIN_DISTANCE + 1
+      : AI_TANK_CREEP_MIN_DISTANCE +
+        random() * (AI_TANK_CREEP_MAX_DISTANCE - AI_TANK_CREEP_MIN_DISTANCE);
+  const step = Math.min(maxStep, distance);
+  const ux = dx / distance;
+  const uz = dz / distance;
+  const px = -uz;
+  const pz = ux;
+  const lateral = 8 + random() * 5;
+  const candidates = [
+    { x: unit.position.x + ux * step, z: unit.position.z + uz * step, progress: 1 },
+    { x: unit.position.x + ux * step * 0.55, z: unit.position.z + uz * step * 0.55, progress: 0.7 },
+    {
+      x: unit.position.x + ux * step * 0.7 + px * lateral,
+      z: unit.position.z + uz * step * 0.7 + pz * lateral,
+      progress: 0.75,
+    },
+    {
+      x: unit.position.x + ux * step * 0.7 - px * lateral,
+      z: unit.position.z + uz * step * 0.7 - pz * lateral,
+      progress: 0.75,
+    },
+  ];
+
+  let best = null;
+  let bestScore = Infinity;
+  for (const candidate of candidates) {
+    const point = clampAiTankDestination(mapDef, candidate.x, candidate.z);
+    if (!isAiTankDestinationOpen(game, point.x, point.z)) continue;
+    const next = assessAiTankEnvelope(unit, players, game, point.x, point.z, yaw);
+    if (next.killZone && next.score > (envelope?.score ?? 0) + 0.4) continue;
+    const score =
+      next.score +
+      next.flankedWeight * 0.25 +
+      (next.surrounded ? 3 : 0) -
+      candidate.progress * 0.8;
+    if (score < bestScore) {
+      bestScore = score;
+      best = point;
+    }
+  }
+  return best;
+}
+
 function continueAiTankManeuver(unit, players, mapDef, game, now) {
   const maneuver = unit._aiTankManeuver;
   if (!maneuver) return false;
-  const target = players.find((candidate) => candidate.id === maneuver.targetId);
-  if (
-    !target ||
-    target.dead ||
-    unit._mobilityDamaged ||
-    unit._crewless ||
-    now >= maneuver.until
-  ) {
+  if (unit._mobilityDamaged || unit._crewless || now >= maneuver.until) {
     clearAiTankManeuver(unit);
     return false;
+  }
+
+  const target = players.find((candidate) => candidate.id === maneuver.targetId);
+  if (maneuver.kind === 'flank' && (!target || target.dead)) {
+    clearAiTankManeuver(unit);
+    return false;
+  }
+
+  if (maneuver.kind === 'hold') {
+    if (target && !target.dead) bindAiTankTarget(unit, target);
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._reverseMoveOrder = false;
+    unit._chasingAttack = false;
+    return true;
   }
 
   const remaining = Math.hypot(
     unit.position.x - maneuver.x,
     unit.position.z - maneuver.z
   );
-  if (remaining <= 4.5) {
+  if (remaining <= (maneuver.kind === 'creep' ? 3.6 : 4.5)) {
     clearAiTankManeuver(unit);
     unit.moveTarget = null;
     unit._movePath = null;
     unit._finalMoveGoal = null;
+    unit._reverseMoveOrder = false;
+    unit._chasingAttack = false;
     return false;
   }
 
-  if (unit.attackOrder !== target) unit.setAttackOrder(target);
+  if (target && !target.dead) bindAiTankTarget(unit, target);
   if (
     !unit.moveTarget ||
     Math.hypot(unit.moveTarget.x - maneuver.x, unit.moveTarget.z - maneuver.z) > 2
@@ -382,14 +773,15 @@ function continueAiTankManeuver(unit, players, mapDef, game, now) {
     unit._finalMoveGoal = { x: maneuver.x, z: maneuver.z };
   }
   unit._userMoveOrder = false;
+  unit._chasingAttack = false;
   unit._reverseMoveOrder = maneuver.kind === 'reverse';
   return true;
 }
 
 /**
- * Enemy tracked armor periodically disengages in reverse or works around an
- * opposing tank for a side/rear shot. The maneuver remains stable for several
- * AI ticks so target acquisition cannot pin the hull in its first firing spot.
+ * Enemy tracked armor creeps toward contact, holds the main-gun envelope
+ * against a formed line, and reverses when the hull is being flanked or
+ * wrapped. Long charges into clustered infantry and AT guns are rejected.
  */
 export function tryAssignAiTankManeuver(
   unit,
@@ -398,7 +790,7 @@ export function tryAssignAiTankManeuver(
   mapDef,
   game,
   difficulty,
-  { allowFlank = true } = {},
+  { allowFlank = true, allowAdvance = true } = {},
   random = Math.random
 ) {
   if (
@@ -415,115 +807,240 @@ export function tryAssignAiTankManeuver(
   }
 
   const now = game?.matchTime ?? 0;
-  if (continueAiTankManeuver(unit, players, mapDef, game, now)) return true;
-  if (now < (unit._aiTankManeuverNextAt ?? 0)) return false;
-  unit._aiTankManeuverNextAt =
-    now +
-    AI_TANK_MANEUVER_REASSESS_MIN +
-    random() * (AI_TANK_MANEUVER_REASSESS_MAX - AI_TANK_MANEUVER_REASSESS_MIN);
+  const currentYaw = unit.mesh?.rotation?.y ?? 0;
+  const current = assessAiTankEnvelope(
+    unit,
+    players,
+    game,
+    unit.position.x,
+    unit.position.z,
+    currentYaw
+  );
+  const inDanger = current.surrounded || current.flanked || current.killZone;
 
-  const target = pickAiTankManeuverTarget(unit, players, game?.scenery);
-  if (!target) return false;
+  if (!inDanger && continueAiTankManeuver(unit, players, mapDef, game, now)) {
+    return true;
+  }
+  if (inDanger) clearAiTankManeuver(unit);
 
-  const distance = unit.distanceTo(target);
+  const target = pickAiTankApproachTarget(unit, players, game?.scenery);
   const hpRatio = unit.hp / Math.max(1, unit.maxHp);
-  const nearbyThreats = players.filter(
-    (candidate) =>
-      !candidate.dead &&
-      (isTankType(candidate.def?.type) || candidate.def?.type === 'antiTankGun') &&
-      unit.distanceTo(candidate) <= (unit.def?.range ?? 55) * 0.9
-  ).length;
-  const nearbyFriendlyArmor = allies.filter(
-    (candidate) =>
-      candidate !== unit &&
-      !candidate.dead &&
-      isTankType(candidate.def?.type) &&
-      unit.distanceTo(candidate) <= 42
-  ).length;
-  const outnumbered = nearbyThreats > nearbyFriendlyArmor + 1;
-  const yaw = unit.mesh?.rotation?.y ?? 0;
-  const tx = target.position.x - unit.position.x;
-  const tz = target.position.z - unit.position.z;
-  const targetDistance = Math.max(0.001, Math.hypot(tx, tz));
-  const targetForwardDot =
-    (tx * Math.sin(yaw) + tz * Math.cos(yaw)) / targetDistance;
-  const pressured =
-    distance <= Math.min(48, (unit.def?.range ?? 55) * 0.82);
-  const reverseChance =
-    hpRatio < 0.34 ? 0.78 : hpRatio < 0.58 ? 0.48 : outnumbered ? 0.34 : 0.13;
+  const friendlyArmor = countNearbyFriendlyArmor(unit, allies);
+  const range = unit.def?.range ?? 55;
+  const standoffRange = getEnemyArmorStandoffRange(unit);
+  const inFiringPosition =
+    !!target &&
+    isInRange(unit, target) &&
+    !current.surrounded &&
+    !current.flanked;
+  const facingDefensiveLine =
+    current.denseLine ||
+    current.antiArmorCount >= 1 ||
+    current.forwardContacts >= 3 ||
+    (Number.isFinite(current.nearestThreat) && current.nearestThreat <= standoffRange * 1.08);
 
-  if (pressured && targetForwardDot >= 0.32 && random() < reverseChance) {
-    const destination = getAiTankReverseDestination(unit, mapDef, game, random);
+  if (inDanger || (current.denseLine && hpRatio < 0.42 && current.nearestThreat < range * 0.7)) {
+    const destination = getAiTankWithdrawDestination(
+      unit,
+      players,
+      mapDef,
+      game,
+      current
+    );
     if (destination) {
-      unit.setAttackOrder(target);
-      unit.moveTarget = { ...destination };
-      unit._movePath = null;
-      unit._finalMoveGoal = { ...destination };
-      unit._userMoveOrder = false;
-      unit._reverseMoveOrder = true;
-      unit._aiTankManeuver = {
-        kind: 'reverse',
-        targetId: target.id,
-        x: destination.x,
-        z: destination.z,
-        until: now + 7 + random() * 4,
-      };
+      const hullYaw = unit.mesh?.rotation?.y ?? 0;
+      const awayX = destination.x - unit.position.x;
+      const awayZ = destination.z - unit.position.z;
+      const awayLen = Math.max(0.001, Math.hypot(awayX, awayZ));
+      const behindDot =
+        (awayX * Math.sin(hullYaw) + awayZ * Math.cos(hullYaw)) / awayLen;
+      issueAiTankOrder(
+        unit,
+        destination,
+        behindDot <= -0.35 ? 'reverse' : 'creep',
+        target,
+        now,
+        6 + random() * 4
+      );
+      unit._aiTankManeuverNextAt = now + 3;
       return true;
+    }
+    issueAiTankOrder(
+      unit,
+      null,
+      'hold',
+      target,
+      now,
+      AI_TANK_HOLD_REASSESS_MIN + random() * 1.8
+    );
+    return true;
+  }
+
+  if (inFiringPosition && (facingDefensiveLine || !allowAdvance)) {
+    issueAiTankOrder(
+      unit,
+      null,
+      'hold',
+      target,
+      now,
+      AI_TANK_HOLD_REASSESS_MIN +
+        random() * (AI_TANK_HOLD_REASSESS_MAX - AI_TANK_HOLD_REASSESS_MIN)
+    );
+    unit._aiTankManeuverNextAt = now + 2.4;
+    return true;
+  }
+
+  if (!allowAdvance) return false;
+
+  const goal = target
+    ? getAiTankGoalStandoff(unit, target)
+    : isAiTankAdvanceGoal(unit, unit._finalMoveGoal ?? unit.moveTarget, players)
+      ? (unit._finalMoveGoal ?? unit.moveTarget)
+      : null;
+
+  if (
+    allowFlank &&
+    target &&
+    isTankType(target.def?.type) &&
+    hpRatio >= 0.34 &&
+    !current.denseLine &&
+    !current.surrounded &&
+    now >= (unit._aiTankManeuverNextAt ?? 0)
+  ) {
+    const targetAspect = getArmorAspect(unit, target).aspect;
+    const distance = unit.distanceTo(target);
+    if (targetAspect === 'front') {
+      const aggression = difficulty?.attackAggressionMult ?? 1;
+      const closeContact = distance <= range * 1.05;
+      const targetIsActivelyEngaging =
+        target.attackOrder === unit || target.target === unit;
+      const valuableTarget =
+        target.def?.type === 'tankDestroyer' || target.def?.type === 'superHeavyTank';
+      const flankChance = clamp(
+        0.28 +
+          (aggression - 1) * 0.12 +
+          (closeContact ? 0.12 : 0.04) +
+          (targetIsActivelyEngaging ? 0.1 : 0) +
+          (valuableTarget ? 0.06 : 0) -
+          (friendlyArmor === 0 ? 0.16 : 0) -
+          (current.antiArmorCount >= 2 ? 0.2 : 0),
+        0.08,
+        0.58
+      );
+      if (random() < flankChance) {
+        const side = ((unit.id ?? 0) & 1) === 0 ? 1 : -1;
+        const destination = getAiTankFlankDestination(
+          unit,
+          target,
+          mapDef,
+          game,
+          side,
+          random
+        );
+        if (destination) {
+          const destYaw = getAiTankFacingYaw(unit, destination.x, destination.z);
+          const destEnvelope = assessAiTankEnvelope(
+            unit,
+            players,
+            game,
+            destination.x,
+            destination.z,
+            destYaw
+          );
+          if (!destEnvelope.killZone && !destEnvelope.surrounded && destEnvelope.score <= current.score + 0.8) {
+            issueAiTankOrder(
+              unit,
+              destination,
+              'flank',
+              target,
+              now,
+              12 + random() * 6,
+              { side: destination.side }
+            );
+            unit._aiTankManeuverNextAt =
+              now +
+              AI_TANK_MANEUVER_REASSESS_MIN +
+              random() * (AI_TANK_MANEUVER_REASSESS_MAX - AI_TANK_MANEUVER_REASSESS_MIN);
+            return true;
+          }
+        }
+      }
     }
   }
 
-  const targetIsArmored = isTankType(target.def?.type);
-  const targetAspect = targetIsArmored ? getArmorAspect(unit, target).aspect : 'front';
-  if (!allowFlank || hpRatio < 0.3 || targetAspect !== 'front') {
+  if (!goal) {
+    if (target && isInRange(unit, target)) {
+      issueAiTankOrder(
+        unit,
+        null,
+        'hold',
+        target,
+        now,
+        AI_TANK_HOLD_REASSESS_MIN + random() * 1.6
+      );
+      return true;
+    }
     return false;
   }
-  const aggression = difficulty?.attackAggressionMult ?? 1;
-  const closeContact = distance <= (unit.def?.range ?? 55) * 1.05;
-  const targetIsActivelyEngaging =
-    target.attackOrder === unit || target.target === unit;
-  const valuableTarget =
-    target.def?.type === 'tankDestroyer' || target.def?.type === 'superHeavyTank';
-  // A tank that has a frontal armor problem should usually try to solve it;
-  // the previous 25%-base roll made a flank an occasional novelty, especially
-  // on Easy and during the long gaps between reassessments.
-  const flankChance = clamp(
-    0.36 +
-      (aggression - 1) * 0.14 +
-      (closeContact ? 0.18 : 0.06) +
-      (targetIsActivelyEngaging ? 0.12 : 0) +
-      (valuableTarget ? 0.06 : 0) +
-      (outnumbered ? 0.05 : 0),
-    0.28,
-    0.72
-  );
-  if (random() >= flankChance) return false;
 
-  const side = ((unit.id ?? 0) & 1) === 0 ? 1 : -1;
-  const destination = getAiTankFlankDestination(
+  const remaining = Math.hypot(goal.x - unit.position.x, goal.z - unit.position.z);
+  if (remaining <= 4 && target && isInRange(unit, target)) {
+    issueAiTankOrder(
+      unit,
+      null,
+      'hold',
+      target,
+      now,
+      AI_TANK_HOLD_REASSESS_MIN + random() * 1.8
+    );
+    return true;
+  }
+
+  const creep = getAiTankCautiousDestination(
     unit,
-    target,
+    goal,
+    players,
+    allies,
     mapDef,
     game,
-    side,
+    current,
     random
   );
-  if (!destination) return false;
+  if (!creep) {
+    if (target || current.hasContact) {
+      issueAiTankOrder(
+        unit,
+        null,
+        'hold',
+        target,
+        now,
+        AI_TANK_HOLD_REASSESS_MIN + random() * 1.5
+      );
+      return true;
+    }
+    return false;
+  }
 
-  unit.setAttackOrder(target);
-  unit.moveTarget = { x: destination.x, z: destination.z };
-  unit._movePath = null;
-  unit._finalMoveGoal = { x: destination.x, z: destination.z };
-  unit._userMoveOrder = false;
-  unit._reverseMoveOrder = false;
-  unit._aiTankManeuver = {
-    kind: 'flank',
-    targetId: target.id,
-    x: destination.x,
-    z: destination.z,
-    side: destination.side,
-    until: now + 14 + random() * 7,
-  };
+  issueAiTankOrder(
+    unit,
+    creep,
+    'creep',
+    target,
+    now,
+    AI_TANK_CREEP_REASSESS_MIN +
+      random() * (AI_TANK_CREEP_REASSESS_MAX - AI_TANK_CREEP_REASSESS_MIN)
+  );
+  unit._aiTankManeuverNextAt = now + 2.2;
   return true;
+}
+
+function restrainAssignedAiTankMove(unit, players, allies, mapDef, game, difficulty) {
+  if (!isTankType(unit?.def?.type) || unit._aiTankManeuver) return false;
+  if (!unit.moveTarget && !unit.attackOrder) return false;
+  return tryAssignAiTankManeuver(unit, players, allies, mapDef, game, difficulty, {
+    allowFlank: true,
+    allowAdvance: true,
+  });
 }
 
 export function resetAI(openingDelay = 0, firstProdDelay = 5, defenseDelay = 24) {
@@ -1054,8 +1571,29 @@ function applyStandardAiUnitTactics(unit, plan, players, game) {
   if (unit._aiStandardHold) unit._aiStandardHold = false;
   if (target) {
     unit.setAttackOrder(target);
-    if (isInRange(unit, target)) holdStandardAiUnit(unit);
-    else setStandardAiMove(unit, getStandoffPosition(unit, target));
+    if (isInRange(unit, target) || isTankType(unit.def?.type)) {
+      if (isTankType(unit.def?.type)) unit._chasingAttack = false;
+      if (isInRange(unit, target)) holdStandardAiUnit(unit);
+      else {
+        setStandardAiMove(
+          unit,
+          getStandoffPosition(unit, target, getEnemyArmorStandoffRange(unit))
+        );
+        unit._chasingAttack = false;
+      }
+    } else {
+      setStandardAiMove(unit, getStandoffPosition(unit, target));
+    }
+    if (isTankType(unit.def?.type)) {
+      restrainAssignedAiTankMove(
+        unit,
+        players,
+        game?._enemyAlive ?? [],
+        game?.mapDef,
+        game,
+        game?.difficulty
+      );
+    }
     return true;
   }
 
@@ -1074,6 +1612,16 @@ function applyStandardAiUnitTactics(unit, plan, players, game) {
   } else {
     holdStandardAiUnit(unit);
   }
+  if (isTankType(unit.def?.type)) {
+    restrainAssignedAiTankMove(
+      unit,
+      players,
+      game?._enemyAlive ?? [],
+      game?.mapDef,
+      game,
+      game?.difficulty
+    );
+  }
   return operation === 'counterattack' || role !== 'line';
 }
 
@@ -1087,6 +1635,154 @@ function getLastStandDoctrineAttackBias(tactic) {
   return clamp(bias, 0.8, 1.18);
 }
 
+function getLastStandTacticTempo(tactic) {
+  const ai = tactic?.ai ?? {};
+  return {
+    openingHold: ai.openingHold ?? 20,
+    probeDelay: ai.probeDelay ?? 0,
+    probeCommit: clamp(ai.probeCommit ?? 0.26, 0.16, 0.4),
+    attackCommitStart: clamp(ai.attackCommitStart ?? 0.42, 0.28, 0.58),
+    attackCommitStep: clamp(ai.attackCommitStep ?? 0.18, 0.1, 0.28),
+    reserveRatio: clamp(ai.reserveRatio ?? 0.3, 0.18, 0.5),
+  };
+}
+
+function lastStandHoldRadius(unit) {
+  const type = unit?.def?.type;
+  if (type === 'artillery' || type === 'mortar') return 12;
+  if (type === 'antiTankGun') return 10;
+  if (isTankType(type)) return 16;
+  if (type === 'armoredCar') return 14;
+  return 11;
+}
+
+function isLastStandSupportRole(role) {
+  return role === 'arty' || role === 'support';
+}
+
+function getLastStandCommitPriority(unit, tactic) {
+  const type = unit?.def?.type;
+  const role = unit.lastStandRole ?? roleFromUnitType(type);
+  const defendBias = (tactic?.stances?.[role] ?? 0.4) * 0.8;
+  let base = 2;
+  if (role === 'recon' || type === 'armoredCar') base = 0;
+  else if (type === 'infantry' || type === 'paratrooper') base = 1;
+  else if (type === 'machineGun' || type === 'engineer') base = 2;
+  else if (type === 'tank') base = 3;
+  else if (type === 'tankDestroyer') base = 4;
+  else if (type === 'superHeavyTank') base = 5;
+  else if (role === 'armor') base = 4;
+  else if (role === 'line') base = 2;
+  else base = 6;
+  return base + defendBias;
+}
+
+function getLastStandPlayerMotion(operational, playerSummary, enemySummary) {
+  const prev = operational.playerLastCenter;
+  const center = playerSummary.center;
+  const moved = prev
+    ? Math.hypot(center.x - prev.x, center.z - prev.z)
+    : 0;
+  const toEnemyX = enemySummary.center.x - center.x;
+  const toEnemyZ = enemySummary.center.z - center.z;
+  const toEnemyLen = Math.hypot(toEnemyX, toEnemyZ) || 1;
+  const vx = prev ? center.x - prev.x : 0;
+  const vz = prev ? center.z - prev.z : 0;
+  const approach =
+    moved > 0.4 ? (vx * toEnemyX + vz * toEnemyZ) / (moved * toEnemyLen) : 0;
+  const perpX = -toEnemyZ / toEnemyLen;
+  const perpZ = toEnemyX / toEnemyLen;
+  const lateral = moved > 0.4 ? (vx * perpX + vz * perpZ) / moved : 0;
+  return {
+    moved,
+    approach,
+    lateral,
+    approaching:
+      approach > 0.32 && moved >= LAST_STAND_PLAYER_APPROACH_MOVE,
+    withdrawing:
+      approach < -0.32 && moved >= LAST_STAND_PLAYER_APPROACH_MOVE,
+    flanking:
+      Math.abs(lateral) >= LAST_STAND_PLAYER_FLANK_LATERAL &&
+      moved >= LAST_STAND_PLAYER_APPROACH_MOVE,
+    flankSign: lateral >= 0 ? 1 : -1,
+    distance: toEnemyLen,
+  };
+}
+
+function lastStandEngageIfInRange(unit, focus) {
+  if (!focus || !isInRange(unit, focus)) return false;
+  unit.setAttackOrder(focus, { respectStance: true });
+  return true;
+}
+
+function assignLastStandUnitHold(unit, x, z, radius, bound = false) {
+  unit.lastStandStance = bound ? 'attack' : 'defend';
+  unit.defensiveHold = bound
+    ? { x, z, radius, bound: true }
+    : { x, z, radius };
+  unit._chasingAttack = false;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+}
+
+function getLastStandApproachPoint(
+  mapDef,
+  unit,
+  enemyCenter,
+  playerCenter,
+  tactic,
+  flankSide,
+  commitment,
+  mode,
+  playerMotion
+) {
+  const ai = tactic?.ai ?? {};
+  const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
+  const half = (mapDef?.size ?? 120) / 2 - 8;
+  const dx = playerCenter.x - enemyCenter.x;
+  const dz = playerCenter.z - enemyCenter.z;
+  const length = Math.hypot(dx, dz) || 1;
+  const fx = dx / length;
+  const fz = dz / length;
+  const px = -fz;
+  const pz = fx;
+
+  let depth = mode === 'probe' ? 0.34 : 0.42 + commitment * 0.24;
+  if (role === 'recon') depth += 0.1;
+  else if (role === 'armor') depth += mode === 'probe' ? -0.16 : -0.06;
+  else if (unit.def?.type === 'machineGun') depth -= 0.04;
+  if (ai.armorMode === 'flank' && role === 'armor') depth += 0.02;
+  depth = clamp(depth, 0.18, 0.72);
+
+  const minStandoff = role === 'recon' ? 20 : role === 'armor' ? 46 : 22;
+  const remaining = length * (1 - depth);
+  if (remaining < minStandoff) {
+    depth = Math.max(0.18, 1 - minStandoff / length);
+  }
+
+  let spread =
+    role === 'recon'
+      ? Math.max(16, (ai.armorFlankSpread ?? 14) * 1.15)
+      : role === 'armor'
+        ? Math.max(12, ai.armorFlankSpread ?? 14)
+        : 14;
+  let lateral = (((unit.id ?? 0) % 7) - 3) * (spread / 6);
+  if (mode === 'probe' && role === 'recon') {
+    lateral += (flankSide || 1) * spread * 0.35;
+  }
+  if (ai.armorMode === 'flank' && role === 'armor') {
+    lateral += (flankSide || 1) * Math.max(18, spread);
+  }
+  if (playerMotion?.flanking) {
+    lateral += playerMotion.flankSign * 10;
+  }
+
+  return {
+    x: clamp(enemyCenter.x + fx * length * depth + px * lateral, -half, half),
+    z: clamp(enemyCenter.z + fz * length * depth + pz * lateral, -half, half),
+  };
+}
+
 function getLastStandNearestForceDistance(enemies, players) {
   let nearest = Infinity;
   for (const enemy of enemies) {
@@ -1097,20 +1793,6 @@ function getLastStandNearestForceDistance(enemies, players) {
     }
   }
   return nearest;
-}
-
-function getLastStandIdleFrontRatio(enemies) {
-  let frontCount = 0;
-  let idleCount = 0;
-  for (const unit of enemies) {
-    if (!isLastStandOperationalUnit(unit)) continue;
-    const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
-    if (role !== 'line' && role !== 'armor' && role !== 'recon') continue;
-    frontCount++;
-    const hasTarget = unit.attackOrder && !unit.attackOrder.dead;
-    if (!hasTarget && !unit.moveTarget && !unit._aiTankManeuver) idleCount++;
-  }
-  return frontCount > 0 ? idleCount / frontCount : 0;
 }
 
 /**
@@ -1276,11 +1958,36 @@ function issueLastStandDefense(enemies, mapDef, operational) {
     };
     if (!unit.attackOrder || unit.attackOrder.dead || !isInRange(unit, unit.attackOrder)) {
       unit.clearAttackOrder();
+    } else {
+      unit._chasingAttack = false;
     }
     unit.moveTarget = null;
     unit._movePath = null;
     unit._userMoveOrder = false;
     unit._reverseMoveOrder = false;
+  }
+}
+
+function issueLastStandOpening(enemies, mapDef, operational) {
+  const summary = getLastStandForceSummary(enemies);
+  operational.anchor = clampLastStandPoint(mapDef, summary.center);
+  operational.commitment = 0;
+  operational.wave = 0;
+  const axis = getLastStandBattleAxis(mapDef);
+
+  for (const unit of enemies) {
+    if (!isLastStandOperationalUnit(unit)) continue;
+    clearAiTankManeuver(unit);
+    unit.clearAttackOrder();
+    const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
+    const screen = role === 'recon' ? 9 : 0;
+    const point = clampLastStandPoint(mapDef, {
+      x: unit.position.x + axis.forwardX * screen,
+      z: unit.position.z + axis.forwardZ * screen,
+    });
+    assignLastStandUnitHold(unit, point.x, point.z, lastStandHoldRadius(unit));
+    unit.moveTarget = screen > 0 ? { x: point.x, z: point.z } : null;
+    unit._movePath = null;
   }
 }
 
@@ -1290,56 +1997,129 @@ function issueLastStandAttackWave(
   mapDef,
   tactic,
   flankSide,
-  scenery
+  scenery,
+  operational
 ) {
-  const ai = tactic?.ai ?? getLastStandTactic('armoredThrust').ai;
+  const tempo = getLastStandTacticTempo(tactic);
+  const enemySummary = getLastStandForceSummary(enemies);
+  const playerSummary = getLastStandForceSummary(players);
+  const playerMotion = operational?.playerMotion ?? {};
+  const mode = operational?.mode === 'probe' ? 'probe' : 'attack';
+  let commitment = operational?.commitment ?? tempo.probeCommit;
+  if (playerMotion.approaching) {
+    commitment = Math.min(commitment, mode === 'probe' ? 0.22 : 0.48);
+  }
+  if (operational) operational.commitment = commitment;
+
+  const combat = [];
   for (const unit of enemies) {
     if (!isLastStandOperationalUnit(unit)) continue;
     const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
-    if (role === 'arty' || role === 'support') {
-      unit.lastStandStance = 'defend';
+    if (isLastStandSupportRole(role)) {
       if (!unit.defensiveHold) {
-        unit.defensiveHold = {
-          x: unit.position.x,
-          z: unit.position.z,
-          radius: unit.def?.type === 'artillery' || unit.def?.type === 'mortar' ? 12 : 10,
-        };
+        assignLastStandUnitHold(
+          unit,
+          unit.position.x,
+          unit.position.z,
+          lastStandHoldRadius(unit)
+        );
+      } else {
+        unit.lastStandStance = 'defend';
+      }
+      if (!lastStandEngageIfInRange(unit, pickPresetAttackTarget(unit, players, scenery))) {
+        if (unit.attackOrder && !isInRange(unit, unit.attackOrder)) {
+          unit.clearAttackOrder();
+        }
       }
       continue;
     }
+    combat.push(unit);
+  }
 
-    unit.lastStandStance = 'attack';
-    unit.defensiveHold = null;
+  combat.sort(
+    (a, b) => getLastStandCommitPriority(a, tactic) - getLastStandCommitPriority(b, tactic)
+  );
+
+  const reserveFloor = Math.max(
+    1,
+    Math.round(combat.length * (mode === 'probe' ? Math.max(tempo.reserveRatio, 0.55) : tempo.reserveRatio))
+  );
+  const maxCommit = Math.max(1, combat.length - Math.min(reserveFloor, combat.length - 1));
+  const targetCount = Math.max(
+    1,
+    Math.min(maxCommit, Math.round(combat.length * commitment))
+  );
+
+  for (let i = 0; i < combat.length; i++) {
+    const unit = combat[i];
+    const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
     const focus = pickPresetAttackTarget(unit, players, scenery);
-    if (focus) {
-      unit.setAttackOrder(focus);
-      if (!isInRange(unit, focus)) {
-        unit.moveTarget = getStandoffPosition(unit, focus);
+
+    if (i >= targetCount) {
+      clearAiTankManeuver(unit);
+      assignLastStandUnitHold(
+        unit,
+        unit.position.x,
+        unit.position.z,
+        lastStandHoldRadius(unit)
+      );
+      if (!lastStandEngageIfInRange(unit, focus)) {
+        unit.clearAttackOrder();
+        unit.moveTarget = null;
+      } else {
+        unit.moveTarget = null;
       }
+      unit._movePath = null;
       continue;
     }
 
-    if (unit.attackOrder && !unit.attackOrder.dead) continue;
-    const mode =
-      role === 'recon'
-        ? 'center'
-        : role === 'armor'
-          ? ai.armorMode
-          : 'center';
-    const spread =
-      role === 'recon'
-        ? Math.max(20, (ai.armorFlankSpread ?? 14) * 1.3)
-        : role === 'armor'
-          ? Math.max(14, ai.armorFlankSpread ?? 14)
-          : 18;
-    unit.clearAttackOrder();
-    unit.moveTarget = getPresetAdvancePoint(
+    const dest = getLastStandApproachPoint(
       mapDef,
-      players,
-      mode,
+      unit,
+      enemySummary.center,
+      playerSummary.center,
+      tactic,
       flankSide,
-      spread
+      commitment,
+      mode,
+      playerMotion
     );
+    const bounding =
+      unit.def?.type === 'machineGun' ||
+      unit.def?.type === 'sniper' ||
+      (role === 'armor' && (tactic?.ai?.armorMode === 'hold' || mode === 'probe'));
+
+    clearAiTankManeuver(unit);
+    if (bounding) {
+      assignLastStandUnitHold(unit, dest.x, dest.z, 9, true);
+    } else {
+      unit.lastStandStance = 'attack';
+      unit.defensiveHold = null;
+    }
+
+    if (lastStandEngageIfInRange(unit, focus)) {
+      unit.moveTarget = null;
+      unit._movePath = null;
+      continue;
+    }
+
+    const closeEnough =
+      focus && unit.distanceTo(focus) <= getUnitWeaponRange(unit) * 1.18;
+    if (closeEnough) {
+      unit.setAttackOrder(focus);
+      unit._chasingAttack = false;
+      unit.moveTarget = isTankType(unit.def?.type)
+        ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+        : getStandoffPosition(unit, focus);
+      unit._movePath = null;
+      unit._userMoveOrder = false;
+      continue;
+    }
+
+    unit.clearAttackOrder();
+    unit.moveTarget = dest;
+    if (isTankType(unit.def?.type)) unit._chasingAttack = false;
+    unit._chasingAttack = false;
     unit._movePath = null;
     unit._userMoveOrder = false;
   }
@@ -1360,19 +2140,33 @@ function setLastStandOperationalMode(
   operational.mode = mode;
   operational.since = now;
   operational.cycle = (operational.cycle ?? 0) + 1;
+  const tempo = getLastStandTacticTempo(tactic);
 
   if (mode === 'regroup') {
+    operational.commitment = 0;
     issueLastStandRegroup(enemies, players, mapDef, operational, forceRatio, game);
+  } else if (mode === 'opening') {
+    issueLastStandOpening(enemies, mapDef, operational);
   } else if (mode === 'defend') {
+    operational.commitment = Math.min(operational.commitment ?? 0, 0.2);
     issueLastStandDefense(enemies, mapDef, operational);
   } else {
+    if (mode === 'probe') {
+      operational.commitment = tempo.probeCommit;
+    } else {
+      operational.commitment = Math.max(
+        operational.commitment ?? 0,
+        tempo.attackCommitStart
+      );
+    }
     issueLastStandAttackWave(
       enemies,
       players,
       mapDef,
       tactic,
       flankSide,
-      game?.scenery
+      game?.scenery,
+      operational
     );
     operational.attackPulseAt = now + LAST_STAND_ATTACK_PULSE_INTERVAL;
   }
@@ -1390,6 +2184,10 @@ function updateLastStandOperationalPlan(
   const state = game?.lastStand;
   if (!state) return 'opening';
   const now = game?.matchTime ?? 0;
+  const tempo = getLastStandTacticTempo(tactic);
+  const openingHold =
+    (tempo.openingHold + tempo.probeDelay) *
+    Math.min(difficulty?.aiTickMult ?? 1, 1.25);
   let operational = state.enemyOperational;
   if (!operational || typeof operational !== 'object') {
     const initialSummary = getLastStandForceSummary(enemies);
@@ -1398,25 +2196,39 @@ function updateLastStandOperationalPlan(
       mode: 'opening',
       since: now,
       nextAt: now + LAST_STAND_OPENING_REASSESS_DELAY,
-      attackPulseAt: now + LAST_STAND_OPENING_REASSESS_DELAY,
+      attackPulseAt: now + openingHold,
       playerLastCenter: { ...initialPlayerSummary.center },
       playerLastMovedAt: now,
       playerCampSince: null,
       nextCampAttackAt: null,
+      commitment: 0,
+      wave: 0,
       cycle: 0,
       anchor: null,
       lastCenter: { ...initialSummary.center },
       lastStrength: initialSummary.score,
     };
     state.enemyOperational = operational;
+    issueLastStandOpening(enemies, mapDef, operational);
     return operational.mode;
   }
+
+  if (operational.commitment == null && operational.mode === 'opening') {
+    issueLastStandOpening(enemies, mapDef, operational);
+  }
+
   if (now < (operational.nextAt ?? 0)) return operational.mode ?? 'opening';
 
   const enemySummary = getLastStandForceSummary(enemies);
   const playerSummary = getLastStandForceSummary(players);
   if (enemySummary.count === 0 || playerSummary.count === 0) return operational.mode;
 
+  const playerMotion = getLastStandPlayerMotion(
+    operational,
+    playerSummary,
+    enemySummary
+  );
+  operational.playerMotion = playerMotion;
   const playerCamped = updateLastStandPlayerCampState(
     operational,
     players,
@@ -1434,17 +2246,10 @@ function updateLastStandOperationalPlan(
   const localPressure = nearbyPlayerScore / Math.max(0.35, nearbyEnemyScore);
   const nearestForceDistance = getLastStandNearestForceDistance(enemies, players);
   const underPressure = nearestForceDistance < 42 && localPressure > 1.2;
-  const idleFrontRatio = getLastStandIdleFrontRatio(enemies);
+  const playerClosing =
+    playerMotion.approaching &&
+    nearestForceDistance < LAST_STAND_CONTACT_DISTANCE + 24;
   const age = Math.max(0, now - (operational.since ?? now));
-  const previousCenter = operational.lastCenter ?? enemySummary.center;
-  const distanceAdvanced = Math.hypot(
-    enemySummary.center.x - previousCenter.x,
-    enemySummary.center.z - previousCenter.z
-  );
-  const attackHasStalled =
-    operational.mode === 'attack' &&
-    age >= 10 &&
-    (idleFrontRatio >= 0.32 || (distanceAdvanced < 2.5 && nearestForceDistance > 20));
 
   let nextMode = operational.mode ?? 'opening';
   if (nextMode === 'opening') {
@@ -1454,14 +2259,41 @@ function updateLastStandOperationalPlan(
       (underPressure && forceRatio < 0.76)
     ) {
       nextMode = 'regroup';
-    } else if (campAttackReady) {
-      // A defensive battle plan is allowed to hold the opening, but not to
-      // leave the field permanently passive when the player camps.
-      nextMode = 'attack';
-    } else if (tactic?.id === 'defensiveBelt' && forceRatio < 1.18) {
+    } else if (
+      playerClosing ||
+      nearestForceDistance < LAST_STAND_CLOSE_CONTACT_DISTANCE
+    ) {
       nextMode = 'defend';
-    } else {
-      nextMode = 'attack';
+    } else if (
+      age >= openingHold ||
+      campAttackReady ||
+      (playerMotion.withdrawing && age >= 10)
+    ) {
+      nextMode =
+        tactic?.id === 'defensiveBelt' &&
+        !campAttackReady &&
+        !playerMotion.withdrawing &&
+        forceRatio < 1.18
+          ? 'defend'
+          : 'probe';
+    } else if (tactic?.id === 'defensiveBelt' && age >= 10) {
+      nextMode = 'defend';
+    }
+  } else if (nextMode === 'probe') {
+    if (
+      forceRatio < 0.52 ||
+      (enemySummary.hpRatio < 0.4 && forceRatio < 0.78) ||
+      (underPressure && forceRatio < 0.72)
+    ) {
+      nextMode = 'regroup';
+    } else if (
+      playerClosing &&
+      nearestForceDistance < LAST_STAND_CONTACT_DISTANCE &&
+      forceRatio < 1.2
+    ) {
+      nextMode = 'defend';
+    } else if (age >= LAST_STAND_PROBE_MIN_DURATION) {
+      nextMode = playerClosing ? 'defend' : 'attack';
     }
   } else if (nextMode === 'attack') {
     if (
@@ -1470,21 +2302,29 @@ function updateLastStandOperationalPlan(
       (underPressure && forceRatio < 0.72)
     ) {
       nextMode = 'regroup';
+    } else if (
+      playerClosing &&
+      nearestForceDistance < LAST_STAND_CLOSE_CONTACT_DISTANCE &&
+      localPressure > 1.05 &&
+      age >= 8
+    ) {
+      nextMode = 'defend';
     }
   } else if (nextMode === 'regroup') {
     const readiness = getLastStandRegroupReadiness(enemies);
     if (
-      campAttackReady &&
+      (campAttackReady || playerMotion.withdrawing) &&
       forceRatio >= 0.72 &&
       enemySummary.hpRatio >= 0.5
     ) {
-      nextMode = 'attack';
+      nextMode = 'probe';
     } else if (
       forceRatio >= 1.08 &&
       enemySummary.hpRatio >= 0.58 &&
-      age >= LAST_STAND_REGROUP_MIN_DURATION
+      age >= LAST_STAND_REGROUP_MIN_DURATION &&
+      !playerClosing
     ) {
-      nextMode = 'attack';
+      nextMode = 'probe';
     } else if (
       age >= LAST_STAND_REGROUP_MIN_DURATION &&
       (readiness >= 0.55 || age >= 22)
@@ -1494,21 +2334,31 @@ function updateLastStandOperationalPlan(
   } else if (nextMode === 'defend') {
     if (forceRatio < 0.42 && underPressure && age >= 12) {
       nextMode = 'regroup';
+    } else if (playerClosing) {
+      nextMode = 'defend';
     } else if (
-      campAttackReady &&
+      playerMotion.flanking &&
+      age >= 10 &&
+      forceRatio >= 0.7 &&
+      enemySummary.hpRatio >= 0.45
+    ) {
+      nextMode = 'probe';
+    } else if (
+      (campAttackReady || playerMotion.withdrawing) &&
       forceRatio >= 0.58 &&
       enemySummary.hpRatio >= 0.45
     ) {
-      nextMode = 'attack';
+      nextMode = 'probe';
     } else if (
       age >= LAST_STAND_DEFEND_MIN_DURATION &&
+      !playerClosing &&
       (
         forceRatio >= attackThreshold ||
         (nearestForceDistance > 38 && forceRatio >= 0.55 && age >= 28) ||
         (underPressure && forceRatio >= 0.68 && doctrineBias >= 0.96)
       )
     ) {
-      nextMode = 'attack';
+      nextMode = 'probe';
     }
   }
 
@@ -1525,31 +2375,47 @@ function updateLastStandOperationalPlan(
       now,
       forceRatio
     );
-    if (nextMode === 'attack' && campAttackReady) {
+    if (
+      (nextMode === 'probe' || nextMode === 'attack') &&
+      campAttackReady
+    ) {
       operational.nextCampAttackAt = now + LAST_STAND_CAMP_ATTACK_COOLDOWN;
     }
   } else if (
-    nextMode === 'attack' &&
-    (attackHasStalled || now >= (operational.attackPulseAt ?? 0))
+    (nextMode === 'attack' || nextMode === 'probe') &&
+    now >= (operational.attackPulseAt ?? 0)
   ) {
+    if (
+      nextMode === 'attack' &&
+      !playerMotion.approaching &&
+      !underPressure
+    ) {
+      operational.commitment = Math.min(
+        1 - tempo.reserveRatio,
+        (operational.commitment ?? tempo.attackCommitStart) + tempo.attackCommitStep
+      );
+      operational.wave = (operational.wave ?? 0) + 1;
+    }
     issueLastStandAttackWave(
       enemies,
       players,
       mapDef,
       tactic,
       flankSide,
-      game?.scenery
+      game?.scenery,
+      operational
     );
     operational.attackPulseAt = now + LAST_STAND_ATTACK_PULSE_INTERVAL;
   }
 
+  const openingLike = nextMode === 'opening' || nextMode === 'probe';
   operational.nextAt =
     now +
-    (
-      LAST_STAND_OPERATIONAL_REASSESS_MIN +
-      Math.random() *
-        (LAST_STAND_OPERATIONAL_REASSESS_MAX - LAST_STAND_OPERATIONAL_REASSESS_MIN)
-    ) *
+    (openingLike
+      ? 6 + Math.random() * 4
+      : LAST_STAND_OPERATIONAL_REASSESS_MIN +
+        Math.random() *
+          (LAST_STAND_OPERATIONAL_REASSESS_MAX - LAST_STAND_OPERATIONAL_REASSESS_MIN)) *
       Math.min(difficulty?.aiTickMult ?? 1, 1.2);
   operational.lastCenter = { ...enemySummary.center };
   operational.lastStrength = enemySummary.score;
@@ -1559,32 +2425,36 @@ function updateLastStandOperationalPlan(
 }
 
 function updateLastStandOperationalPosition(unit, players, mode, scenery) {
-  if (mode !== 'regroup' && mode !== 'defend') return false;
   const hold = unit.defensiveHold;
   if (!hold) return false;
+  const bounding = !!hold.bound && unit.lastStandStance === 'attack';
+  const holding =
+    mode === 'regroup' ||
+    mode === 'defend' ||
+    mode === 'opening' ||
+    unit.lastStandStance === 'defend' ||
+    bounding;
+  if (!holding) return false;
+
   const focus = pickPresetAttackTarget(unit, players, scenery);
   const distanceToHold = Math.hypot(
     unit.position.x - hold.x,
     unit.position.z - hold.z
   );
 
-  if (focus && isInRange(unit, focus)) {
-    unit.setAttackOrder(focus);
-  } else {
+  if (lastStandEngageIfInRange(unit, focus)) {
+    unit._chasingAttack = false;
+  } else if (unit.attackOrder && !isInRange(unit, unit.attackOrder)) {
     unit.clearAttackOrder();
   }
 
-  if (mode === 'regroup') {
-    if (distanceToHold > Math.max(4, hold.radius * 0.45)) {
-      unit.moveTarget = { x: hold.x, z: hold.z };
-    } else {
-      unit.moveTarget = null;
-    }
-    return true;
-  }
-
-  if (distanceToHold > hold.radius) {
+  const arriveRadius =
+    mode === 'regroup' || bounding
+      ? Math.max(4, hold.radius * 0.45)
+      : hold.radius;
+  if (distanceToHold > arriveRadius) {
     unit.moveTarget = { x: hold.x, z: hold.z };
+    unit._chasingAttack = false;
   } else {
     unit.moveTarget = null;
   }
@@ -1732,8 +2602,11 @@ function issueClearanceAttackWave(enemies, players, mapDef, plan, game) {
     if (focus) {
       unit.setAttackOrder(focus);
       if (!isInRange(unit, focus)) {
-        unit.moveTarget = getStandoffPosition(unit, focus);
+        unit.moveTarget = isTankType(unit.def?.type)
+          ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+          : getStandoffPosition(unit, focus);
       }
+      if (isTankType(unit.def?.type)) unit._chasingAttack = false;
       continue;
     }
     if (unit.attackOrder && !unit.attackOrder.dead) continue;
@@ -2931,7 +3804,9 @@ export function updateAI({
       !!lastStand &&
       (
         unit.lastStandStance === 'defend' ||
-        lastStandOperationalMode === 'regroup'
+        lastStandOperationalMode === 'regroup' ||
+        lastStandOperationalMode === 'opening' ||
+        (!!unit.defensiveHold?.bound && unit.lastStandStance === 'attack')
       );
     if (
       lastStandOperationalMode !== 'regroup' &&
@@ -2946,6 +3821,11 @@ export function updateAI({
         {
           allowFlank:
             !holdsPreparedClearanceLine && !holdsPresetDefensivePosition,
+          allowAdvance:
+            !holdsPreparedClearanceLine &&
+            !holdsPresetDefensivePosition &&
+            lastStandOperationalMode !== 'regroup' &&
+            !clearanceOperationalHold,
         }
       )
     ) {
@@ -3004,19 +3884,14 @@ export function updateAI({
       // after treatment while combat units obey the battle-plan hold.
       if (tryAssignSupportCare(unit, aliveEnemies, game, mapDef, careClaims)) continue;
       if (tryAssignSupportRearMove(unit, aliveEnemies, game, mapDef)) continue;
+      const lastStandHoldMode =
+        lastStandOperationalMode === 'regroup' ||
+        lastStandOperationalMode === 'defend' ||
+        lastStandOperationalMode === 'opening' ||
+        unit.lastStandStance === 'defend' ||
+        (unit.defensiveHold?.bound && unit.lastStandStance === 'attack');
       if (
-        lastStandOperationalMode === 'regroup' &&
-        updateLastStandOperationalPosition(
-          unit,
-          alivePlayers,
-          lastStandOperationalMode,
-          game?.scenery
-        )
-      ) {
-        continue;
-      }
-      if (
-        lastStandOperationalMode === 'defend' &&
+        lastStandHoldMode &&
         updateLastStandOperationalPosition(
           unit,
           alivePlayers,
@@ -3106,7 +3981,20 @@ export function updateAI({
     if (focus) {
       unit.setAttackOrder(focus);
       if (!isInRange(unit, focus)) {
-        unit.moveTarget = getStandoffPosition(unit, focus);
+        unit.moveTarget = isTankType(unit.def?.type)
+          ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+          : getStandoffPosition(unit, focus);
+      }
+      if (isTankType(unit.def?.type)) {
+        unit._chasingAttack = false;
+        restrainAssignedAiTankMove(
+          unit,
+          alivePlayers,
+          aliveEnemies,
+          mapDef,
+          game,
+          d
+        );
       }
       continue;
     }
@@ -3955,7 +4843,8 @@ function getAiDefensiveTrenchContext(
     );
     return {
       kind: 'lastStand',
-      useTrenches: mode === 'defend' && !mobilityDoctrine,
+      useTrenches:
+        (mode === 'defend' || mode === 'opening') && !mobilityDoctrine,
       reserveRatio: mobilityDoctrine
         ? 0.62
         : tactic?.id === 'defensiveBelt'
@@ -7084,33 +7973,6 @@ function countAlliesInRole(allies, role, nearUnit, radius) {
   return n;
 }
 
-function getPresetAdvancePoint(mapDef, players, mode, flankSide, spread) {
-  const cluster = averagePosition(players);
-  const half = mapDef.size / 2 - 8;
-
-  if (mode === 'flank' && mapDef?.playerBase && mapDef?.enemyBase) {
-    const own = mapDef.enemyBase;
-    const foe = mapDef.playerBase;
-    const axisX = foe.x - own.x;
-    const axisZ = foe.z - own.z;
-    const len = Math.hypot(axisX, axisZ) || 1;
-    const perpX = -axisZ / len;
-    const perpZ = axisX / len;
-    const midX = (own.x + foe.x) * 0.5;
-    const midZ = (own.z + foe.z) * 0.5;
-    const flankDist = (mapDef.size ?? 120) * 0.2;
-    return {
-      x: clamp(midX + perpX * flankSide * flankDist + (Math.random() - 0.5) * spread, -half, half),
-      z: clamp(midZ + perpZ * flankSide * flankDist + (Math.random() - 0.5) * spread, -half, half),
-    };
-  }
-
-  return {
-    x: clamp(cluster.x + (Math.random() - 0.5) * spread, -half, half),
-    z: clamp(cluster.z + (Math.random() - 0.5) * spread, -half, half),
-  };
-}
-
 function findLeadRecon(allies) {
   let best = null;
   let bestDist = -1;
@@ -7142,32 +8004,58 @@ function updateLastStandPresetUnit(
   const ai = tactic.ai ?? getLastStandTactic('armoredThrust').ai;
   const role = unit.lastStandRole ?? 'line';
   const hold = unit.defensiveHold;
-  const isDefensive = unit.lastStandStance === 'defend' || (!!hold && unit.lastStandStance !== 'attack');
+  const isDefensive =
+    unit.lastStandStance === 'defend' ||
+    (!!hold && unit.lastStandStance !== 'attack');
+  const bounding = !!hold?.bound && unit.lastStandStance === 'attack';
   const focus = pickPresetAttackTarget(unit, players, scenery);
 
-  if (role === 'armor' || role === 'recon') {
-    if (focus) {
-      unit.setAttackOrder(focus);
-      if (!isInRange(unit, focus)) {
-        unit.moveTarget = getStandoffPosition(unit, focus);
+  if (isDefensive || bounding) {
+    if (lastStandEngageIfInRange(unit, focus)) {
+      if (hold) {
+        const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+        if (dist > hold.radius) unit.moveTarget = { x: hold.x, z: hold.z };
+        else unit.moveTarget = null;
+      } else {
+        unit.moveTarget = null;
       }
       return;
     }
-
-    if (ai.armorMode === 'hold' && role === 'armor' && isDefensive) {
-      if (hold) {
-        const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
-        if (dist > hold.radius) {
+    if (hold) {
+      const dist = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+      const arrive = bounding ? Math.max(4, hold.radius * 0.45) : hold.radius;
+      if (dist > arrive) {
+        if (unit.attackOrder && !isInRange(unit, unit.attackOrder)) {
           unit.clearAttackOrder();
-          unit.moveTarget = { x: hold.x, z: hold.z };
-        } else {
+        }
+        unit.moveTarget = { x: hold.x, z: hold.z };
+        unit._chasingAttack = false;
+      } else {
+        unit.moveTarget = null;
+        if (unit.attackOrder && !isInRange(unit, unit.attackOrder)) {
           unit.clearAttackOrder();
-          unit.moveTarget = null;
         }
       }
       return;
     }
+    unit.clearAttackOrder();
+    unit.moveTarget = null;
+    return;
+  }
 
+  if (role === 'armor' || role === 'recon') {
+    if (lastStandEngageIfInRange(unit, focus)) {
+      unit.moveTarget = null;
+      return;
+    }
+    if (focus && unit.distanceTo(focus) <= getUnitWeaponRange(unit) * 1.22) {
+      unit.setAttackOrder(focus);
+      unit._chasingAttack = false;
+      unit.moveTarget = isTankType(unit.def?.type)
+        ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+        : getStandoffPosition(unit, focus);
+      return;
+    }
     if (role === 'armor' && ai.armorMode === 'followRecon') {
       const leadRecon = findLeadRecon(allies);
       if (leadRecon?.moveTarget) {
@@ -7179,43 +8067,29 @@ function updateLastStandPresetUnit(
         const half = mapDef.size / 2 - 8;
         unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
         unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
+        unit._chasingAttack = false;
         return;
       }
     }
-
-    unit.clearAttackOrder();
-    const spread =
-      role === 'recon'
-        ? ai.armorFlankSpread * 1.35
-        : ai.armorFlankSpread * (ai.armorMode === 'flank' ? 1.1 : 1);
-    unit.moveTarget = getPresetAdvancePoint(
-      mapDef,
-      players,
-      role === 'recon' ? 'center' : ai.armorMode,
-      flankSide,
-      spread
-    );
+    if (unit.moveTarget) {
+      unit._chasingAttack = false;
+      return;
+    }
+    unit._chasingAttack = false;
     return;
   }
 
   if (role === 'line') {
-    if (!isDefensive && players.length > 0) {
-      if (focus) {
-        unit.setAttackOrder(focus);
-        if (!isInRange(unit, focus)) {
-          unit.moveTarget = getStandoffPosition(unit, focus);
-        }
-        return;
-      }
-      const advanceChance = (ai.infantryAdvanceMult ?? 0.55) * 0.32 * d.attackAggressionMult;
-      if (Math.random() < advanceChance) {
-        unit.clearAttackOrder();
-        unit.moveTarget = getPresetAdvancePoint(mapDef, players, 'center', flankSide, 14);
-        return;
-      }
+    if (lastStandEngageIfInRange(unit, focus)) {
+      unit.moveTarget = null;
+      return;
     }
-
-    if (isDefensive && countAlliesInRole(allies, 'armor', unit, 42) > 0) {
+    if (focus && unit.distanceTo(focus) <= getUnitWeaponRange(unit) * 1.18) {
+      unit.setAttackOrder(focus);
+      unit.moveTarget = getStandoffPosition(unit, focus);
+      return;
+    }
+    if (countAlliesInRole(allies, 'armor', unit, 42) > 0) {
       const armorLead = allies.find(
         (a) =>
           !a.dead &&
@@ -7223,7 +8097,7 @@ function updateLastStandPresetUnit(
           a.lastStandStance === 'attack' &&
           unit.distanceTo(a) < 42
       );
-      const followChance = 0.28 * (ai.lineFollowArmorMult ?? 1) * d.attackAggressionMult;
+      const followChance = 0.22 * (ai.lineFollowArmorMult ?? 1) * d.attackAggressionMult;
       if (
         armorLead &&
         (armorLead.attackOrder || armorLead.moveTarget) &&
@@ -7231,33 +8105,28 @@ function updateLastStandPresetUnit(
       ) {
         unit.lastStandStance = 'attack';
         unit.defensiveHold = null;
-        if (
-          armorLead.attackOrder &&
-          !armorLead.attackOrder.dead &&
-          isVisibleAttackTarget(unit, armorLead.attackOrder, scenery)
-        ) {
-          unit.setAttackOrder(armorLead.attackOrder);
-          unit.moveTarget = getStandoffPosition(unit, armorLead.attackOrder);
-        } else if (armorLead.moveTarget) {
+        if (armorLead.moveTarget) {
+          unit.clearAttackOrder();
           unit.moveTarget = {
             x: armorLead.moveTarget.x + (Math.random() - 0.5) * 8,
             z: armorLead.moveTarget.z + (Math.random() - 0.5) * 8,
           };
+          unit._chasingAttack = false;
         }
         return;
       }
     }
+    if (unit.moveTarget) {
+      unit._chasingAttack = false;
+      return;
+    }
+    unit._chasingAttack = false;
+    return;
   }
 
   if (role === 'arty' || role === 'support') {
-    if (focus) {
-      unit.setAttackOrder(focus);
-      if (!isInRange(unit, focus)) {
-        const distToHold = hold ? Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z) : Infinity;
-        if (hold && distToHold < hold.radius * 1.8) {
-          unit.moveTarget = getStandoffPosition(unit, focus);
-        }
-      }
+    if (lastStandEngageIfInRange(unit, focus)) {
+      unit.moveTarget = null;
       return;
     }
     if (hold) {
@@ -7283,25 +8152,13 @@ function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) 
   const focus = pickAttackTarget(unit, players, scenery);
 
   if (isDefensive) {
-    const engageChance = 0.55 * d.attackAggressionMult;
-
-    if (focus) {
-      unit.setAttackOrder(focus);
-      if (!isInRange(unit, focus)) {
-        const distToHold = hold ? Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z) : Infinity;
-        const chaseRadius = hold ? hold.radius * 2.4 : 22;
-        if (
-          unit.distanceTo(focus) < getUnitWeaponRange(unit) * 1.05 ||
-          (hold && distToHold < chaseRadius && Math.random() < engageChance)
-        ) {
-          unit.moveTarget = getStandoffPosition(unit, focus);
-        } else if (hold && distToHold > hold.radius) {
-          unit.clearAttackOrder();
-          unit.moveTarget = {
-            x: hold.x + (Math.random() - 0.5) * 4,
-            z: hold.z + (Math.random() - 0.5) * 4,
-          };
-        }
+    if (lastStandEngageIfInRange(unit, focus)) {
+      if (hold) {
+        const distToHold = Math.hypot(unit.position.x - hold.x, unit.position.z - hold.z);
+        if (distToHold > hold.radius) unit.moveTarget = { x: hold.x, z: hold.z };
+        else unit.moveTarget = null;
+      } else {
+        unit.moveTarget = null;
       }
       return;
     }
@@ -7322,37 +8179,23 @@ function updateLastStandUnit(unit, players, mapDef, difficulty, scenery = null) 
     }
   }
 
-  if (focus) {
+  if (lastStandEngageIfInRange(unit, focus)) {
+    unit.moveTarget = null;
+    return;
+  }
+  if (focus && unit.distanceTo(focus) <= getUnitWeaponRange(unit) * 1.18) {
     unit.setAttackOrder(focus);
-    if (!isInRange(unit, focus)) {
-      unit.moveTarget = getStandoffPosition(unit, focus);
-    }
+    unit._chasingAttack = false;
+    unit.moveTarget = isTankType(unit.def?.type)
+      ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+      : getStandoffPosition(unit, focus);
     return;
   }
-
-  if (unit.attackOrder && !unit.attackOrder.dead) return;
-
-  const nearest = findNearestVisibleEnemy(unit, players, scenery);
-  if (nearest && unit.distanceTo(nearest) < getUnitWeaponRange(unit) * 1.75) {
-    unit.setAttackOrder(nearest);
-    unit.moveTarget = getStandoffPosition(unit, nearest);
+  if (unit.moveTarget) {
+    unit._chasingAttack = false;
     return;
   }
-
-  if (players.length === 0) return;
-
-  const advanceChance = 0.42 + 0.28 * (d.attackAggressionMult - 1);
-  if (Math.random() < advanceChance) {
-    const center = averagePosition(players);
-    unit.clearAttackOrder();
-    unit.moveTarget = {
-      x: center.x + (Math.random() - 0.5) * 14,
-      z: center.z + (Math.random() - 0.5) * 14,
-    };
-    const half = mapDef.size / 2 - 8;
-    unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
-    unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
-  }
+  unit._chasingAttack = false;
 }
 
 /**
@@ -7402,14 +8245,25 @@ function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game
   if (role === 'armor') {
     if (focus) {
       unit.setAttackOrder(focus);
+      unit._chasingAttack = false;
       if (!isInRange(unit, focus)) {
-        unit.moveTarget = getStandoffPosition(unit, focus);
+        unit.moveTarget = isTankType(unit.def?.type)
+          ? getStandoffPosition(unit, focus, getEnemyArmorStandoffRange(unit))
+          : getStandoffPosition(unit, focus);
       }
-      return;
-    }
-    if (Math.random() < plan.armorFollow * 0.4 * aggression) {
+    } else if (Math.random() < plan.armorFollow * 0.4 * aggression) {
       unit.clearAttackOrder();
       unit.moveTarget = getClearanceAssaultAdvancePoint(mapDef, players, plan, unit);
+    }
+    if (isTankType(unit.def?.type)) {
+      restrainAssignedAiTankMove(
+        unit,
+        players,
+        allies,
+        mapDef,
+        game,
+        d
+      );
     }
     return;
   }

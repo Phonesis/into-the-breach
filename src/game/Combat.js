@@ -39,10 +39,12 @@ import {
   getGroundFireMoveDest,
   getStandoffPosition,
   getUnitWeaponRange,
+  getEnemyArmorStandoffRange,
   tankCanEngageTarget,
   findNearestEnemyInRange,
   filterAcquireNearAttacker,
   isSmokeShellTarget,
+  isCrewlessVehicleTarget,
   SMOKE_SHELL_COOLDOWN_SEC,
   isHqTarget,
   WEAPON_RANGE_SLACK,
@@ -629,6 +631,7 @@ export function canThrowHandGrenadeAt(attacker, target) {
   if (!attacker || !target || attacker.dead || target.dead) return false;
   if (!HAND_GRENADE_THROWER_TYPES.has(attacker.def?.type)) return false;
   if (!HAND_GRENADE_TARGET_TYPES.has(target.def?.type)) return false;
+  if (isCrewlessVehicleTarget(target)) return false;
   if (attacker.team === target.team || attacker.surrendered || attacker._captureExit) return false;
   if ((attacker.grenadeCooldown ?? 0) > 0 || isUnitMounted(attacker)) return false;
   return distanceBetween(attacker, target) <= HAND_GRENADE_RANGE;
@@ -898,7 +901,10 @@ export function updateCombat(
       (mainGunCanAim || coaxInRange || crewSmallArmsInRange)
     ) {
       if (attacker.moveTarget && attacker.attackOrder && !target.isGround) {
-        const standoff = getStandoffPosition(attacker, target);
+        const standoff =
+          attacker.team === 'enemy' && isTankType(attacker.def.type)
+            ? getStandoffPosition(attacker, target, getEnemyArmorStandoffRange(attacker))
+            : getStandoffPosition(attacker, target);
         const reach = getMoveReachConfig(attacker.def.type);
         if (hasReachedMoveDest(attacker, standoff, mapDef, reach.horiz * 0.85, reach.height * 0.85)) {
           attacker.moveTarget = null;
@@ -1089,6 +1095,13 @@ function resolveAttackTarget(attacker, targets, acquireTargets, scenery) {
       return attacker.attackOrder;
     }
     if (!attacker.attackOrder.dead) {
+      if (isCrewlessVehicleTarget(attacker.attackOrder)) {
+        attacker.clearAttackOrder();
+        if (!attacker._userMoveOrder && !attacker._aiTankManeuver) {
+          attacker.moveTarget = null;
+        }
+        return null;
+      }
       if (attacker.attackOrder._dropping) {
         attacker.clearAttackOrder();
         return null;
@@ -2143,9 +2156,13 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
           isHqTarget(unit.attackOrder)
             ? 1.05
             : 0.88;
-        const chaseRange = isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
-          ? unit.def.coaxMG.range * rangeSlack
-          : getUnitWeaponRange(unit) * rangeSlack;
+        const enemyArmor =
+          unit.team === 'enemy' && isTankType(unit.def.type);
+        const chaseRange = enemyArmor
+          ? getUnitWeaponRange(unit) * 0.92
+          : isTankType(unit.def.type) && isCoaxSoftTarget(unit.attackOrder) && unit.def.coaxMG
+            ? unit.def.coaxMG.range * rangeSlack
+            : getUnitWeaponRange(unit) * rangeSlack;
         if (blockedPursuit) {
           // A straight-line standoff point may lie inside a Berlin block.
           // Route toward the target's street and stop as soon as both weapon
@@ -2155,7 +2172,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
             z: unit.attackOrder.position.z,
           };
         } else if (dist > chaseRange) {
-          unit.moveTarget = getStandoffPosition(unit, unit.attackOrder);
+          unit.moveTarget = getStandoffPosition(
+            unit,
+            unit.attackOrder,
+            enemyArmor ? getEnemyArmorStandoffRange(unit) : null
+          );
         }
       }
     }

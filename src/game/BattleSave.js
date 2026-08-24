@@ -512,6 +512,9 @@ export function captureBattleSave(game, { id = null } = {}) {
                 playerLastCenter: game.lastStand.enemyOperational.playerLastCenter
                   ? { ...game.lastStand.enemyOperational.playerLastCenter }
                   : null,
+                playerMotion: game.lastStand.enemyOperational.playerMotion
+                  ? { ...game.lastStand.enemyOperational.playerMotion }
+                  : null,
               }
             : null,
         }
@@ -1297,6 +1300,9 @@ export function applyBattleSave(game, snapshot) {
               : null,
             playerLastCenter: snapshot.lastStand.enemyOperational.playerLastCenter
               ? { ...snapshot.lastStand.enemyOperational.playerLastCenter }
+              : null,
+            playerMotion: snapshot.lastStand.enemyOperational.playerMotion
+              ? { ...snapshot.lastStand.enemyOperational.playerMotion }
               : null,
           }
         : null,

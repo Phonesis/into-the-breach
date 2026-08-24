@@ -1,10 +1,19 @@
 /** Combat targeting helpers — ranges in game meters (~10 m per unit). */
 
 import { currentLivingPersonnel } from '../data/squadSizes.js';
-import { isTankType } from '../units/VehicleTypes.js';
+import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 
 /** Small boundary tolerance used by weapon checks to prevent range-edge flicker. */
 export const WEAPON_RANGE_SLACK = 1.02;
+
+/**
+ * A hull with no crew is an abandoned objective, not a live combat target.
+ * The flag is shared by surrendered tanks and vehicles restored from a
+ * recoverable knockout, regardless of which side originally owned the hull.
+ */
+export function isCrewlessVehicleTarget(target) {
+  return !!(target?.def && isVehicleUnit(target.def.type) && target._crewless);
+}
 
 /** Enemy or friendly headquarters (not a unit def, not ground fire). */
 export function isHqTarget(target) {
@@ -80,12 +89,18 @@ export function isSpotterRifleInRange(attacker, target, slack = WEAPON_RANGE_SLA
   if (attacker?.def?.type !== 'sniper' || !rifle || !sniperHasSpotter(attacker)) {
     return false;
   }
-  if (!target || target.dead || target.isGround || target.isSmokeShell) return false;
+  if (
+    !target ||
+    target.dead ||
+    target.isGround ||
+    target.isSmokeShell ||
+    isCrewlessVehicleTarget(target)
+  ) return false;
   return distanceBetween(attacker, target) <= rifle.range * slack;
 }
 
 export function isInRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
-  if (!target || target.dead) return false;
+  if (!target || target.dead || isCrewlessVehicleTarget(target)) return false;
   const distance = distanceBetween(attacker, target);
   const minRange = attacker.def?.minRange ?? 0;
   return distance <= getUnitWeaponRange(attacker) * slack && distance >= minRange / slack;
@@ -99,13 +114,13 @@ export function isPointInRange(unit, point, slack = WEAPON_RANGE_SLACK) {
 
 export function isInCoaxRange(attacker, target, slack = WEAPON_RANGE_SLACK) {
   const mg = attacker.def?.coaxMG;
-  if (!mg || !target || target.dead || target.isGround) return false;
+  if (!mg || !target || target.dead || target.isGround || isCrewlessVehicleTarget(target)) return false;
   return distanceBetween(attacker, target) <= mg.range * slack;
 }
 
 export function isInsideMinimumRange(attacker, target) {
   const minRange = attacker?.def?.minRange ?? 0;
-  if (minRange <= 0 || !target || target.dead) return false;
+  if (minRange <= 0 || !target || target.dead || isCrewlessVehicleTarget(target)) return false;
   return distanceBetween(attacker, target) < minRange;
 }
 
@@ -120,7 +135,8 @@ export function isInArtilleryCrewSmallArmsRange(
     !weapon ||
     !target?.def ||
     target.dead ||
-    target.isGround
+    target.isGround ||
+    isCrewlessVehicleTarget(target)
   ) {
     return false;
   }
@@ -133,6 +149,14 @@ export function getStandoffRange(attacker, target) {
     return attacker.def.coaxMG.range * 0.9;
   }
   return getUnitWeaponRange(attacker) * 0.82;
+}
+
+/**
+ * Enemy armor holds the main gun envelope instead of closing to coax range,
+ * which would drive the hull into infantry and AT crossfire.
+ */
+export function getEnemyArmorStandoffRange(attacker) {
+  return getUnitWeaponRange(attacker) * 0.9;
 }
 
 export function tankCanEngageTarget(attacker, target) {
@@ -169,6 +193,7 @@ export function isSmokeShellReady(unit) {
 /** True when a player-issued attack order is in weapon range (ground, cover, or unit). */
 export function canEngageManualOrder(unit, target) {
   if (!target || target.dead) return false;
+  if (isCrewlessVehicleTarget(target)) return false;
   if (target.isGround || target.isSmokeShell) return isPointInRange(unit, target.position);
   if (isInArtilleryCrewSmallArmsRange(unit, target)) return true;
   if (isHqTarget(target)) {
@@ -221,7 +246,8 @@ export function filterAcquireNearAttacker(attacker, targets, rangeMult = 2.25) {
       other.team === attacker.team ||
       other.surrendered ||
       other._captureExit ||
-      other._dropping
+      other._dropping ||
+      isCrewlessVehicleTarget(other)
     ) continue;
     const tx = other.position?.x ?? other.mesh?.position.x ?? 0;
     const tz = other.position?.z ?? other.mesh?.position.z ?? 0;
@@ -250,7 +276,8 @@ export function findNearestEnemyInRange(unit, targets, maxRangeMultiplier = 1) {
       other.team === unit.team ||
       other.surrendered ||
       other._captureExit ||
-      other._dropping
+      other._dropping ||
+      isCrewlessVehicleTarget(other)
     ) continue;
     const d = distanceBetween(unit, other);
     if (d > maxR) continue;
@@ -277,7 +304,8 @@ export function findNearestEnemy(unit, targets) {
       other.team === unit.team ||
       other.surrendered ||
       other._captureExit ||
-      other._dropping
+      other._dropping ||
+      isCrewlessVehicleTarget(other)
     ) continue;
     const d = distanceBetween(unit, other);
     if (d < bestDist) {

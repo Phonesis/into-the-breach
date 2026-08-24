@@ -4,7 +4,7 @@ import {
   getLastStandPresetRoster,
   resolveLastStandPresetSize,
 } from '../data/lastStandForces.js';
-import { pickLastStandTactic, getLastStandTactic } from '../data/lastStandTactics.js';
+import { pickLastStandTactic } from '../data/lastStandTactics.js';
 import { buildLastStandBriefing } from '../data/lastStandBriefing.js';
 
 export { isLastStandMode, LAST_STAND_SUPPLIES };
@@ -529,13 +529,8 @@ export function ensureLastStandEngagementTactic(game) {
   return state.enemyTactic ?? null;
 }
 
-/** Combined-arms stances — varies by enemy battle plan (preset and manual). */
+/** Combined-arms stances — the operational planner commits attacks from this hold. */
 export function assignLastStandPresetStances(game) {
-  const tactic =
-    game.lastStand?.enemyTactic ??
-    getLastStandTactic(game.lastStand?.enemyTacticId);
-  const stanceTable = tactic?.stances ?? getLastStandTactic('armoredThrust').stances;
-
   for (const unit of game.units) {
     if (unit.dead) continue;
 
@@ -551,8 +546,9 @@ export function assignLastStandPresetStances(game) {
       continue;
     }
 
-    const defendChance = stanceTable[role] ?? stanceTable.line ?? 0.55;
-    assignDefensiveHold(unit, defendChance);
+    // Start formed on the deployment line. The operational planner commits
+    // probes and attack echelons from this hold instead of a first-wave charge.
+    assignDefensiveHold(unit, 1);
   }
 }
 
