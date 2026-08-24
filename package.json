@@ -35,6 +35,7 @@
     "bake-elevenlabs-vehicle-crew": "node scripts/bake-elevenlabs-vehicle-crew.mjs",
     "bake-elevenlabs-unit-voices": "node scripts/bake-elevenlabs-unit-voices.mjs",
     "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
+    "bake-elevenlabs-at-guns": "node scripts/bake-elevenlabs-at-guns.mjs",
     "bake-elevenlabs-japan": "node scripts/bake-elevenlabs-japan.mjs",
     "bake-elevenlabs-building-collapse": "node scripts/bake-elevenlabs-building-collapse.mjs",
     "bake-engines": "node scripts/bake-engine-sounds.mjs",

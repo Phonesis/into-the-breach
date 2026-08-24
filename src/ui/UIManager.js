@@ -523,7 +523,7 @@ export class UIManager {
         <div class="title-block">
           <span class="menu-kicker">Step 02 · Field Command</span>
           <h1>Choose Your Command</h1>
-          <p>Select a national force, doctrine, and historically grounded unit roster. The army you face is chosen from the theater you pick next — in every game mode.</p>
+          <p>Select your faction. The army you face is determined by the map.</p>
         </div>
         <div class="panel menu-panel faction-panel">
           <h2>Field Army</h2>
@@ -542,7 +542,7 @@ export class UIManager {
         <div class="title-block">
           <span class="menu-kicker">Step 03 · Final Briefing</span>
           <h1>Prepare Battlefield</h1>
-          <p>Choose the theater, battlefield scale, and mission-specific deployment rules. The opposing army is matched to the nations that historically fought there — the same matchup is used in every game mode.</p>
+          <p>Choose the theater, battlefield scale, and mission-specific deployment rules. The opposing army is matched to the nations that historically fought there.</p>
         </div>
         <div class="panel menu-panel battlefield-panel">
           <h2>Theater of Operations</h2>

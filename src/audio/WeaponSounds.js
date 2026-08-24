@@ -281,12 +281,11 @@ export const WEAPON_SAMPLE_FILES = {
   td_mg_uk: ['td-mg-uk.wav'],
 
   at_75_germany: [
-    'at-75-germany.wav',
-    'at-75-germany-c.wav',
-    'at-75-germany-d.wav'],
-  at_57_usa: ['at-57-usa.wav', 'at-57-usa-c.wav', 'at-57-usa-d.wav'],
-  at_57_uk: ['at-57-uk.wav', 'at-57-uk-c.wav', 'at-57-uk-d.wav'],
-  at_76_russia: ['at-76-russia.wav', 'at-76-russia-c.wav', 'at-76-russia-d.wav'],
+    'at-75-germany-el-01.wav',
+    'at-75-germany-el-02.wav'],
+  at_57_usa: ['at-57-usa-el-01.wav', 'at-57-usa-el-02.wav'],
+  at_57_uk: ['at-57-uk-el-01.wav', 'at-57-uk-el-02.wav'],
+  at_76_russia: ['at-76-russia-el-01.wav', 'at-76-russia-el-02.wav'],
   at_47_japan: ['at-47-japan-el-01.wav', 'at-47-japan-el-02.wav'],
 
   mortar_germany: ['mortar-germany.wav', 'mortar-germany-c.wav', 'mortar-germany-d.wav'],
