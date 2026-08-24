@@ -595,6 +595,8 @@ export class InfantryTrenchManager {
     let best = null;
     let bestD = maxDist;
     for (const t of this.trenches) {
+      // An empty enemy position can be occupied and captured. A live opposing
+      // garrison keeps the trench contested until it has been cleared.
       if (t.destroyed || (t.team !== team && (t.garrison?.length ?? 0) > 0)) continue;
       const d = Math.hypot(x - t.x, z - t.z);
       if (d < bestD) {
@@ -605,7 +607,7 @@ export class InfantryTrenchManager {
     return best;
   }
 
-  update(dt) {
+  update(dt, units = null) {
     this._updateCollapsingTrenches(dt);
 
     // Dig sites
@@ -648,7 +650,7 @@ export class InfantryTrenchManager {
     }
 
     // Occupation: enter / leave
-    updateTrenchOccupation(this.game._aliveUnits ?? this.game.units, this);
+    updateTrenchOccupation(units ?? this.game._aliveUnits ?? this.game.units, this);
   }
 
   _updateCollapsingTrenches(dt) {
@@ -1107,6 +1109,12 @@ export function tryEnterTrench(unit, trench, manager) {
   }
 
   trench.garrison = trench.garrison ?? [];
+  // The first unit into an abandoned opposing trench captures the fieldwork.
+  // Keep the trench intact and reusable; only a live garrison blocks the
+  // opposing side from entering it.
+  if (trench.team !== unit.team && trench.garrison.length === 0) {
+    trench.team = unit.team;
+  }
   if (!trench.garrison.includes(unit.id)) trench.garrison.push(unit.id);
   unit._trenchId = trench.id;
   unit._trenchSlot = trench.garrison.indexOf(unit.id);

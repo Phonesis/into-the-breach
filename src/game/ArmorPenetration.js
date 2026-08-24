@@ -110,44 +110,78 @@ const VEHICLE_IMPACT_SIZE = {
   superHeavyTank: { radius: 1.92, height: 2.3 },
 };
 
+function isDedicatedAtGun(attacker) {
+  return attacker?.def?.type === 'antiTankGun';
+}
+
 /**
  * Sample a point on the struck plate. Criticals are only possible when this
  * point overlaps a vulnerable area; they are not a free-floating damage roll.
+ * Towed AT guns aim more carefully, so weak-spot bands are slightly wider.
  */
-function sampleImpactArea(attacker, target, profile, aspect, random) {
-  const size = VEHICLE_IMPACT_SIZE[target.def.type] ?? VEHICLE_IMPACT_SIZE.tank;
-  // Averaging two rolls keeps most hits around the silhouette centre while
-  // still allowing track, roof and outer-plate strikes.
-  const lateral = random() + random() - 1;
-  const height = 0.16 + (random() + random()) * 0.39;
-
+function classifyImpactArea(profile, aspect, height, lateral, dedicatedAt) {
   let area = height < 0.34 ? 'running gear' : height > 0.72 ? 'upper turret' : 'armor plate';
   let weakSpot = null;
   let criticalChance = 0;
+  const ringLo = dedicatedAt ? 0.56 : 0.58;
+  const ringHi = dedicatedAt ? 0.71 : 0.69;
+  const visorLo = dedicatedAt ? 0.42 : 0.43;
+  const visorHi = dedicatedAt ? 0.57 : 0.57;
+  const visorLat = dedicatedAt ? 0.46 : 0.42;
+  const ammoLo = dedicatedAt ? 0.36 : 0.38;
+  const ammoHi = dedicatedAt ? 0.6 : 0.58;
+  const rearLo = dedicatedAt ? 0.32 : 0.34;
+  const rearHi = dedicatedAt ? 0.6 : 0.58;
 
   if (profile.openTop && height > 0.7) {
     area = 'open fighting compartment';
     weakSpot = { name: area, multiplier: 2.15 };
     criticalChance = 0.58;
-  } else if (height >= 0.58 && height <= 0.69) {
+  } else if (height >= ringLo && height <= ringHi) {
     area = 'turret ring';
     weakSpot = { name: area, multiplier: 1.85 };
     criticalChance = aspect === 'front' ? 0.34 : 0.46;
-  } else if (aspect === 'front' && height >= 0.43 && height <= 0.57 && Math.abs(lateral) < 0.42) {
+  } else if (aspect === 'front' && height >= visorLo && height <= visorHi && Math.abs(lateral) < visorLat) {
     area = "driver's visor";
     weakSpot = { name: area, multiplier: 1.75 };
     criticalChance = 0.36;
-  } else if (aspect === 'side' && height >= 0.38 && height <= 0.58) {
+  } else if (aspect === 'side' && height >= ammoLo && height <= ammoHi) {
     area = 'ammunition rack';
     weakSpot = { name: area, multiplier: 2.05 };
     criticalChance = 0.39;
-  } else if (aspect === 'rear' && height >= 0.34 && height <= 0.58) {
+  } else if (aspect === 'rear' && height >= rearLo && height <= rearHi) {
     area = Math.abs(lateral) < 0.5 ? 'engine deck' : 'rear ammunition stowage';
     weakSpot = {
       name: area,
       multiplier: area === 'engine deck' ? 1.9 : 2.05,
     };
     criticalChance = area === 'engine deck' ? 0.48 : 0.55;
+  }
+
+  if (dedicatedAt && weakSpot) {
+    criticalChance = clamp(criticalChance + 0.24, 0, 0.86);
+  }
+
+  return { area, weakSpot, criticalChance, height, lateral };
+}
+
+function sampleImpactArea(attacker, target, profile, aspect, random) {
+  const size = VEHICLE_IMPACT_SIZE[target.def.type] ?? VEHICLE_IMPACT_SIZE.tank;
+  const dedicatedAt = isDedicatedAtGun(attacker);
+
+  const rollPoint = () => {
+    // Averaging two rolls keeps most hits around the silhouette centre while
+    // still allowing track, roof and outer-plate strikes.
+    const lateral = random() + random() - 1;
+    const height = 0.16 + (random() + random()) * 0.39;
+    return classifyImpactArea(profile, aspect, height, lateral, dedicatedAt);
+  };
+
+  let impact = rollPoint();
+  // Dedicated AT crews get one extra aimed sample when the first round
+  // would have struck plain plate.
+  if (dedicatedAt && !impact.weakSpot && random() < 0.22) {
+    impact = rollPoint();
   }
 
   const dx = attacker.position.x - target.position.x;
@@ -159,12 +193,12 @@ function sampleImpactArea(attacker, target, profile, aspect, random) {
   const tangentZ = -towardX;
   const baseY = target.position.y ?? target.mesh?.position?.y ?? 0;
   const position = {
-    x: target.position.x + towardX * size.radius + tangentX * lateral * size.radius * 0.72,
-    y: baseY + 0.16 + height * size.height,
-    z: target.position.z + towardZ * size.radius + tangentZ * lateral * size.radius * 0.72,
+    x: target.position.x + towardX * size.radius + tangentX * impact.lateral * size.radius * 0.72,
+    y: baseY + 0.16 + impact.height * size.height,
+    z: target.position.z + towardZ * size.radius + tangentZ * impact.lateral * size.radius * 0.72,
   };
 
-  return { area, weakSpot, criticalChance, height, lateral, position };
+  return { ...impact, position };
 }
 
 export function isDirectArmorShell(attacker, target, { coax = false, paratrooperAt = false } = {}) {
@@ -210,7 +244,8 @@ export function resolveArmorHit(
   const penetrated = random() < penetrationChance;
   let weakSpot = null;
   if (penetrated && impact.weakSpot) {
-    const overmatchBonus = penetrationRatio > 1.25 ? 0.08 : 0;
+    const dedicatedAt = isDedicatedAtGun(attacker);
+    const overmatchBonus = penetrationRatio > 1.25 ? (dedicatedAt ? 0.12 : 0.08) : 0;
     if (random() < impact.criticalChance + overmatchBonus) weakSpot = impact.weakSpot;
   }
 

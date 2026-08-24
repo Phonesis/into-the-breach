@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { FACTION_LIST } from '../data/factions.js';
-import { MAP_LIST, MAPS } from '../data/maps.js';
+import { FACTION_LIST, getEnemyFaction } from '../data/factions.js';
+import { MAP_LIST, MAPS, getTheaterEnemyIds } from '../data/maps.js';
 import {
   MAP_SIZE_LIST,
   formatMapHudLabel,
@@ -223,12 +223,25 @@ const FACTION_ROSTER_LABELS = {
   artillery: 'Artillery',
 };
 
+function factionNameById(id) {
+  return FACTION_LIST.find((f) => f.id === id)?.name ?? id;
+}
+
+function joinOpponentNames(ids) {
+  const names = ids.map(factionNameById).filter(Boolean);
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} or ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`;
+}
+
 export class UIManager {
   constructor(root, callbacks) {
     this.root = root;
     this.callbacks = callbacks;
     this.selectedFaction = null;
     this.selectedMap = null;
+    this.selectedEnemyFactionId = null;
+    this._enemyRollKey = null;
     this.selectedMapSize = 'medium';
     this.selectedGameMode = null;
     this.selectedAssaultRole = null;
@@ -510,7 +523,7 @@ export class UIManager {
         <div class="title-block">
           <span class="menu-kicker">Step 02 · Field Command</span>
           <h1>Choose Your Command</h1>
-          <p>Select a national force, doctrine, and historically grounded unit roster.</p>
+          <p>Select a national force, doctrine, and historically grounded unit roster. The army you face is chosen from the theater you pick next — in every game mode.</p>
         </div>
         <div class="panel menu-panel faction-panel">
           <h2>Field Army</h2>
@@ -529,11 +542,12 @@ export class UIManager {
         <div class="title-block">
           <span class="menu-kicker">Step 03 · Final Briefing</span>
           <h1>Prepare Battlefield</h1>
-          <p>Choose the theater, battlefield scale, and mission-specific deployment rules.</p>
+          <p>Choose the theater, battlefield scale, and mission-specific deployment rules. The opposing army is matched to the nations that historically fought there — the same matchup is used in every game mode.</p>
         </div>
         <div class="panel menu-panel battlefield-panel">
           <h2>Theater of Operations</h2>
           <div class="map-grid" id="map-grid"></div>
+          <p class="map-opponent-briefing hidden" id="map-opponent-briefing"></p>
           <div class="map-size-block" id="map-size-block">
             <h2>Battlefield Scale</h2>
             <div class="map-size-grid" id="map-size-grid"></div>
@@ -1477,7 +1491,7 @@ export class UIManager {
 
   renderFactions() {
     const grid = this.root.querySelector('#faction-grid');
-    grid.innerHTML = FACTION_LIST.map((f, index) => {
+    grid.innerHTML = FACTION_LIST.map((f) => {
       const roster = getProducibleUnits(f)
         .map((key) => {
           const def = f.units[key];
@@ -1490,7 +1504,6 @@ export class UIManager {
         <span class="faction-flag-frame">
           <img class="faction-flag" src="${f.flag}" alt="" draggable="false" />
         </span>
-        <span class="card-index">Field Army ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${f.name}</span>
         <span class="meta">${f.era}</span>
         <span class="units-preview-label">Units</span>
@@ -1500,18 +1513,81 @@ export class UIManager {
     }).join('');
   }
 
+  ensureEnemyFaction(forceReroll = false) {
+    if (!this.selectedFaction || !this.selectedMap) {
+      this.selectedEnemyFactionId = null;
+      this._enemyRollKey = null;
+      return;
+    }
+    const key = `${this.selectedFaction}:${this.selectedMap}`;
+    const allowed = getTheaterEnemyIds(this.selectedFaction, this.selectedMap);
+    if (
+      !forceReroll &&
+      this._enemyRollKey === key &&
+      this.selectedEnemyFactionId &&
+      (!allowed.length || allowed.includes(this.selectedEnemyFactionId))
+    ) {
+      return;
+    }
+    this.selectedEnemyFactionId = getEnemyFaction(
+      this.selectedFaction,
+      this.selectedMap
+    ).id;
+    this._enemyRollKey = key;
+  }
+
+  opposingForceLabel(mapId, selected) {
+    if (!this.selectedFaction) return '';
+    if (selected && this.selectedEnemyFactionId) {
+      return factionNameById(this.selectedEnemyFactionId);
+    }
+    const ids = getTheaterEnemyIds(this.selectedFaction, mapId);
+    if (MAPS[mapId]?.randomizeOpponent && ids.length > 1) {
+      return joinOpponentNames(ids);
+    }
+    if (ids.length) return factionNameById(ids[0]);
+    return getEnemyFaction(this.selectedFaction, mapId).name;
+  }
+
   renderMaps() {
+    this.ensureEnemyFaction(false);
     const grid = this.root.querySelector('#map-grid');
-    grid.innerHTML = MAP_LIST.map(
-      (m, index) => `
-      <button class="card-btn interactive map-card" data-id="${m.id}">
+    grid.innerHTML = MAP_LIST.map((m, index) => {
+      const selected = m.id === this.selectedMap;
+      const opponentName = this.opposingForceLabel(m.id, selected);
+      const opponent = opponentName
+        ? `<span class="map-opponent">Opposing force: ${opponentName}</span>`
+        : '';
+      return `
+      <button class="card-btn interactive map-card${selected ? ' selected' : ''}" data-id="${m.id}">
         <span class="card-index">Theater ${String(index + 1).padStart(2, '0')}</span>
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
         <span class="units-preview">${m.features.join(' · ')}</span>
+        ${opponent}
       </button>
-    `
-    ).join('');
+    `;
+    }).join('');
+    const launch = this.root.querySelector('#btn-launch');
+    if (launch) launch.disabled = !this.selectedMap;
+    this.updateMapOpponentBriefing();
+  }
+
+  updateMapOpponentBriefing() {
+    const el = this.root.querySelector('#map-opponent-briefing');
+    if (!el) return;
+    if (!this.selectedFaction || !this.selectedMap) {
+      el.classList.add('hidden');
+      el.textContent = '';
+      return;
+    }
+    this.ensureEnemyFaction(false);
+    const player = FACTION_LIST.find((f) => f.id === this.selectedFaction);
+    const enemyName = factionNameById(
+      this.selectedEnemyFactionId ?? getEnemyFaction(this.selectedFaction, this.selectedMap).id
+    );
+    el.classList.remove('hidden');
+    el.innerHTML = `<strong>${player?.name ?? 'Your command'}</strong> will face <strong>${enemyName}</strong> in this theater.`;
   }
 
   renderMapSizes() {
@@ -1704,12 +1780,14 @@ export class UIManager {
         btn.classList.add('selected');
         this.selectedFaction = btn.dataset.id;
         this.updateFactionScreenBg(this.selectedFaction);
+        this.ensureEnemyFaction(false);
         this.root.querySelector('#btn-to-maps').disabled = false;
       };
     });
 
     this.root.querySelector('#btn-to-maps').onclick = () => {
       this.updateModeSetupPanels();
+      this.renderMaps();
       this.renderMapSizes();
       show('map');
     };
@@ -1824,11 +1902,11 @@ export class UIManager {
     this.root.querySelector('#map-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.map-card');
       if (!btn) return;
-      this.root.querySelectorAll('.map-card').forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
       this.selectedMap = btn.dataset.id;
       const mapBase = MAPS[this.selectedMap];
       if (mapBase) this.selectedMapSize = getDefaultMapSize(mapBase);
+      this.ensureEnemyFaction(true);
+      this.renderMaps();
       this.renderMapSizes();
       this.renderLastStandPresetSizes();
       this.updateCampaignStyleMapSizeLock();
@@ -1837,6 +1915,7 @@ export class UIManager {
 
     this.root.querySelector('#btn-launch').onclick = () => {
       if (!this.selectedFaction || !this.selectedMap || !this.selectedGameMode) return;
+      this.ensureEnemyFaction(false);
       if (this.selectedGameMode === 'assault' && !this.selectedAssaultRole) return;
       if (this.selectedGameMode === 'clearance' && !this.selectedClearanceRole) return;
       if (this.callbacks.onStartGame) {
@@ -1860,6 +1939,7 @@ export class UIManager {
           () => this.callbacks.onStartGame(this.selectedFaction, this.selectedMap, this.selectedGameMode, {
             assaultRole: this.selectedAssaultRole ?? 'defend',
             difficulty: this.selectedDifficulty,
+            enemyFactionId: this.selectedEnemyFactionId,
             mapSize,
             campaignStyle:
               this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
@@ -2428,7 +2508,10 @@ export class UIManager {
     this.hudHidden = false;
     this.root.querySelector('#hud').classList.remove('hidden');
     this._syncHudVisibility();
-    this.root.querySelector('#hud-faction').textContent = faction.name;
+    const enemyName = options.enemyFaction?.name;
+    this.root.querySelector('#hud-faction').textContent = enemyName
+      ? `${faction.name} vs ${enemyName}`
+      : faction.name;
     const diffLabel = options.difficulty ? ` · ${options.difficulty.name}` : '';
     this.root.querySelector('#hud-map').textContent = `${formatMapHudLabel(mapDef)}${diffLabel}`;
 
@@ -2449,7 +2532,14 @@ export class UIManager {
     this._hudLastStand = lastStand;
     this._hudLastStandDeploy = lastStand;
     const banner = this.root.querySelector('#tutorial-banner');
-    if (banner) banner.classList.toggle('hidden', !tutorial);
+    if (banner) {
+      banner.classList.toggle('hidden', !tutorial);
+      if (tutorial) {
+        banner.textContent = enemyName
+          ? `Training — no enemy AI · ${enemyName} practice HQ`
+          : 'Training — no enemy AI';
+      }
+    }
 
     const assaultBanner = this.root.querySelector('#assault-banner');
     if (assaultBanner) assaultBanner.classList.toggle('hidden', !assault);
@@ -2538,8 +2628,9 @@ export class UIManager {
     const hint = this.root.querySelector('#hud-hint');
     if (hint) {
       if (tutorial) {
-        this._defaultHudHint =
-          'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
+        this._defaultHudHint = enemyName
+          ? `Tutorial: practice vs a static ${enemyName} HQ — train all unit types, capture neutral points`
+          : 'Tutorial: practice vs static HQ — train all unit types, capture neutral points';
       } else if (clearance) {
         this._defaultHudHint =
           options.clearanceRole === 'defend'

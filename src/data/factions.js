@@ -1,4 +1,5 @@
 import { publicUrl } from '../lib/publicUrl.js';
+import { getTheaterEnemyIds, resolveEnemyFactionId } from './maps.js';
 
 /** Historically grounded unit rosters — ranges in game meters (~10 m per unit). */
 
@@ -72,11 +73,11 @@ const atGunGermany = {
     type: 'antiTankGun',
     name: '7.5 cm Pak 40',
     designation: 'Panzerabwehrkanone 40',
-    description: 'Towed anti-tank gun — lethal vs armor at medium range (~610 m); weak vs infantry.',
+    description: 'Towed anti-tank gun — lethal vs armor at medium range (~720 m); weak vs infantry.',
     hp: 88,
     damage: 38,
-    range: 61,
-    rangeMeters: 610,
+    range: 66,
+    rangeMeters: 720,
     speed: 2.1,
     attackSpeed: 0.4,
     shellReload: 5.2,
@@ -95,11 +96,11 @@ const atGunUSA = {
     type: 'antiTankGun',
     name: '57 mm Gun M1',
     designation: 'Anti-tank gun M1 on carriage M1',
-    description: 'Towed 57 mm — dedicated tank killer to ~600 m; poor vs infantry.',
+    description: 'Towed 57 mm — dedicated tank killer to ~700 m; poor vs infantry.',
     hp: 86,
     damage: 37,
-    range: 60,
-    rangeMeters: 600,
+    range: 65,
+    rangeMeters: 700,
     speed: 2.2,
     attackSpeed: 0.41,
     shellReload: 4.4,
@@ -118,11 +119,11 @@ const atGunUK = {
     type: 'antiTankGun',
     name: 'QF 6-pounder',
     designation: 'Ordnance QF 6-pdr anti-tank gun',
-    description: 'Six-pounder AT gun — accurate medium-range fire to ~610 m.',
+    description: 'Six-pounder AT gun — accurate medium-range fire to ~720 m.',
     hp: 87,
     damage: 38,
-    range: 61,
-    rangeMeters: 610,
+    range: 66,
+    rangeMeters: 720,
     speed: 2.0,
     attackSpeed: 0.39,
     shellReload: 4.2,
@@ -141,11 +142,11 @@ const atGunRussia = {
     type: 'antiTankGun',
     name: 'ZIS-3',
     designation: '76 mm divisional gun M1942',
-    description: 'Versatile 76 mm field/AT gun — strong vs armor to ~610 m.',
+    description: 'Versatile 76 mm field/AT gun — strong vs armor to ~720 m.',
     hp: 89,
     damage: 38,
-    range: 61,
-    rangeMeters: 610,
+    range: 66,
+    rangeMeters: 720,
     speed: 2.1,
     attackSpeed: 0.4,
     shellReload: 4.8,
@@ -164,11 +165,11 @@ const atGunJapan = {
     type: 'antiTankGun',
     name: 'Type 1 47 mm AT Gun',
     designation: 'Type 1 mobile anti-tank gun',
-    description: 'Low-profile 47 mm anti-tank gun — effective from concealment against flank armor.',
+    description: 'Low-profile 47 mm anti-tank gun — effective from concealment against flank armor (~860 m).',
     hp: 82,
     damage: 34,
-    range: 58,
-    rangeMeters: 800,
+    range: 63,
+    rangeMeters: 860,
     speed: 2.15,
     attackSpeed: 0.42,
     shellReload: 4.6,
@@ -1404,9 +1405,22 @@ export const CAPTURE_POINT_INCOME = 6;
 
 export const FACTION_LIST = Object.values(FACTIONS);
 
-export function getEnemyFaction(playerId) {
+/** Historical opponent for this player in a theater. Used by every game mode. */
+export function getEnemyFaction(playerId, mapId, preferredId) {
   const player = FACTIONS[playerId];
   if (!player) return FACTIONS.germany;
-  const enemyId = player.enemyDefault === playerId ? 'germany' : player.enemyDefault;
-  return FACTIONS[enemyId] ?? FACTIONS.germany;
+  const fallbackId = player.enemyDefault === playerId ? 'germany' : player.enemyDefault;
+  if (preferredId && preferredId !== playerId && FACTIONS[preferredId]) {
+    const allowed = mapId ? getTheaterEnemyIds(playerId, mapId) : [];
+    if (!allowed.length || allowed.includes(preferredId)) return FACTIONS[preferredId];
+  }
+  const enemyId = mapId
+    ? resolveEnemyFactionId(playerId, mapId, fallbackId)
+    : fallbackId;
+  if (enemyId === playerId) {
+    return FACTIONS[fallbackId] && fallbackId !== playerId
+      ? FACTIONS[fallbackId]
+      : FACTIONS.germany;
+  }
+  return FACTIONS[enemyId] ?? FACTIONS[fallbackId] ?? FACTIONS.germany;
 }

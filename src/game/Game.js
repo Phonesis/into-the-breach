@@ -1128,7 +1128,9 @@ export class Game {
     this.assaultRole = startOptions.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(startOptions.difficulty ?? readDifficultySetting());
     this.playerFaction = FACTIONS[factionId];
-    this.enemyFaction = getEnemyFaction(factionId);
+    // Theater match is mode-agnostic: every operation uses the same historical opponent.
+    // Setup may pass a rolled Allied nation (Normandy / Italy / Berlin as Germany).
+    this.enemyFaction = getEnemyFaction(factionId, mapId, startOptions.enemyFactionId);
     sounds.preloadEndMusic(factionId);
     let mapSizeId = startOptions.mapSize ?? 'medium';
     if (isAssaultMode(gameMode)) {
@@ -1236,8 +1238,8 @@ export class Game {
       this.scene,
       this.scenery,
       {
-        player: this.playerFaction?.id,
-        enemy: this.enemyFaction?.id,
+        player: this.playerFaction,
+        enemy: this.enemyFaction,
       },
       { towerDefense: this.towerDefense }
     );
@@ -1247,19 +1249,21 @@ export class Game {
 
     let playerBasePos = this.mapDef.playerBase;
     let enemyBasePos = this.mapDef.enemyBase;
-    let playerHqLabel = 'Allied HQ';
-    let enemyHqLabel = this.tutorial ? 'Practice Target HQ' : 'Enemy HQ';
+    const playerName = this.playerFaction?.name ?? 'Friendly';
+    const enemyName = this.enemyFaction?.name ?? 'Enemy';
+    let playerHqLabel = `${playerName} HQ`;
+    let enemyHqLabel = this.tutorial ? `Practice Target — ${enemyName}` : `${enemyName} HQ`;
 
     if (assault) {
       const bases = getAssaultSpawnBases(this.mapDef);
       playerBasePos = this.assaultRole === 'attack' ? bases.attackerBase : bases.defenderBase;
       enemyBasePos = this.assaultRole === 'attack' ? bases.defenderBase : bases.attackerBase;
-      playerHqLabel = this.assaultRole === 'attack' ? 'Assault HQ' : 'Defensive HQ';
-      enemyHqLabel = this.assaultRole === 'attack' ? 'Defensive HQ' : 'Assault HQ';
+      playerHqLabel = this.assaultRole === 'attack' ? `${playerName} Assault HQ` : `${playerName} Defensive HQ`;
+      enemyHqLabel = this.assaultRole === 'attack' ? `${enemyName} Defensive HQ` : `${enemyName} Assault HQ`;
       buildFrontlineVisual(this.mapDef, this.scene);
     } else if (this.towerDefense) {
       this.assault = null;
-      playerHqLabel = 'Sector HQ';
+      playerHqLabel = `${playerName} Sector HQ`;
       buildFrontlineVisual(this.mapDef, this.scene);
     } else {
       this.assault = null;
@@ -1623,6 +1627,7 @@ export class Game {
     this._syncBattleCursor();
     this.ui.hideEndOverlay();
     this.ui.showHUD(this.playerFaction, this.mapDef, this.gameMode, {
+      enemyFaction: this.enemyFaction,
       assaultRole: this.assaultRole,
       difficulty: this.tutorial ? null : this.difficulty,
       towerDefense: this.towerDefense,
@@ -4499,7 +4504,9 @@ export class Game {
         if (this.engineerSandbags?.sites?.length) {
           this.ui?.updateEngineerBuild(this);
         }
-        this.infantryTrenches?.update(dt);
+        // Include dead units so a casualty inside a surviving trench is
+        // removed from its garrison and leaves the position capturable.
+        this.infantryTrenches?.update(dt, this.units);
         if (this.infantryTrenches?.sites?.length) {
           this.ui?.updateInfantryTrench(this);
         }

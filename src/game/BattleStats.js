@@ -290,7 +290,11 @@ export class BattleStats {
 
     return {
       playerName,
-      enemyName: tutorial ? 'Practice target' : enemyName,
+      enemyName: tutorial
+        ? enemyName
+          ? `${enemyName} (practice)`
+          : 'Practice target'
+        : enemyName,
       playerLines,
       enemyLines,
       playerTotal,

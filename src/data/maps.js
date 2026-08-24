@@ -21,6 +21,9 @@ export const MAPS = {
       { id: 'cp-south', name: 'Vire Bridge', x: 12, z: -22 },
     ],
     features: ['Hedgerows', 'Farm tracks', 'Overcast skies'],
+    axis: ['germany'],
+    allies: ['usa', 'uk'],
+    randomizeOpponent: true,
   },
   northAfrica: {
     id: 'northAfrica',
@@ -42,6 +45,8 @@ export const MAPS = {
       { id: 'cp-east', name: 'Kidney Ridge', x: 25, z: -12 },
     ],
     features: ['Open desert', 'Escarpments', 'Heat haze'],
+    axis: ['germany'],
+    allies: ['uk', 'usa'],
   },
   easternFront: {
     id: 'easternFront',
@@ -63,6 +68,8 @@ export const MAPS = {
       { id: 'cp-south', name: 'Belgorod Road', x: 18, z: 28 },
     ],
     features: ['Rolling steppe', 'Treelines', 'Summer dust'],
+    axis: ['germany'],
+    allies: ['russia'],
   },
   italy: {
     id: 'italy',
@@ -84,6 +91,9 @@ export const MAPS = {
       { id: 'cp-liri', name: 'Liri Valley', x: 20, z: -18 },
     ],
     features: ['Hill country', 'Olive groves', 'Mountain mist'],
+    axis: ['germany'],
+    allies: ['usa', 'uk'],
+    randomizeOpponent: true,
   },
   farEast: {
     id: 'farEast',
@@ -110,6 +120,13 @@ export const MAPS = {
       'Kunai grass and village clearings',
       'Humid dawn mist',
     ],
+    axis: ['japan'],
+    allies: ['usa', 'uk'],
+    // Germany was not at Guadalcanal; treat the Far East as the Soviet-Japanese
+    // war in Manchuria / the Soviet Far East when the player is German.
+    matchups: {
+      germany: ['russia'],
+    },
   },
   berlin: {
     id: 'berlin',
@@ -142,10 +159,68 @@ export const MAPS = {
       'Central church square',
       'Canal bridges & bombed parkland',
     ],
+    axis: ['germany'],
+    allies: ['russia', 'usa', 'uk'],
+    randomizeOpponent: true,
   },
 };
 
 export const MAP_LIST = Object.values(MAPS);
+
+const AXIS_FACTIONS = new Set(['germany', 'japan']);
+const ALLIED_FACTIONS = new Set(['usa', 'uk', 'russia']);
+
+function withoutPlayer(ids, playerId) {
+  return (ids ?? []).filter((id) => id && id !== playerId);
+}
+
+function isHistoricalCombatant(playerId, theater) {
+  return !!(
+    theater.axis?.includes(playerId) ||
+    theater.allies?.includes(playerId) ||
+    theater.matchups?.[playerId]
+  );
+}
+
+/**
+ * Historical enemy faction ids for a player in a theater.
+ * When `randomizeOpponent` is set, battle picks randomly from this list.
+ * Factions that were not present still get the opposing coalition for that map.
+ */
+export function getTheaterEnemyIds(playerId, mapId) {
+  const theater = MAPS[mapId];
+  if (!theater || !playerId) return [];
+  const override = theater.matchups?.[playerId];
+  if (override?.length) return withoutPlayer(override, playerId);
+  if (theater.axis?.includes(playerId)) return withoutPlayer(theater.allies, playerId);
+  if (theater.allies?.includes(playerId)) return withoutPlayer(theater.axis, playerId);
+  if (AXIS_FACTIONS.has(playerId)) return withoutPlayer(theater.allies, playerId);
+  if (ALLIED_FACTIONS.has(playerId)) return withoutPlayer(theater.axis, playerId);
+  return [];
+}
+
+function pickFrom(ids, rng) {
+  if (!ids.length) return null;
+  const roll = typeof rng === 'function' ? rng() : Math.random();
+  const index = Math.min(ids.length - 1, Math.max(0, Math.floor(roll * ids.length)));
+  return ids[index];
+}
+
+/** Resolves the single AI faction id for a player + theater. */
+export function resolveEnemyFactionId(playerId, mapId, fallbackId = 'germany', rng = Math.random) {
+  const theater = MAPS[mapId];
+  const ids = getTheaterEnemyIds(playerId, mapId);
+  if (!theater) return fallbackId;
+  // When the player was not in this campaign, prefer their usual rival if that
+  // rival actually fought here (Japan in Europe faces the US, not whoever is listed first).
+  if (!isHistoricalCombatant(playerId, theater) && fallbackId && ids.includes(fallbackId)) {
+    return fallbackId;
+  }
+  if (theater.randomizeOpponent && ids.length > 1) {
+    return pickFrom(ids, rng) ?? fallbackId;
+  }
+  return ids[0] ?? fallbackId;
+}
 
 export {
   buildMapDef,

@@ -544,6 +544,24 @@ body.portrait-blocked .mobile-support-screen {
   margin-top: 0.35rem;
 }
 
+.card-btn .map-opponent {
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #c9a227;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.map-opponent-briefing {
+  margin: 0.9rem 0 0;
+  color: #d8c48a;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
 .faction-units {
   list-style: none;
   margin: 0.2rem 0 0;
@@ -4874,6 +4892,15 @@ body.portrait-blocked .mobile-support-screen {
   letter-spacing: 0.025em;
   line-height: 1.35;
   opacity: 1;
+}
+
+.menu-screen .card-btn .map-opponent {
+  color: #d6aa3a;
+  opacity: 1;
+}
+
+.menu-screen .map-opponent-briefing {
+  color: #d8c48a;
 }
 
 .menu-screen .faction-card {

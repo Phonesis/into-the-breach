@@ -33,6 +33,7 @@ import {
   tryAssignSupportRearMove,
   diversifyAiMoveOrders,
   updateAiIncomingFireReactions,
+  updateAiAbandonedTrenchCapture,
   maintainAiCommanderScreen,
 } from './AI.js';
 
@@ -632,6 +633,7 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
       clearance: false,
     });
   }
+  updateAiAbandonedTrenchCapture(game, enemyUnits);
   const crewlessTankClaims = new Set();
   const careClaims = new Set();
   for (const unit of enemyUnits) {
@@ -639,7 +641,14 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
     if (unit._aiCommanderScreen && maintainAiCommanderScreen(unit, game, game?._playerAlive ?? [])) {
       continue;
     }
-    if (unit.retreating || unit.surrendered || unit._captureExit) continue;
+    if (
+      unit.retreating ||
+      unit.surrendered ||
+      unit._captureExit ||
+      unit._trenchId ||
+      unit._aiAbandonedTrenchId ||
+      unit._aiAbandonedTrenchOccupant
+    ) continue;
     if (unit._aiIncomingFireReaction) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
     if (tryAssignSupportCare(unit, enemyUnits, game, game?.mapDef, careClaims)) continue;

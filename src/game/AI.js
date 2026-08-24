@@ -118,6 +118,9 @@ const AI_INCOMING_FIRE_SUSTAINED_HP_RATIO = 0.56;
 const AI_TRENCH_CAPACITY = 4;
 const AI_TRENCH_MAX_OCCUPATION_DISTANCE = 48;
 const AI_TRENCH_DEFAULT_RESERVE_RATIO = 0.32;
+const AI_ABANDONED_TRENCH_SEEK_RANGE = 46;
+const AI_ABANDONED_TRENCH_GOAL_RADIUS = 17;
+const AI_ABANDONED_TRENCH_IDLE_RADIUS = 26;
 const AI_TRENCH_OCCUPANT_TYPES = new Set([
   'commander',
   'radioOperator',
@@ -155,6 +158,12 @@ const LAST_STAND_CAMP_ATTACK_COOLDOWN = 18;
 const CLEARANCE_OPERATIONAL_REASSESS_MIN = 12;
 const CLEARANCE_OPERATIONAL_REASSESS_MAX = 17;
 const CLEARANCE_OPENING_REASSESS_DELAY = 12;
+const AI_FALLBACK_PATTERNS = [
+  'crossfire',
+  'echelon',
+  'defenseInDepth',
+];
+const AI_FALLBACK_MIN_SPACING = 7.5;
 const CLEARANCE_ATTACK_PULSE_INTERVAL = 13;
 const CLEARANCE_ATTACKER_REGROUP_MIN_DURATION = 9;
 const CLEARANCE_ATTACKER_HOLD_MIN_DURATION = 10;
@@ -650,12 +659,62 @@ function getStandardAiPlan(
     ...doctrine,
     session,
     mapId: mapDef?.id ?? null,
+    fallbackCycle:
+      existing?.session === session ? existing.fallbackCycle ?? 0 : 0,
     generatedAt: now,
     nextAt:
       now +
       interval *
         clamp((difficulty?.aiTickMult ?? 1) * 0.84, 0.72, 1.35),
   };
+  if (plan.operation === 'regroup') {
+    const fallbackCycle =
+      existing?.session === session && existing?.operation === 'regroup'
+      ? existing.fallbackCycle ?? 1
+      : plan.fallbackCycle + 1;
+    const pattern = AI_FALLBACK_PATTERNS[
+      Math.abs(fallbackCycle - 1) % AI_FALLBACK_PATTERNS.length
+    ];
+    const fallbackUnits = (enemyUnits ?? []).filter((unit) => {
+      const type = unit?.def?.type;
+      return (
+        isLastStandOperationalUnit(unit) &&
+        type !== 'commander' &&
+        type !== 'radioOperator' &&
+        type !== 'medic' &&
+        type !== 'engineer'
+      );
+    });
+    const assignments = buildAiFallbackAssignments(
+      fallbackUnits,
+      mapDef,
+      game,
+      plan.anchor,
+      plan.axis,
+      pattern,
+      {
+        rearSign: -1,
+        getRoleDepth: (unit) => {
+          const role = getStandardAiRole(unit.def?.type);
+          if (role === 'fireSupport') return -12;
+          if (role === 'antiArmor') return -6;
+          if (role === 'armor') return 3;
+          return -1;
+        },
+      }
+    );
+    plan.fallbackCycle = fallbackCycle;
+    plan.fallbackPattern = pattern;
+    plan.fallbackDestinations = new Map(
+      assignments.map(({ unit, destination, slot }) => [
+        unit.id,
+        {
+          ...destination,
+          sector: slot.lateral < -4 ? 'left' : slot.lateral > 4 ? 'right' : 'center',
+        },
+      ])
+    );
+  }
   if (game) game._standardAiPlan = plan;
   return plan;
 }
@@ -808,6 +867,10 @@ function isStandardAiReserve(unit, plan) {
 }
 
 function getStandardAiRoleDestination(unit, plan, game) {
+  if (plan.operation === 'regroup') {
+    const fallback = plan.fallbackDestinations?.get(unit.id);
+    if (fallback) return { x: fallback.x, z: fallback.z };
+  }
   const role = getStandardAiRole(unit.def?.type);
   const axis = plan.axis ?? {
     forwardX: 1,
@@ -1130,7 +1193,8 @@ function issueLastStandRegroup(
   players,
   mapDef,
   operational,
-  forceRatio
+  forceRatio,
+  game
 ) {
   const enemySummary = getLastStandForceSummary(enemies);
   const playerSummary = getLastStandForceSummary(players);
@@ -1154,24 +1218,27 @@ function issueLastStandRegroup(
   operational.anchor = anchor;
 
   const axis = getLastStandBattleAxis(mapDef);
-  for (const unit of enemies) {
-    if (!isLastStandOperationalUnit(unit)) continue;
-    const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
-    const lateralSlot = (((unit.id ?? 0) * 37) % 11) - 5;
-    const lateral = lateralSlot * (role === 'armor' || role === 'recon' ? 3.2 : 2.35);
-    const rearOffset =
-      role === 'arty' ? -11 : role === 'support' ? -6 : role === 'armor' ? 3 : 0;
-    const destination = clampLastStandPoint(mapDef, {
-      x:
-        anchor.x +
-        axis.perpendicularX * lateral +
-        axis.forwardX * rearOffset,
-      z:
-        anchor.z +
-        axis.perpendicularZ * lateral +
-        axis.forwardZ * rearOffset,
-    });
+  const pattern = AI_FALLBACK_PATTERNS[
+    Math.abs((operational.cycle ?? 1) - 1) % AI_FALLBACK_PATTERNS.length
+  ];
+  const assignments = buildAiFallbackAssignments(
+    enemies.filter(isLastStandOperationalUnit),
+    mapDef,
+    game,
+    anchor,
+    axis,
+    pattern,
+    {
+      rearSign: -1,
+      getRoleDepth: (unit) => {
+        const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
+        return role === 'arty' ? -11 : role === 'support' ? -6 : role === 'armor' ? 3 : 0;
+      },
+    }
+  );
+  operational.fallbackPattern = pattern;
 
+  for (const { unit, destination, slot } of assignments) {
     clearAiTankManeuver(unit);
     unit.clearAttackOrder();
     unit.lastStandStance = 'regroup';
@@ -1179,6 +1246,8 @@ function issueLastStandRegroup(
       x: destination.x,
       z: destination.z,
       radius: Math.max(7, (unit.def?.type === 'artillery' ? 12 : 9)),
+      aiFallbackPattern: pattern,
+      aiFallbackSector: slot.lateral < -4 ? 'left' : slot.lateral > 4 ? 'right' : 'center',
     };
     unit.moveTarget = { x: destination.x, z: destination.z };
     unit._movePath = null;
@@ -1284,7 +1353,7 @@ function setLastStandOperationalMode(
   mapDef,
   tactic,
   flankSide,
-  scenery,
+  game,
   now,
   forceRatio
 ) {
@@ -1293,7 +1362,7 @@ function setLastStandOperationalMode(
   operational.cycle = (operational.cycle ?? 0) + 1;
 
   if (mode === 'regroup') {
-    issueLastStandRegroup(enemies, players, mapDef, operational, forceRatio);
+    issueLastStandRegroup(enemies, players, mapDef, operational, forceRatio, game);
   } else if (mode === 'defend') {
     issueLastStandDefense(enemies, mapDef, operational);
   } else {
@@ -1303,7 +1372,7 @@ function setLastStandOperationalMode(
       mapDef,
       tactic,
       flankSide,
-      scenery
+      game?.scenery
     );
     operational.attackPulseAt = now + LAST_STAND_ATTACK_PULSE_INTERVAL;
   }
@@ -1452,7 +1521,7 @@ function updateLastStandOperationalPlan(
       mapDef,
       tactic,
       flankSide,
-      game?.scenery,
+      game,
       now,
       forceRatio
     );
@@ -1555,7 +1624,8 @@ function issueClearanceAttackerRegroup(
   players,
   mapDef,
   operational,
-  forceRatio
+  forceRatio,
+  game
 ) {
   const enemySummary = getLastStandForceSummary(enemies);
   const playerSummary = getLastStandForceSummary(players);
@@ -1579,23 +1649,29 @@ function issueClearanceAttackerRegroup(
   operational.anchor = anchor;
 
   const axis = getClearanceBattleAxis(mapDef);
-  for (const unit of enemies) {
-    if (!isLastStandOperationalUnit(unit)) continue;
+  const pattern = AI_FALLBACK_PATTERNS[
+    Math.abs((operational.cycle ?? 1) - 1) % AI_FALLBACK_PATTERNS.length
+  ];
+  const assignments = buildAiFallbackAssignments(
+    enemies.filter(isLastStandOperationalUnit),
+    mapDef,
+    game,
+    anchor,
+    axis,
+    pattern,
+    {
+      rearSign: -1,
+      getRoleDepth: (unit) => {
+        const role = unit.clearanceAttackRole ?? roleFromUnitType(unit.def?.type);
+        return role === 'support' ? -7 : role === 'armor' ? 3 : 0;
+      },
+    }
+  );
+  operational.fallbackPattern = pattern;
+
+  for (const { unit, destination, slot } of assignments) {
     const role = unit.clearanceAttackRole ?? roleFromUnitType(unit.def?.type);
     unit.clearanceAttackRole = role;
-    const lateralSlot = (((unit.id ?? 0) * 29) % 11) - 5;
-    const lateral = lateralSlot * (role === 'armor' ? 3.1 : 2.3);
-    const depth = role === 'support' ? -7 : role === 'armor' ? 3 : 0;
-    const destination = clampLastStandPoint(mapDef, {
-      x:
-        anchor.x +
-        axis.perpendicularX * lateral +
-        axis.forwardX * depth,
-      z:
-        anchor.z +
-        axis.perpendicularZ * lateral +
-        axis.forwardZ * depth,
-    });
 
     clearAiTankManeuver(unit);
     unit.clearAttackOrder();
@@ -1603,6 +1679,8 @@ function issueClearanceAttackerRegroup(
       x: destination.x,
       z: destination.z,
       radius: role === 'support' ? 11 : role === 'armor' ? 14 : 9,
+      aiFallbackPattern: pattern,
+      aiFallbackSector: slot.lateral < -4 ? 'left' : slot.lateral > 4 ? 'right' : 'center',
     };
     unit.moveTarget = { x: destination.x, z: destination.z };
     unit._movePath = null;
@@ -1691,7 +1769,180 @@ function updateClearanceOperationalHoldPosition(unit, players, scenery) {
   return true;
 }
 
-function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio) {
+function getAiFallbackUnitPriority(unit) {
+  const type = unit?.def?.type;
+  if (
+    type === 'machineGun' ||
+    type === 'sniper' ||
+    type === 'antiTankGun' ||
+    type === 'tankDestroyer'
+  ) return 0;
+  if (isTankType(type) || type === 'armoredCar') return 1;
+  if (type === 'infantry' || type === 'paratrooper') return 2;
+  if (type === 'engineer') return 3;
+  return 4;
+}
+
+function compareAiFallbackUnits(a, b) {
+  const priority = getAiFallbackUnitPriority(a) - getAiFallbackUnitPriority(b);
+  if (priority !== 0) return priority;
+  const aId = Number(a?.id);
+  const bId = Number(b?.id);
+  if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) return aId - bId;
+  return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+}
+
+function getAiFallbackSlots(count, mapDef, pattern, rearSign = 1) {
+  if (count <= 0) return [];
+  const frontage = clamp(
+    30 + Math.max(0, count - 4) * 3.4,
+    34,
+    Math.max(38, (mapDef?.size ?? 120) * 0.68)
+  );
+  const columns = Math.min(
+    count,
+    Math.max(4, Math.floor(frontage / (AI_FALLBACK_MIN_SPACING + 1)))
+  );
+  const slots = [];
+  for (let i = 0; i < count; i++) {
+    const row = Math.floor(i / columns);
+    const column = i % columns;
+    const rowCount = Math.min(columns, count - row * columns);
+    const normalized = rowCount === 1 ? 0 : (column / (rowCount - 1)) * 2 - 1;
+    let lateral = normalized * frontage * 0.5;
+    let depth = row * (AI_FALLBACK_MIN_SPACING + 2) * rearSign;
+    if (row % 2 === 1) {
+      lateral += (AI_FALLBACK_MIN_SPACING * 0.5) * (normalized <= 0 ? 1 : -1);
+    }
+    if (pattern === 'crossfire') {
+      const side = normalized < 0 ? -1 : 1;
+      lateral = side * (frontage * 0.2 + Math.abs(normalized) * frontage * 0.3);
+      // Flank strongpoints sit slightly forward so their fire converges across
+      // the approaches instead of every weapon firing from one straight line.
+      depth += (3 - Math.abs(normalized) * 8) * rearSign;
+    } else if (pattern === 'echelon') {
+      depth += normalized * 8 * rearSign;
+    } else {
+      // Three staggered belts stop a barrage on one line catching the entire
+      // fallback force and leave a genuine local reserve behind the frontage.
+      const stagger = (column % 3) - 1;
+      depth += stagger * 2.5 * rearSign;
+      lateral += ((row % 3) - 1) * 2.5;
+    }
+    slots.push({ lateral, depth });
+  }
+  // Assign the scarce flank-capable weapons first, to the widest sectors.
+  slots.sort((a, b) => Math.abs(b.lateral) - Math.abs(a.lateral));
+  return slots;
+}
+
+function resolveAiFallbackPoint(game, mapDef, unit, desired, axis, reserved) {
+  const alternates = [
+    [0, 0],
+    [0, 5],
+    [0, -5],
+    [5, 0],
+    [-5, 0],
+    [5, 5],
+    [-5, 5],
+    [5, -5],
+    [-5, -5],
+    [7, 6],
+    [-7, 6],
+    [9, -4],
+    [-9, -4],
+    [0, 10],
+    [0, -10],
+    [10, 0],
+    [-10, 0],
+    [10, 10],
+    [-10, 10],
+    [10, -10],
+    [-10, -10],
+    [15, 5],
+    [-15, 5],
+    [15, -5],
+    [-15, -5],
+    [5, 15],
+    [-5, 15],
+    [5, -15],
+    [-5, -15],
+    [20, 0],
+    [-20, 0],
+    [20, 10],
+    [-20, 10],
+    [20, -10],
+    [-20, -10],
+    [10, 20],
+    [-10, 20],
+    [10, -20],
+    [-10, -20],
+    [0, 20],
+    [0, -20],
+  ];
+  const radius = unitPathRadius(unit?.def?.type);
+  const spacing = Math.max(
+    AI_FALLBACK_MIN_SPACING,
+    radius + 5
+  );
+  let best = clampLastStandPoint(mapDef, desired);
+  let bestSeparation = -Infinity;
+
+  for (const [lateral, depth] of alternates) {
+    const point = clampLastStandPoint(mapDef, {
+      x: desired.x + axis.perpendicularX * lateral + axis.forwardX * depth,
+      z: desired.z + axis.perpendicularZ * lateral + axis.forwardZ * depth,
+    });
+    if (game?.scenery?.getUnitPlacementBlocker?.(point.x, point.z, radius)) continue;
+    const separation = reserved.reduce(
+      (nearest, other) => Math.min(nearest, Math.hypot(point.x - other.x, point.z - other.z)),
+      Infinity
+    );
+    if (separation >= spacing) return point;
+    if (separation > bestSeparation) {
+      best = point;
+      bestSeparation = separation;
+    }
+  }
+  return best;
+}
+
+function buildAiFallbackAssignments(
+  units,
+  mapDef,
+  game,
+  anchor,
+  axis,
+  pattern,
+  { rearSign = 1, getRoleDepth = () => 0 } = {}
+) {
+  const sorted = [...(units ?? [])].sort(compareAiFallbackUnits);
+  const slots = getAiFallbackSlots(sorted.length, mapDef, pattern, rearSign);
+  const reserved = [];
+  const assignments = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const unit = sorted[i];
+    const slot = slots[i] ?? { lateral: 0, depth: 0 };
+    const depth = slot.depth + getRoleDepth(unit);
+    const desired = {
+      x: anchor.x + axis.perpendicularX * slot.lateral + axis.forwardX * depth,
+      z: anchor.z + axis.perpendicularZ * slot.lateral + axis.forwardZ * depth,
+    };
+    const destination = resolveAiFallbackPoint(
+      game,
+      mapDef,
+      unit,
+      desired,
+      axis,
+      reserved
+    );
+    reserved.push(destination);
+    assignments.push({ unit, destination, slot });
+  }
+  return assignments;
+}
+
+function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio, game) {
   const summary = getLastStandForceSummary(enemies);
   const defenderBase = mapDef?.enemyBase ?? summary.center;
   let fallbackX = defenderBase.x - summary.center.x;
@@ -1707,28 +1958,34 @@ function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio
   operational.anchor = anchor;
 
   const axis = getClearanceBattleAxis(mapDef);
-  for (const unit of enemies) {
-    if (
-      !isLastStandOperationalUnit(unit) ||
-      unit._trenchId ||
-      unit._garrisonBunkerId
-    ) {
-      continue;
+  const fallbackUnits = enemies.filter(
+    (unit) =>
+      isLastStandOperationalUnit(unit) &&
+      !unit._trenchId &&
+      !unit._garrisonBunkerId
+  );
+  const patternIndex = Math.abs((operational.cycle ?? 1) - 1) %
+    AI_FALLBACK_PATTERNS.length;
+  const pattern = AI_FALLBACK_PATTERNS[patternIndex];
+  const assignments = buildAiFallbackAssignments(
+    fallbackUnits,
+    mapDef,
+    game,
+    anchor,
+    axis,
+    pattern,
+    {
+      rearSign: 1,
+      getRoleDepth: (unit) => {
+        const role = roleFromUnitType(unit.def?.type);
+        return role === 'support' ? 10 : role === 'armor' ? 3 : 0;
+      },
     }
+  );
+  operational.fallbackPattern = pattern;
+
+  for (const { unit, destination, slot } of assignments) {
     const role = roleFromUnitType(unit.def?.type);
-    const lateralSlot = (((unit.id ?? 0) * 31) % 9) - 4;
-    const lateral = lateralSlot * (role === 'armor' ? 3.2 : 2.45);
-    const depth = role === 'support' ? -5 : role === 'armor' ? 2 : 0;
-    const destination = clampLastStandPoint(mapDef, {
-      x:
-        anchor.x +
-        axis.perpendicularX * lateral +
-        axis.forwardX * depth,
-      z:
-        anchor.z +
-        axis.perpendicularZ * lateral +
-        axis.forwardZ * depth,
-    });
     unit._clearanceProbe = null;
     clearAiTankManeuver(unit);
     unit.clearAttackOrder();
@@ -1736,6 +1993,8 @@ function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio
       x: destination.x,
       z: destination.z,
       radius: role === 'armor' ? 15 : role === 'support' ? 11 : 9,
+      clearanceFallbackPattern: pattern,
+      clearanceFallbackSector: slot.lateral < -4 ? 'left' : slot.lateral > 4 ? 'right' : 'center',
     };
     unit.moveTarget = { x: destination.x, z: destination.z };
     unit._movePath = null;
@@ -1830,7 +2089,8 @@ function setClearanceOperationalMode(
         players,
         mapDef,
         operational,
-        forceRatio
+        forceRatio,
+        game
       );
     } else if (mode === 'hold') {
       issueClearanceAttackerHold(enemies, mapDef, operational);
@@ -1842,7 +2102,7 @@ function setClearanceOperationalMode(
   }
 
   if (mode === 'fallback') {
-    issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio);
+    issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio, game);
   } else if (mode === 'counterattack') {
     if (!issueClearanceDefenderCounterattack(enemies, players, game, operational)) {
       operational.mode = 'hold';
@@ -2080,6 +2340,8 @@ function canDiversifyAiOrder(unit) {
     !unit._aiSupportMode &&
     !unit._aiTrenchTargetId &&
     !unit._aiTrenchOccupant &&
+    !unit._aiAbandonedTrenchId &&
+    !unit._aiAbandonedTrenchOccupant &&
     !unit._clearanceDefenderCover &&
     !unit._trenchId &&
     !unit._bunkerEntryId &&
@@ -2629,7 +2891,9 @@ export function updateAI({
       isUnitGarrisoned(unit) ||
       unit._trenchId ||
       unit._aiTrenchTargetId ||
-      unit._aiTrenchOccupant
+      unit._aiTrenchOccupant ||
+      unit._aiAbandonedTrenchId ||
+      unit._aiAbandonedTrenchOccupant
     ) continue;
 
     if (unit._aiIncomingFireReaction) continue;
@@ -3705,13 +3969,21 @@ function getAiDefensiveTrenchContext(
   if (clearance || game.clearance) {
     const enemyIsDefender = game.clearanceRole !== 'defend';
     const mode = game.clearanceOperational?.mode ?? 'opening';
+    const fallbackPattern = game.clearanceOperational?.fallbackPattern ?? null;
     const held = liveEnemies.filter(
       (unit) => unit.defensiveHold && !unit._clearanceProbe
     );
     return {
       kind: enemyIsDefender ? 'clearanceDefend' : 'clearanceAttack',
       useTrenches: enemyIsDefender && (mode === 'hold' || mode === 'opening'),
-      reserveRatio: 0.26,
+      // A fallback line keeps a larger mobile reserve than the prepared
+      // opening belt. This prevents every new position becoming another dense
+      // trench cluster and preserves troops for the flanks/counterattack.
+      reserveRatio: fallbackPattern
+        ? fallbackPattern === 'defenseInDepth'
+          ? 0.5
+          : 0.44
+        : 0.3,
       anchor: getAiTrenchAveragePoint(held, game.mapDef?.enemyBase),
       unitFilter: (unit) => !!unit.defensiveHold && !unit._clearanceProbe,
     };
@@ -3780,6 +4052,163 @@ function getAiDefensiveTrenchContext(
   }
 
   return null;
+}
+
+function isAiAbandonedTrenchCandidate(unit) {
+  return !!(
+    isAiLiveEnemyUnit(unit) &&
+    AI_TRENCH_OCCUPANT_TYPES.has(unit.def?.type) &&
+    !unit.retreating &&
+    !unit._mobilityDamaged &&
+    !unit._userMoveOrder &&
+    !unit._manualFireMission &&
+    !unit._trenchId &&
+    !unit._trenchDigSite &&
+    !unit._diggingTrench &&
+    !unit._garrisonBunkerId &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiTankManeuver &&
+    !unit._aiRadioManeuver &&
+    !unit._aiRadioSafety &&
+    !unit._aiSupportMode &&
+    !unit._aiCommanderScreen &&
+    !unit._aiTrenchTargetId &&
+    !unit._aiTrenchOccupant &&
+    !unit._aiAbandonedTrenchId &&
+    !unit._aiAbandonedTrenchOccupant &&
+    !unit._clearanceDefenderCover &&
+    !unit.defensiveHold &&
+    (!unit.attackOrder || unit.attackOrder.dead)
+  );
+}
+
+function isAiAbandonedTrenchAssignmentValid(trench, unit) {
+  if (!trench || trench.destroyed) return false;
+  if (unit._trenchId === trench.id) {
+    return trench.garrison?.includes(unit.id) ?? false;
+  }
+  if ((trench.garrison?.length ?? 0) >= AI_TRENCH_CAPACITY) return false;
+  return trench.team === unit.team || (trench.garrison?.length ?? 0) === 0;
+}
+
+function clearAiAbandonedTrenchAssignment(unit, manager, { release = false, cancelMove = false } = {}) {
+  if (!unit) return;
+  if (release && unit._trenchId) manager?.releaseUnit?.(unit);
+  if (cancelMove && !unit._userMoveOrder) {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._autoMoveOrderX = null;
+    unit._autoMoveOrderZ = null;
+  }
+  unit._aiAbandonedTrenchId = null;
+  unit._aiAbandonedTrenchOccupant = false;
+}
+
+/**
+ * Let enemy infantry use an intact, empty player trench as it advances. The
+ * ordinary trench manager already permits the final entry; this controller
+ * supplies the missing AI move order and keeps other AI branches from pulling
+ * the unit out before it reaches the abandoned position.
+ */
+export function updateAiAbandonedTrenchCapture(game, enemyUnits = []) {
+  const manager = game?.infantryTrenches;
+  const trenches = manager?.trenches ?? [];
+  const byId = new Map(trenches.map((trench) => [trench.id, trench]));
+  const reservations = new Map();
+  let assigned = 0;
+
+  for (const unit of enemyUnits ?? []) {
+    const targetId = unit?._aiAbandonedTrenchId;
+    if (targetId == null) {
+      if (unit?._aiAbandonedTrenchOccupant) {
+        unit._aiAbandonedTrenchOccupant = false;
+      }
+      continue;
+    }
+
+    const trench = byId.get(targetId);
+    const leaving =
+      unit.dead ||
+      unit.surrendered ||
+      unit.retreating ||
+      unit._captureExit ||
+      unit._userMoveOrder;
+    const valid = !leaving && isAiAbandonedTrenchAssignmentValid(trench, unit);
+    if (!valid) {
+      clearAiAbandonedTrenchAssignment(unit, manager, {
+        release: !!unit._trenchId,
+        cancelMove: !unit._userMoveOrder,
+      });
+      continue;
+    }
+
+    if (unit._trenchId === trench.id) {
+      unit._aiAbandonedTrenchOccupant = true;
+      continue;
+    }
+
+    reservations.set(targetId, (reservations.get(targetId) ?? 0) + 1);
+  }
+
+  for (const unit of enemyUnits ?? []) {
+    if (!isAiAbandonedTrenchCandidate(unit)) continue;
+
+    const currentGoal = unit.moveTarget ?? null;
+    const candidates = [];
+    for (const trench of trenches) {
+      if (
+        !trench ||
+        trench.destroyed ||
+        trench.team === unit.team ||
+        (trench.garrison?.length ?? 0) > 0
+      ) continue;
+
+      const distance = Math.hypot(
+        unit.position.x - trench.x,
+        unit.position.z - trench.z
+      );
+      if (distance > AI_ABANDONED_TRENCH_SEEK_RANGE) continue;
+
+      const goalDistance = currentGoal
+        ? Math.hypot(currentGoal.x - trench.x, currentGoal.z - trench.z)
+        : Infinity;
+      if (currentGoal) {
+        if (goalDistance > AI_ABANDONED_TRENCH_GOAL_RADIUS) continue;
+      } else if (distance > AI_ABANDONED_TRENCH_IDLE_RADIUS) {
+        continue;
+      }
+
+      const planned = reservations.get(trench.id) ?? 0;
+      if (planned + (trench.garrison?.length ?? 0) >= AI_TRENCH_CAPACITY) continue;
+      candidates.push({
+        trench,
+        score: distance + (Number.isFinite(goalDistance) ? goalDistance * 1.35 : 0),
+      });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    const best = candidates[0]?.trench;
+    if (!best) continue;
+
+    unit.clearAttackOrder();
+    unit.moveTarget = { x: best.x, z: best.z };
+    unit._movePath = null;
+    unit._finalMoveGoal = { x: best.x, z: best.z };
+    unit._autoMoveOrderX = null;
+    unit._autoMoveOrderZ = null;
+    unit._pathRepathAttempts = 0;
+    unit._lastPathRepathX = null;
+    unit._lastPathRepathZ = null;
+    unit._reverseMoveOrder = false;
+    unit._aiAbandonedTrenchId = best.id;
+    unit._aiAbandonedTrenchOccupant = false;
+    reservations.set(best.id, (reservations.get(best.id) ?? 0) + 1);
+    assigned++;
+  }
+
+  return assigned;
 }
 
 function isAiLiveEnemyUnit(unit) {
@@ -4259,6 +4688,8 @@ function isAiDefensiveTrenchBaseCandidate(
     !unit._aiRadioSafety &&
     !unit._aiSupportMode &&
     (includeAssigned || !unit._aiTrenchTargetId) &&
+    !unit._aiAbandonedTrenchId &&
+    !unit._aiAbandonedTrenchOccupant &&
     (!unit.attackOrder || unit.attackOrder.dead) &&
     (includeTrench || !unit._trenchId) &&
     (!context?.unitFilter || context.unitFilter(unit))
@@ -4476,6 +4907,7 @@ function updateAIDefenses(game, enemyUnits, playerUnits, dt, assault, options = 
     assault,
     options
   );
+  updateAiAbandonedTrenchCapture(game, enemyUnits);
   updateAiDefensiveTrenchOccupants(game, enemyUnits, trenchContext);
   const fieldworkContext = getAiDefensiveFieldworkContext(
     game,
@@ -4596,6 +5028,8 @@ function isClearanceDefenderCoverCandidate(unit) {
     !unit._garrisonBunkerId &&
     !unit._aiTrenchTargetId &&
     !unit._aiTrenchOccupant &&
+    !unit._aiAbandonedTrenchId &&
+    !unit._aiAbandonedTrenchOccupant &&
     (!unit.attackOrder || unit.attackOrder.dead)
   );
 }
@@ -5124,6 +5558,8 @@ function isAiCommanderScreenCandidate(unit, commander) {
     !unit._trenchId &&
     !unit._aiTrenchTargetId &&
     !unit._aiTrenchOccupant &&
+    !unit._aiAbandonedTrenchId &&
+    !unit._aiAbandonedTrenchOccupant &&
     !unit._garrisonBunkerId &&
     !isUnitGarrisoned(unit) &&
     !unit.attackOrder?.isSmokeShell

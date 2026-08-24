@@ -74,6 +74,36 @@ const MAP_CONTEXT = {
     terrain:
       'Steep hills and river valleys restrict tank movement. Infantry and artillery dominate the approaches.',
   },
+  farEast: {
+    year: 1942,
+    month: 10,
+    dayMin: 8,
+    dayMax: 26,
+    operations: [
+      'Matanikau Crossing Fight',
+      'Lunga Perimeter Clash',
+      'Mount Austen Probe',
+      'Jungle Meeting Engagement',
+    ],
+    weather: ['Humid dawn mist', 'Heavy tropical rain', 'Steamy afternoon, clearing at dusk', 'Low cloud over the jungle canopy'],
+    terrain:
+      'Dense jungle and kunai grass limit sight lines. Tracks and village clearings are the only routes for armor.',
+  },
+  berlin: {
+    year: 1945,
+    month: 4,
+    dayMin: 16,
+    dayMax: 30,
+    operations: [
+      'Seelow Approaches',
+      'Frankfurter Allee Push',
+      'Canal Bridge Fight',
+      'District Clearing Action',
+    ],
+    weather: ['Overcast and smoky', 'Rain on rubble', 'Haze from burning blocks', 'Cold spring wind down the avenues'],
+    terrain:
+      'Rubble-choked streets and canal bridges canalize armor. Cellars and wrecked tenements give infantry cover at every corner.',
+  },
 };
 
 const HOURS = ['0430', '0615', '0930', '1145', '1415', '1630', '1820'];
