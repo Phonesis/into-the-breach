@@ -16,8 +16,8 @@
     "check": "node --check main.js && node scripts/verify-build.mjs"
   },
   "devDependencies": {
-    "electron": "^43.3.0",
-    "electron-builder": "^26.0.0"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.7"
   },
   "build": {
     "appId": "com.martinpoole.intothebreach",

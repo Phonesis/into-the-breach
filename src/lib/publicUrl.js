@@ -22,6 +22,7 @@ const MENU_BG_VARS = {
 export function applyPublicAssetCssVars(root = document.documentElement) {
   if (!root?.style) return;
   for (const [name, path] of Object.entries(MENU_BG_VARS)) {
-    root.style.setProperty(name, `url("${publicUrl(path)}")`);
+    const assetUrl = new URL(publicUrl(path), document.baseURI).href;
+    root.style.setProperty(name, `url("${assetUrl}")`);
   }
 }

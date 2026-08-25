@@ -303,6 +303,12 @@ body.portrait-blocked .mobile-support-screen {
   background-image: var(--menu-bg-faction-japan);
 }
 
+#screen-faction.menu-screen::before {
+  background:
+    linear-gradient(90deg, rgba(5, 8, 12, 0.72) 0%, rgba(7, 11, 16, 0.48) 38%, rgba(7, 11, 16, 0.22) 68%, rgba(5, 8, 12, 0.42) 100%),
+    linear-gradient(180deg, rgba(4, 7, 11, 0.18) 0%, rgba(8, 12, 17, 0.08) 40%, rgba(4, 7, 11, 0.58) 100%);
+}
+
 #screen-map {
   background-image: var(--menu-bg-map);
   background-attachment: fixed;
@@ -4782,10 +4788,10 @@ body.portrait-blocked .mobile-support-screen {
   border-color: rgba(223, 229, 235, 0.18);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 32%),
-    rgba(10, 15, 20, 0.78);
+    rgba(10, 15, 20, 0.24);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48), inset 0 1px rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(15px) saturate(0.78);
-  -webkit-backdrop-filter: blur(15px) saturate(0.78);
+  backdrop-filter: blur(10px) saturate(0.88);
+  -webkit-backdrop-filter: blur(10px) saturate(0.88);
 }
 
 .menu-screen .faction-grid {
@@ -4905,14 +4911,14 @@ body.portrait-blocked .mobile-support-screen {
 
 .menu-screen .faction-card {
   min-height: 23rem;
-  background: rgba(20, 27, 34, 0.62);
+  background: rgba(20, 27, 34, 0.16);
 }
 
 #screen-faction.menu-screen .faction-card:hover,
 #screen-faction.menu-screen .faction-card.selected {
   background:
     linear-gradient(145deg, rgba(214, 170, 58, 0.13), transparent 48%),
-    rgba(23, 30, 37, 0.84);
+    rgba(23, 30, 37, 0.28);
 }
 
 .menu-screen .faction-flag-frame {
