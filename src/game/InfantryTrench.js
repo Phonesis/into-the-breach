@@ -546,7 +546,10 @@ export class InfantryTrenchManager {
 
     // Digger drops into the finished trench
     if (digger && !digger.dead) {
-      tryEnterTrench(digger, trench, this);
+      // A digger is allowed to work from the full digging radius. Use that
+      // same radius for the completion hand-off so the final frame cannot
+      // leave the builder standing beside the trench.
+      tryEnterTrench(digger, trench, this, { maxDistance: TRENCH_DIG_RANGE });
     }
     this.game.coverSystem?.updateUnits?.(this.game._aliveUnits ?? this.game.units);
   }
@@ -1093,14 +1096,15 @@ function positionTrenchOccupants(trench, manager) {
   }
 }
 
-export function tryEnterTrench(unit, trench, manager) {
+export function tryEnterTrench(unit, trench, manager, options = {}) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
   if (isUnitMounted(unit) || isUnitGarrisoned(unit)) return false;
   if (!OCCUPY_TYPES.has(unit.def?.type)) return false;
   if (!trench || trench.destroyed) return false;
   if (trench.team !== unit.team && (trench.garrison?.length ?? 0) > 0) return false;
   if ((trench.garrison?.length ?? 0) >= TRENCH_CAPACITY) return false;
-  if (Math.hypot(unit.position.x - trench.x, unit.position.z - trench.z) > TRENCH_ENTER_RANGE + 0.5) {
+  const maxDistance = options.maxDistance ?? TRENCH_ENTER_RANGE + 0.5;
+  if (Math.hypot(unit.position.x - trench.x, unit.position.z - trench.z) > maxDistance) {
     return false;
   }
 
