@@ -371,8 +371,8 @@ export const CLEARANCE_ATTACK_PLANS = {
   infantryAssault: {
     id: 'infantryAssault',
     label: 'Infantry assault',
-    infantryAdvance: 0.72,
-    armorFollow: 0.35,
+    infantryAdvance: 0.5,
+    armorFollow: 0.7,
     supportHold: 0.55,
     flankBias: 0,
   },

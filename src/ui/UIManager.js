@@ -234,6 +234,20 @@ function joinOpponentNames(ids) {
   return `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`;
 }
 
+function donationSupportMarkup() {
+  if (!['http:', 'https:'].includes(globalThis.location?.protocol)) return '';
+  return `
+          <div class="title-support" aria-label="Support development">
+            <div>
+              <span class="title-support-kicker">Support development</span>
+              <p>If you enjoy the operation, you can help keep development going.</p>
+            </div>
+            <a class="title-support-link interactive" href="https://paypal.me/phonesis" target="_blank" rel="noopener noreferrer">
+              Donate via PayPal <span aria-hidden="true">↗</span>
+            </a>
+          </div>`;
+}
+
 export class UIManager {
   constructor(root, callbacks) {
     this.root = root;
@@ -254,6 +268,7 @@ export class UIManager {
     this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
     this.selectedLastStandPresetSize = DEFAULT_LAST_STAND_PRESET_SIZE;
+    this._hudTutorial = false;
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
     this._baseBuildUiKey = '';
@@ -332,9 +347,10 @@ export class UIManager {
       ? `
             <label class="setting-row" for="setting-tablet-mode">
               <span><strong>Tablet controls</strong><small>Use touch camera controls and tablet targeting.</small><span class="setting-detail" id="setting-tablet-mode-detail">Turn this off when a keyboard and mouse are connected to the tablet to use the normal WASD, mouse, and keyboard command scheme. This setting is only available on tablet-class devices.</span></span>
-              <input type="checkbox" id="setting-tablet-mode" data-setting="tabletMode" aria-describedby="setting-tablet-mode-detail" />
-            </label>`
+            <input type="checkbox" id="setting-tablet-mode" data-setting="tabletMode" aria-describedby="setting-tablet-mode-detail" />
+          </label>`
       : '';
+    const donationMarkup = donationSupportMarkup();
     this.root.innerHTML = `
       <div id="screen-title" class="screen menu-screen title-screen interactive">
         <div class="title-hero">
@@ -350,6 +366,7 @@ export class UIManager {
             <button class="btn btn-secondary interactive" id="btn-guide-title">Open Field Manual</button>
             <button class="btn btn-secondary interactive" id="btn-about">Credits &amp; Information</button>
           </div>
+          ${donationMarkup}
           <p class="title-footnote">Plan the operation. Choose your command. Fight the battle.</p>
         </div>
       </div>
@@ -609,19 +626,6 @@ export class UIManager {
           <div>
             <div class="hud-badge" id="hud-faction">—</div>
             <div class="hud-stats" id="hud-map">—</div>
-            <div class="tutorial-banner hidden" id="tutorial-banner">Training — no enemy AI</div>
-            <div class="assault-banner hidden" id="assault-banner">
-              <span class="assault-role" id="assault-role-label">—</span>
-              <span class="assault-objective" id="assault-objective">—</span>
-              <span class="assault-timer" id="assault-timer">—</span>
-            </div>
-            <div class="clearance-banner hidden" id="clearance-banner">
-              Clear all dug-in defenders — fixed force, no reinforcements
-            </div>
-            <div class="td-banner hidden" id="td-banner">
-              <span class="td-wave" id="td-wave-label">Wave 0 / 12</span>
-              <span class="td-phase" id="td-phase-label">Prepare defenses</span>
-            </div>
             <button
               type="button"
               class="frontline-toggle interactive hidden"
@@ -643,9 +647,6 @@ export class UIManager {
               <span class="capture-points-toggle-icon" aria-hidden="true"></span>
               <span>Capture circles</span>
             </button>
-            <div class="laststand-banner hidden" id="laststand-banner">
-              Battle Simulation — no HQ or reinforcements.
-            </div>
           </div>
           <div class="hud-top-right">
             <button
@@ -1185,6 +1186,7 @@ export class UIManager {
           <h2 id="end-title">Victory</h2>
           <p id="end-msg"></p>
           <div id="end-stats" class="end-stats hidden"></div>
+          ${donationSupportMarkup()}
           <div class="end-actions">
             <button class="btn btn-secondary interactive" id="btn-view-battlefield">View battlefield</button>
             <button class="btn btn-primary interactive hidden" id="btn-replay">Replay battle</button>
@@ -2180,7 +2182,7 @@ export class UIManager {
   openSurrenderConfirm() {
     const overlay = this.root.querySelector('#overlay-surrender-confirm');
     if (!overlay) return;
-    const tutorial = !this.root.querySelector('#tutorial-banner')?.classList.contains('hidden');
+    const tutorial = this._hudTutorial;
     const title = this.root.querySelector('#surrender-confirm-title');
     const message = this.root.querySelector('#surrender-confirm-message');
     const cancel = this.root.querySelector('#btn-surrender-cancel');
@@ -2529,49 +2531,16 @@ export class UIManager {
     this._hudStandardCampaign = gameMode === 'campaign';
     this._hudCampaignStyle = options.campaignStyle ?? 'classic';
     this._hudAutoBuildAvailable = gameMode === 'campaign';
+    this._hudTutorial = tutorial;
     this._hudLastStand = lastStand;
     this._hudLastStandDeploy = lastStand;
-    const banner = this.root.querySelector('#tutorial-banner');
-    if (banner) {
-      banner.classList.toggle('hidden', !tutorial);
-      if (tutorial) {
-        banner.textContent = enemyName
-          ? `Training — no enemy AI · ${enemyName} practice HQ`
-          : 'Training — no enemy AI';
-      }
-    }
-
-    const assaultBanner = this.root.querySelector('#assault-banner');
-    if (assaultBanner) assaultBanner.classList.toggle('hidden', !assault);
 
     this._hudClearance = clearance;
-    const clearanceBanner = this.root.querySelector('#clearance-banner');
-    if (clearanceBanner) {
-      clearanceBanner.classList.toggle('hidden', !clearance);
-      const sizeLabel =
-        options.clearanceReinforcementSize === 'large'
-          ? 'Large'
-          : options.clearanceReinforcementSize === 'medium'
-            ? 'Medium'
-            : 'Small';
-      const roleLabel = options.clearanceRole === 'defend' ? 'Defend' : 'Attack';
-      const deadlineLabel = clearanceTimeLimitEnabled ? '15-minute assault' : 'no assault deadline';
-      clearanceBanner.textContent = clearanceReinforced
-        ? `Fortified Line · ${roleLabel} · ${deadlineLabel} · ${sizeLabel} reinforcements every 3 minutes`
-        : `Fortified Line · ${roleLabel} · ${deadlineLabel}`;
-    }
-
-    this.root.querySelector('#td-banner')?.classList.toggle('hidden', !towerDefense);
     this._hudTdEndless = !!(towerDefense && options.tdEndless);
     const tdCountdown = this.root.querySelector('#td-wave-countdown');
     tdCountdown?.classList.add('hidden');
     tdCountdown?.classList.toggle('td-wave-countdown-side', !!towerDefense);
     this.hideTdBreachAlert();
-    const lastStandBanner = this.root.querySelector('#laststand-banner');
-    lastStandBanner?.classList.toggle('hidden', !lastStand);
-    if (lastStand && lastStandBanner) {
-      lastStandBanner.textContent = 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.';
-    }
     this._hudTowerDefense = towerDefense;
     this._hudTdHqDefense = tdHqDefense;
     this._hudHasFrontline = assault || towerDefense;
@@ -2687,14 +2656,6 @@ export class UIManager {
         hint.textContent += ' · Camera pad (right)';
       }
       hint.classList.remove('hud-hint-opening');
-    }
-
-    if (assault && options.assaultRole) {
-      const roleLabel = this.root.querySelector('#assault-role-label');
-      if (roleLabel) {
-        roleLabel.textContent =
-          options.assaultRole === 'attack' ? 'You are attacking' : 'You are defending';
-      }
     }
 
     const btns = this.root.querySelector('#produce-btns');
@@ -3466,14 +3427,6 @@ export class UIManager {
   updateTowerDefense(game) {
     const hud = formatTowerDefenseHud(game?.towerDefense);
     if (!hud) return;
-    const waveEl = this.root.querySelector('#td-wave-label');
-    const phaseEl = this.root.querySelector('#td-phase-label');
-    if (waveEl) {
-      waveEl.textContent = hud.endless
-        ? `Wave ${hud.wave} · Endless`
-        : `Wave ${hud.wave} / ${hud.maxWaves}`;
-    }
-    if (phaseEl) phaseEl.textContent = hud.phaseLabel;
 
     const countdown = this.root.querySelector('#td-wave-countdown');
     const card = this.root.querySelector('#td-wave-countdown-card');
@@ -4548,16 +4501,6 @@ export class UIManager {
     const enemyCount = countLastStandCombatUnits(game.units, 'enemy');
     const supplies = game.cheatMode ? '∞' : game.lastStand.supplies.player;
 
-    const lastStandBanner = this.root.querySelector('#laststand-banner');
-    if (lastStandBanner) {
-      lastStandBanner.textContent =
-        game.lastStand.phase === 'deploy'
-          ? preset
-            ? 'Battle Simulation — preset forces deployed. Begin battle when ready.'
-            : 'Battle Simulation — deploy your army, then engage. No HQ or reinforcements.'
-          : LAST_STAND_BATTLE_HINT;
-    }
-
     if (game.lastStand.phase !== 'deploy') {
       banner?.classList.add('hidden');
       banner?.classList.remove('opening-countdown--manual-deploy');
@@ -4842,10 +4785,11 @@ export class UIManager {
   updateAssaultHUD(assault) {
     if (!assault) return;
     const hud = formatAssaultHud(assault);
-    const obj = this.root.querySelector('#assault-objective');
-    const timer = this.root.querySelector('#assault-timer');
-    if (obj) obj.textContent = hud.objective;
-    if (timer) timer.textContent = hud.timer;
+    const hint = this.root.querySelector('#hud-hint');
+    if (hint && !this._hudCheatMode) {
+      hint.textContent = `${hud.role} · ${hud.objective} · ${hud.timer}`;
+      hint.classList.remove('hud-hint-opening');
+    }
   }
 
   _productionPanelKeyFor(game) {

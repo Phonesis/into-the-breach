@@ -215,6 +215,11 @@ const CLEARANCE_DEFENDER_COVER_MAX_DISTANCE = 34;
 const CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE = 30;
 const CLEARANCE_DEFENDER_COVER_HOLD_RADIUS = 5.6;
 const CLEARANCE_DEFENDER_TRENCH_MAX_DISTANCE = 48;
+// Prepared-line garrisons should use a trench as a fire position, not as a
+// single-unit reserve. Keep the first pass deliberately light so adjacent
+// trenches and field cover are occupied before any trench is filled.
+const CLEARANCE_DEFENDER_TRENCH_SOFT_CAPACITY = 2;
+const CLEARANCE_DEFENDER_COVER_SPREAD_DISTANCE = 7.5;
 
 const LAST_STAND_FORCE_WEIGHTS = {
   commander: 0.2,
@@ -1597,9 +1602,29 @@ function applyStandardAiUnitTactics(unit, plan, players, game) {
     return true;
   }
 
-  // Let ordinary advancing riflemen retain the established capture/cover
-  // logic. Armor and fire support still receive a deliberate objective order.
-  if (operation === 'advance' && role === 'line' && !reserve) return false;
+  // Advancing riflemen still peel off for capture, but they do not independently
+  // charge when armor or MGs are available to bound with.
+  if (operation === 'advance' && role === 'line' && !reserve) {
+    const lead = findCombinedArmsLead(
+      unit,
+      (game?._enemyAlive ?? []).filter((ally) => !isStandardAiReserve(ally, plan)),
+      52
+    );
+    if (lead) {
+      if (target && isInRange(unit, target)) {
+        unit.setAttackOrder(target, { respectStance: true });
+        holdStandardAiUnit(unit);
+        return true;
+      }
+      const follow = getFollowPointNearLead(unit, lead, game?.mapDef, 8);
+      if (follow) {
+        unit.clearAttackOrder();
+        setStandardAiMove(unit, follow);
+        return true;
+      }
+    }
+    if (plan.assessment?.needsCapture) return false;
+  }
   unit.clearAttackOrder();
   const destination = getStandardAiRoleDestination(unit, plan, game);
   if (
@@ -1622,7 +1647,7 @@ function applyStandardAiUnitTactics(unit, plan, players, game) {
       game?.difficulty
     );
   }
-  return operation === 'counterattack' || role !== 'line';
+  return true;
 }
 
 function getLastStandDoctrineAttackBias(tactic) {
@@ -1660,6 +1685,85 @@ function isLastStandSupportRole(role) {
   return role === 'arty' || role === 'support';
 }
 
+function isAiRifleChargeType(type) {
+  return type === 'infantry' || type === 'paratrooper' || type === 'engineer';
+}
+
+function isAiCombinedArmsLeadType(type) {
+  return isTankType(type) || type === 'armoredCar' || type === 'machineGun';
+}
+
+function forceHasCombinedArmsSupport(allies) {
+  for (const ally of allies ?? []) {
+    if (!ally || ally.dead || ally.surrendered || ally._captureExit) continue;
+    const type = ally.def?.type;
+    if (isAiCombinedArmsLeadType(type) || type === 'mortar' || type === 'artillery') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function forceHasIdleArmor(allies) {
+  let hasArmor = false;
+  let advancingArmor = false;
+  for (const ally of allies ?? []) {
+    if (!ally || ally.dead || ally.surrendered || ally._captureExit) continue;
+    if (!isTankType(ally.def?.type) && ally.def?.type !== 'armoredCar') continue;
+    hasArmor = true;
+    if (
+      ally.moveTarget ||
+      (ally.attackOrder && !ally.attackOrder.dead) ||
+      ally.lastStandStance === 'attack'
+    ) {
+      advancingArmor = true;
+    }
+  }
+  return hasArmor && !advancingArmor;
+}
+
+function findCombinedArmsLead(unit, allies, radius = 48) {
+  if (!unit) return null;
+  let best = null;
+  let bestScore = Infinity;
+  for (const ally of allies ?? []) {
+    if (!ally || ally === unit || ally.dead || ally.surrendered || ally._captureExit) {
+      continue;
+    }
+    if (!isAiCombinedArmsLeadType(ally.def?.type)) continue;
+    const attacking = !!ally.attackOrder && !ally.attackOrder.dead;
+    const committed = ally.lastStandStance === 'attack';
+    const advancing = attacking || committed || !!ally.moveTarget;
+    if (!advancing) continue;
+    const distance = unit.distanceTo(ally);
+    if (distance > radius) continue;
+    const score =
+      distance -
+      (isTankType(ally.def?.type) ? 8 : ally.def?.type === 'armoredCar' ? 3 : 0) -
+      (attacking || committed ? 20 : 0);
+    if (score < bestScore) {
+      bestScore = score;
+      best = ally;
+    }
+  }
+  return best;
+}
+
+function getFollowPointNearLead(unit, lead, mapDef, spread = 8) {
+  const dest = lead?.moveTarget ?? lead?.position;
+  if (!dest) return null;
+  const id = Math.abs(Number(unit?.id) || 0);
+  const ox = ((id % 5) - 2) * (spread / 2.2);
+  const oz = ((Math.floor(id / 5) % 5) - 2) * (spread / 2.2);
+  const point = { x: dest.x + ox, z: dest.z + oz };
+  if (!mapDef) return point;
+  const half = (mapDef.size ?? 120) / 2 - 8;
+  return {
+    x: clamp(point.x, -half, half),
+    z: clamp(point.z, -half, half),
+  };
+}
+
 function getLastStandCommitPriority(unit, tactic) {
   const type = unit?.def?.type;
   const role = unit.lastStandRole ?? roleFromUnitType(type);
@@ -1675,6 +1779,88 @@ function getLastStandCommitPriority(unit, tactic) {
   else if (role === 'line') base = 2;
   else base = 6;
   return base + defendBias;
+}
+
+function getLastStandCommitGroup(unit) {
+  const type = unit?.def?.type;
+  const role = unit.lastStandRole ?? roleFromUnitType(type);
+  if (role === 'recon' || type === 'armoredCar') return 'recon';
+  if (role === 'armor' || isTankType(type)) return 'armor';
+  if (type === 'machineGun' || type === 'sniper') return 'fire';
+  if (type === 'engineer') return 'engineer';
+  return 'line';
+}
+
+/**
+ * Build a mixed assault package instead of sending the cheapest units first.
+ * Cheap-first commitment produced rifle charges while tanks sat in reserve.
+ */
+function selectLastStandCommitUnits(combat, targetCount, mode, tactic) {
+  const want = Math.max(0, Math.min(targetCount, combat.length));
+  if (want <= 0) return new Set();
+
+  const buckets = {
+    recon: [],
+    armor: [],
+    fire: [],
+    engineer: [],
+    line: [],
+  };
+  for (const unit of combat) {
+    buckets[getLastStandCommitGroup(unit)].push(unit);
+  }
+  for (const list of Object.values(buckets)) {
+    list.sort(
+      (a, b) => getLastStandCommitPriority(a, tactic) - getLastStandCommitPriority(b, tactic)
+    );
+  }
+
+  const selected = [];
+  const used = new Set();
+  const take = (list, count) => {
+    let taken = 0;
+    for (const unit of list) {
+      if (taken >= count || selected.length >= want) break;
+      if (used.has(unit)) continue;
+      used.add(unit);
+      selected.push(unit);
+      taken++;
+    }
+    return taken;
+  };
+
+  const hasSupportingArms = buckets.armor.length + buckets.fire.length > 0;
+  if (mode === 'probe') {
+    take(buckets.recon, Math.max(1, Math.round(want * 0.5)));
+    take(buckets.fire, Math.min(1, want - selected.length));
+    take(buckets.armor, Math.min(1, want - selected.length));
+    take(buckets.engineer, Math.min(1, want - selected.length));
+    take(
+      buckets.line,
+      hasSupportingArms ? Math.max(0, Math.ceil(want * 0.35)) : want - selected.length
+    );
+  } else {
+    const armorShare = tactic?.ai?.armorMode === 'hold' ? 0.24 : 0.36;
+    if (buckets.armor.length) {
+      take(buckets.armor, Math.max(1, Math.round(want * armorShare)));
+    }
+    if (buckets.fire.length) {
+      take(buckets.fire, Math.max(1, Math.round(want * 0.22)));
+    }
+    take(buckets.recon, Math.round(want * 0.12));
+    take(buckets.engineer, Math.min(1, Math.round(want * 0.12)));
+    take(
+      buckets.line,
+      hasSupportingArms ? Math.max(1, Math.floor(want * 0.5)) : want - selected.length
+    );
+  }
+
+  for (const key of ['armor', 'fire', 'recon', 'engineer', 'line']) {
+    if (selected.length >= want) break;
+    take(buckets[key], want - selected.length);
+  }
+
+  return new Set(selected);
 }
 
 function getLastStandPlayerMotion(operational, playerSummary, enemySummary) {
@@ -1749,12 +1935,17 @@ function getLastStandApproachPoint(
 
   let depth = mode === 'probe' ? 0.34 : 0.42 + commitment * 0.24;
   if (role === 'recon') depth += 0.1;
-  else if (role === 'armor') depth += mode === 'probe' ? -0.16 : -0.06;
-  else if (unit.def?.type === 'machineGun') depth -= 0.04;
+  else if (role === 'armor') depth += mode === 'probe' ? -0.12 : 0.04;
+  else if (unit.def?.type === 'machineGun') depth -= 0.06;
+  else if (role === 'line' || isAiRifleChargeType(unit.def?.type)) {
+    // InfantryAdvanceMult only nudges the bound. It must not put rifles
+    // ahead of the armor/MG spearhead into unsupported close assault.
+    depth += clamp(((ai.infantryAdvanceMult ?? 0.65) - 0.7) * 0.08, -0.05, 0.04) - 0.04;
+  }
   if (ai.armorMode === 'flank' && role === 'armor') depth += 0.02;
   depth = clamp(depth, 0.18, 0.72);
 
-  const minStandoff = role === 'recon' ? 20 : role === 'armor' ? 46 : 22;
+  const minStandoff = role === 'recon' ? 20 : role === 'armor' ? 36 : 34;
   const remaining = length * (1 - depth);
   if (remaining < minStandoff) {
     depth = Math.max(0.18, 1 - minStandoff / length);
@@ -2036,26 +2227,31 @@ function issueLastStandAttackWave(
     combat.push(unit);
   }
 
-  combat.sort(
-    (a, b) => getLastStandCommitPriority(a, tactic) - getLastStandCommitPriority(b, tactic)
-  );
-
   const reserveFloor = Math.max(
     1,
     Math.round(combat.length * (mode === 'probe' ? Math.max(tempo.reserveRatio, 0.55) : tempo.reserveRatio))
   );
   const maxCommit = Math.max(1, combat.length - Math.min(reserveFloor, combat.length - 1));
-  const targetCount = Math.max(
+  let targetCount = Math.max(
     1,
     Math.min(maxCommit, Math.round(combat.length * commitment))
   );
+  const presentGroups = new Set(combat.map((unit) => getLastStandCommitGroup(unit)));
+  const mixedCount =
+    (presentGroups.has('armor') ? 1 : 0) +
+    (presentGroups.has('fire') ? 1 : 0) +
+    (presentGroups.has('line') ? 1 : 0);
+  if (mode !== 'probe' && mixedCount >= 2) {
+    targetCount = Math.max(targetCount, Math.min(maxCommit, mixedCount + 1));
+  }
+  const committed = selectLastStandCommitUnits(combat, targetCount, mode, tactic);
 
   for (let i = 0; i < combat.length; i++) {
     const unit = combat[i];
     const role = unit.lastStandRole ?? roleFromUnitType(unit.def?.type);
     const focus = pickPresetAttackTarget(unit, players, scenery);
 
-    if (i >= targetCount) {
+    if (!committed.has(unit)) {
       clearAiTankManeuver(unit);
       assignLastStandUnitHold(
         unit,
@@ -2912,15 +3108,41 @@ function issueClearanceDefenderCounterattack(enemies, players, game, operational
   if (candidates.length < 2 || players.length === 0) return false;
 
   const target = averagePosition(players);
-  candidates.sort((a, b) => {
+  const byDistance = (a, b) => {
     const aDistance = Math.hypot(a.position.x - target.x, a.position.z - target.z);
     const bDistance = Math.hypot(b.position.x - target.x, b.position.z - target.z);
     return aDistance - bDistance;
-  });
+  };
+  const fire = candidates.filter((unit) => unit.def?.type === 'machineGun').sort(byDistance);
+  const recon = candidates.filter((unit) => unit.def?.type === 'armoredCar').sort(byDistance);
+  const rifles = candidates
+    .filter((unit) => unit.def?.type === 'infantry' || unit.def?.type === 'engineer')
+    .sort(byDistance);
+  const rest = candidates
+    .filter(
+      (unit) =>
+        unit.def?.type !== 'machineGun' &&
+        unit.def?.type !== 'armoredCar' &&
+        unit.def?.type !== 'infantry' &&
+        unit.def?.type !== 'engineer'
+    )
+    .sort(byDistance);
+  const mixed = [];
+  const takeCounter = (list, count) => {
+    for (const unit of list) {
+      if (mixed.length >= count) break;
+      if (!mixed.includes(unit)) mixed.push(unit);
+    }
+  };
   const detachmentSize = clamp(Math.round(candidates.length * 0.24), 2, 6);
+  takeCounter(fire, 1);
+  takeCounter(recon, 1);
+  takeCounter(rifles, detachmentSize);
+  takeCounter(rest, detachmentSize);
+  takeCounter(candidates.sort(byDistance), detachmentSize);
   const until = (game?.matchTime ?? 0) + CLEARANCE_DEFENDER_COUNTERATTACK_DURATION;
-  for (let i = 0; i < detachmentSize; i++) {
-    const unit = candidates[i];
+  for (let i = 0; i < mixed.length; i++) {
+    const unit = mixed[i];
     unit._clearanceProbe = {
       targetX: target.x,
       targetZ: target.z,
@@ -4066,6 +4288,26 @@ export function updateAI({
       }
     }
 
+    if (
+      isAiRifleChargeType(unit.def?.type) &&
+      forceHasCombinedArmsSupport(aliveEnemies)
+    ) {
+      const lead = findCombinedArmsLead(unit, aliveEnemies, 64);
+      const follow = lead ? getFollowPointNearLead(unit, lead, mapDef, 9) : null;
+      if (follow) {
+        unit.clearAttackOrder();
+        unit.moveTarget = follow;
+        unit._chasingAttack = false;
+        continue;
+      }
+      const army = averagePosition(aliveEnemies);
+      const toArmy = Math.hypot(unit.position.x - army.x, unit.position.z - army.z);
+      unit.clearAttackOrder();
+      unit.moveTarget = toArmy > 14 ? { x: army.x, z: army.z } : null;
+      unit._chasingAttack = false;
+      continue;
+    }
+
     const center = averagePosition(alivePlayers);
     unit.clearAttackOrder();
     unit.moveTarget = {
@@ -4872,7 +5114,12 @@ function getAiDefensiveTrenchContext(
         ? fallbackPattern === 'defenseInDepth'
           ? 0.5
           : 0.44
-        : 0.3,
+        // Leave roughly half of a prepared defender's foot force mobile for
+        // sandbags, buildings, and flank screens instead of filling every
+        // available trench at the opening bell.
+        : enemyIsDefender
+          ? 0.48
+          : 0.3,
       anchor: getAiTrenchAveragePoint(held, game.mapDef?.enemyBase),
       unitFilter: (unit) => !!unit.defensiveHold && !unit._clearanceProbe,
     };
@@ -5576,6 +5823,9 @@ function isAiDefensiveTrenchBaseCandidate(
     !unit._aiRadioManeuver &&
     !unit._aiRadioSafety &&
     !unit._aiSupportMode &&
+    // A prepared-line cover order is already a defensive assignment. Do not
+    // let the trench allocator overwrite it on the next strategic tick.
+    !unit._clearanceDefenderCover &&
     (includeAssigned || !unit._aiTrenchTargetId) &&
     !unit._aiAbandonedTrenchId &&
     !unit._aiAbandonedTrenchOccupant &&
@@ -5707,15 +5957,41 @@ function updateAiDefensiveTrenchOccupants(game, enemyUnits, context) {
     });
 
   const planned = new Map();
+  const spreadAcrossTrenches = context.kind === 'clearanceDefend';
   let assigned = 0;
   for (const unit of candidates) {
     if (state.occupied + assigned >= desired) break;
 
+    const available = state.trenches.filter((trench) => {
+      const used = (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0);
+      return used < AI_TRENCH_CAPACITY;
+    });
+    if (!available.length) continue;
+
+    // For a prepared Fortified Line, give every nearby trench its first
+    // occupants before any trench receives a second group. Once that belt is
+    // covered, the normal hard capacity remains available as a fallback.
+    let trenchPool = available;
+    if (spreadAcrossTrenches) {
+      const underSoftCap = available.filter((trench) => {
+        const used = (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0);
+        return used < CLEARANCE_DEFENDER_TRENCH_SOFT_CAPACITY;
+      });
+      if (underSoftCap.length) trenchPool = underSoftCap;
+      const minimumOccupancy = Math.min(
+        ...trenchPool.map(
+          (trench) => (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0)
+        )
+      );
+      trenchPool = trenchPool.filter(
+        (trench) =>
+          (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0) === minimumOccupancy
+      );
+    }
+
     let best = null;
     let bestDistance = AI_TRENCH_MAX_OCCUPATION_DISTANCE;
-    for (const trench of state.trenches) {
-      const used = (trench.garrison?.length ?? 0) + (planned.get(trench.id) ?? 0);
-      if (used >= AI_TRENCH_CAPACITY) continue;
+    for (const trench of trenchPool) {
       const distance = Math.hypot(unit.position.x - trench.x, unit.position.z - trench.z);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -5951,40 +6227,71 @@ function isClearanceBunkerAvailable(entry, unit) {
   );
 }
 
-function findClearanceDefenderBunker(unit, game) {
+function getClearanceDefenderShelterAssignments(enemyUnits, excludeUnit) {
+  return (enemyUnits ?? []).filter(
+    (candidate) =>
+      candidate &&
+      candidate !== excludeUnit &&
+      !candidate.dead &&
+      !candidate.surrendered &&
+      !candidate._captureExit &&
+      candidate._clearanceDefenderCover
+  );
+}
+
+function findClearanceDefenderBunker(unit, game, enemyUnits = []) {
   const hold = getClearanceDefenderHoldPoint(unit);
   const holdRadius = unit.defensiveHold?.radius ?? 12;
   const maxHoldDistance = Math.max(
     CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
     holdRadius + 18
   );
-  let best = null;
-  let bestScore = Infinity;
+  const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
+  const candidates = [];
 
   for (const entry of getClearanceBunkerEntries(game)) {
     if (!isClearanceBunkerAvailable(entry, unit)) continue;
+    const assigned = assignments.filter(
+      (candidate) =>
+        candidate._clearanceDefenderCover.kind === 'bunker' &&
+        candidate._clearanceDefenderCover.id === entry.id
+    ).length;
+    const effectiveOccupancy = (entry.garrison?.length ?? 0) + assigned;
+    const capacity = entry.def.garrisonCapacity ?? 2;
+    if (effectiveOccupancy >= capacity) continue;
     const distance = Math.hypot(entry.x - unit.position.x, entry.z - unit.position.z);
     const holdDistance = Math.hypot(entry.x - hold.x, entry.z - hold.z);
     if (distance > 46 || holdDistance > maxHoldDistance) continue;
-    const score = distance + holdDistance * 0.32 + (entry.garrison?.length ?? 0) * 4;
-    if (score < bestScore) {
-      bestScore = score;
-      const enterRange = getBunkerEnterRange(entry);
-      best = {
-        kind: 'bunker',
-        id: entry.id,
-        x: entry.x,
-        z: entry.z,
-        enterRange,
-        radius: Math.max(5.2, enterRange + 1.2),
-        reached: false,
-      };
-    }
+    candidates.push({ entry, distance, holdDistance, effectiveOccupancy });
   }
-  return best;
+
+  if (!candidates.length) return null;
+  const minimumOccupancy = Math.min(...candidates.map((candidate) => candidate.effectiveOccupancy));
+  const balanced = candidates.filter(
+    (candidate) => candidate.effectiveOccupancy === minimumOccupancy
+  );
+  const best = balanced.sort(
+    (a, b) =>
+      a.distance + a.holdDistance * 0.32 - (b.distance + b.holdDistance * 0.32)
+  )[0];
+  const enterRange = getBunkerEnterRange(best.entry);
+  return {
+    kind: 'bunker',
+    id: best.entry.id,
+    x: best.entry.x,
+    z: best.entry.z,
+    enterRange,
+    radius: Math.max(5.2, enterRange + 1.2),
+    reached: false,
+  };
 }
 
-function findClearanceDefenderTrench(unit, game) {
+function findClearanceDefenderTrench(
+  unit,
+  game,
+  enemyUnits = [],
+  { allowSoftOverflow = false } = {}
+) {
   const trenches = game?.infantryTrenches?.trenches ?? [];
   const hold = getClearanceDefenderHoldPoint(unit);
   const holdRadius = unit.defensiveHold?.radius ?? 12;
@@ -5992,8 +6299,8 @@ function findClearanceDefenderTrench(unit, game) {
     CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
     holdRadius + 18
   );
-  let best = null;
-  let bestScore = Infinity;
+  const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
+  const candidates = [];
 
   for (const trench of trenches) {
     if (
@@ -6002,26 +6309,44 @@ function findClearanceDefenderTrench(unit, game) {
       trench.team !== unit.team ||
       (trench.garrison?.length ?? 0) >= AI_TRENCH_CAPACITY
     ) continue;
+    const assigned = assignments.filter(
+      (candidate) =>
+        candidate._clearanceDefenderCover.kind === 'trench' &&
+        candidate._clearanceDefenderCover.id === trench.id
+    ).length;
+    const effectiveOccupancy = (trench.garrison?.length ?? 0) + assigned;
+    if (effectiveOccupancy >= AI_TRENCH_CAPACITY) continue;
     const distance = Math.hypot(trench.x - unit.position.x, trench.z - unit.position.z);
     const holdDistance = Math.hypot(trench.x - hold.x, trench.z - hold.z);
     if (distance > CLEARANCE_DEFENDER_TRENCH_MAX_DISTANCE || holdDistance > maxHoldDistance) continue;
-    const score = distance + holdDistance * 0.25 - (AI_TRENCH_CAPACITY - (trench.garrison?.length ?? 0)) * 0.8;
-    if (score < bestScore) {
-      bestScore = score;
-      best = {
-        kind: 'trench',
-        id: trench.id,
-        x: trench.x,
-        z: trench.z,
-        radius: 3.4,
-        reached: false,
-      };
-    }
+    candidates.push({ trench, distance, holdDistance, effectiveOccupancy });
   }
-  return best;
+
+  if (!candidates.length) return null;
+  const underSoftCap = candidates.filter(
+    (candidate) => candidate.effectiveOccupancy < CLEARANCE_DEFENDER_TRENCH_SOFT_CAPACITY
+  );
+  if (!underSoftCap.length && !allowSoftOverflow) return null;
+  const pool = underSoftCap.length ? underSoftCap : candidates;
+  const minimumOccupancy = Math.min(...pool.map((candidate) => candidate.effectiveOccupancy));
+  const balanced = pool.filter(
+    (candidate) => candidate.effectiveOccupancy === minimumOccupancy
+  );
+  const best = balanced.sort(
+    (a, b) =>
+      a.distance + a.holdDistance * 0.25 - (b.distance + b.holdDistance * 0.25)
+  )[0];
+  return {
+    kind: 'trench',
+    id: best.trench.id,
+    x: best.trench.x,
+    z: best.trench.z,
+    radius: 3.4,
+    reached: false,
+  };
 }
 
-function findClearanceDefenderCoverZone(unit, game) {
+function findClearanceDefenderCoverZone(unit, game, enemyUnits = []) {
   const zones = game?.coverSystem?.zones ?? [];
   const hold = getClearanceDefenderHoldPoint(unit);
   const holdRadius = unit.defensiveHold?.radius ?? 12;
@@ -6029,42 +6354,50 @@ function findClearanceDefenderCoverZone(unit, game) {
     CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
     holdRadius + 18
   );
-  let best = null;
-  let bestScore = Infinity;
+  const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
+  const candidates = [];
 
   for (const zone of zones) {
     if (!zone || !Number.isFinite(zone.x) || !Number.isFinite(zone.z)) continue;
     // A garrisonable building is handled through the bunker route above. Do
     // not send a unit to the solid centre of a non-garrisonable building.
     if (game.scenery?.isFieldWorksPlacementBlocked?.(zone.x, zone.z, 1.2)) continue;
-    if (zone.type === 'trench') {
-      const trench = (game.infantryTrenches?.trenches ?? []).find(
-        (candidate) =>
-          !candidate.destroyed &&
-          Math.hypot(candidate.x - zone.x, candidate.z - zone.z) < 1.2
-      );
-      if (!trench || (trench.garrison?.length ?? 0) >= AI_TRENCH_CAPACITY) continue;
-    }
+    // Trenches have their own balanced selector. Treating them as generic
+    // cover here would let the fallback path put another squad on the same
+    // trench after its soft capacity had already been reached.
+    if (zone.type === 'trench') continue;
 
     const distance = Math.hypot(zone.x - unit.position.x, zone.z - unit.position.z);
     const holdDistance = Math.hypot(zone.x - hold.x, zone.z - hold.z);
     if (distance > CLEARANCE_DEFENDER_COVER_MAX_DISTANCE || holdDistance > maxHoldDistance) continue;
 
     const coverQuality = Math.max(0, 1 - (zone.mult ?? 0.45));
-    const score = distance + holdDistance * 0.3 - coverQuality * 8;
-    if (score < bestScore) {
-      bestScore = score;
-      best = {
-        kind: 'cover',
-        x: zone.x,
-        z: zone.z,
-        type: zone.type ?? 'medium',
-        radius: zone.radius ?? 4,
-        reached: false,
-      };
-    }
+    const assignedNearby = assignments.filter(
+      (candidate) =>
+        Math.hypot(
+          candidate._clearanceDefenderCover.x - zone.x,
+          candidate._clearanceDefenderCover.z - zone.z
+        ) < CLEARANCE_DEFENDER_COVER_SPREAD_DISTANCE
+    ).length;
+    candidates.push({ zone, distance, holdDistance, coverQuality, assignedNearby });
   }
-  return best;
+
+  if (!candidates.length) return null;
+  const unoccupied = candidates.filter((candidate) => candidate.assignedNearby === 0);
+  const pool = unoccupied.length ? unoccupied : candidates;
+  const best = pool.sort(
+    (a, b) =>
+      a.distance + a.holdDistance * 0.3 - a.coverQuality * 8 -
+      (b.distance + b.holdDistance * 0.3 - b.coverQuality * 8)
+  )[0];
+  return {
+    kind: 'cover',
+    x: best.zone.x,
+    z: best.zone.z,
+    type: best.zone.type ?? 'medium',
+    radius: best.zone.radius ?? 4,
+    reached: false,
+  };
 }
 
 function isClearanceDefenderCoverTargetValid(target, unit, game) {
@@ -6172,9 +6505,13 @@ function ensureClearanceDefenderCover(game, enemyUnits) {
     }
 
     const target =
-      findClearanceDefenderTrench(unit, game) ??
-      findClearanceDefenderBunker(unit, game) ??
-      findClearanceDefenderCoverZone(unit, game);
+      // First use an under-filled trench, then distribute into a bunker or
+      // field cover. Only overflow a trench when no other defensive position
+      // is available in this pass.
+      findClearanceDefenderTrench(unit, game, enemyUnits) ??
+      findClearanceDefenderBunker(unit, game, enemyUnits) ??
+      findClearanceDefenderCoverZone(unit, game, enemyUnits) ??
+      findClearanceDefenderTrench(unit, game, enemyUnits, { allowSoftOverflow: true });
     if (target) {
       issueClearanceDefenderCoverOrder(unit, target);
     } else {
@@ -7964,15 +8301,6 @@ function pickPresetAttackTarget(unit, players, scenery) {
   return pickAttackTarget(unit, players, scenery);
 }
 
-function countAlliesInRole(allies, role, nearUnit, radius) {
-  let n = 0;
-  for (const a of allies) {
-    if (a.dead || a.id === nearUnit.id || a.lastStandRole !== role) continue;
-    if (nearUnit.distanceTo(a) <= radius) n++;
-  }
-  return n;
-}
-
 function findLeadRecon(allies) {
   let best = null;
   let bestDist = -1;
@@ -7999,7 +8327,6 @@ function updateLastStandPresetUnit(
   flankSide = 1,
   scenery = null
 ) {
-  const d = difficulty ?? { attackAggressionMult: 1 };
   const tactic = lastStandTactic ?? getLastStandTactic('armoredThrust');
   const ai = tactic.ai ?? getLastStandTactic('armoredThrust').ai;
   const role = unit.lastStandRole ?? 'line';
@@ -8089,32 +8416,28 @@ function updateLastStandPresetUnit(
       unit.moveTarget = getStandoffPosition(unit, focus);
       return;
     }
-    if (countAlliesInRole(allies, 'armor', unit, 42) > 0) {
-      const armorLead = allies.find(
-        (a) =>
-          !a.dead &&
-          a.lastStandRole === 'armor' &&
-          a.lastStandStance === 'attack' &&
-          unit.distanceTo(a) < 42
-      );
-      const followChance = 0.22 * (ai.lineFollowArmorMult ?? 1) * d.attackAggressionMult;
-      if (
-        armorLead &&
-        (armorLead.attackOrder || armorLead.moveTarget) &&
-        Math.random() < followChance
-      ) {
+    const armorLead = findCombinedArmsLead(unit, allies, 52);
+    if (armorLead && (ai.lineFollowArmorMult ?? 1) >= 0.3) {
+      const follow = getFollowPointNearLead(unit, armorLead, mapDef, 8);
+      if (follow) {
         unit.lastStandStance = 'attack';
         unit.defensiveHold = null;
-        if (armorLead.moveTarget) {
-          unit.clearAttackOrder();
-          unit.moveTarget = {
-            x: armorLead.moveTarget.x + (Math.random() - 0.5) * 8,
-            z: armorLead.moveTarget.z + (Math.random() - 0.5) * 8,
-          };
-          unit._chasingAttack = false;
-        }
+        unit.clearAttackOrder();
+        unit.moveTarget = follow;
+        unit._chasingAttack = false;
         return;
       }
+    }
+    if (
+      forceHasCombinedArmsSupport(allies) &&
+      !armorLead &&
+      (ai.lineFollowArmorMult ?? 1) >= 0.35 &&
+      unit.lastStandStance !== 'attack'
+    ) {
+      // Combined-arms support exists but has not stepped off. Hold rather
+      // than sending rifles in as cannon fodder.
+      unit._chasingAttack = false;
+      return;
     }
     if (unit.moveTarget) {
       unit._chasingAttack = false;
@@ -8268,12 +8591,27 @@ function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game
     return;
   }
 
-  // Line infantry / engineers: main advance.
+  // Line infantry / engineers: bound with armor and MGs rather than charging
+  // prepared fire as an unsupported rifle wave.
+  const lead = findCombinedArmsLead(unit, allies, 52);
   if (focus) {
     unit.setAttackOrder(focus);
-    if (!isInRange(unit, focus)) {
-      unit.moveTarget = getStandoffPosition(unit, focus);
+    if (isInRange(unit, focus)) {
+      unit.moveTarget = null;
+      return;
     }
+    if (lead) {
+      const follow = getFollowPointNearLead(unit, lead, mapDef, 8);
+      if (follow) {
+        unit.moveTarget = follow;
+        return;
+      }
+    }
+    if (forceHasIdleArmor(allies) && unit.distanceTo(focus) > getUnitWeaponRange(unit) * 1.35) {
+      unit.moveTarget = null;
+      return;
+    }
+    unit.moveTarget = getStandoffPosition(unit, focus);
     return;
   }
 
@@ -8282,9 +8620,27 @@ function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game
   const nearest = findNearestVisibleEnemy(unit, players, game?.scenery);
   if (nearest && unit.distanceTo(nearest) < getUnitWeaponRange(unit) * 1.6) {
     unit.setAttackOrder(nearest);
+    if (lead) {
+      const follow = getFollowPointNearLead(unit, lead, mapDef, 8);
+      if (follow) {
+        unit.moveTarget = follow;
+        return;
+      }
+    }
     unit.moveTarget = getStandoffPosition(unit, nearest);
     return;
   }
+
+  if (lead) {
+    const follow = getFollowPointNearLead(unit, lead, mapDef, 8);
+    if (follow) {
+      unit.clearAttackOrder();
+      unit.moveTarget = follow;
+    }
+    return;
+  }
+
+  if (forceHasIdleArmor(allies)) return;
 
   if (players.length && Math.random() < plan.infantryAdvance * 0.38 * aggression) {
     unit.clearAttackOrder();
@@ -8430,13 +8786,16 @@ function rollEnemyUnitType(assault, difficulty) {
   const heavyBias = Math.min(0.18, 0.08 * d.attackAggressionMult);
   const roll = Math.random();
   if (assault && assault.attackerTeam === 'enemy') {
-    if (roll < 0.44) return 'infantry';
-    if (roll < 0.64) return 'infantry';
-    if (roll < 0.74) return 'armoredCar';
-    if (roll < 0.84) return 'sniper';
-    if (roll < 0.88) return 'mortar';
-    if (roll < 0.94) return 'antiTankGun';
-    if (roll < 0.98) return 'tank';
+    if (roll < 0.26) return 'infantry';
+    if (roll < 0.36) return 'machineGun';
+    if (roll < 0.46) return 'infantry';
+    if (roll < 0.54) return 'armoredCar';
+    if (roll < 0.62) return 'mortar';
+    if (roll < 0.7) return 'antiTankGun';
+    if (roll < 0.82) return 'tank';
+    if (roll < 0.88) return 'sniper';
+    if (roll < 0.93) return 'engineer';
+    if (roll < 0.97) return 'tankDestroyer';
     return 'superHeavyTank';
   }
   if (roll < 0.48 - heavyBias) return 'infantry';
@@ -8459,15 +8818,15 @@ function tryProduce(production, resources, spend, assault, difficulty) {
   const tryOrder = [
     pick,
     'radioOperator',
+    'machineGun',
+    'mortar',
+    'tank',
     'infantry',
     'medic',
     'engineer',
-    'machineGun',
-    'mortar',
     'antiTankGun',
     'armoredCar',
     'sniper',
-    'tank',
     'tankDestroyer',
     'artillery',
     'superHeavyTank',
