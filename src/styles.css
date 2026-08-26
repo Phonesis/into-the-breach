@@ -242,6 +242,11 @@ body.portrait-blocked .mobile-support-screen {
   background-attachment: fixed;
 }
 
+#screen-war-stats {
+  background-image: var(--menu-bg-title);
+  background-attachment: fixed;
+}
+
 #screen-mode {
   background-image: var(--menu-bg-mode);
 }
@@ -5023,6 +5028,197 @@ body.portrait-blocked .mobile-support-screen {
   transform: translateY(-50%) rotate(45deg);
 }
 
+.war-stats-screen {
+  justify-content: center;
+  background-image: var(--menu-bg-title);
+}
+
+.war-stats-screen .title-block,
+.war-stats-screen .war-stats-panel {
+  width: min(62rem, 94vw);
+}
+
+.war-stats-screen .war-stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.war-stats-panel .actions {
+  margin-top: 1.35rem;
+}
+
+.war-stats-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.1rem 0.1rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.war-stats-header .menu-kicker {
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+}
+
+.war-stats-header h2 {
+  margin-top: 0.35rem;
+  color: #eee9dc;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.7rem;
+  font-weight: 400;
+  letter-spacing: 0.09em;
+  line-height: 0.95;
+}
+
+.war-stats-header p {
+  flex: 0 0 auto;
+  padding-bottom: 0.08rem;
+  color: #aeb5bd;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.war-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.war-stat-card {
+  min-width: 0;
+  padding: 0.68rem 0.72rem 0.62rem;
+  border: 1px solid rgba(198, 205, 214, 0.16);
+  border-top: 2px solid var(--war-faction-accent, var(--menu-gold));
+  background: rgba(28, 36, 45, 0.7);
+}
+
+.war-stat-faction {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.war-stat-faction img {
+  flex: 0 0 auto;
+  width: 2.45rem;
+  height: 1.55rem;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 6, 9, 0.42);
+}
+
+.war-stat-faction h3 {
+  min-width: 0;
+  overflow: hidden;
+  color: #f2efe7;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.08rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.war-stat-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.62rem;
+}
+
+.war-stat-metrics div {
+  min-width: 0;
+}
+
+.war-stat-metrics dt {
+  color: #8f98a4;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.war-stat-metrics dd {
+  margin-top: 0.12rem;
+  color: #f0c95a;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.war-stat-breakdown {
+  margin-top: 0.72rem;
+  padding-top: 0.62rem;
+  border-top: 1px solid rgba(198, 205, 214, 0.12);
+}
+
+.war-stat-breakdown h4 {
+  color: #8f98a4;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.war-stat-breakdown-list {
+  display: grid;
+  gap: 0.28rem;
+  margin: 0.42rem 0 0;
+}
+
+.war-stat-breakdown-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.55rem;
+}
+
+.war-stat-breakdown-list dt {
+  min-width: 0;
+  color: #c8cdd2;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.war-stat-breakdown-list dd {
+  margin: 0;
+  color: #f0c95a;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.war-stat-breakdown-units {
+  color: #8f98a4;
+  font-weight: 600;
+}
+
+.war-stat-breakdown-empty {
+  margin-top: 0.42rem;
+  color: #818a95;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.war-stats-note {
+  margin: 0.7rem 0.1rem 0;
+  color: #818a95;
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
 .title-support {
   display: flex;
   align-items: center;
@@ -5471,6 +5667,10 @@ body.portrait-blocked .mobile-support-screen {
   .menu-screen .faction-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .war-stats-screen .war-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -5563,6 +5763,10 @@ body.portrait-blocked .mobile-support-screen {
     padding: 1rem 1.2rem max(2rem, env(safe-area-inset-bottom));
   }
 
+  .war-stats-screen {
+    justify-content: flex-start;
+  }
+
   .title-screen::before {
     background:
       linear-gradient(180deg, rgba(5, 8, 12, 0.24) 0%, rgba(5, 8, 12, 0.62) 42%, rgba(5, 8, 12, 0.97) 100%),
@@ -5590,6 +5794,25 @@ body.portrait-blocked .mobile-support-screen {
 
   .title-screen-actions {
     width: 100%;
+  }
+
+  .war-stats-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .war-stats-header p {
+    padding-bottom: 0;
+    text-align: left;
+  }
+
+  .war-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .war-stats-screen .war-stats-grid {
+    grid-template-columns: 1fr;
   }
 
   .title-support {

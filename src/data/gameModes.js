@@ -3,7 +3,7 @@ export const GAME_MODES = {
     id: 'campaign',
     name: 'Frontline Command',
     subtitle:
-      'Build combat power, contest key ground, and destroy the enemy headquarters. Choose centralized production or forward base construction.',
+      'Build combat power, contest key ground or fight without capture zones, and destroy the enemy headquarters. Choose centralized production or forward base construction.',
   },
   tutorial: {
     id: 'tutorial',
@@ -137,6 +137,14 @@ export const DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED = true;
 export function resolveClearanceTimeLimitEnabled(options = {}) {
   const raw = options.clearanceTimeLimitEnabled;
   return typeof raw === 'boolean' ? raw : DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED;
+}
+
+/** Frontline Command uses capture zones by default; the theater can disable them. */
+export const DEFAULT_CAMPAIGN_CAPTURE_ZONES_ENABLED = true;
+
+export function resolveCampaignCaptureZonesEnabled(options = {}) {
+  const raw = options.captureZonesEnabled;
+  return typeof raw === 'boolean' ? raw : DEFAULT_CAMPAIGN_CAPTURE_ZONES_ENABLED;
 }
 
 export function resolveClearanceRole(options = {}) {

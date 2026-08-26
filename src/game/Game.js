@@ -21,6 +21,7 @@ import {
   resolveClearanceReinforcementSize,
   resolveClearanceRole,
   resolveClearanceTimeLimitEnabled,
+  resolveCampaignCaptureZonesEnabled,
   isTowerDefenseMode,
   isLastStandMode,
   LAST_STAND_SUPPLIES,
@@ -290,6 +291,7 @@ import { HQ } from './HQ.js';
 import { createCapturePoints } from './CapturePoint.js';
 import { ProductionManager } from './Production.js';
 import { BattleStats } from './BattleStats.js';
+import { recordCompletedBattle } from './WarStats.js';
 import {
   sounds,
   resolveWeaponProfile,
@@ -472,6 +474,7 @@ export class Game {
     this.clearance = false;
     this.clearanceRole = 'attack';
     this.clearanceTimeLimitEnabled = true;
+    this.captureZonesEnabled = true;
     this.clearanceAttackPlan = null;
     this.clearanceOperational = null;
     this.clearanceReinforcements = null;
@@ -1093,6 +1096,12 @@ export class Game {
     if (isClearanceMode(gameMode)) {
       startOptions.clearanceTimeLimitEnabled = clearanceTimeLimitEnabled;
     }
+    const campaignCaptureZonesEnabled = isCampaignMode(gameMode)
+      ? resolveCampaignCaptureZonesEnabled(startOptions)
+      : false;
+    if (isCampaignMode(gameMode)) {
+      startOptions.captureZonesEnabled = campaignCaptureZonesEnabled;
+    }
     this.stopGame();
     if (!restoreSnapshot) this.activeSaveId = null;
     this.lastSession = {
@@ -1124,6 +1133,7 @@ export class Game {
         )
       : null;
     this.campaign = isCampaignMode(gameMode);
+    this.captureZonesEnabled = campaignCaptureZonesEnabled;
     let campaignStyle = this.campaign ? (startOptions.campaignStyle ?? 'classic') : 'classic';
     this.assaultRole = startOptions.assaultRole ?? 'defend';
     this.difficulty = getDifficulty(startOptions.difficulty ?? readDifficultySetting());
@@ -1300,8 +1310,11 @@ export class Game {
       }
     }
 
-    this.capturePoints =
-      this.lastStand || this.clearance ? [] : createCapturePoints(this.mapDef, this.scene);
+    const useCaptureZones =
+      !this.lastStand && !this.clearance && (!this.campaign || this.captureZonesEnabled);
+    this.capturePoints = useCaptureZones
+      ? createCapturePoints(this.mapDef, this.scene)
+      : [];
 
     if (assault) {
       this.assault = createAssaultState({
@@ -1640,6 +1653,7 @@ export class Game {
       clearanceReinforcementSize: this.clearanceReinforcements?.size ?? 'small',
       clearanceRole: this.clearanceRole ?? 'attack',
       clearanceTimeLimitEnabled: this.clearanceTimeLimitEnabled,
+      captureZonesEnabled: this.captureZonesEnabled,
     });
     this._tabletMode = isTabletModeEnabled();
     this.controller?.setTabletMode(this._tabletMode);
@@ -2778,6 +2792,7 @@ export class Game {
     this.clearanceOperational = null;
     this.clearanceReinforcements = null;
     this.campaign = false;
+    this.captureZonesEnabled = false;
     this.production.setBuildTimeMult(1);
     for (const u of this.units) {
       if (u.mesh?.parent) u.dispose(this.scene);
@@ -3929,6 +3944,7 @@ export class Game {
     this.viewingBattlefield = false;
     this._postMatchRenderAccum = 0;
     this._pendingEnd = { victory, detail };
+    this._finalizeBattleStats();
 
     this.controller.disable();
     this.canvas.style.cursor = '';
@@ -3968,6 +3984,12 @@ export class Game {
     this._battleStatsFinalized = true;
     this.recordBattleLosses();
     this.battleStats.recordDefenseFromEntries(this.defenses?.entries);
+    recordCompletedBattle({
+      playerFactionId: this.playerFaction?.id,
+      enemyFactionId: this.enemyFaction?.id,
+      battleStats: this.battleStats,
+      liveUnits: this.units,
+    });
   }
 
   _buildBattleStatsReport(options = {}) {

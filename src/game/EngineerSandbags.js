@@ -423,7 +423,13 @@ export class EngineerSandbagManager {
       return 'Cannot build inside a building.';
     }
 
-    const engineer = this._nearestSelectedEngineer(x, z, team, options.selectedOnly !== false);
+    const engineer = this._nearestSelectedEngineer(
+      x,
+      z,
+      team,
+      options.selectedOnly !== false,
+      options.engineerPredicate ?? null
+    );
     if (!engineer) {
       return 'Select a free engineer to assign this build site.';
     }
@@ -502,6 +508,7 @@ export class EngineerSandbagManager {
     for (const pos of this._aiPlacementCandidates(x, z)) {
       const reason = this.getPlacementRejectReason(pos.x, pos.z, team, buildType, {
         selectedOnly: false,
+        engineerPredicate,
       });
       if (reason) continue;
 
@@ -537,6 +544,58 @@ export class EngineerSandbagManager {
       this._attachSiteMarker(site);
       return true;
     }
+    return false;
+  }
+
+  /** Assign one engineer a field work as part of a command-wide Dig In order. */
+  tryOrderUnitBuild(unit, enemyFocus = null) {
+    if (!unit || unit.def?.type !== 'engineer') return false;
+
+    const isOrderedEngineer = (candidate) =>
+      candidate === unit &&
+      !candidate.dead &&
+      !candidate.surrendered &&
+      !candidate._captureExit &&
+      !candidate._dropping &&
+      !candidate._sandbagSite &&
+      !candidate._medicTentSite &&
+      !candidate._trenchDigSite &&
+      !candidate._diggingTrench &&
+      !candidate._garrisonBunkerId &&
+      !candidate._trenchId &&
+      !candidate._mountedOnTankId;
+
+    const buildTypes = [];
+    if (this.canBuildSandbags()) buildTypes.push('sandbags');
+    if (this.canBuildBunker()) buildTypes.push('bunker');
+    if (!buildTypes.length) return false;
+
+    const rotationY = enemyFocus
+      ? Math.atan2(
+          enemyFocus.x - unit.position.x,
+          enemyFocus.z - unit.position.z
+        )
+      : null;
+
+    for (const buildType of buildTypes) {
+      if (
+        !this.tryAiPlace(
+          unit.position.x,
+          unit.position.z,
+          unit.team,
+          buildType,
+          rotationY,
+          isOrderedEngineer
+        )
+      ) {
+        continue;
+      }
+
+      const site = this.sites.find((candidate) => candidate.engineerId === unit.id);
+      if (site) site._generalOrderTeam = unit.team;
+      return true;
+    }
+
     return false;
   }
 
@@ -677,6 +736,20 @@ export class EngineerSandbagManager {
     this._cancelSite(site);
     this.sites = this.sites.filter((s) => s.id !== site.id);
     return true;
+  }
+
+  /** Cancel only unfinished field works created by the active Dig In order. */
+  cancelGeneralOrderDigIn(team) {
+    const cancelledIds = new Set();
+    for (const site of this.sites) {
+      if (site._generalOrderTeam !== team) continue;
+      this._cancelSite(site);
+      cancelledIds.add(site.id);
+    }
+    if (!cancelledIds.size) return 0;
+    this.sites = this.sites.filter((site) => !cancelledIds.has(site.id));
+    this.game.ui?.updateEngineerBuild?.(this.game);
+    return cancelledIds.size;
   }
 
   update(dt) {

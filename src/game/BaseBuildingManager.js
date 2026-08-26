@@ -265,6 +265,9 @@ export class BaseBuildingManager {
         return 'Too close to headquarters or a controlled sector.';
       }
       const hasSectors = this._controlledSectors(team).length > 0;
+      if (this.game.captureZonesEnabled === false) {
+        return 'Place within build range of HQ — capture zones are disabled.';
+      }
       return hasSectors
         ? 'Place within build range of HQ or a sector you control.'
         : 'Place within build range of HQ — capture sectors to build forward bases.';

@@ -453,20 +453,28 @@ export class InfantryTrenchManager {
     return false;
   }
 
-  /** Order every currently free trench-capable unit on a team to dig in. */
+  /** Order every currently free foot unit on a team to dig in or build cover. */
   orderTeamDigIn(team, units, enemyFocus = null) {
     let assigned = 0;
     for (const unit of units ?? []) {
-      if (unit?.team !== team || !canDigTrenchType(unit.def?.type)) continue;
-      if (this.tryOrderUnitDigIn(unit, enemyFocus)) assigned++;
+      if (unit?.team !== team) continue;
+      if (canDigTrenchType(unit.def?.type)) {
+        if (this.tryOrderUnitDigIn(unit, enemyFocus)) assigned++;
+      } else if (
+        unit.def?.type === 'engineer' &&
+        this.game.engineerSandbags?.tryOrderUnitBuild?.(unit, enemyFocus)
+      ) {
+        assigned++;
+      }
     }
     if (assigned > 0) {
       this.game.ui?.updateInfantryTrench?.(this.game);
+      this.game.ui?.updateEngineerBuild?.(this.game);
     }
     return assigned;
   }
 
-  /** Cancel only unfinished trenches created by the active Dig In order. */
+  /** Cancel only unfinished works created by the active Dig In order. */
   cancelGeneralOrderDigIn(team) {
     const cancelledIds = new Set();
     for (const site of this.sites) {
@@ -476,10 +484,12 @@ export class InfantryTrenchManager {
       this._cancelSite(site);
       cancelledIds.add(site.id);
     }
-    if (!cancelledIds.size) return 0;
+    const cancelledFieldworkCount =
+      this.game.engineerSandbags?.cancelGeneralOrderDigIn?.(team) ?? 0;
+    if (!cancelledIds.size) return cancelledFieldworkCount;
     this.sites = this.sites.filter((site) => !cancelledIds.has(site.id));
     this.game.ui?.updateInfantryTrench?.(this.game);
-    return cancelledIds.size;
+    return cancelledIds.size + cancelledFieldworkCount;
   }
 
   _attachSiteMarker(site) {

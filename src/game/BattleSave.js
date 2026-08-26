@@ -371,6 +371,9 @@ export function captureBattleSave(game, { id = null } = {}) {
       sessionOptions.clearanceAttackPlanId = game.clearanceAttackPlan.id;
     }
   }
+  if (game.campaign) {
+    sessionOptions.captureZonesEnabled = game.captureZonesEnabled !== false;
+  }
 
   const snapshot = {
     version: SAVE_VERSION,
@@ -582,6 +585,7 @@ export function captureBattleSave(game, { id = null } = {}) {
         progress: s.progress,
         engineerId: s.engineerId,
         rotationY: s.rotationY,
+        generalOrderTeam: s._generalOrderTeam ?? null,
         aiDefensiveFieldwork: !!s._aiDefensiveFieldwork,
         aiFieldworkMode: s._aiFieldworkMode ?? null,
       })),
@@ -968,6 +972,7 @@ function restoreEngineerSite(manager, siteData) {
     engineerId: siteData.engineerId,
     progress: siteData.progress ?? 0,
     rotationY: siteData.rotationY ?? manager._facingYaw(siteData.team, siteData.x, siteData.z),
+    _generalOrderTeam: siteData.generalOrderTeam ?? null,
     _aiDefensiveFieldwork: !!siteData.aiDefensiveFieldwork,
     _aiFieldworkMode: siteData.aiFieldworkMode ?? null,
     marker: null,

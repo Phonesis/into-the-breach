@@ -3793,6 +3793,57 @@ export function updateAiIncomingFireReactions({
   }
 }
 
+/**
+ * Prepared-line garrisons should answer a contact without waiting for the
+ * slower strategic reassessment. Combat has already populated `unit.target`
+ * by this point, so the common case avoids another full visibility scan.
+ */
+function updateClearanceDefenderContactReactions(enemyUnits, players, game) {
+  if (!game?.clearance || game.clearanceRole === 'defend' || !players?.length) return;
+
+  for (const unit of enemyUnits ?? []) {
+    if (
+      !isLastStandOperationalUnit(unit) ||
+      unit.def?.type === 'radioOperator' ||
+      unit._userMoveOrder ||
+      unit._manualFireMission ||
+      unit._aiIncomingFireReaction ||
+      unit._aiCommanderScreen ||
+      unit._aiSupportMode ||
+      unit._aiRadioManeuver ||
+      unit._aiRadioSafety ||
+      unit._clearanceProbe ||
+      unit._trenchId ||
+      unit._trenchDigSite ||
+      unit._diggingTrench ||
+      unit._garrisonBunkerId ||
+      isUnitGarrisoned(unit) ||
+      unit.attackOrder?.isSmokeShell
+    ) continue;
+
+    const currentTarget = unit.target;
+    const targetInRange =
+      currentTarget?.def &&
+      currentTarget.team === 'player' &&
+      !currentTarget.dead &&
+      isInRange(unit, currentTarget);
+    const target = targetInRange
+      ? currentTarget
+      : (unit._underFireTimer ?? 0) > 0
+        ? findNearestVisibleEnemy(unit, players, game.scenery)
+        : null;
+    if (!target || !isInRange(unit, target)) continue;
+
+    if (unit.attackOrder === target && !unit.moveTarget) continue;
+    unit.setAttackOrder(target);
+    // The defender's hold doctrine fires from its current position; it does
+    // not turn an immediate contact into a pursuit order.
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._chasingAttack = false;
+  }
+}
+
 export function updateAI({
   enemyUnits,
   playerUnits,
@@ -3849,6 +3900,8 @@ export function updateAI({
     mapDef,
     clearance: !!clearance,
   });
+
+  updateClearanceDefenderContactReactions(enemyUnits, playerUnits, game);
 
   if (!enemyStagingPhase && !clearance && aiProdTimer <= 0 && production && enemyResources !== undefined) {
     const prodDelayMult = standardCampaign

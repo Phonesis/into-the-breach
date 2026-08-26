@@ -16,6 +16,7 @@ import {
   CLEARANCE_ROLE_LIST,
   DEFAULT_CLEARANCE_ROLE,
   DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED,
+  DEFAULT_CAMPAIGN_CAPTURE_ZONES_ENABLED,
   STANDARD_UNIT_LIMIT,
   canUseAssaultMapSize,
   resolveAssaultMapSize,
@@ -55,6 +56,8 @@ import {
   getTankRiderIds,
 } from '../game/TankRiders.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
+import { formatUsd1944 } from '../data/battleEconomics.js';
+import { UNIT_LOSS_LABELS } from '../game/BattleStats.js';
 import { isPlayerStagingPhase } from '../game/OpeningDeployZone.js';
 import {
   isSmokeShellReady,
@@ -101,6 +104,7 @@ import {
   writeDebrisRetentionIndex,
 } from '../game/GameSettings.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
+import { readWarStats } from '../game/WarStats.js';
 import {
   LAST_STAND_DEPLOY_MODE_LIST,
   LAST_STAND_PRESET_SIZE_LIST,
@@ -111,6 +115,8 @@ import {
   isLastStandPresetDeployMode,
 } from '../data/lastStandForces.js';
 import { countLastStandCombatUnits } from '../game/LastStandMode.js';
+
+const UNIT_LOSS_TYPE_ORDER = Object.keys(UNIT_LOSS_LABELS);
 
 const PRODUCE_LABELS = {
   commander: 'CMD',
@@ -262,6 +268,7 @@ export class UIManager {
     this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
     this.selectedDifficulty = readDifficultySetting();
     this.selectedCampaignStyle = 'classic';
+    this.selectedCampaignCaptureZonesEnabled = DEFAULT_CAMPAIGN_CAPTURE_ZONES_ENABLED;
     this.selectedClearanceReinforcementSize = DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
     this.selectedClearanceTimeLimitEnabled = DEFAULT_CLEARANCE_TIME_LIMIT_ENABLED;
     this.selectedTdWaveMode = 'standard';
@@ -274,6 +281,7 @@ export class UIManager {
     this._baseBuildUiKey = '';
     this._hudBaseBuilding = false;
     this._hudStandardCampaign = false;
+    this._hudCaptureZonesEnabled = true;
     this._settingsReturnTarget = 'title';
     this.showUnitFieldIcons = readBooleanSetting(UNIT_FIELD_ICONS_KEY, true);
     this.showUnitStatus = readBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
@@ -362,12 +370,35 @@ export class UIManager {
           <div class="title-actions title-screen-actions">
             <button class="btn btn-primary interactive" id="btn-start">New Operation</button>
             <button class="btn btn-secondary interactive" id="btn-load-saves">Continue Saved Battle</button>
+            <button class="btn btn-secondary interactive" id="btn-war-stats">War Stats</button>
             <button class="btn btn-secondary interactive" id="btn-settings">Settings</button>
-            <button class="btn btn-secondary interactive" id="btn-guide-title">Open Field Manual</button>
+            <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
             <button class="btn btn-secondary interactive" id="btn-about">Credits &amp; Information</button>
           </div>
           ${donationMarkup}
           <p class="title-footnote">Plan the operation. Choose your command. Fight the battle.</p>
+        </div>
+      </div>
+
+      <div id="screen-war-stats" class="screen menu-screen war-stats-screen interactive hidden">
+        <div class="title-block">
+          <span class="menu-kicker">Permanent Record</span>
+          <h1>War Stats</h1>
+          <p>Review the cumulative unit losses and estimated materiel cost recorded for every faction across completed operations.</p>
+        </div>
+        <div class="panel menu-panel war-stats-panel">
+          <div class="war-stats-header">
+            <div>
+              <span class="menu-kicker">Across completed operations</span>
+              <h2>Faction losses</h2>
+            </div>
+            <p id="war-stats-summary">No completed operations yet</p>
+          </div>
+          <div class="war-stats-grid" id="war-stats-grid" aria-live="polite"></div>
+          <p class="war-stats-note">Cumulative unit losses and estimated materiel cost from completed operations; cost follows the battle report valuation.</p>
+          <div class="actions">
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-war-stats">Return to Headquarters</button>
+          </div>
         </div>
       </div>
 
@@ -575,6 +606,17 @@ export class UIManager {
             <p class="campaign-style-note hidden" id="campaign-style-note">
               Base Building requires a <strong>Large</strong> map.
             </p>
+          </div>
+          <div class="campaign-style-block hidden" id="campaign-capture-zones-block">
+            <h2>Sector Objectives</h2>
+            <label class="setting-row setting-row--always-detail" for="campaign-capture-zones-toggle">
+              <span>
+                <strong>Capture zones</strong>
+                <small>On by default. Contest sectors for extra supplies.</small>
+                <span class="setting-detail" id="campaign-capture-zones-detail">Turn this off for a pure force-on-force Frontline Command battle: remove all capture zones, sector income, and capture-focused AI. Victory remains destroying the enemy HQ or eliminating its army. Forward Bases can still build around HQ, but cannot expand from captured sectors.</span>
+              </span>
+              <input type="checkbox" id="campaign-capture-zones-toggle" aria-describedby="campaign-capture-zones-detail" />
+            </label>
           </div>
           <div class="campaign-style-block hidden" id="clearance-role-block">
             <h2>Mission Role</h2>
@@ -1233,12 +1275,89 @@ export class UIManager {
     this.renderMaps();
     this.renderMapSizes();
     this.renderDifficulties();
+    this.renderWarStats();
     const guideEl = this.root.querySelector('#guide-content');
     if (guideEl) guideEl.innerHTML = renderGameGuideHtml();
     this.guideFromMenu = false;
     this.bind();
     this._bindUnitRoster();
     this.refreshTitleSaveButton();
+  }
+
+  renderWarStats() {
+    const grid = this.root.querySelector('#war-stats-grid');
+    if (!grid) return;
+
+    const stats = readWarStats();
+    const completedOperations = stats.completedOperations ?? 0;
+    const summary = this.root.querySelector('#war-stats-summary');
+    if (summary) {
+      summary.textContent = completedOperations
+        ? `${completedOperations.toLocaleString('en-US')} completed operation${completedOperations === 1 ? '' : 's'}`
+        : 'No completed operations yet';
+    }
+
+    grid.innerHTML = FACTION_LIST.map((faction) => {
+      const factionStats = stats.factions[faction.id] ?? {
+        unitsKilled: 0,
+        casualties: 0,
+        lossCost: 0,
+        lossBreakdown: {},
+      };
+      const breakdownEntries = Object.entries(factionStats.lossBreakdown ?? {})
+        .filter(([, lossStats]) => lossStats && (Number(lossStats.units) > 0 || Number(lossStats.casualties) > 0))
+        .sort(([leftType], [rightType]) => {
+          const leftIndex = UNIT_LOSS_TYPE_ORDER.indexOf(leftType);
+          const rightIndex = UNIT_LOSS_TYPE_ORDER.indexOf(rightType);
+          return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex)
+            - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
+        });
+      const breakdownRows = breakdownEntries.map(([type, lossStats]) => {
+        const casualtyCount = Number(lossStats.casualties ?? 0);
+        const unitCount = Number(lossStats.units ?? 0);
+        const unitLabel = unitCount
+          ? ` <span class="war-stat-breakdown-units">· ${unitCount.toLocaleString('en-US')} ${unitCount === 1 ? 'unit' : 'units'}</span>`
+          : '';
+        return `
+          <div>
+            <dt>${UNIT_LOSS_LABELS[type] ?? 'Other losses'}</dt>
+            <dd><span class="war-stat-breakdown-count">${casualtyCount.toLocaleString('en-US')} ${casualtyCount === 1 ? 'loss' : 'losses'}</span>${unitLabel}</dd>
+          </div>
+        `;
+      }).join('');
+      const breakdownMarkup = breakdownRows
+        ? `<dl class="war-stat-breakdown-list">${breakdownRows}</dl>`
+        : '<p class="war-stat-breakdown-empty">No type losses recorded</p>';
+      const accent = Number.isFinite(faction.accent)
+        ? `#${(faction.accent & 0xffffff).toString(16).padStart(6, '0')}`
+        : '#d6aa3a';
+      return `
+        <article class="war-stat-card" style="--war-faction-accent:${accent}">
+          <div class="war-stat-faction">
+            <img src="${faction.flag}" alt="" aria-hidden="true" draggable="false" />
+            <h3>${faction.name}</h3>
+          </div>
+          <dl class="war-stat-metrics">
+            <div>
+              <dt>Units killed</dt>
+              <dd>${Number(factionStats.unitsKilled ?? 0).toLocaleString('en-US')}</dd>
+            </div>
+            <div>
+              <dt>Personnel lost</dt>
+              <dd>${Number(factionStats.casualties ?? 0).toLocaleString('en-US')}</dd>
+            </div>
+            <div>
+              <dt>Est. loss cost</dt>
+              <dd>${formatUsd1944(factionStats.lossCost ?? 0)}</dd>
+            </div>
+          </dl>
+          <div class="war-stat-breakdown" aria-label="Losses by type">
+            <h4>Losses by type</h4>
+            ${breakdownMarkup}
+          </div>
+        </article>
+      `;
+    }).join('');
   }
 
   renderDifficulties() {
@@ -1410,6 +1529,7 @@ export class UIManager {
 
   updateModeSetupPanels() {
     const styleBlock = this.root.querySelector('#campaign-style-block');
+    const campaignCaptureZonesBlock = this.root.querySelector('#campaign-capture-zones-block');
     const clearanceRoleBlock = this.root.querySelector('#clearance-role-block');
     const clearanceStyleBlock = this.root.querySelector('#clearance-style-block');
     const clearanceTimeLimitBlock = this.root.querySelector('#clearance-time-limit-block');
@@ -1421,6 +1541,7 @@ export class UIManager {
     const isTowerDefense = this.selectedGameMode === 'towerDefense';
     const isLastStand = this.selectedGameMode === 'lastStand';
     if (styleBlock) styleBlock.classList.toggle('hidden', !isCampaign);
+    if (campaignCaptureZonesBlock) campaignCaptureZonesBlock.classList.toggle('hidden', !isCampaign);
     if (clearanceRoleBlock) clearanceRoleBlock.classList.toggle('hidden', !isClearance);
     if (clearanceStyleBlock) clearanceStyleBlock.classList.toggle('hidden', !isClearance);
     if (clearanceTimeLimitBlock) clearanceTimeLimitBlock.classList.toggle('hidden', !isClearance);
@@ -1438,6 +1559,10 @@ export class UIManager {
     const clearanceTimeLimitToggle = this.root.querySelector('#clearance-time-limit-toggle');
     if (clearanceTimeLimitToggle) {
       clearanceTimeLimitToggle.checked = this.selectedClearanceTimeLimitEnabled;
+    }
+    const campaignCaptureZonesToggle = this.root.querySelector('#campaign-capture-zones-toggle');
+    if (campaignCaptureZonesToggle) {
+      campaignCaptureZonesToggle.checked = this.selectedCampaignCaptureZonesEnabled;
     }
     if (isTowerDefense) {
       this.renderTdWaveModes();
@@ -1639,13 +1764,14 @@ export class UIManager {
   }
 
   bind() {
-    const menuScreens = new Set(['title', 'settings', 'mode', 'assault-role', 'faction', 'map', 'saves']);
+    const menuScreens = new Set(['title', 'war-stats', 'settings', 'mode', 'assault-role', 'faction', 'map', 'saves']);
 
     const show = (id) => {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
       const el = this.root.querySelector(`#screen-${id}`);
       if (el) el.classList.remove('hidden');
       if (id === 'faction') this.updateFactionScreenBg(this.selectedFaction);
+      if (id === 'title' || id === 'war-stats') this.renderWarStats();
       if (this.callbacks.onMenuVisible) {
         this.callbacks.onMenuVisible(menuScreens.has(id));
       }
@@ -1671,7 +1797,9 @@ export class UIManager {
       this.renderSaveList();
       show('saves');
     };
+    this.root.querySelector('#btn-war-stats').onclick = () => show('war-stats');
     this.root.querySelector('#btn-back-saves').onclick = () => show('title');
+    this.root.querySelector('#btn-back-war-stats').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
     this.root.querySelectorAll('[data-setting]').forEach((input) => {
       input.addEventListener('change', () => this._setMenuSetting(input.dataset.setting, input.checked));
@@ -1841,6 +1969,10 @@ export class UIManager {
       this.selectedClearanceTimeLimitEnabled = e.currentTarget.checked;
     });
 
+    this.root.querySelector('#campaign-capture-zones-toggle')?.addEventListener('change', (e) => {
+      this.selectedCampaignCaptureZonesEnabled = e.currentTarget.checked;
+    });
+
     this.root.querySelector('#campaign-style-grid')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.campaign-style-card');
       if (
@@ -1945,6 +2077,10 @@ export class UIManager {
             mapSize,
             campaignStyle:
               this.selectedGameMode === 'campaign' ? this.selectedCampaignStyle : undefined,
+            captureZonesEnabled:
+              this.selectedGameMode === 'campaign'
+                ? this.selectedCampaignCaptureZonesEnabled
+                : undefined,
             clearanceRole:
               this.selectedGameMode === 'clearance' ? this.selectedClearanceRole : undefined,
             clearanceReinforcementSize:
@@ -2527,8 +2663,11 @@ export class UIManager {
     const lastStand = gameMode === 'lastStand' || options.lastStand;
     const baseBuilding =
       gameMode === 'campaign' && (options.campaignStyle ?? 'classic') === 'baseBuilding';
+    const captureZonesEnabled =
+      gameMode === 'campaign' ? options.captureZonesEnabled !== false : true;
     this._hudBaseBuilding = baseBuilding;
     this._hudStandardCampaign = gameMode === 'campaign';
+    this._hudCaptureZonesEnabled = captureZonesEnabled;
     this._hudCampaignStyle = options.campaignStyle ?? 'classic';
     this._hudAutoBuildAvailable = gameMode === 'campaign';
     this._hudTutorial = tutorial;
@@ -2547,6 +2686,7 @@ export class UIManager {
     this.root.querySelector('#btn-toggle-frontline')?.classList.toggle('hidden', !this._hudHasFrontline);
     this._syncFrontlineToggle();
     const hasCapturePoints =
+      captureZonesEnabled &&
       !towerDefense &&
       !lastStand &&
       !clearance &&
@@ -2575,7 +2715,9 @@ export class UIManager {
     this.root.querySelector('#defense-panel')?.classList.toggle('hidden', !towerDefense || tdHqDefense);
     this._setProductionPanelVisible(tdHqDefense || (lastStand && !options.lastStandPreset));
     this.root.querySelector('#base-build-panel')?.classList.toggle('hidden', !baseBuilding);
-    this.root.querySelector('#capture-bar')?.classList.toggle('hidden', towerDefense || lastStand || clearance);
+    this.root
+      .querySelector('#capture-bar')
+      ?.classList.toggle('hidden', !captureZonesEnabled || towerDefense || lastStand || clearance);
     this.root.querySelector('.hud-resources')?.classList.toggle('hidden', clearance);
     const prodTitle = this.root.querySelector('#production-panel h3');
     if (prodTitle) prodTitle.textContent = lastStand ? 'Deployment' : 'Reinforcements';
@@ -2632,6 +2774,10 @@ export class UIManager {
       } else if (lastStand) {
         this._defaultHudHint =
           'Battle Simulation: pick a unit, LMB on the map to place · enemy matches your unit count · Begin Battle when ready';
+      } else if (this._hudStandardCampaign && !captureZonesEnabled) {
+        this._defaultHudHint = baseBuilding
+          ? 'Force-on-force: destroy the enemy HQ · Base Construction unlocks armor & artillery · garrison trains infantry'
+          : 'Force-on-force: destroy the enemy HQ · no capture zones or sector income';
       } else if (baseBuilding) {
         this._defaultHudHint =
           'Victory: destroy the enemy HQ · Base Construction unlocks armor & artillery · garrison trains infantry';
@@ -3213,8 +3359,9 @@ export class UIManager {
     this._baseBuildHintTimer = setTimeout(() => {
       hint.classList.remove('base-build-hint-error');
       if (this._hudBaseBuilding) {
-        hint.textContent =
-          'Build near HQ or a sector you control. LMB place · Esc cancel.';
+        hint.textContent = this._hudCaptureZonesEnabled === false
+          ? 'Build near HQ. No capture sectors in this operation · LMB place · Esc cancel.'
+          : 'Build near HQ or a sector you control. LMB place · Esc cancel.';
       }
     }, 2800);
   }
@@ -3227,7 +3374,8 @@ export class UIManager {
       game.baseBuildings.countType('player', t.id)
     ).join(',');
     const facing = game._directionalPlacement?.kind === 'base' ? 1 : 0;
-    return `${supplies}|${pending}|${facing}|${deployActive}|${game.cheatMode}|${counts}`;
+    const captureZones = game.captureZonesEnabled === false ? 0 : 1;
+    return `${supplies}|${pending}|${facing}|${deployActive}|${game.cheatMode}|${captureZones}|${counts}`;
   }
 
   setBaseBuildExpanded(on) {
@@ -3278,10 +3426,13 @@ export class UIManager {
         const def = BASE_BUILDING_TYPES[pending];
         hint.textContent = game._directionalPlacement?.kind === 'base'
           ? `Facing ${def?.name ?? pending} — move the arrow toward the threat, then click to confirm. Esc to cancel.`
-          : `Placing ${def?.name ?? pending} — click within build range of HQ or a sector you hold. Esc to cancel.`;
+          : game.captureZonesEnabled === false
+            ? `Placing ${def?.name ?? pending} — click within build range of HQ. No capture sectors in this operation. Esc to cancel.`
+            : `Placing ${def?.name ?? pending} — click within build range of HQ or a sector you hold. Esc to cancel.`;
       } else {
-        hint.textContent =
-          'Build near HQ or a sector you control. LMB place · Esc cancel.';
+        hint.textContent = game.captureZonesEnabled === false
+          ? 'Build near HQ. No capture sectors in this operation · LMB place · Esc cancel.'
+          : 'Build near HQ or a sector you control. LMB place · Esc cancel.';
       }
     }
 
@@ -4186,7 +4337,7 @@ export class UIManager {
       } else if (activeType === 'holdGround') {
         hint.textContent = `Hold Ground — troops standing firm (${Math.ceil(activeRem)}s) · click Cancel Hold or Esc`;
       } else if (activeType === 'digIn') {
-        hint.textContent = `Dig In — eligible troops digging enemy-facing trenches (${Math.ceil(activeRem)}s) · click Cancel Dig In or Esc`;
+        hint.textContent = `Dig In — foot troops digging trenches; engineers building cover (${Math.ceil(activeRem)}s) · click Cancel Dig In or Esc`;
       } else {
         hint.textContent = 'Command-wide orders — each lasts 30s, 3 min cooldown · ready orders replace the active order · Esc cancels';
       }
@@ -4657,7 +4808,11 @@ export class UIManager {
 
   updateCapturePoints(points) {
     const bar = this.root.querySelector('#capture-bar');
-    if (!bar || !points?.length) return;
+    if (!bar) return;
+    if (!points?.length) {
+      bar.innerHTML = '';
+      return;
+    }
 
     bar.innerHTML = points
       .map((p) => {
@@ -5153,7 +5308,9 @@ export class UIManager {
         : '';
       const trainHint =
         this._hudBaseBuilding && hq.team === 'player'
-          ? '<p class="hq-selected-hint">Use <strong>Base Construction</strong> below to place structures near HQ or <strong>captured sectors</strong> — garrison for infantry, depots for other units.</p>'
+          ? game?.captureZonesEnabled === false
+            ? '<p class="hq-selected-hint">Use <strong>Base Construction</strong> below to place structures near HQ — this operation has no capture sectors.</p>'
+            : '<p class="hq-selected-hint">Use <strong>Base Construction</strong> below to place structures near HQ or <strong>captured sectors</strong> — garrison for infantry, depots for other units.</p>'
           : '<p class="hq-selected-hint">HQ selected — issue move orders to units, or attack enemy forces.</p>';
       body.innerHTML = `
         <h3 class="hq-selected-title">${hq.name ?? 'Headquarters'}</h3>

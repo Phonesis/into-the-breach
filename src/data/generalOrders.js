@@ -20,6 +20,6 @@ export const GENERAL_ORDER_LIST = [
   {
     id: 'digIn',
     short: 'Dig In',
-    label: 'Eligible foot troops dig and occupy trenches facing the enemy',
+    label: 'Eligible foot troops dig trenches or build field cover facing the enemy',
   },
 ];

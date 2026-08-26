@@ -1,498 +1,365 @@
 # Into the Breach
 
-A browser-based real-time strategy game set in the European theater of World War II. Built with **Three.js** and **Vite**. Command infantry, medics, engineers, machine-gun teams, snipers, mortars, **anti-tank guns**, armored cars, tanks (with coax machine guns), super-heavy armor, and artillery across historical maps at **Small / Medium / Large** scale; capture supply points; queue reinforcements at your headquarters; and call in air and artillery fire support.
+A browser-based World War II real-time tactics game built with **Three.js** and **Vite**. Command a historically grounded combined-arms force across European, North African, Eastern Front, Far East, and Berlin theaters. Capture vital ground, build or reinforce your army, use fieldworks and fire support, and adapt to an enemy that changes its plan as the battle develops.
 
-Open **Field Manual** from the title screen or during a battle for an illustrated in-game guide (unit icons, control reference, faction armor and AT-gun tables).
+The title screen includes an illustrated **Field Manual** with the in-game controls, unit cards, faction equipment tables, and detailed battlefield rules.
 
 ## Quick start
 
-**Requirements:** Node.js 18+ (for npm).
+**Requirements:** Node.js 18 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the URL Vite prints (typically `http://localhost:5173`). Choose a game mode, faction, and map from the main menu.
+Open the URL printed by Vite, usually `http://localhost:5173`, then choose an operation, command, and theater.
 
-Optional — regenerate SFX (used when present under `public/sounds/`):
-
-```bash
-npm run bake-sounds           # procedural gunfire / impacts / explosions / aircraft
-npm run bake-elevenlabs-sfx   # AI gunfire + explosions via ElevenLabs (needs ELEVENLABS_API_KEY + ffmpeg)
-npm run bake-elevenlabs-extra # extra explosion/impact/gun/atmos pool for the mix
-npm run bake-elevenlabs-smallarms # faction rifle + MG extras (ElevenLabs)
-npm run bake-engines          # vehicle engine loops
-npm run bake-infantry-death
-npm run bake-unit-select      # faction selection radio acks (edge-tts + ffmpeg)
-npm run bake-unit-under-fire  # panicked under-fire shouts (edge-tts + ffmpeg)
-npm run expand-gun-variety    # extra pitch/EQ variants of gunfire (no API)
-```
-
-ElevenLabs bake (gunfire, mortars, tank/AT guns, howitzers, impact, explosion):
-
-```bash
-export ELEVENLABS_API_KEY=sk_…   # https://elevenlabs.io/app/developers/api-keys
-npm run bake-elevenlabs-sfx          # skip files that already exist
-npm run bake-elevenlabs-sfx -- --force
-npm run bake-elevenlabs-sfx -- --only explosion,rifle,mg
-```
-
-Optional — regenerate procedural menu theme (`public/music/`):
-
-```bash
-python3 scripts/generate-menu-music.py
-```
-
-Faction selection shows country flags from `public/flags/`. Battle SFX unlock after your first click (browser audio policy). Menu music plays on the title screen and stops when you deploy into battle.
-
-Production build:
+Build and preview the production bundle locally:
 
 ```bash
 npm run build
 npm run preview
 ```
 
-### Host on GitHub Pages
+Browser audio is unlocked after the first click. Menu music plays on the title screen and stops when the operation begins.
 
-This repo is set up for a **project site** at:
+## GitHub Pages
+
+The project is configured as a GitHub project site at:
 
 **https://phonesis.github.io/into-the-breach/**
 
-(If your GitHub repo name is not `into-the-breach`, change `GH_PAGES_BASE` in `vite.config.js` to `/<repo-name>/`.)
-
-1. Push the project to GitHub (e.g. `Phonesis/into-the-breach`).
-2. In the repo on GitHub: **Settings → Pages → Build and deployment**.
-3. Set **Source** to **GitHub Actions** (not “Deploy from a branch”).
-4. Push to `main` or `master` (or run the **Deploy to GitHub Pages** workflow manually under **Actions**).
-
-The workflow `.github/workflows/deploy-pages.yml` runs `npm run build:pages` and publishes the `dist/` folder.
-
-Test the Pages build locally:
+The workflow in `.github/workflows/deploy-pages.yml` runs `npm run build:pages` and publishes `dist/` through GitHub Pages. Set the repository name in `vite.config.js` if the project is hosted under a different path.
 
 ```bash
+npm run build:pages
 npm run preview:pages
 ```
 
-Then open the URL Vite prints (paths are under `/into-the-breach/`).
+`preview:pages` serves the build with the `/into-the-breach/` base path.
 
-**Manual deploy (without Actions):** run `npm run build:pages`, then push the contents of `dist/` to a `gh-pages` branch or use any static host; keep the same base path as in `vite.config.js`.
+## Audio and asset tools
 
----
+Common asset generation commands:
 
-## Game modes
+```bash
+npm run bake-sounds
+npm run bake-engines
+npm run bake-infantry-death
+npm run bake-unit-select
+npm run bake-unit-under-fire
+npm run generate-menu-music
+npm run generate-end-music
+npm run generate-vehicle-svgs
+```
 
-| Mode | Description |
-|------|-------------|
-| **Standard** | Full skirmish vs AI with persistent difficulty set in Settings. Longer-paced battles. Win by destroying the enemy HQ or eliminating their army when they cannot reinforce. |
-| **Clear Defenses** | Enemy dug in across the map — **no enemy HQ**. On the Theater screen choose **Classic** fixed forces or **Reinforced** three-minute arrivals. |
-| **Training Ground** | No AI — practice orders, production, fire missions, and fire support. Destroy the passive **Practice Target HQ**. |
-| **Assault & Defend** | Scenario on a fixed frontline. Pick **Attack** or **Defend** after choosing the mode. |
-| **Tower Defence** | No player army. Spend **defense points** on emplacements (bunkers, MG nests, AT guns, mines, wire, artillery pits) and hold the frontline through **12 waves**. |
-| **Battle Simulation** | **2,000** deployment supplies per side. Place your entire army anywhere on the map; the AI deploys in parallel. **Begin Battle** when ready — no HQ, capture points, or reinforcements. Strafe and barrage fire support unlock once battle begins. Win by wiping the enemy force. |
+The ElevenLabs scripts generate faction-specific rifles, machine guns, tank and anti-tank guns, artillery, aircraft, radio, commander, retreat, under-fire, and vehicle-crew audio. They require an environment variable and `ffmpeg`:
 
-### Standard
+```bash
+export ELEVENLABS_API_KEY=sk_...
+npm run bake-elevenlabs-sfx
+npm run bake-elevenlabs-sfx -- --force
+npm run bake-elevenlabs-sfx -- --only explosion,rifle,mg
+```
 
-- Opponent faction mirrors your pick (e.g. USA vs Germany, Soviet Union vs Germany).
-- **Difficulty (Settings):** Recruit, Regular, or Veteran — adjusts enemy damage, income, army size, and AI aggression. Regular is the default and applies across modes with enemy forces.
-- **Pacing:** Higher unit HP, lower damage, slower HQ/capture income, longer build times, larger opening armies, and slower AI reinforcement (see `src/data/campaignPace.js`).
-- AI produces units, captures points, and attacks.
-- Starting armies (each side): 5× infantry, MG, sniper, mortar, armored car, **1× anti-tank gun**, 2× tank, artillery (enemy scaled by difficulty + standard army mult).
+Additional focused bakes are listed in `package.json`, including `bake-elevenlabs-faction-rifles`, `bake-elevenlabs-tank-cannons`, `bake-elevenlabs-at-guns`, `bake-elevenlabs-artillery`, `bake-elevenlabs-aircraft`, `bake-elevenlabs-commander-orders`, and `bake-elevenlabs-retreat`. Keep `ELEVENLABS_API_KEY` in the environment; never commit it.
 
-**Victory:** Enemy HQ destroyed, or enemy eliminated (no field units and cannot reinforce).
+Generated audio is used from `public/sounds/` and music from `public/music/`. The license notes beside the supplied audio assets describe their permitted use.
 
-**Defeat:** Your HQ destroyed, or you are eliminated (no units, empty build queue, and cannot afford reinforcements while your HQ still generates income you can use to recover).
+## Operations
 
-### Clear Defenses
+Choose an operation from **New Operation**, then select your faction and theater. The current operation names are:
 
-- No HQ or production queue for either side.
-- Defenders placed at capture points, forward lines, and map center; they hold position and do not retreat. Includes **2× anti-tank guns** (scaled by difficulty).
-- **10 s** opening ceasefire — defenders do not fire so your staged army is not wiped on deploy.
-- Player army stages in a rear assembly area (includes **1× anti-tank gun**).
-- On the **Select Theater** screen, choose a **Clear Defenses Style** just like the Tower Defence configuration choices.
-- **Classic** (default): original fixed-force battle with no reinforcements.
-- **Reinforced:** every **180 seconds**, both sides receive a two-unit package. Packages rotate through infantry with MG, mortar, armor, or anti-tank support; a HUD countdown shows the next arrival. Roughly every minute, a small mobile defender group also launches a limited probing counterattack against the surviving attackers before falling back to its original defensive holds.
-- **Victory:** All defenders destroyed. **Defeat:** Your attacking force is wiped.
+| Operation | Rules |
+|---|---|
+| **Frontline Command** | The main skirmish against adaptive enemy AI. Use one **Central Command** HQ or, on a Large theater, **Forward Bases** with production depots and captured-sector expansion. Capture zones are enabled by default but can be disabled in theater setup for a pure force-on-force HQ battle. |
+| **Combat Training** | A live-fire practice battle with no enemy AI. Train units, capture neutral sectors, test orders, and attack a passive practice HQ. |
+| **Breakthrough** | A role-based assault or defensive battle on Medium or Large battlefields. Capture and hold the central frontline, or hold it until the timer expires. |
+| **Fortified Line** | Assault prepared defenses or command the garrison. There are no HQs or capture-point economy; both sides receive timed reinforcement groups. |
+| **Hold the Line** | Tower Defence with a choice of wave duration and defensive doctrine: build emplacements or raise a mobile HQ force. |
+| **Force-on-Force** | A pure field engagement with no HQ, capture points, production, or reinforcements. Deploy a custom force or a preset battle group, then destroy the opposing force. |
 
-### Training Ground
+### Frontline Command
 
-- No `updateAI` — enemy does not move, produce, or fight back.
-- All capture points start **neutral**.
-- **200** starting supplies, **5**/sec passive HQ income.
-- Starting army includes all unit types (including anti-tank gun) for practice.
-- **Victory:** Destroy the practice HQ.
-- Surrender button reads **Leave Training** (same flow as defeat → Main Menu).
+Frontline Command is the longer-paced standard battle. Both sides begin with a radio operator and an infantry squad. Standard mode uses tougher units, reduced damage, slower income, longer production times, and a **30-living-unit limit** so that a battle can develop instead of snowballing immediately.
 
-### Assault & Defend
+Choose one command structure on the theater screen:
 
-Pick **Attack** or **Defend** in the menu. Central **frontline** capture point (★ in HUD); flank points stay neutral for supplies.
+- **Central Command** — one HQ trains every buildable unit type. Reinforcements appear in a ring around the HQ.
+- **Forward Bases** — available on **Large** theaters only. Start with a radio operator and infantry squad, then construct an Infantry Garrison, Field Hospital, Ordnance Yard, Motor Pool, or Infantry Bunker at the HQ or a sector you control. Completed structures unlock and spawn their own unit categories; damaged vehicles can repair at a Motor Pool.
 
-| Side | Spawn | Starting army (approx.) | Starting supplies |
-|------|--------|-------------------------|-------------------|
-| **Defender** | West base (`playerBase`) | 3 inf, MG, sniper, mortar, armored car, **2× AT gun**, 1 tank, arty | 140 (player if defending) |
-| **Attacker** | East base (`enemyBase`) | 4 inf, MG, sniper, mortar, armored car, **1× AT gun**, 2 tanks, arty | 140 (player if attacking) |
+Theater setup keeps **Capture zones** on by default. Turn them off for a pure force-on-force operation: the three sector objectives, sector income, and capture-focused AI are removed, while HQ income, reinforcements, and HQ/army-elimination victory remain. Forward Bases can still construct around the HQ, but cannot expand from captured sectors when zones are disabled.
 
-- Frontline starts **owned by the defender** (100% capture progress).
-- **3 second** grace period before elimination / hold / timeout checks.
+The opening **quiet sector** lasts about 32 seconds in Frontline Command. Combat fire, reinforcement queues, and base construction are held during the staging period, while move orders remain available inside the HQ staging ring. Click **Launch Battle Now** to begin immediately.
 
-**Attacker wins if any of:** holds frontline **45 s** continuously; destroys defender HQ; eliminates defenders when they cannot reinforce.
+### Combat Training
 
-**Defender wins if any of:** survives **8 minutes**; destroys attacker HQ; eliminates assault force when they cannot reinforce.
+Combat Training has no enemy AI. The passive practice HQ gives you a safe target while you learn selection, movement, capture points, production, manual fire, construction, fire support, and the Field Manual. Capture points begin neutral, and the HUD button reads **Leave Training** instead of Surrender.
 
-### Tower Defence
+### Breakthrough
 
-- No HQ production roster — spend **defense points** on fixed emplacements.
-- Place bunkers, MG nests, **AT guns** (upgradeable to 88 mm), AT mines, wire, and artillery pits; select emplacements to **upgrade** or (for artillery) arm **barrage**.
-- **12 waves**; lose if enemies breach the frontline toward your HQ or your HQ falls.
-- See Field Manual → **Game modes** for emplacement details.
+Choose **Lead the Assault** or **Hold the Sector**. The central frontline begins under the defender’s control and the two flank sectors are neutral. The attacker wins by holding the frontline for **45 seconds**, destroying the defender HQ, or eliminating the assault force when it cannot recover. The defender wins by surviving **8 minutes**, destroying the assault HQ, or eliminating the assault force.
 
-### Battle Simulation
+### Fortified Line
 
-- **Deploy phase:** Pick a unit type, **LMB** on the map to place it (anywhere valid on the battlefield). The enemy AI places units in parallel from the same **2,000** supply pool. **Esc** cancels the current placement selection. Click **Begin Battle** when your deployment is ready.
-- **Battle phase:** No HQ income, capture zones, or production queue. Strafe and barrage fire support are available. Standard RTS orders otherwise.
-- Enemy units get random **attack** or **hold** stances (mortars, AT guns, and MGs tend to defend; tanks and cars tend to push).
-- **Victory:** Destroy every enemy unit. **Defeat:** Your army is eliminated.
+Choose **Assault the Position** or **Command the Garrison**. The map contains prepared defenses rather than headquarters or capture points. The assault force must clear every defender; the garrison must hold the line or destroy the attackers.
 
----
+Both sides receive automatic reinforcement groups every **180 seconds** at their rear assembly area. Choose a package size before deployment:
 
-## Factions & units
+| Size | Package |
+|---|---|
+| **Small** | Two units |
+| **Medium** | Three to four units |
+| **Large** | Five to six units |
 
-Four playable factions, each with **eleven** buildable unit types. Ranges in the HUD use **meters** (`rangeMeters`); combat uses world-space range with distance falloff.
+The **15-minute assault deadline** is enabled by default. With the deadline enabled, the attacker must clear the position before the clock expires and the garrison wins by holding until the deadline. Disable it for an open-ended battle; a complete force wipe still ends the operation immediately.
 
-| Type | Role | Supply cost | Build time (s) |
-|------|------|-------------|----------------|
-| Infantry | Riflemen + squad automatic weapon | 50 | 8 |
-| Medic | Heals nearby foot troops; reduces retreat chance | 55 | 9 |
-| Engineer | Repairs nearby vehicles; steadies panicked crews | 62 | 10 |
-| Machine gun | Fixed MG team, sustained fire | 65 | 10 |
-| Sniper | Long-range precision eliminations | 72 | 11 |
-| Mortar | High-angle infantry support | 75 | 12 |
-| Anti-tank gun | Towed AT gun — strong vs armor, weak vs infantry | 80–82 | 14–15 |
-| Armored car | Fast MG-armed recon / fire support | 88 | 13 |
-| Tank | Medium gun + coax MG (~520 m) | 120 | 18 |
-| Super heavy tank | Slow, very tough breakthrough armor + coax MG | 255–265 | 27–29 |
-| Artillery | Long-range bombardment | 90 | 14 |
+### Hold the Line
 
-Standard mode multiplies build times by **~1.65×**.
+Hold the Line offers two choices in each of two setup panels:
 
-### Anti-tank guns (by faction)
+- **Battle Duration:** **Decisive Defence** ends after **12 waves**; **Lasting Defence** continues with escalating waves until defeat.
+- **Defensive Doctrine:** **Prepared Positions** starts with **82 defence points** and a commander, bodyguards, and radio operator. Spend points on bunkers, MG nests, mortar pits, AT guns, mines, wire, tank traps, and artillery pits. **Mobile Defence** starts with supplies and an HQ, lets you train any unit type, and moves the frontline toward the HQ when attackers remain across it for 10 seconds.
 
-| Faction | Unit | Range (m) | Cost |
-|---------|------|-----------|------|
-| Germany | 7.5 cm Pak 40 | 720 | 82 |
-| United States | 57 mm Gun M1 | 700 | 80 |
-| United Kingdom | QF 6-pounder | 720 | 81 |
-| Soviet Union | ZIS-3 (76 mm) | 720 | 81 |
+Prepared Positions loses when the frontline is breached or the HQ falls. Mobile Defence loses when the HQ falls; clearing all 12 waves still wins Decisive Defence. Waves have preparation periods, and **Start Wave Now** skips the current preparation countdown. Enemy waves can include radio operators and call the same off-map support system.
 
-Bonus damage vs tanks, super heavies, and armored cars; reduced damage vs infantry. Holds position while firing (like artillery).
+### Force-on-Force
 
-### Super heavy tanks (by faction)
+Force-on-Force has two deployment styles:
 
-| Faction | Unit | Notes |
-|---------|------|--------|
-| Germany | Tiger I Ausf. E (8.8 cm) | Highest HP; slowest |
-| United States | M26 Pershing (90 mm) | Late-war heavy |
-| United Kingdom | Black Prince (17-pdr) | Super-heavy infantry tank |
-| Soviet Union | IS-2 (122 mm D-25T) | Late-war heavy breakthrough tank |
+- **Manual Deployment** — spend a **2,000-supply** budget to place units anywhere valid on the battlefield. The AI matches your unit count with its own composition and selects a battle plan such as an armored thrust, defensive belt, infantry assault, flanking hook, reconnaissance push, fire preparation, or general advance.
+- **Preset Battle Group** — automatically deploy a mirrored combined-arms roster in front, support, and reserve echelons. Choose **Small** (~24 units per side), **Medium** (~38, default), or **Large** (~68). Large is unavailable on Berlin and other dense urban maps. A field briefing presents the theater, weather, and enemy plan before combat.
 
-### Germany (Wehrmacht) — other units
+There is no HQ, capture-point economy, production queue, or reinforcement system in either style. Click **Begin Battle** when deployment is complete. Strafe, bomb, barrage, and other support options become available after deployment, subject to radio range and the opening airborne cloud cover.
 
-| Unit | Designation | Game range (m) |
-|------|-------------|----------------|
-| Grenadier Squad | Kar98k + squad LMG | 420 |
-| MG 42 Team | MG 42 | 1,000 |
-| 8 cm Granatwerfer | 8 cm mortar | 2,400 |
-| Panzer IV Ausf. H | 7.5 cm KwK 40 + coax MG34 | 1,500 |
-| leFH 18/40 | 10.5 cm howitzer | 10,500 |
-| Sd.Kfz. 222 | Armored car | 950 |
+## Theaters and scale
 
-### United States — other units
+| Theater | Historical setting | Battlefield character |
+|---|---|---|
+| **Normandy** | Operation Overlord, June 1944 | Bocage, hedgerows, farm tracks, and overcast skies |
+| **North Africa** | Second Battle of El Alamein, October 1942 | Open desert, escarpments, dunes, and heat haze |
+| **Eastern Front** | Battle of Kursk, July 1943 | Rolling steppe, treelines, and summer dust |
+| **Italy** | Battle of Monte Cassino, January 1944 | Hill country, olive groves, stone tracks, and mountain mist |
+| **Far East** | Guadalcanal, 1942–43 | Dense jungle, muddy tracks, kunai grass, and village clearings |
+| **Berlin** | Outer districts, April 1945 | Connected streets, canal bridges, bombed parkland, and intact masonry |
 
-| Unit | Designation | Game range (m) |
-|------|-------------|----------------|
-| Rifle Squad | M1 Garand / BAR | 500 |
-| Browning MG Team | M1919A4 | 900 |
-| M2 Mortar Squad | 60 mm M2 | 1,800 |
-| M4 Sherman | 75 mm M3 + bow .30 cal | 1,400 |
-| M101 Howitzer | 105 mm M2A1 | 11,000 |
-| M8 Greyhound | Armored car | 950 |
+The enemy is selected from the nations that historically fought in the chosen theater. Normandy, Italy, and North Africa pair Germany with the Western Allies; the Eastern Front pairs Germany with the Soviet Union; the Far East pairs Japan with the United States, while a German Far East operation faces the Soviet Union; and Berlin can draw from Germany, the United States, the United Kingdom, or the Soviet Union. The menu shows the resolved matchup before deployment.
 
-### United Kingdom — other units
+Map scale is selected separately where the theater supports it:
 
-| Unit | Designation | Game range (m) |
-|------|-------------|----------------|
-| Rifle Section | Lee–Enfield / Bren | 450 |
-| Vickers MG Team | Vickers .303 | 950 |
-| 3-inch Mortar Team | ML 3-inch | 2,000 |
-| Churchill Mk IV | 75 mm QF + Besa coax | 1,200 |
-| 25-pounder Gun | QF 25-pdr | 12,000 |
-| Daimler AC | Armored car | 980 |
+| Scale | Use |
+|---|---|
+| **Small** | Tight engagement zone; the legacy battlefield dimensions |
+| **Medium** | Expanded maneuver room; the default |
+| **Large** | Grand theater with longer advances and wider flanks |
 
-### Soviet Union (Red Army) — other units
+The scale multipliers are 1×, 1.75×, and 2.5×. Berlin is fixed at Medium. Breakthrough requires Medium or Large, Forward Bases requires Large, and Preset Battle Group Large is disabled on Berlin.
 
-| Unit | Designation | Game range (m) |
-|------|-------------|----------------|
-| Rifle Squad | Mosin-Nagant / DP-27 | 430 |
-| DP-27 MG Team | Degtyaryov DP-27 | 980 |
-| 82 mm Mortar | BM-37 battalion mortar | 2,100 |
-| T-34-85 | 85 mm ZiS-S-53 + coax DT | 1,450 |
-| M-30 Howitzer | 122 mm M1938 | 11,800 |
-| BA-64 | Armored car | 960 |
+## Factions and units
 
-**Selection:** LMB on a unit, drag a **box** on the ground, or click a row in the **Forces** panel (left). Shift-click adds to selection. Tanks use an invisible pick sphere. Selected units show a **range ring** and stats (designation, **health bar**, range, coax stats on tanks, cover % for infantry/MG). The Forces roster shows a mini HP bar and percentage per unit.
+There are **five playable factions**, each with **13 buildable unit types**. The unit cards in the Field Manual use the same icons as the Forces panel. Costs and ranges are faction-specific; the table gives the current base ranges.
 
----
+| Unit | Role | Cost | Build | Typical range |
+|---|---|---:|---:|---:|
+| Radio operator | Signals, observation, and fire-support link | 58 | 10 s | Support 720 m; rifle ~400 m |
+| Infantry | Flexible rifle squad with squad automatic weapon | 49–50 | 8 s | 420–500 m |
+| Medic | Heals nearby foot troops and deploys field hospitals | 55 | 9 s | Support role |
+| Engineer | Repairs, builds fieldworks, and lays AT mines | 62 | 10 s | 380–400 m |
+| Machine gun | Sustained defensive fire and ground missions | 64–65 | 10 s | 800–1,000 m |
+| Sniper | Long-range precision fire with an observer | 76–78 | 11 s | 800–1,000 m |
+| Mortar | High-angle HE support | 74–75 | 12 s | 1,800–2,850 m |
+| Anti-tank gun | Towed, slow-reloading direct-fire armor killer | 78–82 | 14–15 s | 700–860 m |
+| Armored car | Fast wheeled reconnaissance and MG support | 84–88 | 13 s | 850–1,000 m |
+| Tank | Medium armor, main gun, and coaxial MG | 108–120 | 17–18 s | 900–1,500 m |
+| Tank destroyer | Long-range anti-armor specialist | 150–190 | 21–23 s | 1,200–2,000 m |
+| Top armor tier | Faction’s strongest production tank | 220–265 | 25–29 s | 1,000–1,600 m |
+| Artillery | Long-range indirect bombardment | 88–90 | 14 s | 10.5–12 km |
+
+Frontline Command multiplies base build times by roughly **1.65×**. Commanders, bodyguards, bailed vehicle crews, and paratroopers are strategic or special units rather than normal HQ production choices. Airborne squads arrive through **Airborne Drop** fire support.
+
+### Faction equipment
+
+| Faction | Medium tank | Tank destroyer | Top armor tier | Anti-tank gun |
+|---|---|---|---|---|
+| **Germany** | Panzer IV Ausf. H | Jagdpanther | Tiger I Ausf. E | 7.5 cm Pak 40 · 720 m |
+| **United States** | M4 Sherman | M10 Wolverine | M26 Pershing | 57 mm Gun M1 · 700 m |
+| **United Kingdom** | Churchill Mk IV | Achilles IIC | Black Prince | QF 6-pounder · 720 m |
+| **Soviet Union** | T-34-85 | SU-100 | IS-2 | ZIS-3 · 720 m |
+| **Japan** | Shinhoto Chi-Ha | Type 1 Ho-Ni I | Type 3 Chi-Nu | Type 1 47 mm · 860 m |
+
+Japan’s Type 3 Chi-Nu fills the game’s top armor tier while remaining a historically identified medium tank. Every faction also has its own infantry, MG, mortar, sniper, medic, engineer, radio, armored-car, artillery, and commander identities.
 
 ## Controls
 
 | Input | Action |
-|-------|--------|
-| **LMB** | Select unit / HQ |
-| **LMB drag** | Box-select multiple units |
-| **RMB** | Move to ground, or **attack** enemy unit/HQ under cursor |
-| **Shift + LMB** | **Manual fire** — open ground (fire mission) or **cover scenery** (trees, hedges, bunkers) in range; red reticle while Shift held |
-| **Esc** | Cancel fire-support targeting, **active unit fire missions**, Battle Simulation placement, or pending TD emplacement |
-| **WASD / arrows** | Pan camera |
-| **Mouse wheel / trackpad** | Zoom |
-| **Forces panel** | Click to select; Shift-click to add; each row shows an HP bar |
-| **Field icons** | Toggle (Forces header) — show/hide unit-type icons and **world health bars** above your troops; preference saved in browser |
-| **Capture circles** | Top-left toggle — show/hide capture-zone rings without affecting capture progress; preference saved |
-| **Engage target** | Confirm attack on highlighted enemy (selection panel) |
-| **Launch Battle Now** | Skip quiet-sector staging (countdown banner) |
-| **Surrender** | End battle as defeat → casualty screen → **Main Menu** |
-| **Production buttons** | Queue unit at your HQ (when HQ is alive) |
-| **Strafe / Bomb / Barrage** | Arm fire support, then **LMB** on map; **Esc** cancels targeting |
-| **Tablet / touch** | Phones and tablets play in **landscape only**. **Camera pad**: pan, rotate, zoom · **pinch** on battlefield to zoom · **tap** map with units selected = move/attack (replaces RMB) · add `?tablet=1` to the URL to force tablet UI on desktop |
-| **Cheat mode** | Type **`iddqd`** during a battle, or open the game with **`?cheat=1`** in the URL (unlimited supplies, instant builds) |
+|---|---|
+| **LMB** | Select a unit or HQ; click a highlighted enemy to attack |
+| **LMB drag** | Box-select units |
+| **RMB** | Move, attack an enemy under the cursor, or mount selected foot troops on a friendly tank |
+| **Shift + LMB** | Manual fire at open ground or cover scenery such as trees, hedges, and bunkers |
+| **Alt + Shift + LMB** | Fire a smoke shell from one ready selected artillery piece; 45 s cooldown and 60 s screen |
+| **Engage target** | Confirm the highlighted enemy in the selection panel |
+| **Ctrl + E / M / A / R** | Select and cycle nearest engineer, medic, artillery, or radio operator |
+| **WASD / arrows** | Pan the camera; left/right arrows rotate; mouse wheel or trackpad zooms |
+| **P** | Pause or resume; camera movement remains available while paused |
+| **Esc** | Cancel targeting, fire missions, construction, deployment placement, or pending emplacement builds |
+| **Tactical map** | Toggle the bottom-right minimap; click it to pan the main camera |
+| **Field icons** | Toggle unit-type icons and world health bars above your forces |
+| **Unit status** | Toggle markers such as Inspired, In Cover, Retreating, Surrendered, healing, and repair |
+| **Capture circles** | Show or hide capture-zone rings without disabling capture or income |
+| **Frontline** | Show or hide the red frontline in Breakthrough and Hold the Line |
+| **Save** | Save the current operation in browser storage |
+| **Continue Saved Battle** | Resume a saved operation from the title screen |
+| **Strafe / Bomb / Barrage / Creep / Airborne** | Arm fire support, then click valid ground; Esc cancels |
+| **Full Retreat / Hold Ground / Dig In** | Issue a commander-wide General Order |
+| **Start Wave Now** | Skip a Hold the Line preparation period |
+| **`?tablet=1`** | Force the tablet interface on a desktop browser |
+| **`iddqd` or `?cheat=1`** | Enable cheat mode: unlimited supplies and instant builds |
 
-**Manual fire** (Shift + LMB): any selected combat unit in range can fire at open ground or destroy cover scenery. Ground bombardment units (MG, mortar, armored car, tank, super heavy, artillery) use **fire missions** on open ground. Anti-tank guns use direct fire only. **RMB move** or **Esc** cancels an active fire mission.
+On phones and tablets, play in **landscape**. The camera pad handles pan, rotation, and zoom; **Target** selects an enemy, **Fire** replaces Shift + LMB, and tapping the battlefield with units selected issues a move or attack order. On a tablet with a keyboard and mouse, disable **Tablet controls** in Settings to use the normal command scheme.
 
----
+## Settings
 
-## Economy & capture points
+Settings are saved in browser storage and apply across operations where relevant:
 
-| Mode | Player start | Enemy start | HQ income (/sec) | Per captured point (/sec) |
-|------|--------------|-------------|------------------|---------------------------|
-| Standard | 120 | 75 × difficulty | 2.1 | 4.2 |
-| Training | 200 | — | 5 | 6 |
-| Assault | 140 | 120 × difficulty | 3 | 6 |
-| Clear Defenses | 160 | — | 3 | 6 |
-| Tower Defence | defense points | — | wave rewards | — |
-| Battle Simulation | 2,000 deploy budget | 2,000 deploy budget | — | — |
+- **AI difficulty:** Recruit, Regular, or Veteran. Regular is the default; Combat Training has no enemy AI.
+- **Battlefield interface:** Tactical map, Field icons, Unit status markers, Capture circles, and Frontline visibility.
+- **Unit behaviour:** Seek Cover, Automatic radio positioning, Hold Ground by default, and Artillery auto-fire.
+- **Build queue automation:** separate saved Auto Build preferences for the Central Command and Forward Bases structures in Frontline Command.
+- **Bodies / Destroyed Vehicle Despawn Delay:** 10 seconds, 30 seconds, 1 minute, 2 minutes, 5 minutes, or Permanent. Longer retention can reduce frame rate.
 
-Each map has **three** capture points (Assault: frontline pre-held by defender, flanks neutral). **Battle Simulation** and **Tower Defence** have no capture income. Stand friendly units in a zone to flip ownership; income stacks per point held.
+## Battlefield systems
 
-The top-left **Capture circles** toggle hides the large world-space rings when they obstruct the view. This is visual only; hidden sectors continue capturing and generating income.
+### Command, capture, and reinforcement
 
-**Quiet sector:** ~**32 s** in Standard / Assault — no combat fire; units must stay inside the HQ staging ring. **Launch Battle Now** on the banner skips the wait. Clear Defenses: **10 s** ceasefire for your staged forces.
+Most operations use an HQ, supplies, and three capture sectors. Friendly units in a sector change its ownership and add its income. Frontline Command keeps these zones by default, but its theater option can remove them and their income for a pure HQ-focused force-on-force battle. Force-on-Force, Fortified Line, and Hold the Line do not use the ordinary capture-point economy.
 
-**Production:** Up to **4** queued items per HQ. New units spawn in a ring around your HQ. Reinforcements spawned mid-battle receive bonus HP scaling in Standard mode.
+The enemy AI produces units, captures ground, chooses attack plans, uses support weapons, builds cover, and regroups into crossfire, echelon, or defense-in-depth positions when a push is damaged. Its medics and engineers withdraw to covered support lines after treating wounded troops, repairing vehicles, restoring recoverable wrecks, or repairing a damaged HQ.
 
-**Elimination rule:** Wiping all field units does **not** end the battle if that side’s HQ is intact and they still have units building, can afford a build, or (in modes with income) can recover via supplies. See `src/game/EliminationRules.js`.
+Losing all field units does not always end an HQ operation: a side is eliminated when its HQ is destroyed, or when it has no units, no queued production, and no way to afford or receive another reinforcement. The mode-specific objective always takes precedence.
 
----
+### Fire support and radio operators
 
-## Combat
+Off-map support has no friendly fire, but every call requires a living, operational radio operator. Each side can field at most **three** radio operators. Support calls also require a clear line of sight to a point within roughly **720 m** of the operator; buildings and smoke can block observation.
 
-- **Field commanders:** Every side in every mode receives a faction-specific officer with four bodyguards at its rear map edge. Commanders have a permanent CMD/star marker; enemy AI keeps its commander behind the front. Killing a commander disables that side’s off-map fire support, and for the player also cancels/disables General Orders, with a faction-specific loss announcement. Commanders do not alter ordinary army-wipe or Tower Defence wave-clear conditions.
-- **Explicit attack orders:** RMB on an enemy unit or HQ; or **Engage target** when hovering a highlighted enemy.
-- **Engagement stance:** **Hold Ground** accepts an explicit enemy-unit order at any distance, closes until the target is in range, then holds position if that target withdraws; **Pursue** closes to range, follows withdrawals, and routes around blocking buildings. Switching stance applies immediately. Building attacks may advance in either stance.
-- **Line of sight:** Intact buildings block direct fire. Ordered targets remain selected while obscured; Pursue units maneuver for a clear firing lane, while Hold units wait in place. Mortars, artillery, and barrages fire indirectly over buildings.
-- **Move:** RMB on open ground (clears attack order and fire missions).
-- **Fire mission:** **Shift + LMB** on open ground for bombardment-capable units (see controls).
-- **Defensive fire:** Units engage enemies in range when idle or while executing orders in range.
-- **Range falloff:** Damage scales with distance inside max range.
-- **Difficulty:** Enemy damage multiplier varies by Easy / Medium / Hard; Standard also applies a global damage multiplier (~0.58).
-- **Tank coax MG:** Medium and super-heavy tanks fire a **coax/bow machine gun** on a separate cooldown (~520 m) alongside the main gun — effective vs infantry while the cannon reloads.
-- **Anti-tank guns:** Bonus damage vs tanks, super heavies, and armored cars; weak vs infantry. Tank-gun VFX and sounds.
-- **Tracked turning:** Tanks pivot at a deliberate hull-traverse speed and play track/engine audio while turning in place.
-- **Gun feedback:** Accepted attacks use faction radio acknowledgements. Tank cannons have heavier reports; AT and artillery guns eject persistent brass cases beside the weapon.
-- **Armor:** **Rifles and MGs cannot damage tanks or super heavies** (0% — use AT guns, mortars, tank guns, or artillery). **Armored cars** take partial small-arms damage (~32%). Snipers chip armor slightly; mortars and dedicated AT weapons are effective.
-- **Medics & engineers:** Medics heal nearby infantry/MG/mortar/sniper teams and show a **green cross** while healing. Engineers repair nearby vehicles and show a **spanner** while repairing. Both reduce retreat chance for allies in range.
-- **Vehicle damage smoke:** Tanks, armored cars, artillery, and towed guns below **50% HP** trail **black engine smoke** from the rear until repaired or destroyed.
-- **Health bars:** When **field icons** are enabled, floating bars appear above **damaged** or **selected** units (green → yellow → red by HP; player/enemy border tint). The **Forces** roster and **selection panel** always show HP bars with numeric values. Turning field icons off hides world bars and icons together.
-- **Retreat:** Damaged units may fall back to their HQ (**RETREAT** marker) and stop attacking until safe. Clear Defenses defenders do not retreat.
-- **Surrender & prisoners:** Isolated infantry teams (rifles, MG, sniper, mortar, medic, engineer, towed AT crews) under fire may **surrender** (**SURRENDER** banner). They stop fighting and are not fired upon. An **enemy within ~11 m** captures them — they march off the map and count as a loss. A **friendly within ~11 m** **liberates** them back into the fight. Tanks and artillery do not surrender; Clear Defenses dug-in defenders never surrender.
-- **Casualties:** Destroyed units leave **wrecks** — burning tanks, fallen infantry, knocked-out vehicles. Cover and retreat markers are cleared on death.
-- **Tracers:** Short streaks for infantry/MG only; tanks, AT guns, and artillery use calibre-weighted impact VFX without bullet tracers. Barrages and creeping barrages include distant battery reports and heavier explosions.
+| Support | Cooldown | Effect |
+|---|---:|---|
+| **Air Strafe** | ~72 s | Faction-specific fighter pass with MG fire along the run |
+| **Air Bomb** | ~118 s | One heavy GP bomb and crater |
+| **Artillery Barrage** | ~95 s | Clustered shell impacts after warning markers |
+| **Creeping Barrage** | ~148 s | Shell lifts advance along the attack axis |
+| **Airborne Drop** | ~180 s | Five four-person paratrooper squads with faction-specific weapons |
 
-Heavy hits leave **terrain craters** (capped for performance). Muzzle flashes and impacts are pooled/throttled.
+Opening cloud cover grounds airborne operations for the first **five minutes of the battle**. Fortified Line and Force-on-Force allow one Airborne call per side for the whole operation; other modes use the normal cooldown. Drops cannot target within about 48 m of an opposing HQ.
 
----
+**Automatic radio positioning** is enabled by default. If every radio operator is out of range, an out-of-range click creates a pending strike marker and moves the nearest operator toward a covered relay position. The strike fires when the operator can observe the target. Click the marker, select the operator, or give the operator a manual order to cancel it. Turn the setting off to position operators yourself.
 
-## Cover
+Select a radio operator and press **Binoculars** to extend its observation range to roughly 1,120 m for 45 seconds. Calling an observable support strike ends the scan and applies a three-minute binocular cooldown; an expired scan without a call has no cooldown.
 
-Infantry and **machine gun** teams only.
+### General Orders
 
-| Tier | Damage taken | Reduction | Examples on maps |
-|------|--------------|-----------|------------------|
-| Heavy | **as little as ~12%** | up to ~88% | Concrete bunkers, sandbag nests, stationary armor and vehicle wrecks |
-| Medium | **as little as ~28%** | up to ~72% | Bocage hedges, stone walls |
-| Light | **as little as ~45%** | up to ~55% | Fighting pits, shell scrapes |
+The **General Orders** panel provides **Full Retreat**, **Hold Ground**, and **Dig In**. Each has a three-minute cooldown and a 30-second command window. Orders require a living field commander; the active order can be cancelled early with its button or Esc. They are unavailable in Prepared Positions and during Force-on-Force deployment, but become available after a Force-on-Force battle begins.
 
-Cover is directional: the obstacle must lie between the unit and incoming fire, so flanking and rear attacks bypass it. Bunkers and occupied trenches protect broadly. Mortars, tank shells, artillery, and other blast weapons also defeat more cover than rifles and machine guns.
+- **Full Retreat** keeps units withdrawing toward the HQ or the Fortified Line starting zone.
+- **Hold Ground** greatly reduces, but does not remove, automatic panic retreats.
+- **Dig In** sends eligible commanders, radio operators, infantry, airborne, MG, and sniper units to dig and occupy trenches facing the enemy.
 
-Bonus applies only while the unit stays in the zone. **Shift + LMB** on scenery (with combat units selected) to destroy bunkers, hedges, and brush. Selected infantry/MG show an **IN COVER** banner, a foot ring, and exact damage % on the selection panel. Tanks, super heavies, anti-tank guns, mortars, and artillery ignore cover.
+### Combat, cover, and morale
 
----
+Combat uses line of sight, directional cover, range falloff, armor facing, slope, and sampled vehicle hit locations. Intact buildings block direct fire; mortars, artillery, and off-map barrages can fire indirectly over distant obstacles. Artillery has a minimum range of roughly 220 m and can fire smoke screens.
 
-## Fire support
+- Rifles and MGs cannot damage tanks, tank destroyers, or top-tier armor. Infantry, engineers, and airborne squads can throw close-range anti-tank grenades; dedicated AT guns, tank guns, tank destroyers, and artillery are the primary armor counters.
+- Medium and top-tier tanks carry a separate coaxial MG for soft targets while the main cannon reloads. Tracked tanks pivot deliberately and can break tracks; armored cars can lose wheels.
+- Cover is directional. Bunkers, sandbags, wrecks, and occupied trenches provide the strongest protection; hedges and stone walls provide medium cover. The **Seek Cover** setting routes eligible foot troops toward suitable cover on move orders.
+- A nearby commander inspires troops within roughly 34 m, reducing automatic retreat and surrender pressure. One kill promotes a unit to Veteran; three kills promote it to Elite. Rank badges persist with the unit.
+- Medics heal nearby foot troops and can deploy field hospital tents. Engineers repair vehicles, running gear, recoverable wrecks, and damaged HQs, and can build sandbags, bunkers, and AT mines.
 
-One-use tactical strikes (HUD). **No friendly fire** on your own units/HQ.
+### Trenches, surrender, and captured vehicles
 
-Fire support requires a living field commander. If the commander is killed, pending targeting is cancelled and no further strikes can be called; the same rule gates enemy AI support.
+Commanders, radio operators, infantry, airborne, MG teams, and snipers can dig trenches. Other eligible foot troops can occupy a friendly or empty enemy trench; occupied enemy trenches remain contested. Fortified Line garrison units do not retreat or surrender.
 
-| Strike | Cooldown | Effect |
-|--------|----------|--------|
-| **Strafing run** | ~72 s | Faction fighter pass with nation-specific engine fly-by; MG bursts along the line |
-| **Air bomb** | ~118 s | Fighter releases a large GP bomb (heavy blast/crater) on the aim point |
-| **Artillery barrage** | ~95 s | ~14 shells with warning markers, then impacts |
-| **Creeping barrage** | ~148 s | Shells lift toward the aim point along the attack axis |
-| **Airborne drop** | ~180 s | Faction transport (Ju 52 / C-47 / Dakota / Li-2 / L2D) fly-by; squads exit the cargo door then parachute |
+Isolated foot troops and gun crews under pressure may surrender. A friendly unit close by liberates them; an enemy close by captures them and marches them off the map. Surrendered units stop firing and are not targeted while surrendering.
 
-Click a strike type → **LMB** on valid observed ground → brief warning → strike. Requires a living radio operator.
+Recoverable vehicle knockouts leave an intact, crewless hull. An engineer must restore a destroyed wreck before it can move or fire. Surviving bailed crews can reclaim their original vehicle, while infantry or airborne squads from **either side** can reman an operational crewless tank. Tank riders can mount friendly tanks and super-heavies, fire from the hull, and bail out under fire.
 
----
+### Battlefield persistence and reports
 
-## Maps
+Destroyed units leave burning vehicles, fallen infantry, field-gun wrecks, and terrain craters. Wrecks provide neutral cover to foot troops from either side. Vehicle damage produces black engine smoke below 50% HP until repair or destruction. Bodies and wreck retention is controlled in Settings and saved battles retain visible battlefield casualties and wrecks.
 
-| Map | Theater | Terrain flavor |
-|-----|---------|----------------|
-| **Normandy** | France | Bocage, hedgerows, moderate hills |
-| **North Africa** | Libya | Desert ridges, dunes, open ground |
-| **Eastern Front** | Kursk salient | Rolling steppe, woods, red soil |
-| **Italy** | Gothic Line | Apennine hills, olive groves, stone farm tracks |
+The end-of-battle report includes victory or defeat detail, losses by unit type, prisoners captured, estimated 1944 USD materiel cost, and — in Hold the Line — emplacements lost and waves cleared.
 
-**Map size** (map select screen, default **Medium**):
+## Audio and visual identity
 
-| Size | Scale | Notes |
-|------|-------|--------|
-| **Small** | 1× | Legacy battlefield dimensions |
-| **Medium** | 1.75× | Wider maneuver room (default) |
-| **Large** | 2.5× | Grand theater — bases and capture points scale with map |
-
-Units path around **ridges** via terrain waypoints on long move orders. The sky dome and horizon follow the camera on large maps.
-
----
-
-## End of battle
-
-Results overlay includes victory/defeat detail, **casualty breakdown** by unit type, and HQ destroyed flags. **Replay battle** returns to the same faction, map, mode, and difficulty. **Main Menu** from the end screen or after **Surrender** during play.
-
----
-
-## In-game guide
-
-Content lives in `src/data/gameGuide.js` and is rendered into the **Field Manual** overlay:
-
-- Title screen → **Field Manual**
-- During battle → **Field Manual** (bottom HUD)
-
-The manual includes a section nav, control reference table, illustrated **unit cards** (eleven types, same icons as the Forces panel), per-faction **medium vs super-heavy** and **anti-tank gun** tables, and sections on objectives, modes, controls, **Forces & battlefield UI** (field icons, health bars, tablet camera pad), economy, combat, cover, fire support, and difficulty.
-
----
-
-## Audio
-
-- `SoundManager` plays **faction-specific** weapon samples from `public/sounds/` when available (`WeaponSounds.js` — rifles, MGs, tank guns, mortars, howitzers per nation).
-- Looping **vehicle engine** audio (main + exhaust layers) for tanks, super heavies, armored cars, and artillery while moving, plus dedicated track audio for stationary tank pivots (`VehicleEngineAudio.js`).
-- Faction-specific radio acknowledgements confirm accepted attack orders.
-- **Strafe / bomb fly-by** spatial audio with **per-faction fighter engines** when aircraft pass overhead (`StrafeAircraftAudio.js`); **airborne drops** use multi-engine **transport** loops; air bombs also play heavy detonation clips.
-- **Infantry death** one-shots (baked pool under `public/sounds/infantry-death-*.wav`).
-- **Menu music** (`MenuMusic.js`) on title/menu screens; stops on battle deploy.
-- Spatial pan, distance attenuation, and light reverb from the camera listener.
-- Regenerate samples: `npm run bake-sounds`, `npm run bake-engines`, `npm run bake-infantry-death`.
-
-### Vehicle art pipeline
-
-Side-view **Imagine** references live in `public/vehicles/refs/` (e.g. `medium-tank.jpg`, `medium-tank-usa.jpg`, `medium-tank-russia.jpg`, `super-heavy-russia.jpg`, `armored-car-russia.jpg`, `artillery-russia.jpg`, `at-gun-russia.jpg`). Faction SVG silhouettes are emitted to `public/vehicles/svg/` via `npm run generate-vehicle-svgs` (proportions in `src/units/vehicleDesigns.js`). In-game meshes are built from those designs in `VehicleMeshKit.js` / `FactionMeshes.js`. Soviet flag: `public/flags/russia.svg`.
-
----
+- Faction-specific rifles, MGs, tank guns, AT guns, mortars, howitzers, radio acknowledgements, commander orders, retreat calls, under-fire shouts, and death effects.
+- Vehicle engine and exhaust loops for tanks, tank destroyers, super-heavies, armored cars, and artillery, with dedicated track audio for stationary tank pivots.
+- Spatial fighter and transport fly-bys for strafing, bombing, and airborne operations.
+- Menu and end-of-battle music, pooled muzzle flashes and impacts, shell casings, craters, wreck fire, smoke, parachutes, and faction-specific unit/vehicle meshes.
+- Theater-specific vehicle camouflage and historically named faction equipment. Vehicle SVG silhouettes are generated into `public/vehicles/svg/` from the proportions in `src/units/vehicleDesigns.js`.
 
 ## Project structure
 
-```
+```text
 src/
-  main.js                 # Boot, menu → game, surrender callback
+  main.js                 # Application boot and menu → battle lifecycle
   data/
-    factions.js           # Units, costs, ranges, coax MG, AT guns
-    maps.js               # Map defs, bases, capture points
-    mapSizes.js           # Small / Medium / Large theater scale
-    gameModes.js          # Mode config & unit production order
-    campaignPace.js       # Standard mode balance & AI pacing merge
-    gameGuide.js          # Field Manual HTML (sections + unit cards)
-    towerDefense.js       # TD waves, emplacements, economy
-    difficulty.js         # Recruit / Regular / Veteran profiles
-    fireSupport.js        # Strafe & barrage parameters
+    factions.js           # Faction rosters, costs, ranges, and equipment
+    maps.js               # Theaters, matchups, bases, and capture points
+    mapSizes.js           # Small / Medium / Large scale presets
+    gameModes.js          # Operation and setup rules
+    gameGuide.js          # Field Manual content and unit cards
+    baseBuildings.js      # Forward Bases structures and production unlocks
+    towerDefense.js       # Hold the Line waves, doctrines, and emplacements
+    fireSupport.js        # Off-map support definitions and cooldowns
+    generalOrders.js      # Commander-wide orders
+    lastStandForces.js    # Force-on-Force deployment and preset rosters
+    lastStandTactics.js   # Adaptive Force-on-Force battle plans
   game/
-    Game.js               # Loop, modes, victory, surrender, resources
-    Combat.js             # Damage, targeting, armor, coax MG fire
-    TowerDefenseMode.js   # Wave defence mode
-    DefenseStructures.js  # TD emplacement build/combat
-    EliminationRules.js   # Army wipe vs HQ/reinforcement defeat
-    Production.js         # Build queues & HQ spawn ring
-    CapturePoint.js       # Zone capture & income
-    AI.js                 # Enemy production & attack
-    Spawner.js            # Starting armies & mode rosters
-    AssaultMode.js        # Frontline hold timer & win checks
-    ClearanceMode.js      # Clear Defenses spawn, armor multipliers, victory
-    LastStandMode.js      # Deploy phase, enemy parallel deploy, win checks
-    CoverSystem.js        # Infantry/MG damage reduction
-    FireSupport.js        # Cooldowns & strike execution
-    RetreatBehavior.js    # Damaged-unit fallback to HQ
-    SurrenderBehavior.js  # Isolated units surrender, capture, liberation
-    BattleStats.js        # End-screen casualty tallies
-    MovePath.js           # Ridge-aware movement waypoints
-    HQ.js                 # Headquarters entities
-  units/
-    Unit.js               # Movement, orders, death visuals
-    UnitMeshes.js         # Meshes, wreck/corpse looks
-    FactionMeshes.js      # Per-faction vehicle builders (delegates to kit)
-    VehicleMeshKit.js     # Shared tank/car/arty/AT mesh parts
-    vehicleDesigns.js     # Proportions aligned to SVG silhouettes
-    VehicleTypes.js       # Tank types, move tuning
-  ui/
-    UIManager.js          # Menu, HUD, Field Manual, overlays
-    TabletCameraControls.js # On-screen camera pad for touch devices
-    unitIcons.js          # SVG icons for roster & manual
-  lib/
-    tabletDetect.js       # Tablet/phone detection and landscape orientation gate
-  input/
-    RTSController.js      # Select, move, attack, fire missions
-    BattleCursor.js       # Shift fire-mission reticle
-  audio/
-    SoundManager.js       # Weapon & impact samples
-    WeaponSounds.js       # Faction weapon profile → WAV mapping
-    MenuMusic.js          # Title-screen theme
-    VehicleEngineAudio.js # Per-type engine loops
-    StrafeAircraftAudio.js # Spatial fighter / transport fly-by (faction engines)
-  effects/                # Tracers, wrecks, fire support VFX, air bomb
-  visual/
-    HealMarkers.js        # Medic cross / engineer spanner icons
-    UnitHealthBars.js     # Floating HP bars (tied to field-icons toggle)
-    DamageSmoke.js        # Black engine smoke on damaged vehicles
-    UnitFieldIcons.js     # Unit-type icons above player forces
-    DefenseMeshes.js      # TD emplacement meshes
-scripts/
-  bake-gun-sounds.mjs
-  bake-engine-sounds.mjs
-  bake-infantry-death.mjs
-  generate-menu-music.py
-public/sounds/
-public/music/
-public/flags/
+    Game.js               # Main loop, modes, victory, saving, and resources
+    AI.js / StandardAI.js # Enemy production, movement, support, and regrouping
+    Combat.js             # Targeting, damage, armor, and weapon behavior
+    ClearanceMode.js      # Fortified Line roles, reinforcements, and victory
+    TowerDefenseMode.js   # Hold the Line wave state and frontline behavior
+    LastStandMode.js      # Force-on-Force deployment and battle transition
+    FireSupport.js        # Radio validation and strike execution
+    InfantryTrench.js     # Trench placement, occupation, and cover
+    TankRiders.js         # Mounting, dismounting, bailout, and remanning
+    BattleSave.js         # Browser save/restore state
+    BattleStats.js        # Battle reports and casualty economics
+  units/                  # Unit behavior, meshes, textures, and vehicle design
+  ui/                     # Menus, HUD, Field Manual, minimap, and tablet UI
+  audio/                  # Sound manager, weapon profiles, music, and fly-bys
+  effects/                # Combat, fire-support, destruction, and renderer FX
+  visual/                 # Health bars, field icons, markers, buildings, and defenses
+  world/                  # Terrain, maps, scenery, cover, trenches, and urban layouts
+scripts/                  # Audio, music, vehicle SVG, and verification helpers
+public/                   # Flags, sounds, music, vehicle references, and generated art
+electron/                 # Optional native macOS desktop wrapper
 ```
 
----
+## macOS desktop edition
 
-## Tech stack
+The optional Electron wrapper packages the Vite game in a native macOS window without duplicating the game source. See [`electron/README.md`](electron/README.md) for the full workflow.
 
-- **Three.js** — WebGL rendering, shadows, fog, environment lighting
-- **Vite** — dev server and production bundling
-- No backend; single-player in the browser
+```bash
+cd electron
+npm install
+npm start
+```
 
----
+Build an unsigned local DMG and ZIP, or a universal Apple Silicon/Intel package:
 
-## License
+```bash
+npm run dist:mac
+npm run dist:mac:universal
+```
 
-Private / prototype — adjust as needed for your use.
+Artifacts are written to `electron/release/`. Public distribution should add Developer ID signing and notarization.
+
+## Tech stack and license
+
+- **Three.js** for WebGL rendering, terrain, lighting, shadows, and effects
+- **Vite** for development, bundling, preview, and GitHub Pages output
+- No backend; the game is single-player and stores settings/saves in browser storage
+
+Private prototype — adjust the license and distribution terms as required for your use.
