@@ -4,11 +4,15 @@ menu-theme-previous.ogg — backup of the theme before the last regeneration.
 menu-theme-backup-YYYYMMDD.ogg — dated backup(s) of earlier versions.
 menu-theme-original-backup.ogg — earliest procedural/early theme backup.
 
+war-stats-theme.ogg — sad, reflective WWII memorial loop for the War Stats screen
+  (sparse trumpet and strings; not the main-menu theme).
+
 victory-{faction}.ogg / defeat-{faction}.ogg — short (~18s) match-end stingers
   for germany, usa, uk, russia, japan. German military-band, US 1940s jazz,
   British brass band, Soviet march, Japanese ceremonial/military mix.
 
 Regenerate menu: npm run generate-menu-music -- --force
+Regenerate war-stats memorial: npm run generate-war-stats-music -- --force
 Regenerate end cues: npm run generate-end-music -- --force
   (optional --only=usa or --only=germany-defeat)
 Validate without using credits: npm run generate-menu-music -- --validate

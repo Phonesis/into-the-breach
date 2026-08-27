@@ -1,6 +1,6 @@
 /** Looping baked engine and track audio for moving or pivoting powered vehicles. */
 
-const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
+const ENGINE_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'truck']);
 const CREW_MOVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const TRACKED_PIVOT_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 const ENGINE_FACTIONS = new Set(['germany', 'usa', 'uk', 'russia', 'japan']);
@@ -10,6 +10,7 @@ const BUFFER_KEYS = {
   tankDestroyer: 'engine_tank_destroyer',
   superHeavyTank: 'engine_tank',
   armoredCar: 'engine_armored_car',
+  truck: 'engine_truck',
 };
 
 const PROFILES = {
@@ -44,6 +45,14 @@ const PROFILES = {
     filterMin: 420,
     filterMax: 2200,
     exhaustGain: 0.28,
+  },
+  truck: {
+    rateMin: 0.84,
+    rateMax: 1.28,
+    vol: 0.38,
+    filterMin: 360,
+    filterMax: 1900,
+    exhaustGain: 0.32,
   },
 };
 
@@ -230,7 +239,9 @@ export class VehicleEngineAudio {
         ? `engine_tank_${faction}`
         : faction && type === 'armoredCar'
           ? `engine_armored_car_${faction}`
-          : genericKey;
+          : faction && type === 'truck'
+            ? `engine_truck_${faction}`
+            : genericKey;
     const main = this.sm.buffers[key] ??
       (key !== genericKey ? this.sm.buffers[genericKey] : null) ??
       (type === 'tankDestroyer' ? this.sm.buffers.engine_tank : null);

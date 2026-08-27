@@ -30,6 +30,7 @@ const ENEMY_TYPE_WEIGHTS = {
   sniper: 2,
   mortar: 2,
   antiTankGun: 3,
+  truck: 1.8,
   armoredCar: 2,
   tank: 3,
   tankDestroyer: 2,
@@ -44,6 +45,7 @@ const TACTIC_TYPE_WEIGHT_MULT = {
     superHeavyTank: 2.1,
     tankDestroyer: 1.4,
     armoredCar: 1.2,
+    truck: 1.15,
     antiTankGun: 1.15,
     infantry: 0.85,
   },
@@ -58,6 +60,7 @@ const TACTIC_TYPE_WEIGHT_MULT = {
   },
   infantryAssault: {
     infantry: 2.2,
+    truck: 1.6,
     machineGun: 1.7,
     medic: 1.4,
     engineer: 1.3,
@@ -67,6 +70,7 @@ const TACTIC_TYPE_WEIGHT_MULT = {
   },
   flankingHook: {
     armoredCar: 2.3,
+    truck: 1.7,
     tank: 1.8,
     tankDestroyer: 1.3,
     infantry: 1.1,
@@ -74,6 +78,7 @@ const TACTIC_TYPE_WEIGHT_MULT = {
   },
   reconnaissancePush: {
     armoredCar: 2.6,
+    truck: 1.5,
     sniper: 1.5,
     infantry: 1.15,
     tank: 1.1,
@@ -91,6 +96,7 @@ const TACTIC_TYPE_WEIGHT_MULT = {
     infantry: 1.35,
     machineGun: 1.2,
     tank: 1.2,
+    truck: 1.25,
     antiTankGun: 1.1,
     mortar: 1.1,
   },
@@ -113,6 +119,7 @@ const PRESET_ROLE_BY_TYPE = {
   antiTankGun: 'support',
   artillery: 'arty',
   armoredCar: 'recon',
+  truck: 'recon',
   tank: 'armor',
   tankDestroyer: 'armor',
   superHeavyTank: 'armor',
@@ -472,7 +479,7 @@ function holdRadiusForType(type) {
   if (type === 'infantry') return 14;
   if (type === 'machineGun' || type === 'sniper') return 11;
   if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank') return 16;
-  if (type === 'armoredCar') return 18;
+  if (type === 'armoredCar' || type === 'truck') return 18;
   return 12;
 }
 

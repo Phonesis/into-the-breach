@@ -4,6 +4,7 @@ import {
   buildTankFromDesign,
   buildTankDestroyerFromDesign,
   buildArmoredCarFromDesign,
+  buildTruckFromDesign,
   buildArtilleryFromDesign,
   buildAtGunFromDesign,
 } from './VehicleMeshKit.js';
@@ -968,6 +969,20 @@ export function buildFactionVehicleCrew(group, _body, _dark, factionId) {
   group.userData.hitRadius = 1.4;
 }
 
+export function buildFactionTruckDriver(group, _body, _dark, factionId) {
+  buildSquadSoldier(group, {
+    factionId,
+    squadIndex: 0,
+    x: 0,
+    z: 0,
+    withRifle: true,
+    withPack: false,
+    withWebbing: true,
+  });
+  group.userData.squadSize = 1;
+  group.userData.hitRadius = 1.25;
+}
+
 export function buildFactionParatrooper(group, _body, dark, factionId) {
   const positions = configureTacticalSquadFormation(group, 'paratrooper', 4).map(
     ({ x, z }, index) => ({ x, z, lead: index === 0 })
@@ -1235,6 +1250,8 @@ const VEHICLE_BUILDERS = {
     tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'germany'),
     superHeavyTank: buildTigerI,
     armoredCar: buildSdkfz222,
+    truck: (group, body, detail, dark) =>
+      buildTruckFromDesign(group, body, detail, dark, getVehicleDesign('germany', 'truck')),
     artillery: buildLeFH18,
     antiTankGun: buildPak40,
   },
@@ -1243,6 +1260,8 @@ const VEHICLE_BUILDERS = {
     tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'usa'),
     superHeavyTank: buildPershing,
     armoredCar: buildM8Greyhound,
+    truck: (group, body, detail, dark) =>
+      buildTruckFromDesign(group, body, detail, dark, getVehicleDesign('usa', 'truck')),
     artillery: buildM101,
     antiTankGun: buildM1AtGun,
   },
@@ -1251,6 +1270,8 @@ const VEHICLE_BUILDERS = {
     tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'uk'),
     superHeavyTank: buildBlackPrince,
     armoredCar: buildDaimlerAC,
+    truck: (group, body, detail, dark) =>
+      buildTruckFromDesign(group, body, detail, dark, getVehicleDesign('uk', 'truck')),
     artillery: build25Pounder,
     antiTankGun: build6Pounder,
   },
@@ -1259,6 +1280,8 @@ const VEHICLE_BUILDERS = {
     tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'russia'),
     superHeavyTank: buildIS2,
     armoredCar: buildBA64,
+    truck: (group, body, detail, dark) =>
+      buildTruckFromDesign(group, body, detail, dark, getVehicleDesign('russia', 'truck')),
     artillery: buildM30,
     antiTankGun: buildZIS3,
   },
@@ -1267,6 +1290,8 @@ const VEHICLE_BUILDERS = {
     tankDestroyer: (group, body, detail, dark) => buildTankDestroyer(group, body, detail, dark, 'japan'),
     superHeavyTank: buildChiNu,
     armoredCar: buildChiyoda,
+    truck: (group, body, detail, dark) =>
+      buildTruckFromDesign(group, body, detail, dark, getVehicleDesign('japan', 'truck')),
     artillery: buildType91Howitzer,
     antiTankGun: buildType1AtGun,
   },

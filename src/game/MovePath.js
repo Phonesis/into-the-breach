@@ -539,7 +539,7 @@ export function buildMovePath(
 /** Physical collision / blocking radius. */
 export function unitPathRadius(unitType) {
   if (unitType === 'superHeavyTank') return 2.8;
-  if (unitType === 'armoredCar') return 1.45;
+  if (unitType === 'armoredCar' || unitType === 'truck') return 1.45;
   if (unitType === 'artillery' || unitType === 'antiTankGun') return 1.65;
   if (isVehicleUnit(unitType)) return 2.1;
   // Foot troops / support crews — tight enough for alleys, solid vs façades.

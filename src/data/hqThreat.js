@@ -19,6 +19,7 @@ export const HQ_SIEGE_DPS_BY_TYPE = {
   mortar: 14,
   antiTankGun: 12,
   armoredCar: 16,
+  truck: 10,
   tank: 22,
   superHeavyTank: 28,
   artillery: 20,

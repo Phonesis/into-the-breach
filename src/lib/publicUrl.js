@@ -16,6 +16,7 @@ const MENU_BG_VARS = {
   '--menu-bg-faction-russia': 'menu/menu-faction-russia.jpg',
   '--menu-bg-faction-japan': 'menu/menu-faction-japan.jpg',
   '--menu-bg-map': 'menu/menu-map.jpg',
+  '--menu-bg-war-stats': 'menu/menu-war-stats.jpg',
 };
 
 /** Point CSS menu backgrounds at publicUrl() so GitHub Pages subpaths resolve. */

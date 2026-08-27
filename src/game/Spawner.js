@@ -13,6 +13,7 @@ const PLAYER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'truck', count: 1, spread: 5 },
   { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
@@ -27,6 +28,7 @@ const ENEMY_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'truck', count: 1, spread: 5 },
   { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
@@ -39,6 +41,7 @@ const ASSAULT_ATTACKER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'truck', count: 1, spread: 5 },
   { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 2, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
@@ -51,6 +54,7 @@ const ASSAULT_DEFENDER_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'truck', count: 1, spread: 5 },
   { type: 'antiTankGun', count: 2, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
@@ -64,6 +68,7 @@ const TUTORIAL_ARMY = [
   { type: 'sniper', count: 1, spread: 5 },
   { type: 'mortar', count: 1, spread: 5 },
   { type: 'armoredCar', count: 1, spread: 5 },
+  { type: 'truck', count: 1, spread: 5 },
   { type: 'antiTankGun', count: 1, spread: 4 },
   { type: 'tank', count: 1, spread: 5 },
   { type: 'artillery', count: 1, spread: 4 },
@@ -109,6 +114,7 @@ const CLEARANCE_DEPLOYMENT = {
   sniper: [{ forward: 8, lateral: 13 }],
   antiTankGun: [{ forward: 5, lateral: 4 }],
   armoredCar: [{ forward: 7, lateral: -18 }],
+  truck: [{ forward: 4, lateral: -10 }],
   tank: [
     { forward: 3, lateral: -13 },
     { forward: 3, lateral: 13 },
@@ -134,6 +140,7 @@ const TRAINING_DEPLOYMENT = {
   machineGun: [{ forward: 13, lateral: -10 }],
   sniper: [{ forward: 15, lateral: 12 }],
   armoredCar: [{ forward: 9, lateral: -23 }],
+  truck: [{ forward: 6, lateral: -14 }],
   tank: [{ forward: 8, lateral: 23 }],
   antiTankGun: [{ forward: 7, lateral: 5 }],
   engineer: [{ forward: 3, lateral: -12 }],
@@ -153,6 +160,7 @@ const ASSAULT_DEPLOYMENT = {
     sniper: [{ forward: 17, lateral: 15 }],
     mortar: [{ forward: -2, lateral: -12 }],
     armoredCar: [{ forward: 10, lateral: -29 }],
+    truck: [{ forward: 6, lateral: -16 }],
     antiTankGun: [{ forward: 8, lateral: 4 }],
     radioOperator: [{ forward: 1, lateral: 13 }],
     artillery: [{ forward: -10, lateral: 18 }],
@@ -162,6 +170,7 @@ const ASSAULT_DEPLOYMENT = {
     sniper: [{ forward: 15, lateral: 14 }],
     mortar: [{ forward: -4, lateral: -12 }],
     armoredCar: [{ forward: 7, lateral: 29 }],
+    truck: [{ forward: 3, lateral: 16 }],
     tank: [{ forward: 5, lateral: -29 }],
     radioOperator: [{ forward: 0, lateral: 10 }],
     artillery: [{ forward: -12, lateral: 18 }],
@@ -238,7 +247,7 @@ function getClearanceDeploymentOffset(type, index, count) {
 
 function vehicleSpawnRadius(type) {
   if (type === 'superHeavyTank') return 2.8;
-  if (type === 'armoredCar') return 1.45;
+  if (type === 'armoredCar' || type === 'truck') return 1.45;
   if (type === 'artillery' || type === 'antiTankGun') return 1.65;
   return 2.1;
 }

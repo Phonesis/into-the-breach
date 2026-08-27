@@ -181,6 +181,7 @@ export const UNIT_TYPE_ORDER = [
   'sniper',
   'mortar',
   'antiTankGun',
+  'truck',
   'armoredCar',
   'tank',
   'tankDestroyer',

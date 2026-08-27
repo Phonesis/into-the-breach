@@ -5,6 +5,7 @@ export const GAME_SETTING_KEYS = Object.freeze({
   unitStatus: 'ww2-rts-unit-status-visible',
   frontline: 'ww2-rts-frontline-visible',
   capturePoints: 'ww2-rts-capture-points-visible',
+  unitRangeRings: 'ww2-rts-unit-range-rings-visible',
   seekCover: 'ww2-rts-seek-cover-mode',
   radioOperatorAutoMove: 'ww2-rts-radio-operator-auto-move',
   pursueTargets: 'ww2-rts-pursue-targets-by-default',
@@ -16,7 +17,10 @@ export const GAME_SETTING_KEYS = Object.freeze({
   debrisRetention: 'ww2-rts-debris-retention',
   tabletMode: 'ww2-rts-tablet-mode',
   difficulty: 'ww2-rts-difficulty',
+  guideTextSize: 'ww2-rts-guide-text-size',
 });
+
+export const GUIDE_TEXT_SIZE_OPTIONS = Object.freeze(['standard', 'large', 'extra-large']);
 
 export const DEBRIS_RETENTION_OPTIONS = Object.freeze([
   Object.freeze({ seconds: 10, label: '10 seconds' }),
@@ -61,6 +65,17 @@ export function writeDifficultySetting(id) {
     ? id
     : DEFAULT_DIFFICULTY;
   storage()?.setItem(GAME_SETTING_KEYS.difficulty, selected);
+  return selected;
+}
+
+export function readGuideTextSize() {
+  const stored = storage()?.getItem(GAME_SETTING_KEYS.guideTextSize);
+  return GUIDE_TEXT_SIZE_OPTIONS.includes(stored) ? stored : 'standard';
+}
+
+export function writeGuideTextSize(size) {
+  const selected = GUIDE_TEXT_SIZE_OPTIONS.includes(size) ? size : 'standard';
+  storage()?.setItem(GAME_SETTING_KEYS.guideTextSize, selected);
   return selected;
 }
 

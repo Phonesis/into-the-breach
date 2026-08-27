@@ -77,6 +77,24 @@ const BASE_CATALOG = [
 
   // —— Towed artillery tractor / prime mover ——
   {
+    file: 'engine-truck.wav',
+    duration: 4.2,
+    influence: 0.44,
+    loop: true,
+    kind: 'main',
+    text:
+      'Seamless loop of a World War Two military cargo truck gasoline engine at cruise, medium truck rumble, gearbox and tire noise on packed earth, outdoor field recording, no music, no voices, no horns, not synthetic',
+  },
+  {
+    file: 'engine-truck-exhaust.wav',
+    duration: 4.0,
+    influence: 0.42,
+    loop: true,
+    kind: 'exhaust',
+    text:
+      'Seamless loop of World War Two cargo truck exhaust burble only, low mid muffler pulses from a 3-ton lorry, continuous outdoor vehicle recording, no music, no voices, not synthetic',
+  },
+  {
     file: 'engine-artillery.wav',
     duration: 4.2,
     influence: 0.42,
@@ -100,22 +118,27 @@ const FACTION_ENGINE_SPECS = {
   germany: {
     tank: 'German Panzer IV and Tiger tracked tanks',
     armoredCar: 'German Sd.Kfz. 222 armoured car',
+    truck: 'German Opel Blitz 3-ton cargo truck',
   },
   usa: {
     tank: 'American M4 Sherman and M26 Pershing tracked tanks',
     armoredCar: 'American M8 Greyhound armoured car',
+    truck: 'American GMC CCKW two-and-a-half-ton cargo truck',
   },
   uk: {
     tank: 'British Churchill and Black Prince tracked tanks',
     armoredCar: 'British Daimler armoured car',
+    truck: 'British Bedford QLD 3-ton cargo lorry',
   },
   russia: {
     tank: 'Soviet T-34-85 and IS-2 tracked tanks',
     armoredCar: 'Soviet BA-64 armoured car',
+    truck: 'Soviet ZIS-5 3-ton cargo lorry',
   },
   japan: {
     tank: 'Japanese Shinhoto Chi-Ha and Type 3 Chi-Nu tracked tanks',
     armoredCar: 'Japanese Type 92 Chiyoda armoured car',
+    truck: 'Japanese Type 94 Isuzu cargo truck',
   },
 };
 
@@ -173,6 +196,27 @@ const FACTION_ENGINE_CATALOG = Object.entries(FACTION_ENGINE_SPECS).flatMap(
       text:
         `Seamless loop of ${spec.armoredCar} exhaust burble, continuous faction-specific low-mid ` +
         `engine pulses, outdoor vehicle recording, no music, no voices, not synthetic`,
+    },
+    {
+      file: `engine-truck-${faction}.wav`,
+      duration: 4.2,
+      influence: 0.44,
+      loop: true,
+      kind: 'main',
+      text:
+        `Seamless loop of ${spec.truck} moving under load, faction-specific gasoline cargo-truck ` +
+        `engine rumble, gearbox and tire noise on packed earth, outdoor recording, no music, ` +
+        `no voices, not synthetic`,
+    },
+    {
+      file: `engine-truck-${faction}-exhaust.wav`,
+      duration: 4.0,
+      influence: 0.42,
+      loop: true,
+      kind: 'exhaust',
+      text:
+        `Seamless loop of ${spec.truck} exhaust burble, continuous faction-specific low-mid ` +
+        `muffler pulses, outdoor vehicle recording, no music, no voices, not synthetic`,
     },
   ]
 );

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Opel Blitz">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><circle cx="28" cy="52" r="8"/><circle cx="100" cy="52" r="8"/></g>
+  <g fill="#5a5d52"><path d="M18 44 L18 32 L46 32 L46 20 L70 20 L70 32 L112 32 L112 44 Z"/><rect x="48" y="22" width="20" height="10"/></g>
+  <g fill="#3d4038"><rect x="20" y="24" width="22" height="8"/><rect x="70" y="18" width="38" height="14" opacity="0.55"/></g>
+  <g fill="#6b7058" opacity="0.85"><rect x="22" y="26" width="8" height="5"/></g>
+</svg>

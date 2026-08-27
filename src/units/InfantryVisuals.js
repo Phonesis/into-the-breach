@@ -19,6 +19,7 @@ const INFANTRY_WALK_TYPES = new Set([
   'mortar',
   'sniper',
   'vehicleCrew',
+  'truckDriver',
   'commander',
 ]);
 
@@ -29,6 +30,7 @@ const WEAPON_POSE_TYPES = new Set([
   'sniper',
   'engineer',
   'vehicleCrew',
+  'truckDriver',
   'commander',
 ]);
 const PRONE_FIRE_TYPES = new Set([
@@ -38,6 +40,7 @@ const PRONE_FIRE_TYPES = new Set([
   'engineer',
   'sniper',
   'vehicleCrew',
+  'truckDriver',
   'commander',
 ]);
 
@@ -69,6 +72,7 @@ const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'machineGun',
   'mortar',
   'vehicleCrew',
+  'truckDriver',
   'commander',
 ]);
 

@@ -29,6 +29,7 @@ import {
   finishRadioBinocularsAfterSupportCall,
 } from './RadioOperatorBehavior.js';
 import { WEAPON_RANGE_SLACK } from './Targeting.js';
+import { registerIncomingArtilleryStrike } from './ArtilleryThreats.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
@@ -46,6 +47,7 @@ const FIRE_SUPPORT_OBSERVATION_RANGE_BY_TYPE = {
   medic: 42,
   engineer: 46,
   vehicleCrew: 42,
+  truckDriver: 42,
   commander: 58,
   antiTankGun: 54,
   artillery: 50,
@@ -615,6 +617,19 @@ export class FireSupportManager {
           },
         });
       }
+      registerIncomingArtilleryStrike(this.game, {
+        ownerTeam: this.ownerTeam,
+        kind: type,
+        center: { x: tx, z: tz },
+        alertRadius:
+          def.runLength * 0.5 + (def.fireLead ?? 10) + (def.fireTrail ?? 12) + 4,
+        impacts: strafeImpacts.map(({ t, x: ix, z: iz }) => ({
+          x: ix,
+          z: iz,
+          impactIn: t,
+          radius: def.hitRadius,
+        })),
+      });
     } else if (type === 'airBomb') {
       const hq = this.ownerHq;
       const hx = hq?.position?.x ?? this.ownerBase.x;
@@ -651,6 +666,18 @@ export class FireSupportManager {
 
       spawnStrikeWarning(scene, mapDef, tx, tz, def.hitRadius, true);
       prewarmStrikeImpacts(this.game.renderer, mapDef, [{ x: tx, z: tz }], true, this.game.scene);
+      registerIncomingArtilleryStrike(this.game, {
+        ownerTeam: this.ownerTeam,
+        kind: type,
+        center: { x: tx, z: tz },
+        alertRadius: def.hitRadius + 3,
+        impacts: [{
+          x: tx,
+          z: tz,
+          impactIn: releaseAt + fallTime,
+          radius: def.hitRadius,
+        }],
+      });
 
       this.events.push({
         at: spawnAt,
@@ -719,7 +746,7 @@ export class FireSupportManager {
         const r = Math.sqrt(Math.random()) * def.radius;
         const ix = tx + Math.cos(angle) * r;
         const iz = tz + Math.sin(angle) * r;
-        impacts.push({ x: ix, z: iz });
+        impacts.push({ x: ix, z: iz, impactIn: t });
         this.events.push({
           at: t,
           fn: () => {
@@ -732,6 +759,18 @@ export class FireSupportManager {
           },
         });
       }
+      registerIncomingArtilleryStrike(this.game, {
+        ownerTeam: this.ownerTeam,
+        kind: type,
+        center: { x: tx, z: tz },
+        alertRadius: def.radius + 3,
+        impacts: impacts.map(({ x, z, impactIn }) => ({
+          x,
+          z,
+          impactIn,
+          radius: def.radius * 0.35 + 2.5,
+        })),
+      });
       prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false, this.game.scene);
     } else if (type === 'creepingBarrage') {
       const { dx, dz, perpX, perpZ } = creepAxisFromPlayer(this.game, tx, tz, this.ownerTeam);
@@ -754,7 +793,7 @@ export class FireSupportManager {
         const lateral = (Math.random() - 0.5) * def.laneWidth * laneTight;
         const ix = cx + perpX * lateral;
         const iz = cz + perpZ * lateral;
-        impacts.push({ x: ix, z: iz });
+        impacts.push({ x: ix, z: iz, impactIn: t });
         const atTarget = ratio >= 0.82;
         const shellDamage = atTarget ? def.targetDamage : def.damage * (0.78 + ratio * 0.28);
         const shellRadius = atTarget ? def.targetRadius : def.hitRadius;
@@ -775,6 +814,21 @@ export class FireSupportManager {
           },
         });
       }
+      registerIncomingArtilleryStrike(this.game, {
+        ownerTeam: this.ownerTeam,
+        kind: type,
+        center: {
+          x: (startX + tx) * 0.5,
+          z: (startZ + tz) * 0.5,
+        },
+        alertRadius: def.creepLength * 0.55 + def.laneWidth + 4,
+        impacts: impacts.map(({ x, z, impactIn }) => ({
+          x,
+          z,
+          impactIn,
+          radius: def.hitRadius + 2.5,
+        })),
+      });
       prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false, this.game.scene);
     } else if (type === 'airborneDrop') {
       spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);

@@ -55,6 +55,12 @@ import {
   canUnitEnterVehicle,
   getTankRiderIds,
 } from '../game/TankRiders.js';
+import {
+  canDetachTowedGun,
+  canTowGuns,
+  findAttachableGun,
+  isGunTowed,
+} from '../game/TruckTowing.js';
 import { renderGameGuideHtml } from '../data/gameGuide.js';
 import { formatUsd1944 } from '../data/battleEconomics.js';
 import { UNIT_LOSS_LABELS } from '../game/BattleStats.js';
@@ -94,14 +100,17 @@ import { publicUrl } from '../lib/publicUrl.js';
 import { BattleMinimap } from './Minimap.js';
 import {
   DEBRIS_RETENTION_OPTIONS,
+  GUIDE_TEXT_SIZE_OPTIONS,
   GAME_SETTING_KEYS,
   readBooleanSetting,
   readDifficultySetting,
   readDebrisRetentionIndex,
+  readGuideTextSize,
   resetGameSettings,
   writeBooleanSetting,
   writeDifficultySetting,
   writeDebrisRetentionIndex,
+  writeGuideTextSize,
 } from '../game/GameSettings.js';
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
 import { readWarStats } from '../game/WarStats.js';
@@ -128,6 +137,7 @@ const PRODUCE_LABELS = {
   sniper: 'Snp',
   mortar: 'Mrt',
   antiTankGun: 'AT',
+  truck: 'Trk',
   armoredCar: 'AC',
   tank: 'Tk',
   tankDestroyer: 'TD',
@@ -165,6 +175,7 @@ const UNIT_FIELD_ICONS_KEY = GAME_SETTING_KEYS.unitFieldIcons;
 const UNIT_STATUS_VISIBLE_KEY = GAME_SETTING_KEYS.unitStatus;
 const FRONTLINE_VISIBLE_KEY = GAME_SETTING_KEYS.frontline;
 const CAPTURE_POINTS_VISIBLE_KEY = GAME_SETTING_KEYS.capturePoints;
+const UNIT_RANGE_RINGS_KEY = GAME_SETTING_KEYS.unitRangeRings;
 const SEEK_COVER_MODE_KEY = GAME_SETTING_KEYS.seekCover;
 const RADIO_OPERATOR_AUTO_MOVE_KEY = GAME_SETTING_KEYS.radioOperatorAutoMove;
 // Keep the existing storage key so saved pursuit choices migrate cleanly while
@@ -212,6 +223,26 @@ function loadAutoBuildPreference(campaignStyle = 'classic') {
 
 const _selectionProj = new THREE.Vector3();
 
+const MENU_NAVIGATION_GROUP_SELECTOR = [
+  '.title-screen-actions',
+  '.mode-grid',
+  '.faction-grid',
+  '.map-grid',
+  '.map-size-grid',
+  '.difficulty-grid',
+  '.campaign-style-grid',
+  '.save-list',
+  '.actions',
+].join(', ');
+
+const MENU_FOCUSABLE_SELECTOR = [
+  'button:not(:disabled)',
+  'a[href]',
+  'input:not(:disabled)',
+  'select:not(:disabled)',
+  'textarea:not(:disabled)',
+].join(', ');
+
 const FACTION_ROSTER_LABELS = {
   commander: 'Field commander',
   radioOperator: 'Radio operator',
@@ -222,6 +253,7 @@ const FACTION_ROSTER_LABELS = {
   sniper: 'Sniper team',
   mortar: 'Mortar',
   antiTankGun: 'AT gun',
+  truck: 'Truck',
   armoredCar: 'Armored car',
   tank: 'Tank',
   tankDestroyer: 'Tank destroyer',
@@ -267,6 +299,7 @@ export class UIManager {
     this.selectedAssaultRole = null;
     this.selectedClearanceRole = DEFAULT_CLEARANCE_ROLE;
     this.selectedDifficulty = readDifficultySetting();
+    this.guideTextSize = readGuideTextSize();
     this.selectedCampaignStyle = 'classic';
     this.selectedCampaignCaptureZonesEnabled = DEFAULT_CAMPAIGN_CAPTURE_ZONES_ENABLED;
     this.selectedClearanceReinforcementSize = DEFAULT_CLEARANCE_REINFORCEMENT_SIZE;
@@ -287,6 +320,7 @@ export class UIManager {
     this.showUnitStatus = readBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
     this.showFrontline = readBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     this.showCapturePoints = readBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
+    this.showUnitRangeRings = readBooleanSetting(UNIT_RANGE_RINGS_KEY, true);
     this.seekCoverMode = readBooleanSetting(SEEK_COVER_MODE_KEY, true);
     this.radioOperatorAutoMove = readBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true);
     this.holdGroundByDefault = !readBooleanSetting(HOLD_GROUND_KEY, false);
@@ -340,6 +374,112 @@ export class UIManager {
     });
   }
 
+  _focusFirstMenuControl(screen) {
+    if (!screen) return;
+    const first = [...screen.querySelectorAll(MENU_FOCUSABLE_SELECTOR)].find(
+      (element) => element.getClientRects().length > 0
+    );
+    if (!first) return;
+
+    const focus = () => {
+      if (!screen.classList.contains('hidden') && first.isConnected) first.focus();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
+    else focus();
+  }
+
+  _replaceMenuGrid(grid, markup) {
+    if (!grid) return;
+    const focusedButton = grid.contains(document.activeElement)
+      ? document.activeElement?.closest?.('button')
+      : null;
+    const focusedId = focusedButton?.dataset?.id;
+
+    grid.innerHTML = markup;
+
+    if (!focusedId) return;
+    const replacement = [...grid.querySelectorAll('button:not(:disabled)')].find(
+      (button) => button.dataset.id === focusedId
+    );
+    replacement?.focus();
+  }
+
+  _handleMenuKeydown(event) {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const button = event.target?.closest?.('button');
+    if (!button || !this.root.contains(button)) return;
+
+    const screen = button.closest('.menu-screen');
+    if (!screen || screen.classList.contains('hidden')) return;
+    const group = button.closest(MENU_NAVIGATION_GROUP_SELECTOR);
+    if (!group) return;
+
+    const buttons = [...group.querySelectorAll('button:not(:disabled)')].filter(
+      (candidate) => candidate.getClientRects().length > 0
+    );
+    const currentIndex = buttons.indexOf(button);
+    if (currentIndex < 0 || buttons.length < 2) return;
+
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      buttons[event.key === 'Home' ? 0 : buttons.length - 1].focus();
+      return;
+    }
+
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+
+    const items = buttons.map((candidate, index) => {
+      const rect = candidate.getBoundingClientRect();
+      return {
+        button: candidate,
+        index,
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2,
+        height: rect.height,
+      };
+    });
+    const current = items[currentIndex];
+    const rowTolerance = Math.max(8, Math.min(current.height, 80) * 0.45);
+    const sameRow = items
+      .filter((item) => Math.abs(item.centerY - current.centerY) <= rowTolerance)
+      .sort((a, b) => a.centerX - b.centerX);
+
+    let next = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const rowIndex = sameRow.findIndex((item) => item.button === button);
+      if (sameRow.length > 1) {
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        next = sameRow[(rowIndex + step + sameRow.length) % sameRow.length];
+      } else {
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        next = items[(current.index + step + items.length) % items.length];
+      }
+    } else {
+      const rows = [];
+      for (const item of [...items].sort((a, b) => a.centerY - b.centerY || a.centerX - b.centerX)) {
+        const row = rows[rows.length - 1];
+        if (!row || Math.abs(row.centerY - item.centerY) > rowTolerance) {
+          rows.push({ centerY: item.centerY, items: [item] });
+        } else {
+          row.items.push(item);
+          row.centerY = row.items.reduce((sum, entry) => sum + entry.centerY, 0) / row.items.length;
+        }
+      }
+      const currentRowIndex = rows.findIndex((row) => row.items.includes(current));
+      if (rows.length > 1 && currentRowIndex >= 0) {
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const targetRow = rows[(currentRowIndex + step + rows.length) % rows.length];
+        next = [...targetRow.items].sort(
+          (a, b) => Math.abs(a.centerX - current.centerX) - Math.abs(b.centerX - current.centerX)
+        )[0];
+      }
+    }
+
+    if (!next || next.button === button) return;
+    event.preventDefault();
+    next.button.focus();
+  }
+
   /** Nation-specific art on the faction picker (hover / selection). */
   updateFactionScreenBg(factionId = null) {
     const screen = this.root.querySelector('#screen-faction');
@@ -386,6 +526,16 @@ export class UIManager {
           <h1>War Stats</h1>
           <p>Review the cumulative unit losses and estimated materiel cost recorded for every faction across completed operations.</p>
         </div>
+        <figure class="war-stats-memorial">
+          <img
+            src="${publicUrl('menu/menu-war-stats.jpg')}"
+            alt="Rows of white marble crosses in a World War Two military cemetery under an overcast sky"
+            width="1280"
+            height="720"
+            decoding="async"
+          />
+          <figcaption>In remembrance of those who did not come home.</figcaption>
+        </figure>
         <div class="panel menu-panel war-stats-panel">
           <div class="war-stats-header">
             <div>
@@ -427,6 +577,10 @@ export class UIManager {
             <label class="setting-row" for="setting-capture-points">
               <span><strong>Capture circles</strong><small>Show capture-zone circles on the battlefield.</small><span class="setting-detail" id="setting-capture-points-detail">Draws the ground boundary of objectives in modes that use capture zones. Hiding the circles does not disable capturing, ownership changes, income, or victory progress; it only removes the large battlefield rings.</span></span>
               <input type="checkbox" id="setting-capture-points" data-setting="capturePoints" aria-describedby="setting-capture-points-detail" />
+            </label>
+            <label class="setting-row" for="setting-unit-range-rings">
+              <span><strong>Selected-unit range circles</strong><small>Show weapon and minimum-range circles around selected units.</small><span class="setting-detail" id="setting-unit-range-rings-detail">Displays the visual weapon range around selected units, plus relevant minimum-range, spotter-rifle, or active-binocular circles. Turning this off only hides those battlefield guides; it does not change weapon ranges, targeting, line of sight, or combat rules.</span></span>
+              <input type="checkbox" id="setting-unit-range-rings" data-setting="unitRangeRings" aria-describedby="setting-unit-range-rings-detail" />
             </label>
             <label class="setting-row" for="setting-frontline">
               <span><strong>Frontline</strong><small>Show the red frontline in modes that use it.</small><span class="setting-detail" id="setting-frontline-detail">Displays the sector boundary used in Breakthrough and Hold the Line battles. Hiding it is visual only: deployment limits, defensive territory, breach timers, and frontline movement continue to work normally.</span></span>
@@ -783,6 +937,22 @@ export class UIManager {
                 >
                   Settings
                 </button>
+                <p class="pause-overlay-settings-hint">
+                  Adjust persistent battlefield settings while paused
+                </p>
+              </div>
+              <div class="pause-overlay-action-group pause-overlay-guide-action">
+                <button
+                  type="button"
+                  class="btn btn-secondary pause-controls-btn interactive"
+                  id="btn-pause-controls"
+                  title="Open the Field Manual at the Controls section while the battle remains paused"
+                >
+                  Controls
+                </button>
+                <p class="pause-overlay-guide-hint">
+                  Open the Field Manual controls reference
+                </p>
               </div>
             </div>
           </div>
@@ -898,6 +1068,19 @@ export class UIManager {
           </svg>
           <span>Get in</span>
         </button>
+        <button
+          type="button"
+          class="vehicle-entry-action interactive hidden"
+          id="gun-tow-action"
+          aria-label="Attach gun to truck"
+          title="Attach"
+        >
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <path class="vehicle-entry-arrow" d="M8 16h16m-5-5 5 5-5 5" />
+            <path class="vehicle-entry-hull" d="M4 20h10l1.5 5H3l1-5Zm18 0h7l1 5h-9l1-5" />
+          </svg>
+          <span>Attach</span>
+        </button>
 
         <aside class="unit-roster interactive" id="unit-roster" aria-label="Your forces">
           <h3 class="unit-roster-title">Forces</h3>
@@ -992,6 +1175,17 @@ export class UIManager {
               </button>
               <p class="tank-rider-hint" id="tank-rider-hint">
                 Riders also disembark automatically when the vehicle comes under fire.
+              </p>
+            </div>
+            <div class="tank-rider-actions hidden" id="truck-tow-actions">
+              <button type="button" class="btn btn-secondary interactive" id="btn-attach-gun">
+                Attach gun
+              </button>
+              <button type="button" class="btn btn-secondary interactive" id="btn-detach-gun">
+                Detach gun
+              </button>
+              <p class="tank-rider-hint" id="truck-tow-hint">
+                Drive the truck next to an AT gun or howitzer to hook it on.
               </p>
             </div>
             <div class="engineer-build-actions hidden" id="engineer-build-actions">
@@ -1171,8 +1365,26 @@ export class UIManager {
 
       <div id="overlay-guide" class="overlay-guide hidden interactive">
         <div class="guide-box">
-          <h2>Field Manual</h2>
-          <p class="guide-lead">How to play Into the Breach — controls, economy, combat, and victory conditions.</p>
+          <header class="guide-header">
+            <div class="guide-heading-copy">
+              <span class="guide-eyebrow">Commander’s reference · field notes</span>
+              <h2>Field Manual</h2>
+              <p class="guide-lead">How to play Into the Breach — controls, economy, combat, and victory conditions.</p>
+            </div>
+            <div class="guide-header-tools">
+              <div class="guide-text-size-control" role="group" aria-label="Field Manual text size">
+                <span class="guide-text-size-label">Text size</span>
+                <button type="button" class="guide-text-size-button interactive" data-guide-text-size="standard" aria-label="Use standard text size" title="Standard text size">A</button>
+                <button type="button" class="guide-text-size-button interactive" data-guide-text-size="large" aria-label="Use large text" title="Large text">A<sup>+</sup></button>
+                <button type="button" class="guide-text-size-button interactive" data-guide-text-size="extra-large" aria-label="Use extra large text" title="Extra large text">A<sup>++</sup></button>
+              </div>
+              <div class="guide-header-stamp" aria-label="Field Manual reference FM-01">
+                <span class="guide-header-stamp-mark">FM</span>
+                <span class="guide-header-stamp-code">FM–01</span>
+                <strong>Know the ground</strong>
+              </div>
+            </div>
+          </header>
           <div class="guide-scroll" id="guide-content"></div>
           <div class="guide-actions">
             <button type="button" class="btn btn-secondary interactive" id="btn-guide-close">Close</button>
@@ -1279,6 +1491,7 @@ export class UIManager {
     const guideEl = this.root.querySelector('#guide-content');
     if (guideEl) guideEl.innerHTML = renderGameGuideHtml();
     this.guideFromMenu = false;
+    this.guideFromPause = false;
     this.bind();
     this._bindUnitRoster();
     this.refreshTitleSaveButton();
@@ -1363,14 +1576,14 @@ export class UIManager {
   renderDifficulties() {
     const grid = this.root.querySelector('#difficulty-grid');
     if (!grid) return;
-    grid.innerHTML = DIFFICULTY_LIST.map(
+    this._replaceMenuGrid(grid, DIFFICULTY_LIST.map(
       (d) => `
       <button type="button" class="card-btn interactive difficulty-card${d.id === this.selectedDifficulty ? ' selected' : ''}" data-id="${d.id}" aria-pressed="${d.id === this.selectedDifficulty}">
         <span class="name">${d.name}</span>
         <span class="meta">${d.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   renderCampaignStyles() {
@@ -1378,7 +1591,7 @@ export class UIManager {
     if (!grid) return;
     const onLargeMap = canUseBaseBuildingOnMap(this.selectedMapSize ?? 'medium');
     const mapAllowsLarge = getMapSizeOptions(MAPS[this.selectedMap]).includes('large');
-    grid.innerHTML = CAMPAIGN_STYLE_LIST.map((s) => {
+    this._replaceMenuGrid(grid, CAMPAIGN_STYLE_LIST.map((s) => {
       const selected = s.id === this.selectedCampaignStyle;
       const blocked = s.id === 'baseBuilding' && !mapAllowsLarge;
       let meta = s.subtitle;
@@ -1393,33 +1606,33 @@ export class UIManager {
         <span class="meta">${meta}</span>
       </button>
     `;
-    }).join('');
+    }).join(''));
   }
 
   renderClearanceStyles() {
     const grid = this.root.querySelector('#clearance-style-grid');
     if (!grid) return;
-    grid.innerHTML = CLEARANCE_REINFORCEMENT_SIZE_LIST.map(
+    this._replaceMenuGrid(grid, CLEARANCE_REINFORCEMENT_SIZE_LIST.map(
       (size) => `
       <button type="button" class="card-btn interactive campaign-style-card clearance-style-card${size.id === this.selectedClearanceReinforcementSize ? ' selected' : ''}" data-id="${size.id}">
         <span class="name">${size.name}</span>
         <span class="meta">${size.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   renderClearanceRoles() {
     const grid = this.root.querySelector('#clearance-role-grid');
     if (!grid) return;
-    grid.innerHTML = CLEARANCE_ROLE_LIST.map(
+    this._replaceMenuGrid(grid, CLEARANCE_ROLE_LIST.map(
       (role) => `
       <button type="button" class="card-btn interactive campaign-style-card clearance-role-card${role.id === this.selectedClearanceRole ? ' selected' : ''}" data-id="${role.id}">
         <span class="name">${role.name}</span>
         <span class="meta">${role.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   updateCampaignStyleMapSizeLock() {
@@ -1446,40 +1659,40 @@ export class UIManager {
   renderTdWaveModes() {
     const grid = this.root.querySelector('#td-wave-mode-grid');
     if (!grid) return;
-    grid.innerHTML = TD_WAVE_MODE_LIST.map(
+    this._replaceMenuGrid(grid, TD_WAVE_MODE_LIST.map(
       (m) => `
       <button type="button" class="card-btn interactive campaign-style-card td-wave-mode-card${m.id === this.selectedTdWaveMode ? ' selected' : ''}" data-id="${m.id}">
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   renderTdStyles() {
     const grid = this.root.querySelector('#td-style-grid');
     if (!grid) return;
-    grid.innerHTML = TD_STYLE_MODE_LIST.map(
+    this._replaceMenuGrid(grid, TD_STYLE_MODE_LIST.map(
       (m) => `
       <button type="button" class="card-btn interactive campaign-style-card td-style-card${m.id === this.selectedTdStyle ? ' selected' : ''}" data-id="${m.id}">
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   renderLastStandDeployModes() {
     const grid = this.root.querySelector('#laststand-deploy-grid');
     if (!grid) return;
-    grid.innerHTML = LAST_STAND_DEPLOY_MODE_LIST.map(
+    this._replaceMenuGrid(grid, LAST_STAND_DEPLOY_MODE_LIST.map(
       (m) => `
       <button type="button" class="card-btn interactive campaign-style-card laststand-deploy-card${m.id === this.selectedLastStandDeployMode ? ' selected' : ''}" data-id="${m.id}">
         <span class="name">${m.name}</span>
         <span class="meta">${m.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
     this.renderLastStandPresetSizes();
   }
 
@@ -1505,7 +1718,7 @@ export class UIManager {
     const largeBlocked = !canUseLastStandPresetSize('large', mapDef ?? mapId);
     if (note) note.classList.toggle('hidden', !largeBlocked);
 
-    grid.innerHTML = LAST_STAND_PRESET_SIZE_LIST.map((size) => {
+    this._replaceMenuGrid(grid, LAST_STAND_PRESET_SIZE_LIST.map((size) => {
       const allowed = canUseLastStandPresetSize(size.id, mapDef ?? mapId);
       const selected = size.id === this.selectedLastStandPresetSize;
       const count = countLastStandPresetUnits(mapDef, size.id);
@@ -1518,7 +1731,7 @@ export class UIManager {
         <span class="meta">${meta}</span>
       </button>
     `;
-    }).join('');
+    }).join(''));
   }
 
   updateLastStandMapSizeLock() {
@@ -1590,7 +1803,7 @@ export class UIManager {
         'Lead the breakthrough or take command of the defensive line.';
     }
     if (heading) heading.textContent = 'Field Orders';
-    grid.innerHTML = roles.map(
+    this._replaceMenuGrid(grid, roles.map(
       (r, index) => `
       <button class="card-btn interactive role-card${r.id === selectedId ? ' selected' : ''}" data-id="${r.id}">
         <span class="card-index">Order ${String(index + 1).padStart(2, '0')}</span>
@@ -1598,14 +1811,14 @@ export class UIManager {
         <span class="meta">${r.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
     const continueBtn = this.root.querySelector('#btn-to-faction-role');
     if (continueBtn) continueBtn.disabled = !selectedId;
   }
 
   renderModes() {
     const grid = this.root.querySelector('#mode-grid');
-    grid.innerHTML = GAME_MODE_LIST.map(
+    this._replaceMenuGrid(grid, GAME_MODE_LIST.map(
       (m, index) => `
       <button class="card-btn interactive mode-card" data-id="${m.id}">
         <span class="card-index">Operation ${String(index + 1).padStart(2, '0')}</span>
@@ -1613,12 +1826,12 @@ export class UIManager {
         <span class="meta">${m.subtitle}</span>
       </button>
     `
-    ).join('');
+    ).join(''));
   }
 
   renderFactions() {
     const grid = this.root.querySelector('#faction-grid');
-    grid.innerHTML = FACTION_LIST.map((f) => {
+    this._replaceMenuGrid(grid, FACTION_LIST.map((f) => {
       const roster = getProducibleUnits(f)
         .map((key) => {
           const def = f.units[key];
@@ -1637,7 +1850,7 @@ export class UIManager {
         <ul class="faction-units">${roster}</ul>
       </button>
     `;
-    }).join('');
+    }).join(''));
   }
 
   ensureEnemyFaction(forceReroll = false) {
@@ -1679,7 +1892,7 @@ export class UIManager {
   renderMaps() {
     this.ensureEnemyFaction(false);
     const grid = this.root.querySelector('#map-grid');
-    grid.innerHTML = MAP_LIST.map((m, index) => {
+    this._replaceMenuGrid(grid, MAP_LIST.map((m, index) => {
       const selected = m.id === this.selectedMap;
       const opponentName = this.opposingForceLabel(m.id, selected);
       const opponent = opponentName
@@ -1694,7 +1907,7 @@ export class UIManager {
         ${opponent}
       </button>
     `;
-    }).join('');
+    }).join(''));
     const launch = this.root.querySelector('#btn-launch');
     if (launch) launch.disabled = !this.selectedMap;
     this.updateMapOpponentBriefing();
@@ -1734,7 +1947,7 @@ export class UIManager {
       this.selectedMapSize =
         mapAllowed.find((sizeId) => canUseAssaultMapSize(sizeId)) ?? 'medium';
     }
-    grid.innerHTML = MAP_SIZE_LIST.map((preset) => {
+    this._replaceMenuGrid(grid, MAP_SIZE_LIST.map((preset) => {
       const selected = preset.id === this.selectedMapSize;
       const mapBlocks = !mapAllowed.includes(preset.id);
       const assaultBlocks =
@@ -1760,7 +1973,7 @@ export class UIManager {
         <span class="meta">${meta}</span>
       </button>
     `;
-    }).join('');
+    }).join(''));
   }
 
   bind() {
@@ -1769,13 +1982,20 @@ export class UIManager {
     const show = (id) => {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
       const el = this.root.querySelector(`#screen-${id}`);
-      if (el) el.classList.remove('hidden');
+      if (el) {
+        el.classList.remove('hidden');
+        this._focusFirstMenuControl(el);
+      }
       if (id === 'faction') this.updateFactionScreenBg(this.selectedFaction);
       if (id === 'title' || id === 'war-stats') this.renderWarStats();
       if (this.callbacks.onMenuVisible) {
-        this.callbacks.onMenuVisible(menuScreens.has(id));
+        this.callbacks.onMenuVisible(menuScreens.has(id), id);
       }
     };
+
+    this.root.removeEventListener('keydown', this._onMenuKeydown);
+    this._onMenuKeydown = (event) => this._handleMenuKeydown(event);
+    this.root.addEventListener('keydown', this._onMenuKeydown);
 
     this.root.querySelector('#btn-start').onclick = () => show('mode');
     this.root.querySelector('#btn-settings').onclick = () => {
@@ -1792,6 +2012,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-pause-settings')?.addEventListener('click', () => {
       this.openPausedSettings();
+    });
+    this.root.querySelector('#btn-pause-controls')?.addEventListener('click', () => {
+      this.openGuide(false, 'controls', true);
     });
     this.root.querySelector('#btn-load-saves').onclick = () => {
       this.renderSaveList();
@@ -1815,6 +2038,10 @@ export class UIManager {
     this.root.querySelector('#btn-about')?.addEventListener('click', () => this.openAbout());
     this.root.querySelector('#btn-about-close')?.addEventListener('click', () => this.closeAbout());
     this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
+    this.root.querySelectorAll('[data-guide-text-size]').forEach((button) => {
+      button.addEventListener('click', () => this.setGuideTextSize(button.dataset.guideTextSize));
+    });
+    this._syncGuideTextSize();
     this.root.querySelector('#btn-toggle-field-icons')?.addEventListener('click', () => {
       this.setUnitFieldIconsEnabled(!this.showUnitFieldIcons);
       if (this.callbacks.onToggleUnitFieldIcons) {
@@ -1827,6 +2054,13 @@ export class UIManager {
     });
     this.root.querySelector('#btn-dismount-riders')?.addEventListener('click', () => {
       this.callbacks.onDismountTankRiders?.();
+    });
+    this.root.querySelector('#btn-attach-gun')?.addEventListener('click', () => {
+      const gun = this._selectedTowGun;
+      if (gun) this.callbacks.onGunTowAttach?.(gun.id);
+    });
+    this.root.querySelector('#btn-detach-gun')?.addEventListener('click', () => {
+      this.callbacks.onDetachTowedGun?.();
     });
     this.root.querySelector('#btn-toggle-frontline')?.addEventListener('click', () => {
       this.setFrontlineVisible(!this.showFrontline);
@@ -1902,9 +2136,9 @@ export class UIManager {
     };
     this.root.querySelector('#btn-back-faction').onclick = () => show('faction');
 
+    const factionGrid = this.root.querySelector('#faction-grid');
     this.root.querySelectorAll('.faction-card').forEach((btn) => {
       btn.addEventListener('mouseenter', () => this.updateFactionScreenBg(btn.dataset.id));
-      btn.addEventListener('mouseleave', () => this.updateFactionScreenBg(this.selectedFaction));
       btn.onclick = () => {
         this.root.querySelectorAll('.faction-card').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
@@ -1914,6 +2148,7 @@ export class UIManager {
         this.root.querySelector('#btn-to-maps').disabled = false;
       };
     });
+    factionGrid?.addEventListener('mouseleave', () => this.updateFactionScreenBg(this.selectedFaction));
 
     this.root.querySelector('#btn-to-maps').onclick = () => {
       this.updateModeSetupPanels();
@@ -2172,6 +2407,19 @@ export class UIManager {
       const targetId = Number(event.currentTarget.dataset.targetId);
       if (Number.isFinite(targetId)) this.callbacks.onVehicleEntry?.(targetId);
     });
+    const gunTowAction = this.root.querySelector('#gun-tow-action');
+    gunTowAction?.addEventListener('pointerenter', () => {
+      this.callbacks.onVehicleEntryHover?.(true);
+    });
+    gunTowAction?.addEventListener('pointerleave', () => {
+      this.callbacks.onVehicleEntryHover?.(false);
+    });
+    gunTowAction?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetId = Number(event.currentTarget.dataset.targetId);
+      if (Number.isFinite(targetId)) this.callbacks.onGunTowAttach?.(targetId);
+    });
     this.root.querySelector('#btn-stance-hold')?.addEventListener('click', () => {
       this.callbacks.onSetEngagementStance?.('hold');
     });
@@ -2350,14 +2598,59 @@ export class UIManager {
     this._surrenderPreviousFocus = null;
   }
 
-  openGuide(fromMenu = false) {
+  setGuideTextSize(size) {
+    this.guideTextSize = GUIDE_TEXT_SIZE_OPTIONS.includes(size) ? size : 'standard';
+    writeGuideTextSize(this.guideTextSize);
+    this._syncGuideTextSize();
+  }
+
+  _syncGuideTextSize() {
+    const guideBox = this.root.querySelector('.guide-box');
+    if (!guideBox) return;
+    guideBox.dataset.guideTextSize = this.guideTextSize;
+    this.root.querySelectorAll('[data-guide-text-size]').forEach((button) => {
+      const selected = button.dataset.guideTextSize === this.guideTextSize;
+      button.classList.toggle('selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  }
+
+  _syncGuideCloseButton() {
+    const button = this.root.querySelector('#btn-guide-close');
+    if (!button) return;
+    const returnToPause = this.guideFromPause;
+    button.textContent = returnToPause ? 'Return to paused game' : 'Close';
+    button.setAttribute(
+      'aria-label',
+      returnToPause ? 'Return to the paused game' : 'Close the Field Manual'
+    );
+  }
+
+  openGuide(fromMenu = false, sectionId = null, fromPause = false) {
     this.guideFromMenu = fromMenu;
+    this.guideFromPause = fromPause;
     const overlay = this.root.querySelector('#overlay-guide');
     if (!overlay) return;
+    const guideScroll = this.root.querySelector('#guide-content');
+    if (guideScroll) guideScroll.scrollTop = 0;
     overlay.classList.remove('hidden');
     overlay.classList.toggle('guide-from-menu', fromMenu);
+    this._syncGuideCloseButton();
     if (fromMenu) {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+    }
+    if (sectionId && guideScroll) {
+      const focusSection = () => {
+        guideScroll.querySelector(`#guide-${sectionId}`)?.scrollIntoView({
+          behavior: 'auto',
+          block: 'start',
+        });
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(focusSection);
+      } else {
+        setTimeout(focusSection, 0);
+      }
     }
   }
 
@@ -2368,6 +2661,15 @@ export class UIManager {
       this.root.querySelector('#screen-title')?.classList.remove('hidden');
     }
     this.guideFromMenu = false;
+    this.guideFromPause = false;
+    this._syncGuideCloseButton();
+  }
+
+  isGuideFromPauseOpen() {
+    return (
+      this.guideFromPause &&
+      !this.root.querySelector('#overlay-guide')?.classList.contains('hidden')
+    );
   }
 
   setMinimapMap(mapDef) {
@@ -2868,6 +3170,7 @@ export class UIManager {
     writeBooleanSetting(UNIT_STATUS_VISIBLE_KEY, true);
     writeBooleanSetting(FRONTLINE_VISIBLE_KEY, true);
     writeBooleanSetting(CAPTURE_POINTS_VISIBLE_KEY, true);
+    writeBooleanSetting(UNIT_RANGE_RINGS_KEY, true);
     writeBooleanSetting(SEEK_COVER_MODE_KEY, true);
     writeBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true);
     // The legacy storage key stores pursuit, so false means Hold Ground.
@@ -2876,6 +3179,8 @@ export class UIManager {
     writeBooleanSetting(AUTO_BUILD_MODE_KEYS.classic, false);
     writeBooleanSetting(AUTO_BUILD_MODE_KEYS.baseBuilding, false);
     this.selectedDifficulty = writeDifficultySetting(DEFAULT_DIFFICULTY);
+    this.guideTextSize = writeGuideTextSize('standard');
+    this._syncGuideTextSize();
     writeDebrisRetentionIndex(defaultDebrisIndex);
     if (isTabletLikeDevice()) {
       writeBooleanSetting(GAME_SETTING_KEYS.tabletMode, true);
@@ -2886,6 +3191,7 @@ export class UIManager {
     this.showUnitStatus = true;
     this.showFrontline = true;
     this.showCapturePoints = true;
+    this.showUnitRangeRings = true;
     this.seekCoverMode = true;
     this.radioOperatorAutoMove = true;
     this.holdGroundByDefault = true;
@@ -2905,6 +3211,7 @@ export class UIManager {
     this.callbacks.onToggleUnitStatus?.(true);
     this.callbacks.onToggleFrontline?.(true);
     this.callbacks.onToggleCapturePoints?.(true);
+    this.callbacks.onToggleUnitRangeRings?.(true);
     this.callbacks.onToggleSeekCover?.(true);
     this.callbacks.onChangeRadioOperatorAutoMove?.(true);
     this.callbacks.onChangePursueTargets?.(false);
@@ -2927,7 +3234,9 @@ export class UIManager {
     let hoveredRow = null;
     let focusedRow = null;
     const renderInfo = () => {
-      const row = focusedRow ?? hoveredRow;
+      // Pointer hover should win over a lingering checkbox focus; focus remains
+      // the fallback for keyboard navigation when no row is hovered.
+      const row = hoveredRow ?? focusedRow;
       const detail = row?.querySelector('.setting-detail')?.textContent?.trim();
       const heading = row?.querySelector('strong')?.textContent?.trim();
       title.textContent = heading || 'Highlight a setting';
@@ -3029,6 +3338,10 @@ export class UIManager {
         this.setCapturePointsVisible(on);
         if (applyToBattle) this.callbacks.onToggleCapturePoints?.(this.showCapturePoints);
         break;
+      case 'unitRangeRings':
+        this.setUnitRangeRingsEnabled(on);
+        if (applyToBattle) this.callbacks.onToggleUnitRangeRings?.(this.showUnitRangeRings);
+        break;
       case 'seekCover':
         this.setSeekCoverMode(on);
         if (applyToBattle) this.callbacks.onToggleSeekCover?.(this.seekCoverMode);
@@ -3090,6 +3403,8 @@ export class UIManager {
       unitStatus: this.showUnitStatus,
       frontline: this.showFrontline,
       capturePoints: this.showCapturePoints,
+      unitRangeRings:
+        this.showUnitRangeRings ?? readBooleanSetting(UNIT_RANGE_RINGS_KEY, true),
       seekCover: this.seekCoverMode,
       radioOperatorAutoMove:
         this.radioOperatorAutoMove ?? readBooleanSetting(RADIO_OPERATOR_AUTO_MOVE_KEY, true),
@@ -3131,6 +3446,12 @@ export class UIManager {
     this.showUnitStatus = !!on;
     writeBooleanSetting(UNIT_STATUS_VISIBLE_KEY, on);
     this._syncUnitStatusToggle();
+  }
+
+  setUnitRangeRingsEnabled(on) {
+    this.showUnitRangeRings = !!on;
+    writeBooleanSetting(UNIT_RANGE_RINGS_KEY, this.showUnitRangeRings);
+    this._syncSettingsControls();
   }
 
   _syncUnitStatusToggle() {
@@ -3232,6 +3553,58 @@ export class UIManager {
         : riderCount === 1
           ? '1 rider aboard — disembark manually, or they will bail out automatically under fire.'
           : `${riderCount} riders aboard — disembark manually, or they will bail out automatically under fire.`;
+    }
+  }
+
+  updateTruckTowActions(units, game = null) {
+    const panel = this.root.querySelector('#truck-tow-actions');
+    const hint = this.root.querySelector('#truck-tow-hint');
+    const attachBtn = this.root.querySelector('#btn-attach-gun');
+    const detachBtn = this.root.querySelector('#btn-detach-gun');
+    if (!panel) return;
+
+    const selected = units ?? [];
+    const allUnits = game?.units ?? selected;
+    const trucks = selected.filter((unit) => canTowGuns(unit.def?.type) && !unit.dead);
+    const towedGuns = selected.filter((unit) => isGunTowed(unit));
+    let attachTruck = null;
+    let attachGun = null;
+    for (const truck of trucks) {
+      if (truck._towedGunId) continue;
+      const gun = findAttachableGun(truck, allUnits);
+      if (gun && !gun._towedByTruckId) {
+        attachTruck = truck;
+        attachGun = gun;
+        break;
+      }
+    }
+    const canDetach = trucks.some((truck) => canDetachTowedGun(truck) && !truck.moveTarget)
+      || towedGuns.some((gun) => {
+        const truck = allUnits.find((unit) => unit.id === gun._towedByTruckId);
+        return truck && !truck.moveTarget;
+      });
+    const show = trucks.length > 0 || towedGuns.length > 0;
+    panel.classList.toggle('hidden', !show);
+    this._selectedTowTruck = attachTruck;
+    this._selectedTowGun = attachGun;
+    if (attachBtn) {
+      attachBtn.classList.toggle('hidden', !attachGun);
+      attachBtn.disabled = !attachGun;
+    }
+    if (detachBtn) {
+      detachBtn.classList.toggle('hidden', !canDetach && !trucks.some((t) => t._towedGunId));
+      detachBtn.disabled = !canDetach;
+    }
+    if (hint && show) {
+      if (trucks.some((t) => t._towedGunId)) {
+        hint.textContent = canDetach
+          ? 'Gun hooked on the hitch — Detach to unlimber and fire.'
+          : 'Stop the truck to unhook the gun.';
+      } else if (attachGun) {
+        hint.textContent = `Attach ${attachGun.name ?? attachGun.def?.name ?? 'gun'} to the truck hitch.`;
+      } else {
+        hint.textContent = 'Drive next to a friendly AT gun or howitzer to hook it on.';
+      }
     }
   }
 
@@ -4380,6 +4753,7 @@ export class UIManager {
     this.updateHqThreat(null);
     this.root.querySelector('#hud').classList.add('hidden');
     this.root.querySelector('#vehicle-entry-action')?.classList.add('hidden');
+    this.root.querySelector('#gun-tow-action')?.classList.add('hidden');
     this.root.querySelector('#hud')?.classList.remove('hud-chrome-hidden');
     this.hideTdBreachAlert();
     const panel = this.root.querySelector('#firesupport-panel');
@@ -4421,7 +4795,9 @@ export class UIManager {
     button.style.left = `${Math.max(rect.left + 36, Math.min(rect.right - 36, projectedLeft))}px`;
     button.style.top = `${Math.max(rect.top + 38, projectedTop)}px`;
     button.dataset.targetId = String(target.id);
-    const ownCrew = entrants.some((unit) => unit.def?.type === 'vehicleCrew');
+    const ownCrew = entrants.some(
+      (unit) => unit.def?.type === 'vehicleCrew' || unit.def?.type === 'truckDriver'
+    );
     const label = ownCrew ? 'Re-enter' : target._crewless ? 'Get in' : 'Get on';
     const text = button.querySelector('span');
     if (text) text.textContent = label;
@@ -4431,6 +4807,45 @@ export class UIManager {
         ? 'Return this crew to its repaired vehicle'
         : 'Enter and crew this operational vehicle'
       : 'Mount selected troops as riders on this vehicle';
+    button.classList.remove('hidden');
+  }
+
+  updateGunTowAction(pair, hovered, camera, canvas, visible = true) {
+    const button = this.root.querySelector('#gun-tow-action');
+    const target = hovered ?? pair?.truck ?? pair?.gun;
+    if (
+      !button ||
+      !visible ||
+      !pair ||
+      !target?.position ||
+      !camera ||
+      !canvas
+    ) {
+      button?.classList.add('hidden');
+      return;
+    }
+
+    const point = target.position.clone();
+    point.y += 4.2;
+    point.project(camera);
+    if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1.08 || Math.abs(point.y) > 1.08) {
+      button.classList.add('hidden');
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const projectedLeft = rect.left + (point.x + 1) * 0.5 * rect.width;
+    const projectedTop = rect.top + (1 - point.y) * 0.5 * rect.height;
+    button.style.left = `${Math.max(rect.left + 36, Math.min(rect.right - 36, projectedLeft))}px`;
+    button.style.top = `${Math.max(rect.top + 38, projectedTop)}px`;
+    button.dataset.targetId = String(target.id);
+    const text = button.querySelector('span');
+    if (text) text.textContent = 'Attach';
+    button.setAttribute(
+      'aria-label',
+      `Attach ${pair.gun.name ?? pair.gun.def?.name ?? 'gun'} to ${pair.truck.name ?? 'truck'}`
+    );
+    button.title = 'Hook this gun onto the truck hitch';
     button.classList.remove('hidden');
   }
 
@@ -5323,6 +5738,7 @@ export class UIManager {
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions([], game);
+      this.updateTruckTowActions([], game);
       return;
     }
 
@@ -5352,6 +5768,7 @@ export class UIManager {
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions(units, game);
+      this.updateTruckTowActions(units, game);
       return;
     }
 
@@ -5366,6 +5783,7 @@ export class UIManager {
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions(units, game);
+      this.updateTruckTowActions(units, game);
       return;
     }
 
@@ -5470,7 +5888,16 @@ export class UIManager {
             : riderN > 0
           ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — use Get on or RMB with selected infantry to mount more. Stop the vehicle and press Disembark riders to put them down manually; incoming fire makes them bail out automatically.</p>`
           : canHostRiders(u.def?.type) && u.def?.type !== 'armoredCar'
-            ? '<p class="unit-support-status">Select infantry and use Get on or RMB to mount riders on this tank.</p>'
+            ? u.def?.type === 'truck'
+              ? '<p class="unit-support-status">Select infantry and use Get on or RMB to load troops into the cargo bed.</p>'
+              : '<p class="unit-support-status">Select infantry and use Get on or RMB to mount riders on this tank.</p>'
+            : '';
+      const towBlock = u.def?.type === 'truck' && u._towedGunId
+        ? `<p class="unit-support-status"><strong>Towing</strong> — gun hooked on the rear hitch. Stop and press Detach to unlimber.</p>`
+        : u.def?.type === 'truck'
+          ? '<p class="unit-support-status">Drive next to a friendly AT gun or howitzer — Attach appears when in range.</p>'
+          : isGunTowed(u)
+            ? '<p class="unit-support-status"><strong>Towed</strong> — this gun is hooked to a truck and cannot fire until detached.</p>'
             : '';
       const mobilityBlock = u._mobilityDamaged
         ? `<p class="unit-support-status unit-mobility-status"><strong>${u._mobilityDamageKind === 'wheel' ? 'WHEEL DAMAGE' : 'BROKEN TRACK'} — IMMOBILE</strong> — keep a combat engineer within ~16 m to repair the running gear (${Math.round((u._mobilityRepairProgress ?? 0) * 100)}%). The weapon remains operational.</p>`
@@ -5488,12 +5915,14 @@ export class UIManager {
         ${surrenderBlock}
         ${mobilityBlock}
         ${riderBlock}
+        ${towBlock}
         ${coverBlock}
       `;
       this.updateEngineerBuild(game);
       this.updateArtilleryAutoFire(game);
       this.updateSmokeShell(game);
       this.updateTankRiderActions([u], game);
+      this.updateTruckTowActions([u], game);
       return;
     }
 
@@ -5501,6 +5930,7 @@ export class UIManager {
     this.updateArtilleryAutoFire(game);
     this.updateSmokeShell(game);
     this.updateTankRiderActions(units, game);
+    this.updateTruckTowActions(units, game);
 
     const types = {};
     for (const u of units) types[u.type] = (types[u.type] || 0) + 1;

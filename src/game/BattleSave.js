@@ -19,6 +19,7 @@ import {
 import { exportAIState, importAIState } from './AI.js';
 import { CLEARANCE_ATTACK_PLANS } from './ClearanceMode.js';
 import { restoreTankRiderLinks } from './TankRiders.js';
+import { restoreTruckTowLinks } from './TruckTowing.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import {
   deformTerrainForTrench,
@@ -324,6 +325,11 @@ export function captureBattleSave(game, { id = null } = {}) {
       _pendingMountTankId: u._pendingMountTankId ?? null,
       _pendingReplacementCrew: !!u._pendingReplacementCrew,
       _tankRiderIds: u._tankRiderIds?.length ? [...u._tankRiderIds] : null,
+      _towedGunId: u._towedGunId ?? null,
+      _towedGunType: u._towedGunType ?? null,
+      _towedByTruckId: u._towedByTruckId ?? null,
+      _pendingTowGunId: u._pendingTowGunId ?? null,
+      _pendingTowTruckId: u._pendingTowTruckId ?? null,
       _sandbagSite: u._sandbagSite ?? null,
       _trenchId: u._trenchId ?? null,
       _trenchDigSite: u._trenchDigSite ?? null,
@@ -1547,6 +1553,11 @@ export function applyBattleSave(game, snapshot) {
     unit._pendingMountTankId = null;
     unit._pendingReplacementCrew = !!uData._pendingReplacementCrew;
     unit._tankRiderIds = uData._tankRiderIds ? [...uData._tankRiderIds] : null;
+    unit._towedGunId = uData._towedGunId ?? null;
+    unit._towedGunType = uData._towedGunType ?? null;
+    unit._towedByTruckId = null;
+    unit._pendingTowGunId = uData._pendingTowGunId ?? null;
+    unit._pendingTowTruckId = uData._pendingTowTruckId ?? null;
     unit._sandbagSite = uData._sandbagSite ?? null;
     unit._trenchId = null;
     unit._trenchDigSite = uData._trenchDigSite ?? null;
@@ -1670,6 +1681,7 @@ export function applyBattleSave(game, snapshot) {
     unit._pendingMountTankId = uData._pendingMountTankId ?? null;
   }
   restoreTankRiderLinks(game.units, game.mapDef);
+  restoreTruckTowLinks(game.units, game.mapDef);
 
   if (snapshot.selectedHqTeam) {
     const hq = game.hqs.find((h) => h.team === snapshot.selectedHqTeam && !h.dead);

@@ -19,13 +19,14 @@ const RIDER_TYPES = new Set([
   'engineer',
 ]);
 
-const HOST_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar']);
-const RIDER_DECK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
+const HOST_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'truck']);
+const RIDER_DECK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'truck']);
 
 const HOST_CAPACITY = {
   tank: 2,
   superHeavyTank: 3,
   armoredCar: 1,
+  truck: 3,
 };
 
 /** Place the rider group origin on the hull roof; seated bodies snap down onto it. */
@@ -58,6 +59,14 @@ export function getRiderDeckOffset(tank, slotIndex = 0) {
   if (type === 'armoredCar') {
     return { x: 0, z: (hull.z ?? 0) - hull.d * 0.28, y };
   }
+  if (type === 'truck') {
+    const cargo = design.cargo;
+    const slot = cargo?.slots?.[slotIndex] ?? cargo?.slots?.[0];
+    if (slot) {
+      return { x: slot.x, z: slot.z, y: cargo.y ?? y };
+    }
+    return { x: 0, z: (hull.z ?? 0) - hull.d * 0.28, y };
+  }
   const inset = hull.w * 0.34;
   const slots = [
     { x: -inset, z: rearZ, y },
@@ -76,6 +85,10 @@ const DISMOUNT_OFFSETS = [
 
 const MOUNTED_RENDER_ORDER = 12;
 const REPLACEMENT_CREW_COUNT = 2;
+
+function getReplacementCrewCount(tank) {
+  return tank?.def?.type === 'truck' ? 1 : REPLACEMENT_CREW_COUNT;
+}
 
 const _riderLocal = new THREE.Vector3();
 
@@ -154,9 +167,15 @@ function squadLivingCount(unit) {
 }
 
 export function canSupplyReplacementCrew(unit, tank = null) {
-  if (squadLivingCount(unit) < REPLACEMENT_CREW_COUNT) return false;
+  const needed =
+    unit?.def?.type === 'truckDriver' ? 1 : getReplacementCrewCount(tank);
+  if (squadLivingCount(unit) < needed) return false;
   if (unit?.def?.type === 'infantry' || unit?.def?.type === 'paratrooper') {
     return true;
+  }
+  if (unit?.def?.type === 'truckDriver') {
+    if (tank && tank.def?.type !== 'truck') return false;
+    return !tank || tank.id === unit._bailoutSourceVehicleId;
   }
   if (unit?.def?.type !== 'vehicleCrew' || unit._bailoutSourceVehicleId == null) {
     return false;
@@ -173,8 +192,9 @@ function syncEmbeddedCrewVisibility(rider, embedded) {
     if (child.name !== 'squadMember') return;
     const index = child.userData?.squadIndex;
     if (index == null) return;
-    if (embedded && index < REPLACEMENT_CREW_COUNT) child.visible = false;
-    else if (!embedded && index < Math.min(REPLACEMENT_CREW_COUNT, living)) child.visible = true;
+    const hideCount = rider._embeddedCrewCount ?? REPLACEMENT_CREW_COUNT;
+    if (embedded && index < hideCount) child.visible = false;
+    else if (!embedded && index < Math.min(hideCount, living)) child.visible = true;
   });
 }
 
@@ -198,13 +218,13 @@ function syncRiderSlot(rider, tank, slotIndex) {
   applyMountedRiderVisuals(rider, true);
 }
 
-function dismountPosition(tank, index, mapDef) {
+export function getRiderDismountPosition(tank, index, mapDef = null) {
   const offset = DISMOUNT_OFFSETS[index % DISMOUNT_OFFSETS.length];
   const yaw = tank.mesh?.rotation?.y ?? 0;
   const cos = Math.cos(yaw);
   const sin = Math.sin(yaw);
-  const x = tank.position.x + offset.x * cos - offset.z * sin;
-  const z = tank.position.z + offset.x * sin + offset.z * cos;
+  const x = tank.position.x + offset.x * cos + offset.z * sin;
+  const z = tank.position.z - offset.x * sin + offset.z * cos;
   const y = mapDef ? sampleTerrainHeight(x, z, mapDef) : tank.position.y;
   return { x, z, y };
 }
@@ -233,7 +253,7 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
     applyMountedRiderVisuals(rider, false);
   }
   if (tank && mapDef && dismountIndex != null) {
-    const pos = dismountPosition(tank, dismountIndex, mapDef);
+    const pos = getRiderDismountPosition(tank, dismountIndex, mapDef);
     rider.position.x = pos.x;
     rider.position.z = pos.z;
     rider.position.y = pos.y;
@@ -281,7 +301,7 @@ export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null)
   tank._finalMoveGoal = null;
   tank._replacementCrewUnitId = rider.id;
   rider._replacementCrewVehicleId = tank.id;
-  rider._embeddedCrewCount = REPLACEMENT_CREW_COUNT;
+  rider._embeddedCrewCount = getReplacementCrewCount(tank);
   syncEmbeddedCrewVisibility(rider, true);
   garrisonSources?._rebuildUnitCaches?.();
   garrisonSources?._syncUnitRoster?.();

@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { getVehicleDesign } from '../src/units/vehicleDesigns.js';
-import { getRiderDeckOffset, resolveMountedHost } from '../src/game/TankRiders.js';
+import {
+  getRiderDeckOffset,
+  getRiderDismountPosition,
+  resolveMountedHost,
+} from '../src/game/TankRiders.js';
 import { applyMountedRiderVisuals } from '../src/units/InfantryVisuals.js';
 
 const FACTIONS = ['germany', 'usa', 'uk', 'russia', 'japan'];
-const TYPES = ['tank', 'superHeavyTank', 'armoredCar'];
+const TYPES = ['tank', 'superHeavyTank', 'armoredCar', 'truck'];
 const DECK_EMBED = 0.015;
 
 let failed = 0;
@@ -20,9 +24,24 @@ for (const faction of FACTIONS) {
     const hull = getVehicleDesign(faction, type).hull;
     const hullTop = hull.y + hull.h * 0.5;
     const tank = { faction: { id: faction }, def: { type } };
-    const slots = type === 'superHeavyTank' ? 3 : type === 'armoredCar' ? 1 : 2;
+    const slots = type === 'superHeavyTank' || type === 'truck' ? 3 : type === 'armoredCar' ? 1 : 2;
     for (let i = 0; i < slots; i++) {
       const offset = getRiderDeckOffset(tank, i);
+      if (type === 'truck') {
+        const cargo = getVehicleDesign(faction, type).cargo;
+        assert(
+          Math.abs(offset.y - cargo.y) < 1e-6,
+          `${faction} ${type} slot ${i} y=${offset.y.toFixed(3)} cargoY=${cargo.y.toFixed(3)}`
+        );
+        const bed = getVehicleDesign(faction, type).bed;
+        const rear = bed.z - bed.d * 0.55;
+        const front = bed.z + bed.d * 0.55;
+        assert(
+          offset.z >= rear && offset.z <= front,
+          `${faction} ${type} slot ${i} z=${offset.z.toFixed(3)} is off the cargo bed`
+        );
+        continue;
+      }
       const dy = offset.y - hullTop;
       assert(
         Math.abs(dy + DECK_EMBED) < 1e-6,
@@ -98,6 +117,16 @@ assert(
   'dead host should keep the rider'
 );
 assert(resolveMountedHost(null, []) == null, 'missing pick should stay empty');
+
+const eastFacingTank = {
+  position: new THREE.Vector3(0, 0, 0),
+  mesh: { rotation: { y: Math.PI / 2 } },
+};
+const dismount = getRiderDismountPosition(eastFacingTank, 0);
+assert(
+  dismount.x < eastFacingTank.position.x,
+  'east-facing tank should dismount riders behind the hull'
+);
 
 if (failed) {
   console.error(`${failed} check(s) failed`);

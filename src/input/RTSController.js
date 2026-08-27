@@ -5,6 +5,7 @@ import {
   issueMountOrder,
   resolveMountedHost,
 } from '../game/TankRiders.js';
+import { getTowActionTarget, issueTowOrder } from '../game/TruckTowing.js';
 import {
   getSeekCoverEnabled,
   resolveSeekCoverDestination,
@@ -311,7 +312,7 @@ export class RTSController {
         ? 3.5
         : unit?.def?.type === 'tank' || unit?.def?.type === 'tankDestroyer'
           ? 3.2
-          : unit?.def?.type === 'armoredCar'
+          : unit?.def?.type === 'armoredCar' || unit?.def?.type === 'truck'
             ? 2.6
             : 2.2);
     return hitR + UNIT_ATTACK_PROXIMITY_PAD;
@@ -656,6 +657,11 @@ export class RTSController {
       this.setHoveredTarget(vehicle);
       return;
     }
+    if (vehicle && getTowActionTarget(this.getSelectedPlayerUnits(), vehicle, this.getUnits())) {
+      this._cancelVehicleHoverClear();
+      this.setHoveredTarget(vehicle);
+      return;
+    }
     const attackTarget = this.raycastAttackTarget();
     if (attackTarget) {
       this._cancelVehicleHoverClear();
@@ -663,6 +669,10 @@ export class RTSController {
       return;
     }
     if (this.getEligibleVehicleEntrants(this.hoveredTarget).length > 0) {
+      this._scheduleVehicleHoverClear();
+      return;
+    }
+    if (getTowActionTarget(this.getSelectedPlayerUnits(), this.hoveredTarget, this.getUnits())) {
       this._scheduleVehicleHoverClear();
       return;
     }
@@ -700,6 +710,21 @@ export class RTSController {
     this._lastOrderAt = Date.now();
     this.onMoveOrder?.(entrants);
     this.onOrder?.('mount', entrants);
+    return true;
+  }
+
+  issueTowAttach(target, { requireAllSelected = false } = {}) {
+    if (this._inputBlocked() || !target) return false;
+    const selected = this.getSelectedPlayerUnits();
+    const pair = getTowActionTarget(selected, target, this.getUnits());
+    if (!pair) return false;
+    if (requireAllSelected && selected.length > 2) return false;
+    if (!issueTowOrder(pair.truck, pair.gun, this.getUnits())) return false;
+    this._vehicleActionHovered = false;
+    this._cancelVehicleHoverClear();
+    this.setHoveredTarget(null);
+    this._lastOrderAt = Date.now();
+    this.onOrder?.('tow', [pair.truck, pair.gun]);
     return true;
   }
 
@@ -1162,6 +1187,7 @@ export class RTSController {
 
     const mountTarget = this.raycastUnit();
     if (this.issueVehicleEntry(mountTarget, { requireAllSelected: true })) return;
+    if (this.issueTowAttach(mountTarget, { requireAllSelected: true })) return;
 
     if (!this.getDeployZoneActive()) {
       const attackTarget = this.raycastAttackTarget();

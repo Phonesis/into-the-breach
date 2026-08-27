@@ -110,6 +110,13 @@ import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison
 import { applyObstaclePath } from './MovePath.js';
 import { dismountAllRiders, releaseFromTank, updateTankRiders } from './TankRiders.js';
 import {
+  updateTruckTowing,
+  issueTowOrder,
+  detachGun,
+  getTowActionTarget,
+  canDetachTowedGun,
+} from './TruckTowing.js';
+import {
   isBaseBuildingCampaign,
   getPlayerProductionUnitTypes,
   getSpawnBuildingForUnit,
@@ -210,6 +217,7 @@ import {
   updateVehicleCookOffs,
   clearVehicleCookOffs,
   isArmoredCombatVehicle,
+  isPoweredCombatVehicle,
 } from '../effects/VehicleDestruction.js';
 import { clearHqBurnEffects, updateHqBurnEffects } from '../effects/HqBurnEffects.js';
 import {
@@ -313,6 +321,10 @@ import {
 } from '../units/UnitMeshes.js';
 import { updateInfantryWeaponPose } from '../units/InfantryVisuals.js';
 import { FireSupportManager } from './FireSupport.js';
+import {
+  clearIncomingArtilleryStrikes,
+  registerIncomingArtilleryStrike,
+} from './ArtilleryThreats.js';
 import { GeneralOrdersManager } from './GeneralOrders.js';
 import {
   updateFireSupportEffects,
@@ -447,6 +459,7 @@ export class Game {
     this._tabletMode = isTabletModeEnabled();
     this.showUnitFieldIcons = true;
     this.showUnitStatus = true;
+    this.showUnitRangeRings = this.ui?.showUnitRangeRings ?? true;
     this.seekCoverMode = true;
     this.radioOperatorAutoMove = this.ui?.radioOperatorAutoMove ?? true;
     this.pursueTargetsByDefault = this.ui?.pursueTargetsByDefault ?? false;
@@ -456,6 +469,7 @@ export class Game {
     this.showCapturePoints = true;
     this.debrisRetentionSeconds = Infinity;
     this.matchTime = 0;
+    this._incomingArtilleryStrikes = [];
     this._hqThreat = null;
     this._hqAlertPlayed = false;
     this.mapDef = null;
@@ -673,7 +687,13 @@ export class Game {
         this._syncBattleCursor();
       },
       onHoverTarget: (target) => {
-        const action = this.controller?.getEligibleVehicleEntrants(target).length > 0;
+        const action =
+          this.controller?.getEligibleVehicleEntrants(target).length > 0 ||
+          !!getTowActionTarget(
+            this.controller?.getSelectedPlayerUnits?.() ?? [],
+            target,
+            this.units
+          );
         this.targetIndicators?.setHoverTarget(target, { action });
         if (this._selectionPanelDismissed) return;
         const sel = this._playerAlive.filter((u) => u.selected);
@@ -1081,6 +1101,7 @@ export class Game {
     // Drop any in-flight mortar bombs before teardown/rebuild so a delayed
     // detonation cannot land in the new match's spawn area.
     clearPendingMortarImpacts();
+    clearIncomingArtilleryStrikes(this);
     sounds.enterBattle();
     sounds.unlock();
     void sounds.primeForCombat();
@@ -1662,6 +1683,8 @@ export class Game {
     }
     this.showUnitFieldIcons = this.ui.showUnitFieldIcons;
     this.showUnitStatus = this.ui.showUnitStatus !== false;
+    this.showUnitRangeRings = this.ui.showUnitRangeRings !== false;
+    this.rangeRings?.setVisible(this.showUnitRangeRings);
     this.radioOperatorAutoMove = this.ui.radioOperatorAutoMove ?? true;
     this.pursueTargetsByDefault = this.ui.pursueTargetsByDefault ?? false;
     this.artilleryAutoFire = this.ui.artilleryAutoFire ?? true;
@@ -1772,13 +1795,25 @@ export class Game {
   _renderFrame() {
     if (this._rendererContextLost) return;
     const entryTarget = this.controller?.hoveredTarget ?? null;
+    const running = this.running && !this.gameOver && !this.paused;
     const entrants = this.controller?.getEligibleVehicleEntrants(entryTarget) ?? [];
     this.ui?.updateVehicleEntryAction(
       entryTarget,
       entrants,
       this.camera,
       this.canvas,
-      this.running && !this.gameOver && !this.paused
+      running
+    );
+    const selected = this.controller?.getSelectedPlayerUnits?.() ?? [];
+    const towPair = running && entrants.length === 0
+      ? getTowActionTarget(selected, entryTarget, this.units)
+      : null;
+    this.ui?.updateGunTowAction(
+      towPair,
+      entryTarget,
+      this.camera,
+      this.canvas,
+      running
     );
     updateSkyForCamera(this.scene, this.cameraTarget.x, this.cameraTarget.z);
     this.renderer.render(this.scene, this.camera);
@@ -1802,7 +1837,7 @@ export class Game {
         });
         this.canvas.dataset.qaVehicles = JSON.stringify(
           this._playerAlive
-            .filter((unit) => isArmoredCombatVehicle(unit.def?.type))
+            .filter((unit) => isPoweredCombatVehicle(unit.def?.type))
             .map((unit) => ({
               id: unit.id,
               type: unit.def.type,
@@ -2182,6 +2217,14 @@ export class Game {
     syncSurrenderMarkers(this._aliveUnits);
   }
 
+  setUnitRangeRingsEnabled(enabled) {
+    this.showUnitRangeRings = !!enabled;
+    this.rangeRings?.setVisible(this.showUnitRangeRings);
+    if (this.showUnitRangeRings) {
+      this.rangeRings?.updateForUnits(this._aliveUnits);
+    }
+  }
+
   setSeekCoverMode(enabled) {
     this.seekCoverMode = !!enabled;
     this._selectionUiKey = '';
@@ -2263,6 +2306,32 @@ export class Game {
     this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
   }
 
+  detachSelectedTowedGun() {
+    const selected = this._playerAlive.filter((u) => u.selected);
+    const trucks = selected.filter((unit) => canDetachTowedGun(unit) && unit.def?.type === 'truck');
+    const guns = selected.filter((unit) => canDetachTowedGun(unit) && unit.def?.type !== 'truck');
+    for (const truck of trucks) {
+      if (!truck.moveTarget) detachGun(truck, this.units, this.mapDef);
+    }
+    for (const gun of guns) {
+      const truck = this.units.find((unit) => unit.id === gun._towedByTruckId);
+      if (!truck || truck.moveTarget) continue;
+      detachGun(truck, this.units, this.mapDef);
+    }
+    this._selectionUiKey = '';
+    const sel = this._playerAlive.filter((u) => u.selected);
+    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
+  }
+
+  issueSelectedTowAttach(targetId) {
+    if (!this.running || this.gameOver || this.paused) return false;
+    const hovered = this.units.find((unit) => unit.id === targetId) ?? null;
+    const selected = this.controller?.getSelectedPlayerUnits?.() ?? [];
+    const pair = getTowActionTarget(selected, hovered, this.units);
+    if (!pair) return false;
+    return issueTowOrder(pair.truck, pair.gun, this.units);
+  }
+
   setShowFrontlineEnabled(enabled) {
     this.showFrontline = !!enabled;
     syncFrontlineVisual(this.scene, this.showFrontline);
@@ -2295,6 +2364,10 @@ export class Game {
 
   togglePause() {
     if (!this.running || this.gameOver) return;
+    if (this.paused && this.ui?.isGuideFromPauseOpen?.()) {
+      this.ui.closeGuide();
+      return;
+    }
     if (this.paused && this.ui?.isPausedSettingsOpen?.()) {
       this.ui.closePausedSettings();
       return;
@@ -2752,6 +2825,7 @@ export class Game {
     this._battleStatsFinalized = false;
     this._pendingEnd = null;
     clearPendingMortarImpacts();
+    clearIncomingArtilleryStrikes(this);
     this._teardownPending = false;
     this._unitSelectionCycle = null;
     this._unitSelectionShortcutApplying = false;
@@ -4016,6 +4090,7 @@ export class Game {
 
   _purgeBattlefieldEffects() {
     clearPendingMortarImpacts();
+    clearIncomingArtilleryStrikes(this);
     clearHqBurnEffects();
     clearCombatEffects();
     clearWreckEffects();
@@ -4077,7 +4152,7 @@ export class Game {
     for (const u of this.units) {
       if (!u.dead || !u.mesh?.parent || u.mesh.userData?.deathVisualApplied) continue;
       applyUnitDeathVisual(u);
-      if (isArmoredCombatVehicle(u.def?.type) && u.mesh.userData?.wreckApplied) {
+      if (isPoweredCombatVehicle(u.def?.type) && u.mesh.userData?.wreckApplied) {
         if (!u._vehicleKillFxDone) {
           triggerVehicleKillFx(this, u, { x: u.position.x, y: u.position.y, z: u.position.z });
         } else if (!u.wreckFire) {
@@ -4144,9 +4219,49 @@ export class Game {
     mortarImpact,
     artilleryLoft,
     artilleryImpact,
+    indirectFlightTime,
     buildingIntercept,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
+    if (
+      (mortarLoft || artilleryLoft) &&
+      attacker?.team === PLAYER_TEAM &&
+      Number.isFinite(to?.x) &&
+      Number.isFinite(to?.z)
+    ) {
+      const artilleryTarget = target?._towedByTruckId
+        ? this.units.find((unit) => unit.id === target._towedByTruckId) ?? null
+        : target;
+      const targetIsStationaryEnemyUnit =
+        artilleryTarget?.team === ENEMY_TEAM &&
+        !!artilleryTarget.def?.type &&
+        !artilleryTarget.dead &&
+        !artilleryTarget.surrendered &&
+        !artilleryTarget._captureExit &&
+        !artilleryTarget._crewless &&
+        !artilleryTarget._mobilityDamaged &&
+        !artilleryTarget._mountedOnTankId &&
+        !artilleryTarget._towedByTruckId &&
+        !artilleryTarget._userMoveOrder &&
+        !artilleryTarget.moveTarget &&
+        !artilleryTarget._movePath?.length;
+      const impactRadius = artilleryLoft ? 9 : 6.5;
+      registerIncomingArtilleryStrike(this, {
+        ownerTeam: PLAYER_TEAM,
+        kind: artilleryLoft ? 'artillery' : 'mortar',
+        sourceId: attacker.id ?? null,
+        targetId: targetIsStationaryEnemyUnit ? artilleryTarget.id ?? null : null,
+        targetWasStationary: targetIsStationaryEnemyUnit,
+        center: { x: to.x, z: to.z },
+        alertRadius: impactRadius + 3,
+        impacts: [{
+          x: to.x,
+          z: to.z,
+          impactIn: Number.isFinite(indirectFlightTime) ? indirectFlightTime : 2.2,
+          radius: impactRadius,
+        }],
+      });
+    }
     const delayedIndirectImpact = mortarImpact || artilleryImpact;
     if (
       !delayedIndirectImpact &&
@@ -4172,7 +4287,7 @@ export class Game {
 
     if (handGrenade) {
       sounds.playImpact('explosion', { x: to.x, z: to.z }, 0);
-      if (killed && target?.def && isArmoredCombatVehicle(target.def.type)) {
+      if (killed && target?.def && isPoweredCombatVehicle(target.def.type)) {
         triggerVehicleKillFx(this, target, to);
       }
       return;
@@ -4331,7 +4446,7 @@ export class Game {
     }
 
     const targetIsArmored =
-      killed && target?.def && isArmoredCombatVehicle(target.def.type);
+      killed && target?.def && isPoweredCombatVehicle(target.def.type);
     const targetIsDestroyedGun =
       killed && target?.def && DESTROYED_GUN_BLAST_TYPES.has(target.def.type);
     const targetKilledByExplosion = target?._deathCause === 'explosion';
@@ -4682,6 +4797,18 @@ export class Game {
           // Include dead hosts so surviving riders/replacement crews can be
           // detached cleanly from a newly knocked-out vehicle.
           updateTankRiders(this.units, dt, this.mapDef, this);
+        }
+        if (
+          this._aliveUnits.some(
+            (u) =>
+              u._towedByTruckId ||
+              u._towedGunId ||
+              u._pendingTowGunId ||
+              u._pendingTowTruckId ||
+              u._towAttaching
+          )
+        ) {
+          updateTruckTowing(this.units, dt, this.mapDef);
         }
         if (isTdHqDefenseStyle(this.towerDefense)) {
           enforcePlayerFrontlineClamp(this);
@@ -5076,7 +5203,7 @@ export class Game {
         continue;
       }
 
-      if (isArmoredCombatVehicle(u.def.type) && u.mesh.userData?.wreckApplied) {
+      if (isPoweredCombatVehicle(u.def.type) && u.mesh.userData?.wreckApplied) {
         if (!u._vehicleKillFxDone) {
           triggerVehicleKillFx(this, u, {
             x: u.position.x,

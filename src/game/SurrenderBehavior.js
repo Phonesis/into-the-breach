@@ -25,6 +25,7 @@ const SURRENDER_ELIGIBLE = new Set([
   'medic',
   'engineer',
   'vehicleCrew',
+  'truckDriver',
   'antiTankGun',
   'tank',
   'tankDestroyer',

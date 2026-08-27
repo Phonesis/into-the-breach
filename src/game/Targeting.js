@@ -29,10 +29,12 @@ export const COAX_SOFT_TARGET_TYPES = new Set([
   'medic',
   'engineer',
   'vehicleCrew',
+  'truckDriver',
   'radioOperator',
   'commander',
   'paratrooper',
   'armoredCar',
+  'truck',
 ]);
 
 export function isCoaxSoftTarget(target) {

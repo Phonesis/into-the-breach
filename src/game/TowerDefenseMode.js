@@ -29,11 +29,13 @@ import {
 } from '../data/towerDefense.js';
 import {
   tryAssignCrewlessTankRecovery,
+  tryAssignAiTruckTask,
   tryAssignSupportCare,
   tryAssignSupportRearMove,
   tryAssignAiTankManeuver,
   diversifyAiMoveOrders,
   updateAiIncomingFireReactions,
+  updateAiArtilleryThreatReactions,
   updateAiAbandonedTrenchCapture,
   maintainAiCommanderScreen,
 } from './AI.js';
@@ -392,6 +394,7 @@ export function getWaveComposition(wave, waveMult = 1, endless = false) {
   if (w >= 2) add('machineGun', Math.floor((w - 1) / 2));
   if (w >= 3) add('sniper', w >= 5 ? 1 : 0);
   if (w >= 3) add('mortar', Math.max(1, Math.floor((w - 2) / 2)));
+  if (w >= 4) add('truck', Math.max(1, Math.floor((w - 3) / 3)));
   if (w >= 5) add('armoredCar', Math.floor((w - 4) / 2));
   if (w >= 6) add('tank', Math.floor((w - 5) / 2));
   // Signals detachments arrive with selected assault waves. Surviving radio
@@ -633,11 +636,18 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
       mapDef: game?.mapDef,
       clearance: false,
     });
+    updateAiArtilleryThreatReactions({
+      enemyUnits,
+      game,
+      mapDef: game?.mapDef,
+    });
   }
   updateAiAbandonedTrenchCapture(game, enemyUnits);
   const crewlessTankClaims = new Set();
+  const truckClaims = new Set();
   const careClaims = new Set();
   for (const unit of enemyUnits) {
+    if (unit._aiArtilleryEvasion) continue;
     if (unit.def?.type === 'commander' || unit.def?.type === 'radioOperator') continue;
     if (unit._aiCommanderScreen && maintainAiCommanderScreen(unit, game, game?._playerAlive ?? [])) {
       continue;
@@ -651,7 +661,9 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
       unit._aiAbandonedTrenchOccupant
     ) continue;
     if (unit._aiIncomingFireReaction) continue;
+    if (unit._mountedOnTankId || unit._towedByTruckId) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
+    if (tryAssignAiTruckTask(unit, enemyUnits, game?._playerAlive ?? [], game, truckClaims)) continue;
     if (tryAssignSupportCare(unit, enemyUnits, game, game?.mapDef, careClaims)) continue;
     if (tryAssignSupportRearMove(unit, enemyUnits, game, game?.mapDef)) continue;
     if (

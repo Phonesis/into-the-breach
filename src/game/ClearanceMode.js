@@ -16,6 +16,7 @@ export const CLEARANCE_DEFENDER_LAYOUT = [
   { type: 'sniper', count: 1 },
   { type: 'mortar', count: 1 },
   { type: 'armoredCar', count: 1 },
+  { type: 'truck', count: 1 },
   { type: 'antiTankGun', count: 2 },
   { type: 'tank', count: 2 },
   { type: 'artillery', count: 1 },
@@ -41,12 +42,14 @@ const REINFORCEMENT_PACKAGES = {
       ['infantry', 'machineGun'],
       ['infantry', 'mortar'],
       ['infantry', 'tank'],
+      ['infantry', 'truck'],
       ['infantry', 'antiTankGun'],
     ],
     defender: [
       ['infantry', 'machineGun'],
       ['infantry', 'antiTankGun'],
       ['infantry', 'armoredCar'],
+      ['infantry', 'truck'],
       ['infantry', 'mortar'],
     ],
   },
@@ -56,11 +59,13 @@ const REINFORCEMENT_PACKAGES = {
       ['infantry', 'infantry', 'antiTankGun'],
       ['infantry', 'tank', 'machineGun'],
       ['infantry', 'engineer', 'antiTankGun'],
+      ['infantry', 'truck', 'machineGun'],
       ['infantry', 'mortar', 'machineGun'],
     ],
     defender: [
       ['infantry', 'machineGun', 'antiTankGun'],
       ['infantry', 'armoredCar', 'mortar'],
+      ['infantry', 'truck', 'antiTankGun'],
       ['infantry', 'infantry', 'machineGun'],
       ['infantry', 'antiTankGun', 'mortar'],
       ['infantry', 'armoredCar', 'machineGun'],
@@ -72,11 +77,13 @@ const REINFORCEMENT_PACKAGES = {
       ['infantry', 'machineGun', 'tank', 'infantry', 'mortar'],
       ['infantry', 'infantry', 'antiTankGun', 'tank', 'engineer'],
       ['infantry', 'machineGun', 'armoredCar', 'mortar', 'infantry'],
+      ['infantry', 'truck', 'antiTankGun', 'infantry', 'machineGun'],
       ['infantry', 'medic', 'machineGun', 'antiTankGun', 'tank'],
     ],
     defender: [
       ['infantry', 'infantry', 'machineGun', 'antiTankGun', 'mortar'],
       ['infantry', 'armoredCar', 'machineGun', 'infantry', 'antiTankGun'],
+      ['infantry', 'truck', 'infantry', 'antiTankGun', 'mortar'],
       ['infantry', 'infantry', 'mortar', 'tank', 'machineGun'],
       ['infantry', 'antiTankGun', 'armoredCar', 'infantry', 'mortar'],
       ['infantry', 'machineGun', 'antiTankGun', 'infantry', 'armoredCar'],
@@ -99,6 +106,7 @@ const CLEARANCE_PROBE_TYPES = new Set([
   'machineGun',
   'sniper',
   'armoredCar',
+  'truck',
   'tank',
   'tankDestroyer',
   'superHeavyTank',
@@ -110,6 +118,7 @@ const ANTI_ARMOR = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'artiller
 const SMALL_ARMS_VS_ARMOR = new Set([
   'infantry',
   'vehicleCrew',
+  'truckDriver',
   'machineGun',
   'radioOperator',
   'engineer',
@@ -513,6 +522,7 @@ export function roleForClearanceAttackerType(type) {
   if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') {
     return 'armor';
   }
+  if (type === 'truck') return 'line';
   if (type === 'artillery' || type === 'mortar' || type === 'antiTankGun') return 'support';
   if (type === 'sniper' || type === 'machineGun') return 'support';
   return 'line';

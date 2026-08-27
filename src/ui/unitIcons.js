@@ -94,6 +94,18 @@ const ICONS = {
     <rect x="13.5" y="16.5" width="2" height="5" rx="0.3" fill="currentColor" opacity="0.45"/>
   </svg>`,
 
+  truck: `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <rect x="4" y="16" width="24" height="6" rx="0.8" fill="currentColor"/>
+    <rect x="16" y="10" width="10" height="6.5" rx="0.7" fill="currentColor"/>
+    <rect x="4.5" y="11.5" width="11" height="5" rx="0.5" fill="currentColor" opacity="0.75"/>
+    <circle cx="9" cy="24.5" r="3" fill="currentColor"/>
+    <circle cx="23" cy="24.5" r="3" fill="currentColor"/>
+    <circle cx="9" cy="24.5" r="1.15" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+    <circle cx="23" cy="24.5" r="1.15" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+    <rect x="5" y="12.4" width="4.5" height="2.4" rx="0.3" fill="currentColor" opacity="0.4"/>
+    <path d="M26 16.5h3v3h-3" fill="currentColor" opacity="0.7"/>
+  </svg>`,
+
   armoredCar: `<svg viewBox="0 0 32 32" aria-hidden="true">
     <path d="M5 17h22l-1.5-4.5H6.5L5 17z" fill="currentColor"/>
     <path d="M7 12.5h18l-1-3H8l-1 3z" fill="currentColor" opacity="0.8"/>

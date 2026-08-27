@@ -68,6 +68,49 @@ function vehicleCrewDef(factionId) {
   };
 }
 
+function truckDriverDef(factionId) {
+  const identity = {
+    germany: {
+      name: 'Kraftfahrer',
+      designation: 'Opel Blitz driver with Kar98k',
+    },
+    usa: {
+      name: 'Truck Driver',
+      designation: 'CCKW driver with M1 carbine',
+    },
+    uk: {
+      name: 'Lorry Driver',
+      designation: 'Bedford driver with Lee–Enfield',
+    },
+    russia: {
+      name: 'Voditel',
+      designation: 'ZIS-5 driver with Mosin rifle',
+    },
+    japan: {
+      name: 'Untenshu',
+      designation: 'Type 94 driver with Arisaka rifle',
+    },
+  }[factionId] ?? {
+    name: 'Truck Driver',
+    designation: 'Transport driver with service rifle',
+  };
+  return {
+    type: 'truckDriver',
+    ...identity,
+    description: 'The truck’s driver — bails with a service rifle if the vehicle is knocked out.',
+    hp: 20,
+    damage: 8,
+    range: 38,
+    rangeMeters: 400,
+    speed: 4.3,
+    attackSpeed: 1.1,
+    cost: 0,
+    buildTime: 0,
+    weaponSound: `rifle_${factionId}`,
+    hidden: true,
+  };
+}
+
 const atGunGermany = {
   antiTankGun: {
     type: 'antiTankGun',
@@ -827,6 +870,7 @@ export const FACTIONS = {
       commander: commanderDef('germany'),
       radioOperator: radioOperatorDef('germany'),
       vehicleCrew: vehicleCrewDef('germany'),
+      truckDriver: truckDriverDef('germany'),
       infantry: {
         type: 'infantry',
         name: 'Grenadier Squad',
@@ -848,6 +892,22 @@ export const FACTIONS = {
       ...mgMortarGermany,
       ...scoutGermany,
       ...atGunGermany,
+      truck: {
+        type: 'truck',
+        name: 'Opel Blitz',
+        designation: '3-tonner S — cargo truck',
+        description:
+          'Unarmored 3-ton lorry — boards infantry for fast deployment and tows AT guns or howitzers. Driver bails with a Kar98k.',
+        hp: 82,
+        damage: 0,
+        range: 0,
+        rangeMeters: 0,
+        speed: 11.0,
+        attackSpeed: 0,
+        cost: 60,
+        buildTime: 11,
+        nonCombat: true,
+      },
       tank: {
         type: 'tank',
         name: 'Panzer IV Ausf. H',
@@ -944,6 +1004,7 @@ export const FACTIONS = {
       commander: commanderDef('usa'),
       radioOperator: radioOperatorDef('usa'),
       vehicleCrew: vehicleCrewDef('usa'),
+      truckDriver: truckDriverDef('usa'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Squad',
@@ -965,6 +1026,22 @@ export const FACTIONS = {
       ...mgMortarUSA,
       ...scoutUSA,
       ...atGunUSA,
+      truck: {
+        type: 'truck',
+        name: 'GMC CCKW',
+        designation: '2½-ton 6×6 cargo truck',
+        description:
+          'Deuce-and-a-half — boards infantry for fast deployment and tows AT guns or howitzers. Driver bails with a carbine.',
+        hp: 86,
+        damage: 0,
+        range: 0,
+        rangeMeters: 0,
+        speed: 11.4,
+        attackSpeed: 0,
+        cost: 62,
+        buildTime: 11,
+        nonCombat: true,
+      },
       tank: {
         type: 'tank',
         name: 'M4 Sherman',
@@ -1060,6 +1137,7 @@ export const FACTIONS = {
       commander: commanderDef('uk'),
       radioOperator: radioOperatorDef('uk'),
       vehicleCrew: vehicleCrewDef('uk'),
+      truckDriver: truckDriverDef('uk'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Section',
@@ -1081,6 +1159,22 @@ export const FACTIONS = {
       ...mgMortarUK,
       ...scoutUK,
       ...atGunUK,
+      truck: {
+        type: 'truck',
+        name: 'Bedford QLD',
+        designation: '3-ton 4×4 cargo lorry',
+        description:
+          'Cab-over Bedford — boards infantry for fast deployment and tows AT guns or howitzers. Driver bails with a Lee–Enfield.',
+        hp: 80,
+        damage: 0,
+        range: 0,
+        rangeMeters: 0,
+        speed: 10.8,
+        attackSpeed: 0,
+        cost: 60,
+        buildTime: 11,
+        nonCombat: true,
+      },
       tank: {
         type: 'tank',
         name: 'Churchill Mk IV',
@@ -1177,6 +1271,7 @@ export const FACTIONS = {
       commander: commanderDef('russia'),
       radioOperator: radioOperatorDef('russia'),
       vehicleCrew: vehicleCrewDef('russia'),
+      truckDriver: truckDriverDef('russia'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Squad',
@@ -1198,6 +1293,22 @@ export const FACTIONS = {
       ...mgMortarRussia,
       ...scoutRussia,
       ...atGunRussia,
+      truck: {
+        type: 'truck',
+        name: 'ZIS-5',
+        designation: '3-ton cargo lorry',
+        description:
+          'Workhorse 3-ton truck — boards infantry for fast deployment and tows AT guns or howitzers. Driver bails with a rifle.',
+        hp: 84,
+        damage: 0,
+        range: 0,
+        rangeMeters: 0,
+        speed: 10.6,
+        attackSpeed: 0,
+        cost: 58,
+        buildTime: 11,
+        nonCombat: true,
+      },
       tank: {
         type: 'tank',
         name: 'T-34-85',
@@ -1292,6 +1403,7 @@ export const FACTIONS = {
       commander: commanderDef('japan'),
       radioOperator: radioOperatorDef('japan'),
       vehicleCrew: vehicleCrewDef('japan'),
+      truckDriver: truckDriverDef('japan'),
       infantry: {
         type: 'infantry',
         name: 'Rifle Squad',
@@ -1313,6 +1425,22 @@ export const FACTIONS = {
       ...mgMortarJapan,
       ...scoutJapan,
       ...atGunJapan,
+      truck: {
+        type: 'truck',
+        name: 'Type 94 Truck',
+        designation: 'Isuzu Type 94 cargo truck',
+        description:
+          'Six-wheeled army truck — boards infantry for fast deployment and tows AT guns or howitzers. Driver bails with an Arisaka.',
+        hp: 76,
+        damage: 0,
+        range: 0,
+        rangeMeters: 0,
+        speed: 10.4,
+        attackSpeed: 0,
+        cost: 56,
+        buildTime: 11,
+        nonCombat: true,
+      },
       tank: {
         type: 'tank',
         name: 'Shinhoto Chi-Ha',

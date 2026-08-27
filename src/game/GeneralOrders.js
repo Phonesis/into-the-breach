@@ -93,7 +93,8 @@ function rallySlotRadius(unit) {
   if (
     type === 'tank' ||
     type === 'tankDestroyer' ||
-    type === 'armoredCar'
+    type === 'armoredCar' ||
+    type === 'truck'
   ) return 2.6;
   if (type === 'artillery' || type === 'antiTankGun') return 2.2;
   return 1.25;

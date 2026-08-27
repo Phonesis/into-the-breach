@@ -34,6 +34,17 @@ export class RangeRingManager {
      * (only while binocs are raised).
      */
     this.minimumRings = new Map();
+    this.visible = true;
+  }
+
+  setVisible(enabled) {
+    this.visible = !!enabled;
+    if (!this.visible) {
+      this.clear();
+      return;
+    }
+    for (const ring of this.rings.values()) ring.visible = true;
+    for (const ring of this.minimumRings.values()) ring.visible = true;
   }
 
   /** Primary ring = combat weapon range (radio operators use rifle range). */
@@ -74,6 +85,10 @@ export class RangeRingManager {
   }
 
   _updateForUnitsInner(units) {
+    if (!this.visible) {
+      this.clear();
+      return;
+    }
     const list = units ?? [];
     const selected = list.filter((u) => u && !u.dead && u.selected);
     const activeIds = new Set();

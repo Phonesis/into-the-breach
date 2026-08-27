@@ -88,6 +88,7 @@ export const TD_KILL_REWARD = {
   mortar: 12,
   antiTankGun: 20,
   armoredCar: 18,
+  truck: 12,
   tank: 30,
   tankDestroyer: 36,
   superHeavyTank: 45,
@@ -97,6 +98,7 @@ export const TD_WAVE_CLEAR_BONUS = 0;
 
 /** Vehicle types that trigger anti-tank mines. */
 export const MINE_VEHICLE_TYPES = new Set([
+  'truck',
   'armoredCar',
   'tank',
   'tankDestroyer',

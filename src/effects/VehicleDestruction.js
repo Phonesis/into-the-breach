@@ -16,6 +16,10 @@ export function isArmoredCombatVehicle(type) {
   return type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar';
 }
 
+export function isPoweredCombatVehicle(type) {
+  return isArmoredCombatVehicle(type) || type === 'truck';
+}
+
 const GUN_AMMO_COOK_OFF_CHANCE = {
   artillery: 0.36,
   antiTankGun: 0.24,
@@ -25,12 +29,14 @@ function cookOffChance(type) {
   if (type === 'superHeavyTank') return 0.42;
   if (type === 'tank' || type === 'tankDestroyer') return 0.3;
   if (type === 'armoredCar') return 0.18;
+  if (type === 'truck') return 0.34;
   return 0;
 }
 
 function primaryTier(type) {
   if (type === 'superHeavyTank') return 'heavy';
   if (type === 'tank' || type === 'tankDestroyer') return 'heavy';
+  if (type === 'truck') return 'medium';
   return 'medium';
 }
 
@@ -43,7 +49,7 @@ function primaryTier(type) {
 export function triggerVehicleKillFx(game, unit, pos = null) {
   if (!unit || unit._vehicleKillFxDone) return;
   const type = unit.def?.type;
-  if (!isArmoredCombatVehicle(type)) return;
+  if (!isPoweredCombatVehicle(type)) return;
 
   const p = pos ?? {
     x: unit.position?.x ?? 0,
@@ -96,12 +102,14 @@ export function triggerVehicleKillFx(game, unit, pos = null) {
       ? 3 + Math.floor(Math.random() * 3) // 3–5
       : type === 'tank' || type === 'tankDestroyer'
         ? 2 + Math.floor(Math.random() * 3) // 2–4
-        : 2 + Math.floor(Math.random() * 2); // 2–3
+        : type === 'truck'
+          ? 1 + (Math.random() < 0.45 ? 1 : 0) // petrol tank: 1–2
+          : 2 + Math.floor(Math.random() * 2); // 2–3
   const majorBlastIndex = Math.floor(Math.random() * blasts);
 
   let delay = 0.28 + Math.random() * 0.22;
   for (let i = 0; i < blasts; i++) {
-    const spread = type === 'armoredCar' ? 1.4 : 2.6;
+    const spread = type === 'armoredCar' ? 1.4 : type === 'truck' ? 1.7 : 2.6;
     game._pendingCookOffs.push({
       x: p.x + (Math.random() - 0.5) * spread,
       y: (p.y ?? 0) + 0.3 + Math.random() * 0.6,
@@ -164,8 +172,11 @@ export function updateVehicleCookOffs(game, dt) {
     if (scene) {
       // Every cook-off sequence contains one unmistakable magazine detonation;
       // subsequent cartridges use the lower-intensity capped effect.
-      if (c.major) spawnShellExplosion(scene, c, 'heavy');
-      else spawnShellExplosionLite(scene, c, c.tier);
+      if (c.major) {
+        spawnShellExplosion(scene, c, c.sourceType === 'truck' ? 'medium' : 'heavy');
+      } else {
+        spawnShellExplosionLite(scene, c, c.sourceType === 'truck' ? 'medium' : c.tier);
+      }
     }
 
     sounds.playImpact('explosion', { x: c.x, z: c.z }, 0);
@@ -180,7 +191,12 @@ export function updateVehicleCookOffs(game, dt) {
 
     // Keep wreck fire alive / re-assert if mesh still present
     const u = c.unit;
-    if (u && !u.wreckFire && u.mesh?.parent && isTankType(u.def?.type)) {
+    if (
+      u &&
+      !u.wreckFire &&
+      u.mesh?.parent &&
+      (isTankType(u.def?.type) || u.def?.type === 'truck')
+    ) {
       u.wreckFire = spawnTankWreckFire(scene, u.position, u.mesh);
     }
   }

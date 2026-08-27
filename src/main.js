@@ -90,12 +90,25 @@ globalThis.screen?.orientation?.addEventListener?.('change', applyLandscapeGate)
 window.addEventListener('pointerdown', tryLockLandscape, { capture: true });
 
 const ui = new UIManager(uiRoot, {
-  onMenuVisible(visible) {
+  onMenuVisible(visible, screenId) {
     if (sounds.inBattle) {
-      if (!visible) sounds.setMenuMusicActive(false);
+      if (!visible) {
+        sounds.setMenuMusicActive(false);
+        sounds.setMemorialMusicActive(false);
+      }
       return;
     }
-    sounds.setMenuMusicActive(visible);
+    if (!visible) {
+      sounds.setMenuMusicActive(false);
+      sounds.setMemorialMusicActive(false);
+      return;
+    }
+    if (screenId === 'war-stats') {
+      sounds.setMemorialMusicActive(true);
+      return;
+    }
+    sounds.setMemorialMusicActive(false);
+    sounds.setMenuMusicActive(true);
   },
   async onStartGame(factionId, mapId, gameMode, options = {}) {
     primeAudio();
@@ -151,6 +164,12 @@ const ui = new UIManager(uiRoot, {
   },
   onVehicleEntry(targetId) {
     game?.issueSelectedVehicleEntry(targetId);
+  },
+  onGunTowAttach(targetId) {
+    game?.issueSelectedTowAttach(targetId);
+  },
+  onDetachTowedGun() {
+    game?.detachSelectedTowedGun();
   },
   onVehicleEntryHover(hovered) {
     game?.setVehicleEntryActionHovered(hovered);
@@ -247,6 +266,9 @@ const ui = new UIManager(uiRoot, {
   },
   onToggleCapturePoints(enabled) {
     game?.setCapturePointsVisible(enabled);
+  },
+  onToggleUnitRangeRings(enabled) {
+    game?.setUnitRangeRingsEnabled(enabled);
   },
   onToggleSeekCover(enabled) {
     game?.setSeekCoverMode(enabled);

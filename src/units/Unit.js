@@ -423,9 +423,9 @@ export class Unit {
     this._lastPathRepathAt = 0;
     if (playerOrder) this._pendingMountTankId = null;
 
-    // A short click into a tank's rear arc is a tactical withdrawal: retain
-    // the hull's current facing so frontal armour and the turret stay toward
-    // the threat. Longer moves still turn around and use normal pathing.
+    // A short click into a tank or truck's rear arc is a tactical withdrawal:
+    // retain the hull's current facing and reverse. Longer moves still turn
+    // around and use normal pathing.
     this._reverseMoveOrder =
       playerOrder && shouldUseTacticalReverse(this, x, z);
 

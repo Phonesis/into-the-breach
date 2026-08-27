@@ -33,6 +33,8 @@ const SAMPLE_URLS = {
   engine_tank_destroyer_japan: publicUrl('sounds/engine-tank-destroyer-japan.wav'),
   engine_armored_car: publicUrl('sounds/engine-armored-car.wav'),
   engine_armored_car_exhaust: publicUrl('sounds/engine-armored-car-exhaust.wav'),
+  engine_truck: publicUrl('sounds/engine-truck.wav'),
+  engine_truck_exhaust: publicUrl('sounds/engine-truck-exhaust.wav'),
   aircraft_flyby: publicUrl('sounds/aircraft-flyby.wav'),
   aircraft_flyby_exhaust: publicUrl('sounds/aircraft-flyby-exhaust.wav'),
   aircraft_flyby_prop: publicUrl('sounds/aircraft-flyby-prop.wav'),
@@ -53,6 +55,10 @@ for (const faction of ['germany', 'usa', 'uk', 'russia', 'japan']) {
   );
   SAMPLE_URLS[`engine_armored_car_${faction}_exhaust`] = publicUrl(
     `sounds/engine-armored-car-${faction}-exhaust.wav`
+  );
+  SAMPLE_URLS[`engine_truck_${faction}`] = publicUrl(`sounds/engine-truck-${faction}.wav`);
+  SAMPLE_URLS[`engine_truck_${faction}_exhaust`] = publicUrl(
+    `sounds/engine-truck-${faction}-exhaust.wav`
   );
   // Faction fighter engine loops for strafe / bomb fly-bys
   SAMPLE_URLS[`aircraft_flyby_${faction}`] = publicUrl(
@@ -199,6 +205,7 @@ const INFANTRY_TYPES = new Set([
   'engineer',
   'mortar',
   'vehicleCrew',
+  'truckDriver',
 ]);
 
 const UNIT_SELECT_COUNT = 6;
@@ -214,6 +221,7 @@ const VEHICLE_CREW_VOICE_TYPES = new Set([
   'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
+  'truck',
 ]);
 const VEHICLE_CREW_FACTIONS = ['usa', 'uk', 'germany', 'russia', 'japan'];
 const VEHICLE_SELECT_COUNT = 4;
@@ -221,6 +229,11 @@ const VEHICLE_ATTACK_COUNT = 4;
 const VEHICLE_MOVE_COUNT = 4;
 const VEHICLE_RETREAT_COUNT = 4;
 const VEHICLE_UNDERFIRE_COUNT = 6;
+const TRUCK_SELECT_COUNT = 4;
+const TRUCK_ATTACK_COUNT = 3;
+const TRUCK_MOVE_COUNT = 4;
+const TRUCK_RETREAT_COUNT = 4;
+const TRUCK_UNDERFIRE_COUNT = 4;
 /** After the first move ack, keep that unit quiet for a random stretch. */
 const VEHICLE_MOVE_VOICE_GAP_MIN_MS = 14000;
 const VEHICLE_MOVE_VOICE_GAP_MAX_MS = 28000;
@@ -278,7 +291,7 @@ export function isVehicleCrewVoiceType(type) {
 }
 
 export function unitVoiceClass(type) {
-  if (type === 'paratrooper' || type === 'vehicleCrew') return 'infantry';
+  if (type === 'paratrooper' || type === 'vehicleCrew' || type === 'truckDriver') return 'infantry';
   if (UNIT_CLASS_VOICE_TYPE_SET.has(type)) return type;
   return null;
 }
@@ -399,8 +412,10 @@ export class SoundManager {
     this.vehicleEngines = null;
     this.strafeAircraft = null;
     this.menuMusic = null;
+    this.memorialMusic = null;
     this.endMusic = null;
     this.menuMusicVisible = false;
+    this.memorialMusicVisible = false;
     this.inBattle = false;
     this._resumePromise = null;
     this._warmedUp = false;
@@ -440,6 +455,11 @@ export class SoundManager {
     this.vehicleMoveBuffers = emptyFactionVoiceMap();
     this.vehicleRetreatBuffers = emptyFactionVoiceMap();
     this.vehicleUnderFireBuffers = emptyFactionVoiceMap();
+    this.truckSelectBuffers = emptyFactionVoiceMap();
+    this.truckAttackBuffers = emptyFactionVoiceMap();
+    this.truckMoveBuffers = emptyFactionVoiceMap();
+    this.truckRetreatBuffers = emptyFactionVoiceMap();
+    this.truckUnderFireBuffers = emptyFactionVoiceMap();
     this.unitClassVoiceBuffers = emptyUnitClassVoiceBuffers();
     /**
      * Commander order lines: buffers[faction][kind] = AudioBuffer
@@ -564,16 +584,23 @@ export class SoundManager {
       this.vehicleEngines = new VehicleEngineAudio(this);
       this.strafeAircraft = new StrafeAircraftAudio(this);
       this.menuMusic = new MenuMusic(this);
+      this.memorialMusic = new MenuMusic(this, {
+        url: publicUrl('music/war-stats-theme.ogg'),
+        targetGain: 0.34,
+        fadeSec: 1.8,
+      });
       this.endMusic = new EndMusic(this);
       // Put the small menu theme ahead of the large combat sample batch so a
       // cold cache can start music promptly after the first user gesture.
       this.menuMusic.ensureLoaded();
+      this.memorialMusic.ensureLoaded();
       this._coreLoadPromise = new Promise((resolve) => {
         this._resolveCoreLoad = resolve;
       });
       this._loadPromise = this._loadSamples();
-      if (this.menuMusicVisible && !this.inBattle) {
-        this.menuMusic.setMenuActive(true);
+      if (!this.inBattle) {
+        if (this.memorialMusicVisible) this.memorialMusic.setMenuActive(true);
+        else if (this.menuMusicVisible) this.menuMusic.setMenuActive(true);
       }
       return true;
     } catch {
@@ -596,6 +623,7 @@ export class SoundManager {
       this.vehicleEngines = null;
       this.strafeAircraft = null;
       this.menuMusic = null;
+      this.memorialMusic = null;
       return false;
     }
   }
@@ -830,6 +858,35 @@ export class SoundManager {
     loadVehicleVoice('underfire', VEHICLE_UNDERFIRE_COUNT, this.vehicleUnderFireBuffers);
     await Promise.all(vehicleVoiceLoads);
 
+    const truckVoiceLoads = [];
+    const loadTruckVoice = (kind, count, target) => {
+      for (const faction of VEHICLE_CREW_FACTIONS) {
+        const n = this._constrainedAudio ? Math.min(2, count) : count;
+        for (let i = 1; i <= n; i++) {
+          const num = String(i).padStart(2, '0');
+          truckVoiceLoads.push(
+            (async () => {
+              try {
+                const buf = await this._loadDecodedSample(
+                  publicUrl(`sounds/truck-${kind}-${faction}-${num}.wav`)
+                );
+                if (!buf) return;
+                target[faction].push(buf);
+              } catch {
+                /* missing */
+              }
+            })()
+          );
+        }
+      }
+    };
+    loadTruckVoice('select', TRUCK_SELECT_COUNT, this.truckSelectBuffers);
+    loadTruckVoice('attack', TRUCK_ATTACK_COUNT, this.truckAttackBuffers);
+    loadTruckVoice('move', TRUCK_MOVE_COUNT, this.truckMoveBuffers);
+    loadTruckVoice('retreat', TRUCK_RETREAT_COUNT, this.truckRetreatBuffers);
+    loadTruckVoice('underfire', TRUCK_UNDERFIRE_COUNT, this.truckUnderFireBuffers);
+    await Promise.all(truckVoiceLoads);
+
     const classVoiceLoads = [];
     for (const unitClass of UNIT_CLASS_VOICE_TYPES) {
       for (const kind of UNIT_CLASS_VOICE_KINDS) {
@@ -994,6 +1051,21 @@ export class SoundManager {
    * @param {'select'|'move'|'attack'|'retreat'|'underfire'} kind
    */
   _voicePoolFor(kind, unitType, factionKey) {
+    if (unitType === 'truck') {
+      const truckPool =
+        kind === 'select'
+          ? this.truckSelectBuffers[factionKey]
+          : kind === 'attack'
+            ? this.truckAttackBuffers[factionKey]
+            : kind === 'move'
+              ? this.truckMoveBuffers[factionKey]
+              : kind === 'retreat'
+                ? this.truckRetreatBuffers[factionKey]
+                : kind === 'underfire'
+                  ? this.truckUnderFireBuffers[factionKey]
+                  : null;
+      if (truckPool?.length) return truckPool;
+    }
     if (isVehicleCrewVoiceType(unitType)) {
       if (kind === 'select') return this.vehicleSelectBuffers[factionKey];
       if (kind === 'attack') return this.vehicleAttackBuffers[factionKey];
@@ -1270,6 +1342,8 @@ export class SoundManager {
         if (this.inBattle) {
           this._startBattleAudioLock();
           this._startBattleAtmos();
+        } else if (this.memorialMusicVisible) {
+          this.memorialMusic?.setMenuActive(true);
         } else if (this.menuMusicVisible) {
           this.menuMusic?.setMenuActive(true);
         }
@@ -1361,9 +1435,14 @@ export class SoundManager {
       this.clearVehicleEngines();
       this._stopBattleAtmos();
       this.menuMusic?.stopImmediate();
+      this.memorialMusic?.stopImmediate();
       this.endMusic?.stopImmediate();
     } else if (this.inBattle && !this.endMusic?.isPlaying) {
       this._startBattleAtmos();
+    } else if (this.memorialMusicVisible) {
+      this.memorialMusic?.setMenuActive(true);
+    } else if (this.menuMusicVisible) {
+      this.menuMusic?.setMenuActive(true);
     }
   }
 
@@ -1371,7 +1450,9 @@ export class SoundManager {
   enterBattle() {
     this.inBattle = true;
     this.menuMusicVisible = false;
+    this.memorialMusicVisible = false;
     this.menuMusic?.stopImmediate();
+    this.memorialMusic?.stopImmediate();
     this.endMusic?.stopImmediate();
     void this.ensureLoaded().then(() => {
       void this._resumeContext().then(() => {
@@ -1412,10 +1493,26 @@ export class SoundManager {
     if (this.inBattle && active) return;
     this.menuMusicVisible = active;
     if (!active) {
-      this.menuMusic?.stopImmediate();
+      this.menuMusic?.fadeOut();
       return;
     }
+    this.memorialMusicVisible = false;
+    this.memorialMusic?.fadeOut();
     this.menuMusic?.setMenuActive(true);
+  }
+
+  /** Quiet cemetery lament used only on the War Stats record. */
+  setMemorialMusicActive(active) {
+    if (this.inBattle && active) return;
+    this.memorialMusicVisible = active;
+    if (!active) {
+      this.memorialMusic?.fadeOut();
+      return;
+    }
+    this.menuMusicVisible = false;
+    this.menuMusic?.fadeOut();
+    this.memorialMusic?.ensureLoaded();
+    this.memorialMusic?.setMenuActive(true);
   }
 
   updateVehicleEngines(units, dt) {
@@ -1696,9 +1793,7 @@ export class SoundManager {
     this._runWhenReady(() => {
       const key = unitUnderFireVoiceKey(factionId);
       // Never fall back to another language — silent is better than English on German troops
-      const bufs = isVehicleCrewVoiceType(opts.unitType)
-        ? this.vehicleUnderFireBuffers[key]
-        : this.unitUnderFireBuffers[key];
+      const bufs = this._voicePoolFor('underfire', opts.unitType, key);
       if (!bufs?.length) return;
 
       const now = performance.now();

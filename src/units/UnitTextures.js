@@ -24,6 +24,7 @@ const VEHICLE_TYPES = new Set([
   'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
+  'truck',
   'artillery',
   'antiTankGun',
 ]);

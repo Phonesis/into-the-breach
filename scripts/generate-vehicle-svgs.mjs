@@ -227,6 +227,38 @@ const SVGS = {
       hull: `<path d="M42 44 L44 22 L55 25 L54 44 Z"/>`,
       gun: `<rect x="52" y="18" width="59" height="4"/><rect x="107" y="16" width="6" height="8"/>`,
     }),
+  'truck-germany': () =>
+    wrap('Opel Blitz', 'germany', {
+      tracks: `<circle cx="28" cy="52" r="8"/><circle cx="100" cy="52" r="8"/>`,
+      hull: `<path d="M18 44 L18 32 L46 32 L46 20 L70 20 L70 32 L112 32 L112 44 Z"/><rect x="48" y="22" width="20" height="10"/>`,
+      gun: `<rect x="20" y="24" width="22" height="8"/><rect x="70" y="18" width="38" height="14" opacity="0.55"/>`,
+      detail: `<rect x="22" y="26" width="8" height="5"/>`,
+    }),
+  'truck-usa': () =>
+    wrap('GMC CCKW', 'usa', {
+      tracks: `<circle cx="24" cy="52" r="7"/><circle cx="56" cy="52" r="7"/><circle cx="104" cy="52" r="7"/>`,
+      hull: `<path d="M16 44 L16 31 L48 31 L48 19 L74 19 L74 31 L116 31 L116 44 Z"/>`,
+      gun: `<rect x="18" y="23" width="26" height="8"/><rect x="74" y="17" width="40" height="14" opacity="0.55"/>`,
+    }),
+  'truck-uk': () =>
+    wrap('Bedford QLD', 'uk', {
+      tracks: `<circle cx="32" cy="52" r="8"/><circle cx="102" cy="52" r="8"/>`,
+      hull: `<path d="M20 44 L20 18 L58 18 L58 32 L114 32 L114 44 Z"/>`,
+      gun: `<rect x="24" y="20" width="28" height="12"/><rect x="58" y="18" width="52" height="14" opacity="0.55"/>`,
+    }),
+  'truck-russia': () =>
+    wrap('ZIS-5', 'russia', {
+      tracks: `<circle cx="26" cy="52" r="8"/><circle cx="102" cy="52" r="8"/>`,
+      hull: `<path d="M16 44 L16 30 L44 30 L44 18 L68 18 L68 30 L114 30 L114 44 Z"/>`,
+      gun: `<rect x="18" y="22" width="24" height="8"/><rect x="68" y="16" width="42" height="14" opacity="0.55"/>`,
+    }),
+  'truck-japan': () =>
+    wrap('Type 94 Truck', 'japan', {
+      tracks: `<circle cx="24" cy="52" r="7"/><circle cx="54" cy="52" r="7"/><circle cx="102" cy="52" r="7"/>`,
+      hull: `<path d="M16 44 L16 32 L46 32 L46 20 L68 20 L68 32 L112 32 L112 44 Z"/>`,
+      gun: `<rect x="18" y="24" width="24" height="8"/><rect x="68" y="18" width="40" height="14" opacity="0.55"/>`,
+      markings: `<path d="m96 28 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/>`,
+    }),
 };
 
 for (const [name, fn] of Object.entries(SVGS)) {

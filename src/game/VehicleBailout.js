@@ -11,16 +11,34 @@ function squadMembers(mesh) {
   return members;
 }
 
-/** Spawn a two-man armed crew and animate each man climbing from the vehicle hatch. */
+function bailoutCrewDef(vehicle) {
+  if (vehicle?.def?.type === 'truck') {
+    return vehicle.faction?.units?.truckDriver ?? vehicle.faction?.units?.vehicleCrew;
+  }
+  return vehicle.faction?.units?.vehicleCrew;
+}
+
+function bailoutExitDistance(type) {
+  if (type === 'armoredCar' || type === 'truck') return 1.8;
+  return 2.35;
+}
+
+function bailoutHatchHeight(type) {
+  if (type === 'armoredCar' || type === 'truck') return 1.05;
+  if (type === 'superHeavyTank') return 2.05;
+  return 1.65;
+}
+
+/** Spawn an armed crew and animate each man climbing from the vehicle hatch. */
 export function spawnVehicleCrewBailout(game, vehicle) {
   if (!game?.scene || !vehicle || vehicle._crewBailedOut) return null;
-  const def = vehicle.faction?.units?.vehicleCrew;
+  const def = bailoutCrewDef(vehicle);
   if (!def) return null;
 
   vehicle._crewBailedOut = true;
   const yaw = vehicle.mesh.rotation?.y ?? 0;
   const side = Math.random() < 0.5 ? -1 : 1;
-  const exitDistance = vehicle.def.type === 'armoredCar' ? 1.8 : 2.35;
+  const exitDistance = bailoutExitDistance(vehicle.def.type);
   const rightX = Math.cos(yaw);
   const rightZ = -Math.sin(yaw);
   const endX = vehicle.position.x + rightX * exitDistance * side;
@@ -31,7 +49,7 @@ export function spawnVehicleCrewBailout(game, vehicle) {
   const vehicleGroundY = vehicle._mapDef
     ? sampleTerrainHeight(vehicle.position.x, vehicle.position.z, vehicle._mapDef)
     : vehicle.position.y;
-  const hatchHeight = vehicle.def.type === 'armoredCar' ? 1.05 : vehicle.def.type === 'superHeavyTank' ? 2.05 : 1.65;
+  const hatchHeight = bailoutHatchHeight(vehicle.def.type);
 
   const crew = spawnUnitAt({
     def,

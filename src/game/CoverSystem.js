@@ -122,6 +122,7 @@ const COVER_UNIT_TYPES = new Set([
   'engineer',
   'radioOperator',
   'vehicleCrew',
+  'truckDriver',
 ]);
 
 const WRECK_COVER_TYPES = new Set([
@@ -129,6 +130,7 @@ const WRECK_COVER_TYPES = new Set([
   'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
+  'truck',
   'artillery',
   'antiTankGun',
 ]);
@@ -138,6 +140,7 @@ const STATIONARY_VEHICLE_COVER_TYPES = new Set([
   'tankDestroyer',
   'superHeavyTank',
   'armoredCar',
+  'truck',
 ]);
 
 const LIVING_VEHICLE_COVER_PREFIX = 'living-vehicle:';

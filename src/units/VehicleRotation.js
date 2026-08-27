@@ -32,18 +32,24 @@ const FIXED_WEAPON_SLEW_RATE = 4.2;
 const DEG_TO_RAD = Math.PI / 180;
 const DEFAULT_INDEPENDENT_MG_TRAVERSE_DEG = 105;
 const DEFAULT_TURRET_TRAVERSE_DEG = {
+  truck: 0,
   armoredCar: 26,
   tank: 18,
   tankDestroyer: 6,
   superHeavyTank: 10,
 };
 const STATIONARY_HULL_TRAVERSE_DEG = {
+  // Wheeled trucks steer; they should not tank-pivot. These rates are a
+  // fallback if something still requests a stationary hull swing.
+  truck: 16,
   armoredCar: 30,
   tank: 18,
   tankDestroyer: 15,
   superHeavyTank: 12,
 };
 const MOVING_HULL_TRAVERSE_DEG = {
+  // ~22°/s with a rolling crawl yields a visible turning circle, not a dime spin.
+  truck: 22,
   armoredCar: 52,
   tank: 28,
   tankDestroyer: 24,

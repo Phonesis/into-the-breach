@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="GMC CCKW">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#2a2a28"><circle cx="24" cy="52" r="7"/><circle cx="56" cy="52" r="7"/><circle cx="104" cy="52" r="7"/></g>
+  <g fill="#4a5c4a"><path d="M16 44 L16 31 L48 31 L48 19 L74 19 L74 31 L116 31 L116 44 Z"/></g>
+  <g fill="#3a4538"><rect x="18" y="23" width="26" height="8"/><rect x="74" y="17" width="40" height="14" opacity="0.55"/></g>
+  <g fill="#5a6e58" opacity="0.85"></g>
+</svg>

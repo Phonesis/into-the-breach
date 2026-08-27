@@ -33,6 +33,7 @@
     "bake-elevenlabs-faction-death": "node scripts/bake-elevenlabs-faction-death.mjs",
     "bake-elevenlabs-attack-orders": "node scripts/bake-elevenlabs-attack-orders.mjs",
     "bake-elevenlabs-vehicle-crew": "node scripts/bake-elevenlabs-vehicle-crew.mjs",
+    "bake-elevenlabs-truck-crew": "node scripts/bake-elevenlabs-truck-crew.mjs",
     "bake-elevenlabs-unit-voices": "node scripts/bake-elevenlabs-unit-voices.mjs",
     "bake-elevenlabs-tank-destroyers": "node scripts/bake-elevenlabs-tank-destroyers.mjs",
     "bake-elevenlabs-at-guns": "node scripts/bake-elevenlabs-at-guns.mjs",
@@ -47,6 +48,7 @@
     "extend-battle-atmos": "node scripts/extend-battle-atmos.mjs",
     "expand-gun-variety": "node scripts/expand-gun-variety.mjs",
     "generate-menu-music": "node scripts/bake-elevenlabs-menu-music.mjs",
+    "generate-war-stats-music": "node scripts/bake-elevenlabs-war-stats-music.mjs",
     "generate-end-music": "node scripts/bake-elevenlabs-end-music.mjs"
   },
   "dependencies": {

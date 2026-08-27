@@ -26,6 +26,8 @@ const MARKER_HEIGHT = {
   mortar: 2.65,
   antiTankGun: 2.95,
   armoredCar: 3.35,
+  truck: 3.5,
+  truckDriver: 2.45,
   tank: 4.15,
   tankDestroyer: 4.15,
   superHeavyTank: 4.65,

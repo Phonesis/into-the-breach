@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="Type 94 Truck">
+  <rect width="128" height="64" fill="#e8e6e0"/>
+  <g fill="#282820"><circle cx="24" cy="52" r="7"/><circle cx="54" cy="52" r="7"/><circle cx="102" cy="52" r="7"/></g>
+  <g fill="#66623c"><path d="M16 44 L16 32 L46 32 L46 20 L68 20 L68 32 L112 32 L112 44 Z"/></g>
+  <g fill="#41422b"><rect x="18" y="24" width="24" height="8"/><rect x="68" y="18" width="40" height="14" opacity="0.55"/></g>
+  <g fill="#82734b" opacity="0.85"></g>
+  <g fill="#c8aa55"><path d="m96 28 1 2 2.3.3-1.65 1.6.4 2.3-2.05-1.08-2.05 1.08.4-2.3-1.65-1.6 2.3-.3z"/></g>
+</svg>

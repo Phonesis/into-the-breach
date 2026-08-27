@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getMoveReachConfig, isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
+import { canUseTacticalReverse, getMoveReachConfig, isTankType, isTruckType, isVehicleUnit, isWheeledVehicle } from '../units/VehicleTypes.js';
 import { faceUnitTowardMovement } from '../units/VehicleRotation.js';
 import {
   createAOMap,
@@ -1297,7 +1297,8 @@ function terrainPoseRadius(type) {
     case 'superHeavyTank': return 2.15;
     case 'tankDestroyer':
     case 'tank': return 1.7;
-    case 'armoredCar': return 1.35;
+    case 'armoredCar':
+    case 'truck': return 1.35;
     case 'artillery': return 1.35;
     case 'antiTankGun': return 1.2;
     case 'machineGun':
@@ -1307,7 +1308,7 @@ function terrainPoseRadius(type) {
 }
 
 function terrainClearance(type) {
-  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') return 0.09;
+  if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar' || type === 'truck') return 0.09;
   if (type === 'artillery' || type === 'antiTankGun') return 0.065;
   return 0.025;
 }
@@ -1358,7 +1359,7 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
   const forwardSlope = (front - back) / (radius * 2);
   const rightSlope = (right - left) / (radius * 2);
 
-  const maxTilt = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type)
+  const maxTilt = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'truck', 'artillery', 'antiTankGun'].includes(unit.def?.type)
     ? 0.46
     : 0.32;
   const wreckPose = unit._wreckTraversalPose;
@@ -1387,7 +1388,7 @@ export function updateUnitTerrainPose(unit, mapDef, dt) {
     }
   }
 
-  const vehicleLike = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'artillery', 'antiTankGun'].includes(unit.def?.type);
+  const vehicleLike = ['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'truck', 'artillery', 'antiTankGun'].includes(unit.def?.type);
   const targetY =
     center +
     terrainClearance(unit.def?.type) +
@@ -1545,24 +1546,35 @@ function usesHullAlignedDrive(unit) {
   return isVehicleUnit(unit?.def?.type);
 }
 
-const ARMORED_CAR_TYPE = 'armoredCar';
-const ARMORED_CAR_ACCELERATION = 8.5;
-const ARMORED_CAR_BRAKING = 12.5;
+const WHEELED_ACCELERATION = 8.5;
+const WHEELED_BRAKING = 12.5;
+// Keep in sync with MOVING_HULL_TRAVERSE_DEG.truck. Speed is capped so the
+// turning radius stays inside the remaining distance — otherwise a side
+// waypoint sits at the circle's centre and the truck orbits forever.
+const TRUCK_STEER_RATE = (22 * Math.PI) / 180;
+const TRUCK_UTURN_MIN_DIST = 7;
+
+function getTowingSpeedMultiplier(unit) {
+  if (!unit?._towedGunId) return 1;
+  if (unit._towedGunType === 'artillery') return 0.52;
+  if (unit._towedGunType === 'antiTankGun') return 0.68;
+  return 0.6;
+}
 
 function approachValue(current, target, maxDelta) {
   if (current < target) return Math.min(target, current + maxDelta);
   return Math.max(target, current - maxDelta);
 }
 
-function getArmoredCarDriveSpeed(unit, targetSpeed, dt) {
-  if (unit.def?.type !== ARMORED_CAR_TYPE) return targetSpeed;
+function getWheeledDriveSpeed(unit, targetSpeed, dt) {
+  if (!isWheeledVehicle(unit.def?.type)) return targetSpeed;
 
   const currentSpeed = Number.isFinite(unit._driveSpeed)
     ? Math.max(0, unit._driveSpeed)
     : 0;
   const rate = targetSpeed >= currentSpeed
-    ? ARMORED_CAR_ACCELERATION
-    : ARMORED_CAR_BRAKING;
+    ? WHEELED_ACCELERATION
+    : WHEELED_BRAKING;
   unit._driveSpeed = approachValue(
     currentSpeed,
     Math.max(0, targetSpeed),
@@ -1578,7 +1590,7 @@ function getArmoredCarDriveSpeed(unit, targetSpeed, dt) {
  */
 export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
   if (!dest || !mapDef) {
-    if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+    if (isWheeledVehicle(unit.def?.type)) unit._driveSpeed = 0;
     return false;
   }
 
@@ -1587,7 +1599,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
   const canalMove = resolveUrbanCanalMoveTarget(unit, dest, mapDef, cfg);
   const movementDest = canalMove.target;
   if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
-    if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+    if (isWheeledVehicle(unit.def?.type)) unit._driveSpeed = 0;
     if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
     return false;
   }
@@ -1604,14 +1616,16 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
   const reversing =
     unit._reverseMoveOrder &&
     !unit.retreating &&
-    isTankType(unit.def?.type);
+    canUseTacticalReverse(unit.def?.type);
   const reverseSpeedMultiplier = reversing ? 0.55 : 1;
+  const truck = isTruckType(unit.def?.type);
   // How aligned the hull must be before committing full drive speed.
-  const alignDotMin = reversing ? -0.82 : 0.78;
+  // Trucks need a tighter heading before they open the throttle.
+  const alignDotMin = reversing ? -0.82 : truck ? 0.9 : 0.78;
 
   for (let s = 0; s < substeps; s++) {
     if (hasReachedMoveDest(unit, movementDest, mapDef, horizReach, cfg.height)) {
-      if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+      if (isWheeledVehicle(unit.def?.type)) unit._driveSpeed = 0;
       if (canalMove.blockedDestination) cancelMoveAtWaterEdge(unit);
       return false;
     }
@@ -1620,7 +1634,7 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
     const dz = movementDest.z - unit.position.z;
     const horiz = Math.hypot(dx, dz);
     if (horiz < 0.001) {
-      if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+      if (isWheeledVehicle(unit.def?.type)) unit._driveSpeed = 0;
       return false;
     }
 
@@ -1632,17 +1646,19 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
     const desiredNx = reversing ? -nx : nx;
     const desiredNz = reversing ? -nz : nz;
 
+    let turnDelta = 0;
     if (hullDrive && unit.mesh && !unit._mobilityDamaged) {
       const currentYaw = unit.mesh.rotation.y ?? 0;
       const desiredYaw = Math.atan2(desiredNx, desiredNz);
-      const turnDelta = Math.abs(
+      turnDelta = Math.abs(
         Math.atan2(
           Math.sin(desiredYaw - currentYaw),
           Math.cos(desiredYaw - currentYaw)
         )
       );
       faceUnitTowardMovement(unit, desiredNx, desiredNz, subDt, {
-        stationaryTurn: isTankType(unit.def?.type) && turnDelta > 0.5,
+        // Trucks steer on the roll — never tank-pivot for a large heading change.
+        stationaryTurn: !truck && isTankType(unit.def?.type) && turnDelta > 0.5,
       });
     } else if (!hullDrive) {
       faceUnitTowardMovement(unit, nx, nz, subDt);
@@ -1653,6 +1669,15 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
     const fwdZ = Math.cos(yaw);
     // Projection of desired travel onto hull forward (negative = reverse).
     const forwardDot = nx * fwdX + nz * fwdZ;
+    const drive = reversing
+      ? Math.min(0, forwardDot)
+      : Math.max(0, forwardDot);
+    // Only crawl a U-turn when the waypoint is far enough that the arc can
+    // finish. A nearby side click would otherwise become a permanent orbit.
+    const farUTurn = truck && !reversing && horiz > TRUCK_UTURN_MIN_DIST && forwardDot < 0.2;
+    const truckCommitted = reversing
+      ? Math.abs(drive) > 0.12
+      : drive > 0.18 || farUTurn;
 
     if (horiz < cfg.horiz * 0.9) {
       const groundY = sampleUnitTerrainHeight(
@@ -1664,7 +1689,8 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
       unit.position.y = groundY + (destY - groundY) * Math.min(1, subDt * 5);
       if (Math.abs(unit.position.y - destY) < 0.4 && horiz < horizReach) return false;
       // Final creep: only along the hull axis so vehicles don't slide in.
-      if (horiz > 0.08 && (!hullDrive || Math.abs(forwardDot) > 0.55)) {
+      const creepDot = truck ? 0.28 : 0.55;
+      if (horiz > 0.08 && (!hullDrive || Math.abs(forwardDot) > creepDot)) {
         const axisX = hullDrive ? fwdX * Math.sign(forwardDot || 1) : nx;
         const axisZ = hullDrive ? fwdZ * Math.sign(forwardDot || 1) : nz;
         const creep = Math.min(
@@ -1684,45 +1710,54 @@ export function advanceUnitOnTerrain(unit, dest, mapDef, dt, options = {}) {
     }
 
     // Turn-in-place when the hull is badly misaligned — no crab-walk.
-    if (hullDrive && !unit._mobilityDamaged) {
+    // Trucks may crawl a distant U-turn, but they still pause near a waypoint
+    // so they steer onto it instead of circling it.
+    if (hullDrive && !unit._mobilityDamaged && !(truck && truckCommitted)) {
       const aligned = reversing
         ? forwardDot <= alignDotMin
         : forwardDot >= alignDotMin;
       if (!aligned) {
         // Nudge slowly only if mostly forward/back already; otherwise pure turn.
         if (Math.abs(forwardDot) < 0.35) {
-          if (unit.def?.type === ARMORED_CAR_TYPE) unit._driveSpeed = 0;
+          if (isWheeledVehicle(unit.def?.type)) unit._driveSpeed = 0;
           continue;
         }
       }
     }
 
-    let targetSpeed = unit.def.speed * reverseSpeedMultiplier;
+    let targetSpeed = unit.def.speed * reverseSpeedMultiplier * getTowingSpeedMultiplier(unit);
     if (uphill > 2) targetSpeed *= 0.58;
     else if (uphill > 0.6) targetSpeed *= 0.78;
     else if (uphill < -1.5) targetSpeed *= 1.05;
 
     if (hullDrive) {
       // Drive along hull forward; scale by alignment so sharp turns slow naturally.
-      const drive = reversing
-        ? Math.min(0, forwardDot) // reverse only when nose is away from dest
-        : Math.max(0, forwardDot);
-      const alignScale =
-        unit.def?.type === ARMORED_CAR_TYPE
+      const alignScale = truck
+        ? Math.max(0, Math.min(1, (Math.abs(drive) - 0.42) / 0.58))
+        : isWheeledVehicle(unit.def?.type)
           ? Math.max(0, Math.min(1, (Math.abs(drive) - 0.2) / 0.8))
           : Math.max(0, Math.min(1, (Math.abs(drive) - 0.35) / 0.55));
-      const turnSpeedScale =
-        unit.def?.type === ARMORED_CAR_TYPE
+      const turnSpeedScale = truck
+        ? 0.26 + 0.74 * alignScale * alignScale
+        : isWheeledVehicle(unit.def?.type)
           ? 0.18 + 0.82 * alignScale * alignScale
           : 0.15 + 0.85 * alignScale;
       targetSpeed *= turnSpeedScale;
-      const speed = getArmoredCarDriveSpeed(unit, targetSpeed, subDt) * subDt;
+      if (truck && turnDelta > 0.18) {
+        const maxTurnSpeed = TRUCK_STEER_RATE * Math.max(1.25, horiz * 0.55);
+        targetSpeed = Math.min(targetSpeed, maxTurnSpeed);
+        if ((unit._driveSpeed ?? 0) > maxTurnSpeed) unit._driveSpeed = maxTurnSpeed;
+      }
+      const speed = getWheeledDriveSpeed(unit, targetSpeed, subDt) * subDt;
       const step = Math.min(speed, horiz);
       const sign = drive < 0 || reversing ? -1 : 1;
-      // Only roll when we have meaningful forward/back commitment.
-      if (Math.abs(drive) > 0.25 && step > 0.001) {
-        unit.position.x += fwdX * sign * step;
-        unit.position.z += fwdZ * sign * step;
+      const roll = truck
+        ? truckCommitted && step > 0.001
+        : Math.abs(drive) > 0.25 && step > 0.001;
+      if (roll) {
+        const rollSign = farUTurn ? 1 : sign;
+        unit.position.x += fwdX * rollSign * step;
+        unit.position.z += fwdZ * rollSign * step;
         unit.position.y = sampleUnitTerrainHeight(
           unit,
           unit.position.x,

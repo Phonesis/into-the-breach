@@ -115,6 +115,7 @@ const SMALL_ARMS_TYPES = new Set([
   'armoredCar',
   'paratrooper',
   'vehicleCrew',
+  'truckDriver',
   'commander',
   'medic',
 ]);
@@ -125,6 +126,7 @@ function usesInfantryFireAimPose(type) {
     type === 'radioOperator' ||
     type === 'engineer' ||
     type === 'vehicleCrew' ||
+    type === 'truckDriver' ||
     type === 'paratrooper' ||
     type === 'sniper' ||
     type === 'commander'
@@ -389,7 +391,7 @@ const ARMOR_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', '
 const STATIONARY_MAIN_GUN_TYPES = new Set(['antiTankGun', 'artillery', 'mortar']);
 const CREW_SERVED_GUN_TYPES = new Set(['antiTankGun', 'artillery']);
 const HAND_GRENADE_THROWER_TYPES = new Set(['infantry', 'paratrooper', 'engineer']);
-const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
+const HAND_GRENADE_TARGET_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'truck']);
 /** High-angle weapons that ignore building LOS for acquire and discharge. */
 const MORTAR_INDIRECT_TYPES = new Set(['mortar']);
 const AUTHORITATIVE_SHELL_LOS_TYPES = new Set([
@@ -781,7 +783,8 @@ export function updateCombat(
       attacker.retreating ||
       attacker.surrendered ||
       attacker._captureExit ||
-      attacker._crewless
+      attacker._crewless ||
+      attacker._towedByTruckId
     ) continue;
     if (
       attacker.def.type === 'medic' ||
@@ -1271,7 +1274,9 @@ function fire(
   } else if (
     !coax &&
     !spotterRifle &&
-    (attacker.def.type === 'engineer' || attacker.def.type === 'vehicleCrew')
+    (attacker.def.type === 'engineer' ||
+      attacker.def.type === 'vehicleCrew' ||
+      attacker.def.type === 'truckDriver')
   ) {
     // Combat engineers and bailed crews use the standard small-arms VFX.
     vfxType = 'infantry';
@@ -1591,6 +1596,7 @@ function fire(
         groundImpact: false,
         mortarLoft: kind === 'mortar',
         artilleryLoft: kind === 'artillery',
+        indirectFlightTime: flight,
         from: { x: attacker.position.x, z: attacker.position.z },
         to: { x: lockX, z: lockZ },
       });
@@ -1997,11 +2003,11 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
   for (const unit of units) {
     unit._terrainMesh = options.terrainMesh ?? unit._terrainMesh ?? null;
     unit._infantryTrenches = options.infantryTrenches ?? unit._infantryTrenches ?? null;
-    if (unit.def?.type === 'armoredCar' && !unit.moveTarget) {
+    if ((unit.def?.type === 'armoredCar' || unit.def?.type === 'truck') && !unit.moveTarget) {
       unit._driveSpeed = 0;
     }
     if (unit._dropping || unit.dead || unit.surrendered || unit._captureExit || unit._crewless) continue;
-    if (isUnitMounted(unit)) continue;
+    if (isUnitMounted(unit) || unit._towedByTruckId) continue;
     // Garrisoned troops stay put; leave is handled by updateBunkerGarrison
     // (eject + repath). Moving while still "inside" caused façade thrash.
     if (isUnitGarrisoned(unit)) {
@@ -2009,7 +2015,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       continue;
     }
     if (unit._mobilityDamaged) {
-      if (unit.def?.type === 'armoredCar') unit._driveSpeed = 0;
+      if (unit.def?.type === 'armoredCar' || unit.def?.type === 'truck') unit._driveSpeed = 0;
       unit.moveTarget = null;
       unit._movePath = null;
       unit._userMoveOrder = false;
@@ -2271,7 +2277,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
 
           if (isVehicleUnit(unit.def?.type)) {
             const collisionOptions = {
-              vehicleClass: unit.def.type === 'armoredCar' ? 'light' : 'tracked',
+              vehicleClass: unit.def.type === 'armoredCar' || unit.def.type === 'truck' ? 'light' : 'tracked',
               directionX,
               directionZ,
             };
@@ -2452,7 +2458,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     }
 
     if (!unit.moveTarget) {
-      if (unit.def?.type === 'armoredCar') unit._driveSpeed = 0;
+      if (unit.def?.type === 'armoredCar' || unit.def?.type === 'truck') unit._driveSpeed = 0;
       unit._autoMoveOrderX = null;
       unit._autoMoveOrderZ = null;
       if (!unit._userMoveOrder) unit._reverseMoveOrder = false;

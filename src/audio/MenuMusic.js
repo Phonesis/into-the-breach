@@ -1,16 +1,20 @@
 /**
- * Looping cinematic menu theme — starts when menu is visible, fades out in battle.
+ * Looping cinematic menu / memorial themes — start when a menu is visible,
+ * fade out in battle. Pass `url` to play a different loop (War Stats).
  */
 
 import { publicUrl } from '../lib/publicUrl.js';
 
-const MENU_MUSIC_URL = publicUrl('music/menu-theme.ogg');
-const FADE_SEC = 1.4;
-const TARGET_GAIN = 0.42;
+const DEFAULT_MENU_MUSIC_URL = publicUrl('music/menu-theme.ogg');
+const DEFAULT_FADE_SEC = 1.4;
+const DEFAULT_TARGET_GAIN = 0.42;
 
 export class MenuMusic {
-  constructor(soundManager) {
+  constructor(soundManager, options = {}) {
     this.sm = soundManager;
+    this.url = options.url ?? DEFAULT_MENU_MUSIC_URL;
+    this.fadeSec = options.fadeSec ?? DEFAULT_FADE_SEC;
+    this.targetGain = options.targetGain ?? DEFAULT_TARGET_GAIN;
     this.buffer = null;
     this.source = null;
     this.gain = null;
@@ -19,6 +23,10 @@ export class MenuMusic {
     this._playing = false;
     /** Bumped on stop — stale ensureLoaded callbacks ignore. */
     this._generation = 0;
+  }
+
+  get isWanted() {
+    return this._wanted;
   }
 
   ensureLoaded() {
@@ -31,7 +39,7 @@ export class MenuMusic {
     const ctx = this.sm.ctx;
     if (!ctx) return;
     try {
-      const res = await fetch(MENU_MUSIC_URL);
+      const res = await fetch(this.url);
       if (!res.ok) return;
       const ab = await res.arrayBuffer();
       this.buffer = await ctx.decodeAudioData(ab);
@@ -77,7 +85,7 @@ export class MenuMusic {
       return;
     }
     if (this._playing && this.source) {
-      this._rampGain(TARGET_GAIN);
+      this._rampGain(this.targetGain);
       return;
     }
     this._stopSource();
@@ -92,7 +100,13 @@ export class MenuMusic {
     this.source.connect(this.gain);
     this.source.start(0);
     this._playing = true;
-    this._rampGain(TARGET_GAIN);
+    this._rampGain(this.targetGain);
+  }
+
+  fadeOut() {
+    this._wanted = false;
+    this._generation += 1;
+    this._fadeOut();
   }
 
   _fadeOut() {
@@ -104,12 +118,11 @@ export class MenuMusic {
     const t0 = ctx.currentTime;
     this.gain.gain.cancelScheduledValues(t0);
     this.gain.gain.setValueAtTime(this.gain.gain.value, t0);
-    this.gain.gain.linearRampToValueAtTime(0.001, t0 + FADE_SEC);
+    this.gain.gain.linearRampToValueAtTime(0.001, t0 + this.fadeSec);
     const src = this.source;
-    const gain = this.gain;
     setTimeout(() => {
       if (this.source === src && !this._wanted) this._stopSource();
-    }, FADE_SEC * 1000 + 80);
+    }, this.fadeSec * 1000 + 80);
   }
 
   _rampGain(target) {
@@ -117,7 +130,7 @@ export class MenuMusic {
     const t0 = this.sm.ctx.currentTime;
     this.gain.gain.cancelScheduledValues(t0);
     this.gain.gain.setValueAtTime(this.gain.gain.value, t0);
-    this.gain.gain.linearRampToValueAtTime(target, t0 + FADE_SEC);
+    this.gain.gain.linearRampToValueAtTime(target, t0 + this.fadeSec);
   }
 
   _stopSource() {

@@ -5,6 +5,7 @@ import {
   buildFactionInfantry,
   buildFactionCommander,
   buildFactionVehicleCrew,
+  buildFactionTruckDriver,
   buildFactionParatrooper,
   buildFactionMG,
   buildFactionMortar,
@@ -41,6 +42,7 @@ const INFANTRY_TYPES = new Set([
   'medic',
   'engineer',
   'vehicleCrew',
+  'truckDriver',
   'commander',
 ]);
 
@@ -202,6 +204,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     type === 'tankDestroyer' ||
     type === 'superHeavyTank' ||
     type === 'armoredCar' ||
+    type === 'truck' ||
     type === 'artillery' ||
     type === 'antiTankGun'
   ) {
@@ -229,6 +232,9 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     built = true;
   } else if (type === 'vehicleCrew') {
     buildFactionVehicleCrew(group, body, dark, factionId);
+    built = true;
+  } else if (type === 'truckDriver') {
+    buildFactionTruckDriver(group, body, dark, factionId);
     built = true;
   } else if (type === 'paratrooper') {
     buildFactionParatrooper(group, body, dark, factionId);
@@ -261,6 +267,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   const hitRadii = {
     infantry: 2.35,
     vehicleCrew: 1.55,
+    truckDriver: 1.35,
     paratrooper: 2.25,
     machineGun: 2,
     sniper: 1.85,
@@ -270,6 +277,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     radioOperator: 1.35,
     commander: 2.55,
     armoredCar: group.userData.hitRadius ?? 2.6,
+    truck: group.userData.hitRadius ?? 2.5,
     tankDestroyer: group.userData.hitRadius ?? 3.0,
     tank: group.userData.hitRadius ?? 3.2,
     superHeavyTank: group.userData.hitRadius ?? 3.5,
@@ -286,6 +294,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     superHeavyTank: 1.25,
     tankDestroyer: 1.08,
     armoredCar: 0.85,
+    truck: 0.95,
     artillery: 0.95,
     antiTankGun: 0.85,
     commander: 0.85,
@@ -297,6 +306,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     sniper: 0.5,
     infantry: 0.55,
     vehicleCrew: 0.52,
+    truckDriver: 0.52,
   };
   hitbox.position.y = hitY[type] ?? 0.55;
   hitbox.name = 'selectionHitbox';
@@ -313,7 +323,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.y =
-    isTankType(type) || type === 'armoredCar' || type === 'antiTankGun' ? 0.25 : 0.1;
+    isTankType(type) || type === 'armoredCar' || type === 'truck' || type === 'antiTankGun' ? 0.25 : 0.1;
   ring.name = 'selectionRing';
   group.add(ring);
 
@@ -328,7 +338,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
     })
   );
   targetRing.rotation.x = -Math.PI / 2;
-  targetRing.position.y = isTankType(type) || type === 'armoredCar' ? 0.28 : 0.12;
+  targetRing.position.y = isTankType(type) || type === 'armoredCar' || type === 'truck' ? 0.28 : 0.12;
   targetRing.renderOrder = 10;
   targetRing.name = 'targetHighlightRing';
   group.add(targetRing);
@@ -1941,10 +1951,21 @@ export function applyUnitDeathVisual(unit, { staticRestore = false } = {}) {
     type === 'medic' ||
     type === 'engineer' ||
     type === 'vehicleCrew' ||
+    type === 'truckDriver' ||
     type === 'commander'
   ) {
     unit.corpseTimeLeft = INFANTRY_CORPSE_LINGER_SEC;
     applyInfantryCorpseLook(mesh, type, { staticRestore });
+    return;
+  }
+
+  if (type === 'truck') {
+    unit.corpseTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    unit.wreckTimeLeft = VEHICLE_WRECK_LINGER_SEC;
+    applyTruckWreckLook(mesh, {
+      catastrophic: !!unit._catastrophicVehicleKill,
+      recoverable: !!unit._recoverableWreck,
+    });
     return;
   }
 
@@ -1985,6 +2006,167 @@ export function applyUnitDeathVisual(unit, { staticRestore = false } = {}) {
 export function unitHasCorpseLinger(unit) {
   if (!unit?.dead) return false;
   return !!unit.mesh?.userData?.deathVisualApplied && !!unit.mesh?.parent;
+}
+
+/** Soft-skin cargo truck blown apart: canvas ripped, cab crushed, wheels splayed. */
+export function applyTruckWreckLook(mesh, { catastrophic = false, recoverable = false } = {}) {
+  if (!mesh || mesh.userData.wreckApplied || mesh.userData.corpseApplied) return;
+  mesh.userData.wreckApplied = true;
+  mesh.userData.corpseApplied = true;
+  hideUnitChrome(mesh);
+
+  const hullPreset = {
+    colorScale: catastrophic ? 0.2 : recoverable ? 0.42 : 0.3,
+    emissive: catastrophic ? 0x3a1000 : 0x220800,
+    emissiveIntensity: catastrophic ? 0.4 : recoverable ? 0.1 : 0.22,
+    metalness: 0.06,
+    roughness: 0.98,
+  };
+  const canvasPreset = {
+    colorScale: 0.16,
+    emissive: 0x1a0800,
+    emissiveIntensity: 0.1,
+    metalness: 0.02,
+    roughness: 1,
+  };
+  const brokenSide = Math.random() > 0.5 ? 1 : -1;
+  const blowCanvas = !recoverable && (catastrophic || Math.random() < 0.78);
+
+  mesh.traverse((child) => {
+    if (!child.isMesh || WRECK_SKIP_MESHES.has(child.name)) return;
+    const part = child.userData.tankPart;
+
+    if (part === 'canvas') {
+      applyScorchedMaterial(child, canvasPreset);
+      if (blowCanvas) {
+        child.position.x += brokenSide * (0.55 + Math.random() * 1.05);
+        child.position.y = Math.min(child.position.y * 0.35, 0.22 + Math.random() * 0.18);
+        child.position.z += (Math.random() - 0.5) * 0.7;
+        child.rotation.z += brokenSide * (0.75 + Math.random() * 1.05);
+        child.rotation.x += (Math.random() - 0.5) * 1.1;
+        child.scale.y *= 0.12 + Math.random() * 0.18;
+        child.scale.x *= 0.7 + Math.random() * 0.4;
+      } else {
+        child.scale.y *= recoverable ? 0.62 : 0.32;
+        child.position.y -= recoverable ? 0.1 : 0.28;
+        child.rotation.z += brokenSide * (recoverable ? 0.12 : 0.42);
+      }
+      return;
+    }
+
+    if (part === 'cab') {
+      applyScorchedMaterial(child, hullPreset);
+      child.position.y -= catastrophic ? 0.2 : recoverable ? 0.04 : 0.1;
+      child.rotation.z += brokenSide * (catastrophic ? 0.32 : recoverable ? 0.05 : 0.14);
+      child.rotation.x += (Math.random() - 0.5) * (catastrophic ? 0.24 : 0.08);
+      if (catastrophic && child.position.y > 1.35) child.visible = false;
+      return;
+    }
+
+    if (part === 'hood') {
+      applyScorchedMaterial(child, hullPreset);
+      if (!recoverable) {
+        child.rotation.x -= 0.45 + Math.random() * 0.55;
+        child.position.y += 0.06 + Math.random() * 0.08;
+        child.position.z += 0.04;
+      }
+      return;
+    }
+
+    if (part === 'bed') {
+      applyScorchedMaterial(child, hullPreset);
+      child.rotation.z += brokenSide * (catastrophic ? 0.16 : 0.07);
+      child.position.y -= catastrophic ? 0.14 : 0.06;
+      return;
+    }
+
+    if (part === 'track') {
+      applyScorchedMaterial(child, {
+        colorScale: 0.22,
+        emissive: 0x110800,
+        emissiveIntensity: 0.08,
+        metalness: 0.14,
+        roughness: 0.96,
+      });
+      const side = Math.sign(child.position.x) || brokenSide;
+      if (!recoverable) {
+        child.position.x += side * (0.14 + Math.random() * 0.22);
+        child.position.y -= 0.1 + Math.random() * 0.12;
+        child.rotation.z += side * (0.4 + Math.random() * 0.55);
+        child.rotation.x += (Math.random() - 0.5) * 0.45;
+      } else {
+        child.rotation.z += side * 0.12;
+        child.position.y -= 0.04;
+      }
+      return;
+    }
+
+    applyScorchedMaterial(child, hullPreset);
+  });
+
+  mesh.rotation.x += (Math.random() - 0.5) * (catastrophic ? 0.3 : recoverable ? 0.08 : 0.16);
+  mesh.rotation.z += brokenSide * (catastrophic ? 0.24 : recoverable ? 0.06 : 0.12);
+  mesh.position.y -= catastrophic ? 0.22 : recoverable ? 0.08 : 0.14;
+
+  const scorchMat = new THREE.MeshBasicMaterial({
+    color: 0x0a0806,
+    transparent: true,
+    opacity: catastrophic ? 0.78 : 0.62,
+    depthWrite: false,
+  });
+  for (const [sx, sz, rot, sx2, sz2] of [
+    [0.2, 0.15, 0.18, 2.6, 3.4],
+    [-0.45, -0.7, -0.35, 2.0, 2.5],
+    [0.35, -1.2, 0.7, 1.5, 2.0],
+  ]) {
+    const mark = new THREE.Mesh(new THREE.PlaneGeometry(sx2, sz2), scorchMat);
+    mark.rotation.x = -Math.PI / 2;
+    mark.rotation.z = rot;
+    mark.position.set(sx, 0.05, sz);
+    mark.renderOrder = 2;
+    mesh.add(mark);
+  }
+
+  const debrisMat = mat(0x2c2418, { rough: 1 });
+  const crateMat = mat(0x4a3a28, { rough: 0.95 });
+  const canvasMat = mat(0x3a3428, { rough: 1 });
+  const debrisCount = recoverable ? 3 : catastrophic ? 10 : 7;
+  for (let i = 0; i < debrisCount; i++) {
+    const crate = i % 3 === 0;
+    const scrap = i % 3 === 1;
+    const chunk = new THREE.Mesh(
+      crate
+        ? new THREE.BoxGeometry(0.28 + Math.random() * 0.18, 0.16 + Math.random() * 0.1, 0.22 + Math.random() * 0.16)
+        : scrap
+          ? new THREE.BoxGeometry(0.42 + Math.random() * 0.35, 0.04, 0.22 + Math.random() * 0.2)
+          : new THREE.BoxGeometry(0.16 + Math.random() * 0.22, 0.08, 0.12 + Math.random() * 0.18),
+      crate ? crateMat : scrap ? canvasMat : debrisMat
+    );
+    chunk.position.set(
+      (Math.random() - 0.5) * 3.2,
+      0.1 + Math.random() * 0.12,
+      -0.4 + (Math.random() - 0.5) * 3.0
+    );
+    chunk.rotation.set(Math.random(), Math.random(), Math.random());
+    mesh.add(chunk);
+  }
+
+  if (catastrophic) {
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x050403 });
+    for (let i = 0; i < 3; i++) {
+      const hole = new THREE.Mesh(
+        new THREE.CircleGeometry(0.16 + Math.random() * 0.18, 8),
+        holeMat
+      );
+      hole.rotation.x = -Math.PI / 2;
+      hole.position.set(
+        (Math.random() - 0.5) * 1.4,
+        0.62 + Math.random() * 0.28,
+        (Math.random() - 0.5) * 2.2
+      );
+      mesh.add(hole);
+    }
+  }
 }
 
 /** Scorched, knocked-out look for destroyed tanks left on the field. */
@@ -2118,11 +2300,12 @@ export function applyVehicleWreckCrushVisual(unit) {
     return;
   }
 
-  const lightWreck = ['armoredCar', 'antiTankGun', 'artillery'].includes(wreckType);
+  const lightWreck = ['armoredCar', 'antiTankGun', 'artillery', 'truck'].includes(wreckType);
   const maxHullCompression = {
     armoredCar: 0.23,
     antiTankGun: 0.2,
     artillery: 0.17,
+    truck: 0.26,
     tank: 0.1,
     tankDestroyer: 0.09,
     superHeavyTank: 0.07,

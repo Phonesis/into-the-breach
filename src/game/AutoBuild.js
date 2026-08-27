@@ -15,6 +15,7 @@ const AUTO_BUILD_WEIGHTS = {
   sniper: 6,
   mortar: 5,
   antiTankGun: 6,
+  truck: 7,
   armoredCar: 6,
   tank: 11,
   tankDestroyer: 7,

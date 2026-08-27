@@ -9,8 +9,8 @@ export const GAME_GUIDE_SECTIONS = [
     id: 'goal',
     title: 'Your objective',
     body: [
-      'Hold your headquarters (HQ), earn supplies, train reinforcements, and defeat the enemy. In <strong>every game mode</strong> the opposing army is chosen from the nations that historically fought in that theater: Western Allies versus Germany in Normandy, Italy, and North Africa; Germany versus the Soviet Union on the Eastern Front and in the Far East; Japan versus the United States in the Far East. Playing as Germany in Normandy or Italy randomly faces the United States or the United Kingdom; at Berlin it randomly faces the United States, the United Kingdom, or the Soviet Union. Combat Training still uses that nation’s practice HQ, with no enemy AI; Hold the Line waves and Force-on-Force deployments use the same matchup.',
-      'Most modes: win by destroying the enemy HQ or eliminating their army when they cannot reinforce. Lose if your HQ falls, or you cannot rebuild after a total wipe (see Reinforcements). In Frontline Command, disabling <strong>Capture zones</strong> removes sector objectives and income but keeps the HQ and army-elimination victory rules.',
+      'Your mission is straightforward: hold your headquarters (HQ), secure supplies, train reinforcements, and defeat the enemy. In <strong>every game mode</strong>, the opposing force comes from nations that historically fought in that theater: Western Allies versus Germany in Normandy, Italy, and North Africa; Germany versus the Soviet Union on the Eastern Front and in the Far East; and Japan versus the United States in the Far East.<br><br>As Germany, you may face the United States or the United Kingdom in Normandy and Italy. At Berlin, you may face the United States, the United Kingdom, or the Soviet Union. Combat Training uses your faction’s practice HQ and has no enemy AI. Hold the Line waves and Force-on-Force deployments use the same theater matchup.',
+      'In most modes, win by destroying the enemy HQ or eliminating the enemy army when it can no longer reinforce. You lose if your HQ is destroyed or if a total wipe leaves you unable to rebuild (see Reinforcements).<br><br>In Frontline Command, turning off <strong>Capture zones</strong> removes sector objectives and their income, but the HQ and army-elimination victory rules still apply.',
     ],
     callout:
       'Use the <strong>Forces</strong> panel (left) or drag on the battlefield to select units. Each roster row shows an <strong>HP bar</strong> and percentage. The top-right <strong>Surrender</strong> button ends the battle as a defeat and returns you to the main menu.',
@@ -20,14 +20,14 @@ export const GAME_GUIDE_SECTIONS = [
     title: 'Game modes',
     body: [
       '<strong>Frontline Command</strong> (Standard) — Full skirmish vs AI on any map. Set Recruit, Regular, or Veteran enemy experience in <strong>Settings</strong> (Regular is the default). On the battlefield screen choose <strong>Central Command</strong> (single HQ — all unit types from headquarters) or <strong>Forward Bases</strong> (<strong>Large map only</strong> — build an <strong>Infantry Garrison</strong> and depots from HQ; train units at completed structures; expand at <strong>captured sectors</strong>). The theater options keep <strong>Capture zones</strong> on by default; turn them off for a pure force-on-force battle with no capture objectives, sector income, or capture-focused AI. Victory remains destroying the enemy HQ or eliminating its army; Forward Bases can still construct around HQ but cannot expand from sectors. Both command structures start <strong>each side</strong> with a <strong>radio operator and infantry squad</strong>; Central Command exposes all unit types from HQ while Forward Bases unlocks them through structures. When forced to regroup, enemy units form rotating crossfire, echelon, or defence-in-depth positions instead of massing at one rally point. Longer-paced fights: tougher units, slower damage, slower income/production.',
-      '<strong>Fortified Line</strong> (Clear Defenses) — Dug-in positions across the map; <em>no HQ, capture points, or sector economy</em>. On the battlefield options screen choose <strong>Assault the Position</strong> or <strong>Command the Garrison</strong> alongside reinforcement size and the <strong>15-minute deadline</strong> toggle, which is <strong>on by default</strong>. With the deadline on, the assault must wipe every defender within 15 minutes; if defenders remain when time expires, the attackers lose and receive a mandatory <strong>Full Retreat</strong> order. Turn it off for an open-ended battle. As <strong>Defender</strong>, hold the prepared trench belt until the deadline or destroy the assault force; with no deadline, destroy the assault force. A complete force wipe still loses immediately, before later reinforcement waves can restore the line.',
+      '<strong>Fortified Line</strong> (Clear Defenses) — Dug-in positions across the map; <em>no HQ, capture points, or sector economy</em>. Both the assault group and the garrison open with a combined-arms force that includes a <strong>cargo truck</strong> for troop lifts and towing AT guns or howitzers; later reinforcement packages can bring more. On the battlefield options screen choose <strong>Assault the Position</strong> or <strong>Command the Garrison</strong> alongside reinforcement size and the <strong>15-minute deadline</strong> toggle, which is <strong>on by default</strong>. With the deadline on, the assault must wipe every defender within 15 minutes; if defenders remain when time expires, the attackers lose and receive a mandatory <strong>Full Retreat</strong> order. Turn it off for an open-ended battle. As <strong>Defender</strong>, hold the prepared trench belt until the deadline or destroy the assault force; with no deadline, destroy the assault force. A complete force wipe still loses immediately, before later reinforcement waves can restore the line.',
       'Both sides receive automatic <strong>reinforcement groups every 3 minutes</strong> at their rear assembly (assault packages vs garrison packages match the role). On the <strong>Prepare Battlefield</strong> screen choose package size: <strong>Small</strong> (two units), <strong>Medium</strong> (three to four), or <strong>Large</strong> (five to six). Enemy command repeatedly reassesses surviving strength, damage, local pressure, and fresh arrivals. When you attack, the AI garrison remains <strong>defence-focused</strong>: it preserves prepared positions, conducts controlled fallback into dispersed crossfire, echelon, or defence-in-depth positions when a sector is overwhelmed, and releases limited probing counterattacks only when conditions permit. When you defend, the AI assault remains <strong>attack-focused</strong>: its chosen plan (infantry push, armored thrust, flanking hook, fire preparation, or combined arms) drives renewed assault waves, with the same dispersed regrouping when badly mauled. Both you and the AI can call <strong>off-map fire support</strong> (strafe, barrage, creep, airborne); in this mode each side may use <strong>Airborne only once</strong>, after the opening cloud-cover restriction clears.',
-      '<strong>Combat Training</strong> (Training Ground) — No enemy AI. Practice orders, capture, production, fire missions, and fire support vs a passive practice HQ. Button reads <strong>Leave Training</strong> instead of Surrender.',
-      '<strong>Breakthrough</strong> (Assault &amp; Defend) — Available only on <strong>Medium</strong> and <strong>Large</strong> battlefields. Pick <strong>Lead the Assault</strong> or <strong>Hold the Sector</strong> after choosing the operation. Central frontline (★) starts with the defender; flanks are neutral. Both sides field anti-tank guns; defenders start with an extra AT piece. The top HUD shows your role, objective, and a <strong>countdown timer</strong>: defenders see <strong>Hold until</strong> (8 minutes); attackers see <strong>Defender reinforcements</strong> counting down the same window. <strong>Attackers</strong> win by capturing the frontline and holding it for <strong>45 seconds</strong>, destroying the defender HQ, or wiping defenders when they cannot reinforce. <strong>Defenders</strong> win if the 8-minute timer expires, the assault HQ is destroyed, or the assault army is eliminated with no way to rebuild.',
-      '<strong>Hold the Line</strong> (Tower Defence) — On the battlefield screen choose <strong>Battle Duration</strong> (<strong>Decisive Defence</strong> or <strong>Lasting Defence</strong>) and <strong>Defensive Doctrine</strong>: <strong>Prepared Positions</strong> (no trainable player army beyond the field commander, bodyguards, and starting radio operator — start with <strong>82 defense points</strong>, enough for one MG nest and one bunker; earn further points gradually while an assault is active and by destroying enemies, with tougher units worth more; no points accrue during the quiet preparation periods; spend them on bunkers, MG nests, mortar pits, AT guns, mines, wire, and artillery pits) or <strong>Mobile Defence</strong> (spawn <strong>any unit type</strong> from your HQ with supplies — your troops <strong>cannot cross the frontline</strong> into enemy territory; if enemies stay past your side of the line for <strong>10 seconds</strong> the <strong>frontline retreats</strong> toward HQ). Assaults hit <strong>sections of the frontline</strong> from different angles; from roughly <strong>wave 10</strong> expect wider <strong>multi-sector flanking</strong>. In either doctrine, the normal <strong>Fire Support</strong> options are available while a living radio operator can observe the target. Prepared Positions artillery pits also provide their own ammunition-based <strong>barrage</strong>. Selected enemy waves include a radio operator; while one survives and has a target in range, the attackers can call the same off-map support against troops and emplacements. Mobile Defence earns supplies from HQ income and destroying attackers. Between waves, <strong>Start Wave Now</strong> skips the prepare timer. <strong>Prepared Positions</strong> — lose if the line is breached (10 s grace) or HQ falls. <strong>Mobile Defence</strong> — lose only if HQ is destroyed (12 waves still wins in decisive mode).',
+      '<strong>Combat Training</strong> (Training Ground) — No enemy AI. Practice orders, capture, production, fire missions, and fire support vs a passive practice HQ. The opening exercise force includes a cargo truck. Button reads <strong>Leave Training</strong> instead of Surrender.',
+      '<strong>Breakthrough</strong> (Assault &amp; Defend) — Available only on <strong>Medium</strong> and <strong>Large</strong> battlefields. Pick <strong>Lead the Assault</strong> or <strong>Hold the Sector</strong> after choosing the operation. Central frontline (★) starts with the defender; flanks are neutral. Both sides field anti-tank guns and a cargo truck; defenders start with an extra AT piece. The top HUD shows your role, objective, and a <strong>countdown timer</strong>: defenders see <strong>Hold until</strong> (8 minutes); attackers see <strong>Defender reinforcements</strong> counting down the same window. <strong>Attackers</strong> win by capturing the frontline and holding it for <strong>45 seconds</strong>, destroying the defender HQ, or wiping defenders when they cannot reinforce. <strong>Defenders</strong> win if the 8-minute timer expires, the assault HQ is destroyed, or the assault army is eliminated with no way to rebuild.',
+      '<strong>Hold the Line</strong> (Tower Defence) — On the battlefield screen choose <strong>Battle Duration</strong> (<strong>Decisive Defence</strong> or <strong>Lasting Defence</strong>) and <strong>Defensive Doctrine</strong>: <strong>Prepared Positions</strong> (no trainable player army beyond the field commander, bodyguards, and starting radio operator — start with <strong>82 defense points</strong>, enough for one MG nest and one bunker; earn further points gradually while an assault is active and by destroying enemies, with tougher units worth more; no points accrue during the quiet preparation periods; spend them on bunkers, MG nests, mortar pits, AT guns, mines, wire, and artillery pits) or <strong>Mobile Defence</strong> (spawn <strong>any unit type</strong> from your HQ with supplies — your troops <strong>cannot cross the frontline</strong> into enemy territory; if enemies stay past your side of the line for <strong>10 seconds</strong> the <strong>frontline retreats</strong> toward HQ). Assaults hit <strong>sections of the frontline</strong> from different angles; from roughly <strong>wave 4</strong> enemy cargo trucks join the assault, then armored cars and tanks; from roughly <strong>wave 10</strong> expect wider <strong>multi-sector flanking</strong>. In either doctrine, the normal <strong>Fire Support</strong> options are available while a living radio operator can observe the target. Prepared Positions artillery pits also provide their own ammunition-based <strong>barrage</strong>. Selected enemy waves include a radio operator; while one survives and has a target in range, the attackers can call the same off-map support against troops and emplacements. Mobile Defence earns supplies from HQ income and destroying attackers. Between waves, <strong>Start Wave Now</strong> skips the prepare timer. <strong>Prepared Positions</strong> — lose if the line is breached (10 s grace) or HQ falls. <strong>Mobile Defence</strong> — lose only if HQ is destroyed (12 waves still wins in decisive mode).',
       '<strong>Force-on-Force</strong> (Battle Simulation) — a pure field engagement on the battlefield screen (no HQ, capture points, or supply reinforcements). Two deployment styles:',
       '<strong>Manual Deployment</strong> — <strong>2,000</strong> supplies on <strong>any map</strong> and map size. Pick units and <strong>LMB</strong> to place; the enemy fields the <strong>same number of units</strong> with its own mix. Enemy AI rolls a battle plan (armored thrust, defensive belt, infantry assault, flanking hook, recon push, fire preparation, general advance) that shapes both its composition and how it fights. During battle it repeatedly reassesses surviving strength and local pressure, renewing a push, falling back into dispersed crossfire, echelon, or defence-in-depth positions to regroup, or defending ground it has taken instead of relying on its opening orders alone. <strong>Begin Battle</strong> when ready.',
-      '<strong>Preset Battle Group</strong> — Available on <strong>any map</strong> and map size. On the theater screen choose force size: <strong>Small</strong> (~24 units/side), <strong>Medium</strong> (~38/side, default), or <strong>Large</strong> (~68/side). <strong>Large is blocked on Berlin</strong> (and other dense urban maps) for performance — Medium is the maximum there. Both sides auto-deploy the same combined-arms roster in echelons (rifle line, radio/support weapons, armor reserve). A <strong>field briefing</strong> (date, location, weather, enemy plan) appears before combat. Enemy AI still picks a battle plan, applies it with the units fielded at that size, and continues the same adaptive command cycle throughout the fight. <strong>Begin Battle</strong> when ready.',
+      '<strong>Preset Battle Group</strong> — Available on <strong>any map</strong> and map size. On the theater screen choose force size: <strong>Small</strong> (~24 units/side), <strong>Medium</strong> (~38/side, default), or <strong>Large</strong> (~68/side). <strong>Large is blocked on Berlin</strong> (and other dense urban maps) for performance — Medium is the maximum there. Both sides auto-deploy the same combined-arms roster in echelons (rifle line, radio/support weapons, armor and trucks in reserve). A <strong>field briefing</strong> (date, location, weather, enemy plan) appears before combat. Enemy AI still picks a battle plan, applies it with the units fielded at that size, and continues the same adaptive command cycle throughout the fight. <strong>Begin Battle</strong> when ready.',
       'No HQ or sector economy in either style. Strafe, air bomb, and artillery fire support unlock once battle begins. Airborne remains grounded by opening cloud cover for the battle’s first <strong>5 minutes</strong>; after conditions clear, each side may use <strong>Airborne only once</strong> in Battle Simulation. Win by destroying every enemy unit; lose if your army is wiped out.',
     ],
   },
@@ -45,21 +45,27 @@ export const GAME_GUIDE_SECTIONS = [
   {
     id: 'controls',
     title: 'Controls',
+    intro:
+      'Use the mouse to select units and issue orders, keyboard shortcuts to manage specialists and the camera, and HUD buttons for support and battle flow.',
     controls: [
+      { type: 'heading', title: 'Select & command' },
       ['LMB', 'Select unit or HQ'],
       ['LMB drag', 'Box-select on the battlefield'],
-      ['RMB', 'Move to ground, attack enemy under cursor, or mount infantry on a friendly tank'],
-      ['RMB (infantry → tank)', 'With only foot troops selected, RMB a friendly tank to get on and ride the hull (2 riders per tank, 3 on super heavies)'],
+      ['RMB', 'Move to ground, attack enemy under cursor, or mount infantry on a friendly tank or truck'],
+      ['RMB (infantry → tank / truck)', 'With only foot troops selected, RMB a friendly tank to ride the hull (2 on a medium, 3 on a super heavy) or a truck to load the cargo bed (up to 3 units)'],
       ['RMB (construction unit)', 'Move the selected unit; cancels its pending placement or active sandbag, trench, or tent construction'],
       ['Shift + LMB', 'Fire at open ground or cover (trees, hedges, bunkers) — all combat units in range'],
       ['Alt + Shift + LMB', 'One ready selected artillery piece fires smoke at open ground — 45s cooldown; blocks line of sight for 60s'],
+      { type: 'heading', title: 'Specialist shortcuts' },
       ['Ctrl + E', 'Select the nearest available engineer; press again to cycle through engineers'],
       ['Ctrl + M', 'Select the nearest available medic; press again to cycle through medics'],
       ['Ctrl + A', 'Select the nearest available artillery piece; press again to cycle through artillery'],
       ['Ctrl + R', 'Select the nearest available radio operator; press again to cycle through radio operators'],
       ['Esc', 'Cancel fire-support targeting, active unit fire missions, engineer field-work placement, base building construction, Battle Simulation placement, or pending TD build'],
+      { type: 'heading', title: 'Camera & battle flow' },
       ['WASD / arrows', 'Pan camera · left/right arrows rotate · wheel zoom'],
       ['P', 'Pause / resume — camera still pans while paused; orders are blocked'],
+      { type: 'heading', title: 'Panels & battlefield tools' },
       ['Tactical map', 'Bottom-right minimap — toggle with the header button; green = friendlies, red = enemies; fading yellow/red traces show live fire exchanges; click to pan the main camera (preference saved)'],
       ['Settings', 'Main menu — choose persistent AI difficulty, battlefield toggles, automatic radio positioning, Standard Auto Build, and how long bodies and destroyed vehicles remain'],
       ['Forces list', 'Unit types are grouped; click a row to select, hover/focus to reveal additional units, and Shift-click to add — each row shows HP'],
@@ -69,6 +75,7 @@ export const GAME_GUIDE_SECTIONS = [
       ['Engage target', 'Confirm attack on highlighted enemy (selection panel)'],
       ['Launch Battle Now', 'Skip quiet-sector staging (countdown banner)'],
       ['Start Wave Now', 'Tower Defence — skip prepare countdown and begin the current wave'],
+      { type: 'heading', title: 'Support & session actions' },
       ['Save', 'HUD top-right — store battle progress in this browser; resume from <strong>Continue Saved Battle</strong> on the title screen'],
       ['Continue Saved Battle', 'Title screen — resume a saved battle (faction, map, units, supplies, and timer restored)'],
       ['War Stats', 'Main menu — open the dedicated page with cumulative unit losses, personnel casualties, estimated cost, and loss types for every faction (saved in this browser)'],
@@ -91,7 +98,7 @@ export const GAME_GUIDE_SECTIONS = [
       'The small <strong>Capture circles</strong> button at the top-left hides or restores the large capture-zone circles. This is visual only: hidden sectors still capture normally and remain listed in the HUD. The preference is remembered in the browser.',
       'When field icons are <strong>on</strong>, floating <strong>health bars</strong> also appear above damaged units (any team) and above your selected units (even at full HP). Fill color runs green → yellow → red as HP drops; borders tint blue (yours) or red (enemy), gold when selected.',
       'Turning field icons <strong>off</strong> hides both the icons and the world health bars. The Forces roster and bottom <strong>selection panel</strong> still show HP bars and numbers for selected units, groups, and HQ.',
-      'Vehicles below <strong>50% HP</strong> (tanks, armored cars, artillery, towed guns) trail dark <strong>black engine smoke</strong> from the rear until an engineer repairs them or the vehicle is destroyed.',
+      'Vehicles below <strong>50% HP</strong> (tanks, armored cars, trucks, artillery, towed guns) trail dark <strong>black engine smoke</strong> from the rear until an engineer repairs them or the vehicle is destroyed.',
       'Vehicle finishes include rolled-steel surface wear, while towed guns use faction-specific equipment details. Towed <strong>anti-tank guns</strong> have a visible two-man detachment; <strong>artillery</strong> has a three-man detachment with ready ammunition. Their camouflage follows the selected theater: muted hedgerow colors in <strong>Normandy</strong>, sand and light-stone schemes in <strong>North Africa</strong>, field green and earth tones on the <strong>Eastern Front</strong>, dusty olive/earth finishes in <strong>Italy</strong>, and dark humid greens in the <strong>Far East</strong>.',
       'Units continuously follow the local terrain height and lean into hills and side-slopes. Vehicles, towed guns, crews, and mounted tank riders stay aligned to the ground instead of being clipped by rising terrain.',
       'On <strong>Berlin</strong>, all ground units route along connected streets and around intact buildings rather than attempting to cross masonry. The canal has animated ripples and glints; shells striking water produce spray instead of a ground impact.',
@@ -112,7 +119,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Quiet sector</strong> (~32 s in Standard / Assault): no combat fire; both sides stay inside the HQ staging ring. <strong>Neither side</strong> can queue reinforcements or build base structures (in-progress construction pauses) until battle begins. Move orders only reposition troops in a <strong>tight ring around your HQ</strong> — not toward capture points (captures are frozen until launch). Click <strong>Launch Battle Now</strong> when ready (or wait for the timer). <strong>Clear Defenses starts live immediately</strong>: defenders engage as soon as attackers enter their actual weapon range.',
       'In <strong>Classic</strong> Standard each side begins with a radio operator and one infantry squad at HQ — train the rest from the Reinforcements panel as supplies accrue (the AI does the same from its HQ).',
       'Up to <strong>four</strong> units queued at your HQ. Reinforcements spawn in a ring around the HQ when their timer finishes (or at the depot that unlocked them in Base Building mode).',
-      '<strong>Auto Build</strong> (Standard — Classic and Base Building): toggle in the Reinforcements panel header. When <strong>On</strong>, the game keeps the queue full (up to four slots) with a realistic combined-arms mix — infantry backbone, radio operators, MG and mortar support, AT, armor, artillery, medics, and engineers — weighted by what you already have on the field and what you can afford. You can still click unit buttons to queue manually; auto build only fills empty slots. <strong>Off by default in Base Building</strong> so you can afford depots first; Classic remembers its own setting separately. Restored with saved games. Not available in Training, Assault, Tower Defence, or Battle Simulation.',
+      '<strong>Auto Build</strong> (Standard — Classic and Base Building): toggle in the Reinforcements panel header. When <strong>On</strong>, the game keeps the queue full (up to four slots) with a realistic combined-arms mix — infantry backbone, radio operators, MG and mortar support, AT, trucks, armor, artillery, medics, and engineers — weighted by what you already have on the field and what you can afford. You can still click unit buttons to queue manually; auto build only fills empty slots. <strong>Off by default in Base Building</strong> so you can afford depots first; Classic remembers its own setting separately. Restored with saved games. Not available in Training, Assault, Tower Defence, or Battle Simulation.',
       'Standard mode uses slower income and ~1.65× longer build times so battles develop gradually. Each side may deploy up to <strong>30 living units</strong>; losses free space for replacements.',
     ],
   },
@@ -156,6 +163,7 @@ export const GAME_GUIDE_SECTIONS = [
       '<strong>Vehicle handling &amp; gun feedback:</strong> tracked vehicles pivot at a deliberate hull-traverse speed instead of snapping instantly, with track-and-engine audio while turning in place. Towed anti-tank guns and field artillery are moved by their crews and make no engine sound. Accepted attack orders play a faction-specific radio acknowledgement. Tank main guns use heavier cannon reports; anti-tank and artillery pieces visibly eject brass cases that scatter beside the gun and remain on the battlefield. <strong>AT guns and howitzers</strong> only fire while fully stopped; the crew must hand-crank the carriage onto the target before the round goes out — a large traverse takes several seconds. Field howitzers reload slowly (~<strong>11–13.5 s</strong> between shells) as the crew rams and lays each round. Howitzers have a roughly <strong>220 m minimum range</strong> and cannot shell their own immediate position; enemies inside that dead zone are engaged by the crew with faction-specific rifles instead.',
       '<strong>Armor penetration:</strong> Direct tank, anti-tank-gun, and infantry anti-tank shots test the weapon against the target vehicle\'s historical protection, impact range, armor facing, slope, and horizontal strike angle. Glancing or underpowered hits <strong>ricochet with a bright metallic spark shower and no hull damage</strong>. Each hit lands on a sampled part of the vehicle silhouette; penetrations through rear engine decks, ammunition stowage, turret rings, driver visors, and open fighting compartments have a chance to become a high-damage <strong>critical hit</strong>. Towed <strong>anti-tank guns</strong> aim for those weak spots and convert them to criticals more often than tank guns. Low strikes can break tracks or wheels. Jagdpanther and SU-100 frontal slopes are especially effective, while the open-topped M10 and Achilles trade protection for powerful guns. Flank heavy armor instead of trading shots against its front plate.',
       '<strong>Mobility damage:</strong> Shells can break a tank\'s <strong>track</strong> or an armored car\'s <strong>wheel</strong>, especially on side hits. The vehicle becomes completely <strong>immobile</strong> and cancels movement, but can keep firing. Keep a combat engineer within ~16 m until the orange repair status reaches 100%; one engineer needs roughly <strong>9 seconds</strong> at point-blank range. Enemy engineers will make the same repair run, then withdraw behind their main body. The spanner marker appears while work is underway, and mobility damage persists in saved battles.',
+      '<strong>Trucks:</strong> Each faction fields a historically grounded cargo truck (Opel Blitz, GMC CCKW, Bedford QLD, ZIS-5, Type 94). They are a normal production vehicle in <strong>every mode</strong> that trains units, and they spawn in opening forces for <strong>Fortified Line</strong>, <strong>Breakthrough</strong>, <strong>Combat Training</strong>, and Force-on-Force presets, plus Hold the Line assault waves. They are <strong>unarmored</strong> — rifles and machine guns damage them — and unarmed; the driver only fights after bailing with a service rifle. Select foot troops and use <strong>Get on</strong> or RMB to load up to <strong>3</strong> units into the cargo bed for fast deployment; stop and press <strong>Disembark riders</strong>, or they bail automatically under fire. Drive a truck next to a friendly <strong>AT gun</strong> or <strong>howitzer</strong> and an <strong>Attach</strong> option appears — the gun slides onto the rear hitch and is towed (the truck is slower with a gun hooked on). Stop and <strong>Detach</strong> to unlimber and fire. A towed gun cannot shoot until unhooked. <strong>Enemy AI uses trucks the same way:</strong> it loads nearby infantry for a lift, hooks idle AT guns and howitzers, drives them toward the fight, then disembarks troops and unlimbers guns <strong>outside rifle and machine-gun range</strong> (~580 m; howitzers further back). Soft-skinned lorries do not close to contact. Fortified Line garrisons keep prepared guns on the belt instead of limbering them.',
       '<strong>Tank riders &amp; captured vehicles:</strong> Select <strong>foot troops only</strong> (infantry, paratrooper, MG, sniper, medic, engineer) and highlight a friendly <strong>tank</strong> or <strong>super heavy</strong>. A green <strong>Get on</strong> button appears above vehicles the selection can ride; click it or RMB the vehicle to mount the rear deck — up to <strong>2</strong> riders on a medium tank, <strong>3</strong> on a super heavy. Riders are visible on the hull, can fire while mounted, and move with the tank. An intact <strong>crewless</strong> tank may be reclaimed by its own surviving bailed crew, or remanned by <strong>infantry or airborne from either side</strong>; this internal driving/command role uses <strong>Re-enter</strong> or <strong>Get in</strong>. A bailed crew will only re-enter the exact hull it escaped from. Enemy AI follows the same rule and will seize nearby opportunities. Riders ignore individual move orders while mounted. Select either the <strong>vehicle</strong> to disembark everyone aboard or a mounted <strong>rider</strong> to disembark that unit, then press <strong>Disembark rider(s)</strong> after stopping the vehicle; riders also <strong>bail out automatically under fire</strong>. The button is the only manual way to disembark riders.',
       'Armored cars take partial infantry and machine-gun damage (~32%), but sniper rounds cannot damage them. Anti-tank guns, tank guns, and artillery remain effective; mortars deal reduced HE to armored cars and much less to tanks and heavier AFVs.',
       'Damaged units may <strong>retreat</strong> toward their HQ (RETREATING tag) and stop attacking until safe. Troops in <strong>heavy cover</strong> (sandbags, wrecks, and similar hard shelter) are much less likely to panic-retreat; troops fully <strong>inside buildings or bunkers</strong> receive the strongest morale protection, though even they can still break when badly mauled. Dug-in trench troops also stand firmer. <strong>Medics</strong> nearby reduce retreat chance further and slowly heal infantry, MG, mortar, sniper, and bailed vehicle-crew teams — a <strong>green cross</strong> floats above units being healed. A nearby living <strong>field commander</strong> stiffens troops within ~34 m, making automatic retreats and surrender much less likely. Units inside that aura display a gold <strong>INSPIRED</strong> marker above them and an <strong>INSPIRED</strong> status in the selection panel. If the commander dies, automatic retreat and surrender pressure rises sharply across that side; the surviving radio net remains available for support calls. <strong>Engineers</strong> repair nearby vehicles and broken running gear, steady panicked tank and gun crews, and — when within ~16 m of a damaged <strong>HQ</strong> — restore headquarters HP (spanner icon on the engineer and repair target). A recoverable vehicle wreck takes roughly <strong>12 seconds</strong> for one close engineer to restart and returns at about <strong>28% HP</strong>, but remains immobile and unable to fire until remanned. Its surviving bailed crew can right-click and reclaim its original hull; alternatively, select an <strong>infantry or paratrooper squad</strong> and right-click the repaired tank so two troops become its crew and the remaining squad members ride on the hull. Vehicles below half HP trail <strong>black engine smoke</strong> until repaired. Defenders in Clear Defenses do not retreat. Use <strong>General Orders</strong> (see below) to pull everyone back or stiffen the line during a push.',
@@ -224,7 +232,7 @@ export const GAME_GUIDE_SECTIONS = [
     id: 'units',
     title: 'Unit roster',
     intro:
-      'Thirteen buildable unit types per faction (historical names differ). <strong>Radio operators</strong> are one-man signals units that enable off-map support (max <strong>3 per side</strong>); <strong>Airborne paratroopers</strong> remain fire-support only (see Fire support). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
+      'Fourteen buildable unit types per faction (historical names differ). <strong>Radio operators</strong> are one-man signals units that enable off-map support (max <strong>3 per side</strong>); <strong>Airborne paratroopers</strong> remain fire-support only (see Fire support). Icons match the Forces panel. Costs are supplies; build times are base seconds (longer in Standard).',
     units: true,
   },
   {
@@ -314,6 +322,15 @@ export const GUIDE_UNIT_CARDS = [
     tags: ['Anti-armor', 'Hold position'],
   },
   {
+    type: 'truck',
+    name: 'Truck',
+    cost: '56–62',
+    build: 11,
+    range: '—',
+    desc: 'Unarmed cargo lorry — load up to 3 foot units in the bed, or hitch an AT gun / howitzer for a tow. Soft-skinned; the driver bails with a rifle. Enemy AI uses trucks for lifts and tows.',
+    tags: ['Transport', 'Tow guns', 'Unarmored'],
+  },
+  {
     type: 'armoredCar',
     name: 'Armored car',
     cost: 88,
@@ -369,6 +386,26 @@ export const GUIDE_UNIT_CARDS = [
   },
 ];
 
+const GUIDE_QUICK_STEPS = [
+  ['Select', 'Use the Forces panel or drag a box around troops.'],
+  ['Command', 'RMB to move or attack · Shift + LMB to fire.'],
+  ['Support', 'Keep a radio operator alive for off-map strikes.'],
+  ['Hold', 'Use cover, reinforce, and protect your HQ.'],
+];
+
+const MODE_NOTE_LABELS = [
+  'Frontline Command',
+  'Fortified Line',
+  'Reinforcements & AI',
+  'Combat Training',
+  'Breakthrough',
+  'Hold the Line',
+  'Force-on-Force',
+  'Manual deployment',
+  'Preset battle group',
+  'Victory conditions',
+];
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -377,17 +414,49 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+function splitLeadingStrong(markup) {
+  const match = String(markup).match(/^\s*<strong>([^<]+)<\/strong>([\s\S]*)$/);
+  if (!match) return { title: '', body: String(markup) };
+  return {
+    title: match[1],
+    body: match[2].replace(/^\s*[—–-]\s*/, ''),
+  };
+}
+
+function plainGuideText(markup) {
+  return String(markup)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function guideExcerpt(markup, maxLength = 112) {
+  const text = plainGuideText(markup);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 function renderUnitCard(entry) {
   const tags = (entry.tags ?? [])
     .map((t) => `<li class="guide-tag">${escapeHtml(t)}</li>`)
     .join('');
   return `
     <article class="guide-unit-card" data-type="${escapeHtml(entry.type)}">
-      <div class="guide-unit-icon" aria-hidden="true">${getUnitIconMarkup(entry.type)}</div>
-      <h4 class="guide-unit-name">${escapeHtml(entry.name)}</h4>
-      <p class="guide-unit-meta">${escapeHtml(String(entry.cost))} supplies · ${escapeHtml(String(entry.build))}s build</p>
+      <div class="guide-unit-card-head">
+        <div class="guide-unit-icon" aria-hidden="true">${getUnitIconMarkup(entry.type)}</div>
+        <div>
+          <h4 class="guide-unit-name">${escapeHtml(entry.name)}</h4>
+          <p class="guide-unit-meta">${escapeHtml(String(entry.cost))} supplies · ${escapeHtml(String(entry.build))}s build</p>
+        </div>
+      </div>
       <p class="guide-unit-range">${escapeHtml(entry.range)}</p>
-      <p class="guide-unit-desc">${escapeHtml(entry.desc)}</p>
+      <p class="guide-unit-desc">${entry.desc}</p>
       ${tags ? `<ul class="guide-tag-list">${tags}</ul>` : ''}
     </article>
   `;
@@ -411,10 +480,12 @@ function renderFactionHeavyTable() {
   return `
     <div class="guide-faction-block">
       <h4 class="guide-subhead">Faction armor</h4>
-      <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Medium tank</th><th>Tank destroyer</th><th>Top armor tier</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="guide-table-wrap">
+        <table class="guide-table guide-faction-table">
+          <thead><tr><th>Nation</th><th>Medium tank</th><th>Tank destroyer</th><th>Top armor tier</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     </div>
   `;
 }
@@ -434,10 +505,12 @@ function renderFactionParatrooperTable() {
   return `
     <div class="guide-faction-block">
       <h4 class="guide-subhead">Faction airborne teams (fire support only)</h4>
-      <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Designation</th><th>Combat range</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="guide-table-wrap">
+        <table class="guide-table guide-faction-table">
+          <thead><tr><th>Nation</th><th>Designation</th><th>Combat range</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
       <p class="guide-table-note">Dropped via <strong>Airborne</strong> fire support — five squads per call.</p>
     </div>
   `;
@@ -459,10 +532,12 @@ function renderFactionRadioTable() {
   return `
     <div class="guide-faction-block">
       <h4 class="guide-subhead">Faction radio operators</h4>
-      <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Role</th><th>Period set</th><th>Support radius</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="guide-table-wrap">
+        <table class="guide-table guide-faction-table">
+          <thead><tr><th>Nation</th><th>Role</th><th>Period set</th><th>Support radius</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
       <p class="guide-table-note">Operators carry their own backpack set and rifle. Build or deploy more than one to keep support available after casualties and to cover separated sectors.</p>
     </div>
   `;
@@ -486,24 +561,84 @@ function renderFactionAtGunTable() {
   return `
     <div class="guide-faction-block">
       <h4 class="guide-subhead">Faction anti-tank guns</h4>
-      <table class="guide-table guide-faction-table">
-        <thead><tr><th>Nation</th><th>Designation</th><th>Range</th><th>Reload</th><th>Cost · build</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="guide-table-wrap">
+        <table class="guide-table guide-faction-table">
+          <thead><tr><th>Nation</th><th>Designation</th><th>Range</th><th>Reload</th><th>Cost · build</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
       <p class="guide-table-note">Towed guns hold position while firing. Strong vs tanks and armored cars; weak vs infantry. Aimed fire is more likely to critically hit turret rings, visors, ammunition, and engine decks.</p>
     </div>
   `;
 }
 
-function renderSection(section) {
+function renderInfoCard(markup, index) {
+  const lead = splitLeadingStrong(markup);
+  const heading = lead.title ? `<h4>${escapeHtml(lead.title)}</h4>` : '';
+  const body = lead.title ? lead.body : markup;
+  return `
+    <article class="guide-info-card">
+      <span class="guide-note-index">Field note ${String(index + 1).padStart(2, '0')}</span>
+      ${heading}
+      <p>${body}</p>
+    </article>
+  `;
+}
+
+function renderModeCard(markup, index) {
+  const lead = splitLeadingStrong(markup);
+  const title = lead.title || MODE_NOTE_LABELS[index] || 'Field note';
+  const body = lead.title ? lead.body : markup;
+  const excerpt = guideExcerpt(lead.title ? lead.body : markup);
+  return `
+    <details class="guide-mode-card">
+      <summary>
+        <span class="guide-mode-index">${String(index + 1).padStart(2, '0')}</span>
+        <span class="guide-mode-copy">
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(excerpt)}</small>
+        </span>
+        <span class="guide-mode-toggle" aria-hidden="true"></span>
+      </summary>
+      <div class="guide-mode-detail"><p>${body}</p></div>
+    </details>
+  `;
+}
+
+function renderControlCard([key, action]) {
+  return `
+    <article class="guide-control-card">
+      <kbd class="guide-control-key">${escapeHtml(key)}</kbd>
+      <p>${action}</p>
+    </article>
+  `;
+}
+
+function renderControlEntry(entry) {
+  if (entry?.type === 'heading') {
+    return `<h4 class="guide-controls-heading">${escapeHtml(entry.title)}</h4>`;
+  }
+  return renderControlCard(entry);
+}
+
+function renderSection(section, index) {
   const parts = [];
 
   if (section.intro) {
-    parts.push(`<p class="guide-intro">${section.intro}</p>`);
+    parts.push(`
+      <div class="guide-intro-card">
+        <span class="guide-note-index">At a glance</span>
+        <p class="guide-intro">${section.intro}</p>
+      </div>
+    `);
   }
 
   if (section.body?.length) {
-    parts.push(section.body.map((p) => `<p>${p}</p>`).join(''));
+    if (section.id === 'modes') {
+      parts.push(`<div class="guide-mode-grid">${section.body.map(renderModeCard).join('')}</div>`);
+    } else {
+      parts.push(`<div class="guide-body-grid">${section.body.map(renderInfoCard).join('')}</div>`);
+    }
   }
 
   if (section.callout) {
@@ -512,16 +647,9 @@ function renderSection(section) {
 
   if (section.controls?.length) {
     parts.push(`
-      <table class="guide-table guide-controls-table">
-        <tbody>
-          ${section.controls
-            .map(
-              ([key, action]) =>
-                `<tr><th scope="row">${escapeHtml(key)}</th><td>${action}</td></tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>
+      <div class="guide-controls-grid">
+        ${section.controls.map(renderControlEntry).join('')}
+      </div>
     `);
   }
 
@@ -536,8 +664,8 @@ function renderSection(section) {
   }
 
   return `
-    <section class="guide-section" id="guide-${section.id}">
-      <h3>${escapeHtml(section.title)}</h3>
+    <section class="guide-section guide-section--${escapeHtml(section.id)}" id="guide-${section.id}">
+      <h3><span class="guide-section-number">${String(index + 1).padStart(2, '0')}</span><span>${escapeHtml(section.title)}</span></h3>
       ${parts.join('')}
     </section>
   `;
@@ -545,11 +673,41 @@ function renderSection(section) {
 
 export function renderGameGuideHtml() {
   const nav = GAME_GUIDE_SECTIONS.map(
-    (s) => `<a class="guide-nav-link" href="#guide-${s.id}">${escapeHtml(s.title)}</a>`
+    (s, index) =>
+      `<a class="guide-nav-link" href="#guide-${s.id}"><span class="guide-nav-index">${String(index + 1).padStart(2, '0')}</span><span>${escapeHtml(s.title)}</span></a>`
+  ).join('');
+
+  const quickSteps = GUIDE_QUICK_STEPS.map(
+    ([title, detail], index) => `
+      <li class="guide-command-step">
+        <span class="guide-step-index">${String(index + 1).padStart(2, '0')}</span>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(detail)}</p>
+      </li>
+    `
   ).join('');
 
   return `
-    <nav class="guide-nav" aria-label="Field Manual sections">${nav}</nav>
-    ${GAME_GUIDE_SECTIONS.map(renderSection).join('')}
+    <div class="guide-layout">
+      <aside class="guide-rail">
+        <span class="guide-rail-label">Contents</span>
+        <nav class="guide-nav" aria-label="Field Manual sections">${nav}</nav>
+        <div class="guide-rail-tip">
+          <span>Field tip</span>
+          <p>Open a note to expand the detail. Your reading position stays in this manual.</p>
+        </div>
+      </aside>
+      <main class="guide-main">
+        <section class="guide-quickstart" aria-labelledby="guide-quickstart-title">
+          <div class="guide-quickstart-heading">
+            <span class="guide-note-index">Before contact</span>
+            <h3 id="guide-quickstart-title">The command loop</h3>
+            <p>Four habits that keep a battle moving in your favour.</p>
+          </div>
+          <ol class="guide-command-loop">${quickSteps}</ol>
+        </section>
+        ${GAME_GUIDE_SECTIONS.map(renderSection).join('')}
+      </main>
+    </div>
   `;
 }

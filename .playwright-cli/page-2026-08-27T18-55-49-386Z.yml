@@ -1,0 +1,23 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - generic [ref=e7]: World War II · Real-Time Tactics
+    - heading "Into the Breach" [level=1] [ref=e8]:
+      - generic [ref=e9]: Into the
+      - generic [ref=e10]: Breach
+    - paragraph [ref=e11]: Take command of a historically grounded combined-arms force. Seize vital ground, outmanoeuvre the enemy, and break their ability to fight.
+  - generic [ref=e12]:
+    - button "New Operation" [ref=e13] [cursor=pointer]
+    - button "Continue Saved Battle" [ref=e14] [cursor=pointer]
+    - button "War Stats" [ref=e15] [cursor=pointer]
+    - button "Settings" [ref=e16] [cursor=pointer]
+    - button "Field Manual" [ref=e17] [cursor=pointer]
+    - button "Credits & Information" [ref=e18] [cursor=pointer]
+  - generic "Support development" [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: Support development
+      - paragraph [ref=e22]: If you enjoy the operation, you can help keep development going.
+    - link "Donate via PayPal" [ref=e23] [cursor=pointer]:
+      - /url: https://paypal.me/phonesis
+      - text: Donate via PayPal
+      - generic [ref=e24]: ↗
+  - paragraph [ref=e25]: Plan the operation. Choose your command. Fight the battle.

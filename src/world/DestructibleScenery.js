@@ -31,6 +31,7 @@ const GARRISON_WINDOW_ENGAGEMENT_TYPES = new Set([
   'armoredCar',
   'paratrooper',
   'vehicleCrew',
+  'truckDriver',
 ]);
 const STRICT_DIRECT_SHELL_TYPES = new Set([
   'antiTankGun',

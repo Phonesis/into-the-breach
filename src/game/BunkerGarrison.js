@@ -13,6 +13,7 @@ const GARRISON_TYPES = new Set([
   'sniper',
   'medic',
   'engineer',
+  'truckDriver',
 ]);
 
 export function canGarrisonType(unitType) {

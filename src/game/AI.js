@@ -8,7 +8,7 @@ import {
   isCrewlessVehicleTarget,
 } from './Targeting.js';
 import { isTankType, isVehicleUnit, isFootSoldier } from '../units/VehicleTypes.js';
-import { unitPathRadius } from './MovePath.js';
+import { buildMovePath, unitPathPlanRadius, unitPathRadius } from './MovePath.js';
 import { getLastStandTactic } from '../data/lastStandTactics.js';
 import { CAMPAIGN_BALANCE } from '../data/campaignPace.js';
 import { MINE_VEHICLE_TYPES } from '../data/towerDefense.js';
@@ -24,9 +24,18 @@ import { ENGINEER_AURA_RANGE, ENGINEER_HQ_REPAIR_RANGE } from './EngineerBehavio
 import { canReceiveFieldTentHeal, TENT_MIN_SPACING } from './MedicFieldHospital.js';
 import {
   canHostRiders,
+  canRideTanks,
   canSupplyReplacementCrew,
+  dismountAllRiders,
+  getTankRiderCapacity,
+  getTankRiderIds,
   issueMountOrder,
 } from './TankRiders.js';
+import {
+  detachGun,
+  isTowableGun,
+  issueTowOrder,
+} from './TruckTowing.js';
 import { getArmorAspect } from './ArmorPenetration.js';
 import { getClearanceAttackerSpawnBase } from './ClearanceMode.js';
 import { getFieldCommander } from './FieldCommander.js';
@@ -50,6 +59,7 @@ import {
   getStandardAiDoctrine,
   getStandardProductionCandidates,
 } from './StandardAI.js';
+import { getActiveIncomingArtilleryStrikes } from './ArtilleryThreats.js';
 
 let aiTimer = 0;
 let aiProdTimer = 0;
@@ -129,6 +139,40 @@ const AI_INCOMING_FIRE_PRONE_SEC = 2.1;
 const AI_INCOMING_FIRE_RETRY_SEC = 3.6;
 const AI_INCOMING_FIRE_CRITICAL_HP_RATIO = 0.34;
 const AI_INCOMING_FIRE_SUSTAINED_HP_RATIO = 0.56;
+const AI_ARTILLERY_EVASION_LOOKAHEAD_SEC = 4.8;
+const AI_ARTILLERY_EVASION_PADDING = 4.5;
+const AI_ARTILLERY_EVASION_MIN_DISTANCE = 11;
+const AI_ARTILLERY_EVASION_MAX_DISTANCE = 17;
+const AI_ARTILLERY_FOOT_EVASION_MIN_DISTANCE = 5.5;
+const AI_ARTILLERY_FOOT_EVASION_MAX_DISTANCE = 10.5;
+const AI_ARTILLERY_EVASION_HOLD_SEC = 1.25;
+const AI_ARTILLERY_EVASION_REISSUE_SEC = 0.6;
+const AI_ARTILLERY_EVASION_DEFAULT_CHANCE = 0.42;
+const AI_ARTILLERY_EVASION_TARGET_BONUS = 0.12;
+const AI_ARTILLERY_EVASION_AIR_BOMB_BONUS = 0.05;
+const AI_ARTILLERY_EVASION_CREEPING_PENALTY = 0.05;
+const AI_ARTILLERY_EVASION_STRAFE_PENALTY = 0.08;
+const AI_ARTILLERY_EVASION_MAX_CHANCE = 0.78;
+const AI_ARTILLERY_EVASION_CHANCE_BY_TYPE = {
+  commander: 0.4,
+  radioOperator: 0.5,
+  infantry: 0.42,
+  paratrooper: 0.44,
+  machineGun: 0.34,
+  sniper: 0.38,
+  medic: 0.48,
+  engineer: 0.48,
+  vehicleCrew: 0.34,
+  truckDriver: 0.34,
+  tank: 0.62,
+  tankDestroyer: 0.66,
+  superHeavyTank: 0.68,
+  armoredCar: 0.52,
+  truck: 0.46,
+  mortar: 0.5,
+  antiTankGun: 0.5,
+  artillery: 0.58,
+};
 const AI_TRENCH_CAPACITY = 4;
 const AI_TRENCH_MAX_OCCUPATION_DISTANCE = 48;
 const AI_TRENCH_DEFAULT_RESERVE_RATIO = 0.32;
@@ -198,6 +242,7 @@ const CLEARANCE_MOBILE_DEFENDER_TYPES = new Set([
   'machineGun',
   'sniper',
   'armoredCar',
+  'truck',
   'tank',
   'tankDestroyer',
   'superHeavyTank',
@@ -231,6 +276,7 @@ const LAST_STAND_FORCE_WEIGHTS = {
   mortar: 1.1,
   antiTankGun: 1.45,
   artillery: 1.55,
+  truck: 0.95,
   armoredCar: 1.35,
   tank: 2.45,
   tankDestroyer: 2.65,
@@ -1280,6 +1326,7 @@ function getStandardAiRole(type) {
   if (type === 'tankDestroyer') return 'antiArmor';
   if (type === 'mortar' || type === 'artillery') return 'fireSupport';
   if (type === 'machineGun' || type === 'sniper') return 'screen';
+  if (type === 'truck') return 'line';
   if (isTankType(type) || type === 'armoredCar') return 'armor';
   return 'line';
 }
@@ -1677,7 +1724,7 @@ function lastStandHoldRadius(unit) {
   if (type === 'artillery' || type === 'mortar') return 12;
   if (type === 'antiTankGun') return 10;
   if (isTankType(type)) return 16;
-  if (type === 'armoredCar') return 14;
+  if (type === 'armoredCar' || type === 'truck') return 14;
   return 11;
 }
 
@@ -2791,7 +2838,7 @@ function issueClearanceAttackWave(enemies, players, mapDef, plan, game) {
     if (!isLastStandOperationalUnit(unit)) continue;
     const role = unit.clearanceAttackRole ?? roleFromUnitType(unit.def?.type);
     unit.clearanceAttackRole = role;
-    if (role === 'support') continue;
+    if (role === 'support' || unit.def?.type === 'truck') continue;
 
     unit.defensiveHold = null;
     const focus = pickAttackTarget(unit, players, game?.scenery);
@@ -2846,7 +2893,7 @@ function getAiFallbackUnitPriority(unit) {
     type === 'antiTankGun' ||
     type === 'tankDestroyer'
   ) return 0;
-  if (isTankType(type) || type === 'armoredCar') return 1;
+  if (isTankType(type) || type === 'armoredCar' || type === 'truck') return 1;
   if (type === 'infantry' || type === 'paratrooper') return 2;
   if (type === 'engineer') return 3;
   return 4;
@@ -3431,6 +3478,7 @@ function canDiversifyAiOrder(unit) {
     !unit._aiRadioManeuver &&
     !unit._aiRadioSafety &&
     !unit._aiIncomingFireReaction &&
+    !unit._aiArtilleryEvasion &&
     !unit._aiCommanderScreen &&
     !unit._aiSupportMode &&
     !unit._aiTrenchTargetId &&
@@ -3699,6 +3747,7 @@ export function updateAiIncomingFireReactions({
 
   for (const unit of enemyUnits) {
     if (!unit) continue;
+    if (unit._aiArtilleryEvasion) continue;
 
     const reaction = unit._aiIncomingFireReaction;
     if (reaction) {
@@ -3790,6 +3839,375 @@ export function updateAiIncomingFireReactions({
       until: now + AI_INCOMING_FIRE_PRONE_SEC,
     };
     unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_RETRY_SEC;
+  }
+}
+
+function isAiArtilleryUnitCandidate(unit) {
+  const type = unit?.def?.type;
+  return !!(
+    unit &&
+    unit.team === 'enemy' &&
+    Number.isFinite(unit.position?.x) &&
+    Number.isFinite(unit.position?.z) &&
+    type &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._mountedOnTankId &&
+    !unit._towedByTruckId &&
+    !unit._crewless &&
+    !unit._mobilityDamaged &&
+    !isUnitGarrisoned(unit) &&
+    !unit._trenchId &&
+    !unit._diggingTrench &&
+    !unit._trenchDigSite &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite &&
+    !unit._userMoveOrder &&
+    !unit._manualFireMission
+  );
+}
+
+function isAiArtilleryUnitStationary(unit) {
+  return !!unit && !unit.moveTarget && !unit._movePath?.length;
+}
+
+function getAiArtilleryEvasionChance(unit, strike) {
+  let chance =
+    AI_ARTILLERY_EVASION_CHANCE_BY_TYPE[unit?.def?.type] ??
+    AI_ARTILLERY_EVASION_DEFAULT_CHANCE;
+  if (strike?.targetWasStationary && strike.targetId === unit?.id) {
+    chance += AI_ARTILLERY_EVASION_TARGET_BONUS;
+  }
+  if (strike?.kind === 'airBomb') chance += AI_ARTILLERY_EVASION_AIR_BOMB_BONUS;
+  if (strike?.kind === 'creepingBarrage') {
+    chance -= AI_ARTILLERY_EVASION_CREEPING_PENALTY;
+  }
+  if (strike?.kind === 'strafe') chance -= AI_ARTILLERY_EVASION_STRAFE_PENALTY;
+  return clamp(chance, 0, AI_ARTILLERY_EVASION_MAX_CHANCE);
+}
+
+function pruneAiArtilleryDecisions(unit, strikes) {
+  const decisions = unit?._aiArtilleryDecisions;
+  if (!decisions) return;
+  const activeStrikeIds = new Set(
+    (strikes ?? []).map((strike) => strike?.id).filter(Boolean)
+  );
+  for (const strikeId of Object.keys(decisions)) {
+    if (!activeStrikeIds.has(strikeId)) delete decisions[strikeId];
+  }
+  if (Object.keys(decisions).length === 0) unit._aiArtilleryDecisions = null;
+}
+
+function shouldAiEvadeArtillery(unit, strike, random = Math.random) {
+  if (!strike?.id) return false;
+  const decisions =
+    unit._aiArtilleryDecisions ?? (unit._aiArtilleryDecisions = {});
+  if (Object.prototype.hasOwnProperty.call(decisions, strike.id)) {
+    return decisions[strike.id];
+  }
+
+  const roll = typeof random === 'function' ? random() : Math.random();
+  const reacts = Number.isFinite(roll)
+    ? roll < getAiArtilleryEvasionChance(unit, strike)
+    : false;
+  decisions[strike.id] = reacts;
+  return reacts;
+}
+
+function getPendingAiArtilleryImpact(strike, now) {
+  let nearest = null;
+  for (const impact of strike?.impacts ?? []) {
+    if (!Number.isFinite(impact?.impactAt)) continue;
+    const timeUntilImpact = impact.impactAt - now;
+    if (
+      timeUntilImpact < -0.2 ||
+      timeUntilImpact > AI_ARTILLERY_EVASION_LOOKAHEAD_SEC
+    ) continue;
+    if (!nearest || timeUntilImpact < nearest.timeUntilImpact) {
+      nearest = { ...impact, timeUntilImpact };
+    }
+  }
+  return nearest;
+}
+
+function getAiArtilleryThreatForUnit(unit, strikes, now) {
+  if (!isAiArtilleryUnitStationary(unit)) return null;
+
+  const unitRadius = unitPathRadius(unit.def?.type);
+  let best = null;
+  for (const strike of strikes ?? []) {
+    const targeted = strike?.targetId != null;
+
+    const impact = getPendingAiArtilleryImpact(strike, now);
+    if (!impact) continue;
+    const distance = Math.hypot(
+      unit.position.x - impact.x,
+      unit.position.z - impact.z
+    );
+    const nearImpact =
+      distance <=
+      impact.radius + unitRadius + AI_ARTILLERY_EVASION_PADDING;
+    const centerDistance = strike.center
+      ? Math.hypot(
+          unit.position.x - strike.center.x,
+          unit.position.z - strike.center.z
+        )
+      : Infinity;
+    const nearCenter =
+      !targeted &&
+      centerDistance <= (strike.alertRadius ?? 0) + unitRadius;
+    if (!nearImpact && !nearCenter) continue;
+
+    const score =
+      (targeted ? 1000 : 0) +
+      (nearImpact ? 20 : 0) +
+      (impact.radius + unitRadius + AI_ARTILLERY_EVASION_PADDING - distance) * 2 -
+      impact.timeUntilImpact;
+    if (!best || score > best.score) {
+      best = { strike, impact, score };
+    }
+  }
+  return best;
+}
+
+function isAiArtilleryDestinationOpen(unit, game, x, z) {
+  return !game?.scenery?.getUnitPlacementBlocker?.(
+    x,
+    z,
+    unitPathRadius(unit.def?.type),
+    { allowTrackedBuildingCrush: isTankType(unit.def?.type) }
+  );
+}
+
+function getAiArtilleryEvasionDestination(unit, threat, mapDef, game, now) {
+  const origin = threat?.impact;
+  if (!origin) return null;
+
+  let awayX = unit.position.x - origin.x;
+  let awayZ = unit.position.z - origin.z;
+  const awayLength = Math.hypot(awayX, awayZ);
+  if (awayLength > 0.001) {
+    awayX /= awayLength;
+    awayZ /= awayLength;
+  } else {
+    const yaw = unit.mesh?.rotation?.y ?? ((Number(unit.id) || 0) * 0.6180339887);
+    awayX = Math.sin(yaw);
+    awayZ = Math.cos(yaw);
+  }
+
+  const side = (Math.abs(Number(unit.id) || 0) % 2 === 0) ? 1 : -1;
+  const sideX = -awayZ;
+  const sideZ = awayX;
+  const radius = unitPathRadius(unit.def?.type);
+  const isVehicle = isVehicleUnit(unit.def?.type);
+  const minTravel = isVehicle
+    ? AI_ARTILLERY_EVASION_MIN_DISTANCE
+    : AI_ARTILLERY_FOOT_EVASION_MIN_DISTANCE;
+  const maxTravel = isVehicle
+    ? AI_ARTILLERY_EVASION_MAX_DISTANCE
+    : AI_ARTILLERY_FOOT_EVASION_MAX_DISTANCE;
+  const travel = clamp(
+    minTravel + radius * (isVehicle ? 1.5 : 1.2) +
+      (Math.abs(Number(unit.id) || 0) % 3) * 1.4,
+    minTravel,
+    maxTravel
+  );
+  const lateral = (isVehicle ? 4.5 : 2.5) + radius;
+  const candidates = [
+    {
+      x: unit.position.x + awayX * travel + sideX * lateral * side,
+      z: unit.position.z + awayZ * travel + sideZ * lateral * side,
+    },
+    {
+      x: unit.position.x + awayX * travel,
+      z: unit.position.z + awayZ * travel,
+    },
+    {
+      x: unit.position.x + awayX * travel * 0.78 - sideX * lateral * side,
+      z: unit.position.z + awayZ * travel * 0.78 - sideZ * lateral * side,
+    },
+    {
+      x: unit.position.x + awayX * travel * 0.3 + sideX * travel * side,
+      z: unit.position.z + awayZ * travel * 0.3 + sideZ * travel * side,
+    },
+    {
+      x: unit.position.x + awayX * travel * 0.58,
+      z: unit.position.z + awayZ * travel * 0.58,
+    },
+  ];
+  const pendingImpacts = (threat.strike.impacts ?? []).filter(
+    (impact) => Number.isFinite(impact?.impactAt) && impact.impactAt >= now - 0.2
+  );
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const raw of candidates) {
+    const point = clampAiOrderPoint(mapDef, raw);
+    const travelDistance = Math.hypot(
+      point.x - unit.position.x,
+      point.z - unit.position.z
+    );
+    if (travelDistance < 3.5 || !isAiArtilleryDestinationOpen(unit, game, point.x, point.z)) {
+      continue;
+    }
+
+    let clearance = Math.hypot(point.x - origin.x, point.z - origin.z) - (origin.radius ?? 0);
+    for (const impact of pendingImpacts) {
+      clearance = Math.min(
+        clearance,
+        Math.hypot(point.x - impact.x, point.z - impact.z) - (impact.radius ?? 0)
+      );
+    }
+    const awayProgress =
+      (point.x - unit.position.x) * awayX +
+      (point.z - unit.position.z) * awayZ;
+    const score = clearance * 2.2 + awayProgress * 0.4 - travelDistance * 0.12;
+    if (score > bestScore) {
+      bestScore = score;
+      best = point;
+    }
+  }
+  return best;
+}
+
+function setAiArtilleryEvasionMove(unit, destination, game, mapDef) {
+  if (typeof unit.moveTo === 'function') {
+    unit.moveTo(
+      destination.x,
+      destination.z,
+      mapDef,
+      false,
+      game?.scenery ?? null,
+      { trenchManager: game?.infantryTrenches ?? null }
+    );
+  } else {
+    unit.clearAttackOrder?.();
+    unit.moveTarget = { x: destination.x, z: destination.z };
+    unit._movePath = null;
+    unit._finalMoveGoal = { x: destination.x, z: destination.z };
+  }
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+  unit._pathRepathAttempts = 0;
+  unit._lastPathRepathX = null;
+  unit._lastPathRepathZ = null;
+}
+
+function clearAiArtilleryEvasion(unit, stopAtGoal = false) {
+  const reaction = unit?._aiArtilleryEvasion;
+  if (!reaction) return;
+  if (stopAtGoal && !unit._userMoveOrder) {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._reverseMoveOrder = false;
+  }
+  unit._aiArtilleryEvasion = null;
+}
+
+function maintainAiArtilleryEvasion(unit, game, mapDef, now) {
+  const reaction = unit?._aiArtilleryEvasion;
+  if (!reaction) return false;
+
+  const atGoal = Math.hypot(
+    unit.position.x - reaction.x,
+    unit.position.z - reaction.z
+  ) <= 4.2;
+  if (
+    !isAiArtilleryUnitCandidate(unit) ||
+    unit._userMoveOrder ||
+    now >= reaction.until
+  ) {
+    clearAiArtilleryEvasion(unit, atGoal);
+    return false;
+  }
+
+  if (atGoal) {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+    unit._reverseMoveOrder = false;
+    return true;
+  }
+
+  if (
+    now >= (reaction.reissueAt ?? 0) &&
+    (!unit.moveTarget ||
+      Math.hypot(
+        unit.moveTarget.x - reaction.x,
+        unit.moveTarget.z - reaction.z
+      ) > 2.5)
+  ) {
+    setAiArtilleryEvasionMove(unit, reaction, game, mapDef);
+    reaction.reissueAt = now + AI_ARTILLERY_EVASION_REISSUE_SEC;
+  }
+  return true;
+}
+
+/**
+ * Give exposed enemy units a short, path-aware withdrawal when player
+ * artillery is already in flight. Each unit makes one cached, role-weighted
+ * decision per strike, so a warning creates a mix of dispersal and hold-fast
+ * behavior instead of making the whole force instantly scatter.
+ */
+export function updateAiArtilleryThreatReactions({
+  enemyUnits = [],
+  game = null,
+  mapDef = null,
+  random = Math.random,
+} = {}) {
+  const now = game?.matchTime ?? 0;
+  const strikes = getActiveIncomingArtilleryStrikes(game, 'player');
+
+  for (const unit of enemyUnits ?? []) {
+    pruneAiArtilleryDecisions(unit, strikes);
+    if (
+      unit?._aiArtilleryEvasion &&
+      maintainAiArtilleryEvasion(unit, game, mapDef, now)
+    ) {
+      continue;
+    }
+    if (!isAiArtilleryUnitCandidate(unit)) continue;
+
+    const threat = getAiArtilleryThreatForUnit(unit, strikes, now);
+    if (!threat || !shouldAiEvadeArtillery(unit, threat.strike, random)) continue;
+    const destination = getAiArtilleryEvasionDestination(
+      unit,
+      threat,
+      mapDef ?? game?.mapDef ?? null,
+      game,
+      now
+    );
+    if (!destination) continue;
+
+    clearAiIncomingFireReaction(unit);
+    unit.clearAttackOrder?.();
+    unit._aiIncomingFireNextAt = now + AI_ARTILLERY_EVASION_HOLD_SEC;
+    unit._aiTankManeuver = null;
+    unit._aiSupportMode = null;
+    unit._tdGoalStale = true;
+    setAiArtilleryEvasionMove(
+      unit,
+      destination,
+      game,
+      mapDef ?? game?.mapDef ?? null
+    );
+    unit._aiArtilleryEvasion = {
+      strikeId: threat.strike.id,
+      x: destination.x,
+      z: destination.z,
+      until: Math.max(
+        now + AI_ARTILLERY_EVASION_HOLD_SEC,
+        (threat.strike.expiresAt ?? now + threat.impact.timeUntilImpact) +
+          AI_ARTILLERY_EVASION_HOLD_SEC
+      ),
+      reissueAt: now + AI_ARTILLERY_EVASION_REISSUE_SEC,
+    };
   }
 }
 
@@ -3956,6 +4374,8 @@ export function updateAI({
     ensureClearanceDefenderCover(game, enemyUnits);
   }
 
+  updateAiArtilleryThreatReactions({ enemyUnits, game, mapDef });
+
   if (aiTimer > 0) return;
   aiTimer = (AI_TICK_MIN + Math.random() * (AI_TICK_MAX - AI_TICK_MIN)) * d.aiTickMult;
 
@@ -3982,6 +4402,12 @@ export function updateAI({
       clearance: !!clearance,
     });
   }
+
+  updateAiArtilleryThreatReactions({
+    enemyUnits: aliveEnemies,
+    game,
+    mapDef,
+  });
 
   if (alivePlayers.length === 0 && (!assault || assault.attackerTeam === 'enemy')) return;
 
@@ -4022,8 +4448,10 @@ export function updateAI({
   /** One care job per patient/wreck/HQ this tick so medics/engineers spread out. */
   const careClaims = new Set();
   const crewlessTankClaims = new Set();
+  const truckClaims = new Set();
 
   for (const unit of aliveEnemies) {
+    if (unit._aiArtilleryEvasion) continue;
     if (unit.def?.type === 'commander') continue;
     if (unit._aiCommanderScreen) {
       if (maintainAiCommanderScreen(unit, game, alivePlayers)) continue;
@@ -4048,7 +4476,9 @@ export function updateAI({
 
     if (unit.attackOrder?.isSmokeShell) continue;
 
+    if (unit._mountedOnTankId || unit._towedByTruckId) continue;
     if (tryAssignCrewlessTankRecovery(unit, game, crewlessTankClaims)) continue;
+    if (tryAssignAiTruckTask(unit, aliveEnemies, alivePlayers, game, truckClaims)) continue;
 
     // Radio operators have their own relay behavior. Let them hold the
     // assigned station (or a mode-specific defensive hold) instead of the
@@ -4376,6 +4806,837 @@ export function updateAI({
   // campaign, Clear Defenses, and Battle Simulation branches share the same
   // per-unit destination allocation.
   diversifyAiMoveOrders(aliveEnemies, game);
+}
+
+const AI_TRUCK_PASSENGER_SEEK = 28;
+const AI_TRUCK_GUN_SEEK = 42;
+/** Stay outside rifle (~420 m) and MG (~500 m) envelopes. 1 game meter ≈ 10 m. */
+const AI_TRUCK_KEEP_OUT = 58;
+const AI_TRUCK_ARTY_KEEP_OUT = 74;
+const AI_TRUCK_DELIVERY_RADIUS = 7;
+const AI_TRUCK_REASSESS_SEC = 14;
+const AI_TRUCK_RELOAD_COOLDOWN_SEC = 16;
+const AI_TRUCK_ROUTE_WEIGHT = 0.16;
+const AI_TRUCK_DROP_COVER_RADIUS = 18;
+
+function aiTruckMountedCount(truck) {
+  return getTankRiderIds(truck).filter((id) => id !== truck._replacementCrewUnitId).length;
+}
+
+function aiTruckPendingCount(truck, allies = []) {
+  let pending = 0;
+  for (const unit of allies) {
+    if (unit._pendingMountTankId === truck.id && !unit._mountedOnTankId) pending += 1;
+  }
+  return pending;
+}
+
+function aiTruckPassengerCount(truck, allies = []) {
+  return aiTruckMountedCount(truck) + aiTruckPendingCount(truck, allies);
+}
+
+function nearestEnemyDistance(unit, players) {
+  const nearest = findNearestEnemy(unit, players);
+  return nearest ? unit.distanceTo(nearest) : Infinity;
+}
+
+function getAiTruckKeepOut(truck) {
+  if (truck?._towedGunType === 'artillery') return AI_TRUCK_ARTY_KEEP_OUT;
+  return AI_TRUCK_KEEP_OUT;
+}
+
+function getAiTruckGunKeepOut(gun) {
+  return gun?.def?.type === 'artillery'
+    ? AI_TRUCK_ARTY_KEEP_OUT
+    : AI_TRUCK_KEEP_OUT;
+}
+
+function getAiTruckWithdrawPoint(truck, players, keepOut) {
+  const nearest = findNearestEnemy(truck, players);
+  if (!nearest) return null;
+  const dist = truck.distanceTo(nearest);
+  if (dist >= keepOut) return null;
+  const dx = truck.position.x - nearest.position.x;
+  const dz = truck.position.z - nearest.position.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const travel = keepOut - dist + 6;
+  return {
+    x: truck.position.x + (dx / len) * travel,
+    z: truck.position.z + (dz / len) * travel,
+  };
+}
+
+function getAiTruckPositionLike(value) {
+  const position = value?.position ?? value;
+  if (!Number.isFinite(position?.x) || !Number.isFinite(position?.z)) return null;
+  return { x: position.x, z: position.z };
+}
+
+function getAiTruckDistanceToPoint(unit, point) {
+  const target = getAiTruckPositionLike(point);
+  if (!unit?.position || !target) return Infinity;
+  return Math.hypot(unit.position.x - target.x, unit.position.z - target.z);
+}
+
+function getAiTruckObjectiveCandidates(truck, players, game) {
+  const candidates = [];
+  const addCandidate = (point, kind, priority, extra = {}) => {
+    const position = getAiTruckPositionLike(point);
+    if (!position) return;
+    const clamped = clampAiOrderPoint(game?.mapDef, position);
+    const existing = candidates.find(
+      (candidate) =>
+        Math.hypot(candidate.x - clamped.x, candidate.z - clamped.z) < 2.5
+    );
+    if (existing) {
+      if (priority > existing.priority) {
+        Object.assign(existing, { kind, priority, ...extra });
+      }
+      return;
+    }
+    candidates.push({ x: clamped.x, z: clamped.z, kind, priority, ...extra });
+  };
+
+  const plan =
+    game?._standardAiPlan?.session === game?.lastSession
+      ? game._standardAiPlan
+      : null;
+  if (plan) {
+    if (plan.operation === 'regroup') {
+      addCandidate(plan.rearAnchor ?? plan.anchor, 'regroupAnchor', 98, {
+        operation: plan.operation,
+      });
+    } else if (plan.operation === 'defend' || plan.operation === 'contain') {
+      addCandidate(plan.anchor, 'defensiveAnchor', 92, {
+        operation: plan.operation,
+      });
+    } else {
+      addCandidate(plan.attackPoint ?? plan.anchor, 'attackAxis', 74, {
+        operation: plan.operation,
+      });
+    }
+    if (plan.objective) {
+      const objectivePriority =
+        plan.operation === 'defend' || plan.operation === 'contain'
+          ? 72
+          : plan.operation === 'regroup'
+            ? 84
+            : 104;
+      addCandidate(plan.objective, 'captureObjective', objectivePriority, {
+        objectiveId: plan.objective.id ?? null,
+      });
+    }
+  }
+
+  const assault = game?.assault;
+  if (assault?.frontlineCp) {
+    const defendingAssault = assault.defenderTeam === 'enemy';
+    addCandidate(
+      assault.frontlineCp,
+      assault.attackerTeam === 'enemy' ? 'assaultFrontline' : 'defensiveLine',
+      assault.attackerTeam === 'enemy' ? 105 : defendingAssault ? 112 : 84,
+      { objectiveId: assault.frontlineCp.id ?? null }
+    );
+  }
+
+  const clearance = game?.clearance;
+  if (clearance) {
+    const operational = game.clearanceOperational;
+    if (game.clearanceRole === 'defend') {
+      addCandidate(operational?.anchor, 'clearanceAssaultAnchor', 96);
+      addCandidate(game.mapDef?.playerBase, 'clearancePlayerBase', 92);
+    } else {
+      addCandidate(operational?.anchor, 'clearanceDefensiveAnchor', 88);
+    }
+  }
+
+  const towerDefense = game?.towerDefense;
+  if (towerDefense) {
+    const frontline =
+      getAiTruckPositionLike(truck._tdFrontlineTarget) ??
+      (Number.isFinite(towerDefense.frontlineX) && Number.isFinite(towerDefense.frontlineZ)
+        ? { x: towerDefense.frontlineX, z: towerDefense.frontlineZ }
+        : getAiTruckPositionLike(game.mapDef?.frontline));
+    if (frontline) {
+      addCandidate(frontline, 'towerDefenseFrontline', truck._tdAttacker ? 110 : 86);
+    }
+  }
+
+  const lastStand = game?.lastStand;
+  if (lastStand || game?.lastStand?.phase === 'battle') {
+    if (
+      truck.defensiveHold &&
+      truck.lastStandStance !== 'attack' &&
+      truck.lastStandStance !== 'regroup'
+    ) {
+      addCandidate(truck.defensiveHold, 'lastStandHold', 116);
+    } else {
+      addCandidate(game.lastStand?.enemyOperational?.anchor, 'lastStandAnchor', 92);
+    }
+  }
+
+  const operation = plan?.operation;
+  const defensiveOperation =
+    operation === 'defend' ||
+    operation === 'contain' ||
+    assault?.defenderTeam === 'enemy';
+  for (const point of game?.capturePoints ?? []) {
+    const nearestPlayer = (players ?? []).reduce((best, player) => {
+      if (!player || player.dead || player.surrendered) return best;
+      const distance = Math.hypot(
+        player.position.x - point.x,
+        player.position.z - point.z
+      );
+      return Math.min(best, distance);
+    }, Infinity);
+    const nearbyPlayers = (players ?? []).filter(
+      (player) =>
+        player &&
+        !player.dead &&
+        !player.surrendered &&
+        Math.hypot(player.position.x - point.x, player.position.z - point.z) < 18
+    ).length;
+    if (point.owner !== 'enemy') {
+      let priority = point.owner === 'player' ? 94 : 78;
+      if (point.isFrontline) priority += 7;
+      priority += Math.min(12, nearbyPlayers * 3);
+      if (defensiveOperation) priority -= 16;
+      addCandidate(point, 'capturePoint', priority, {
+        objectiveId: point.id ?? null,
+      });
+    } else if (defensiveOperation && nearestPlayer < 30) {
+      addCandidate(point, 'defendCapturePoint', 84, {
+        objectiveId: point.id ?? null,
+      });
+    }
+  }
+
+  const livePlayers = (players ?? []).filter(
+    (player) => player && !player.dead && !player.surrendered && !player._captureExit
+  );
+  const playerCenter = livePlayers.length ? averagePosition(livePlayers) : null;
+  if (playerCenter) addCandidate(playerCenter, 'enemyCluster', 46);
+
+  const nearest = findNearestEnemy(truck, livePlayers);
+  if (nearest) {
+    addCandidate(nearest, 'nearestEnemy', 42, { targetId: nearest.id ?? null });
+  }
+
+  const playerHq = game?.hqs?.find((hq) => hq.team === 'player' && !hq.dead);
+  if (playerHq) addCandidate(playerHq, 'playerHq', livePlayers.length ? 34 : 58);
+
+  if (!candidates.length) addCandidate(truck.position, 'currentPosition', 1);
+  return candidates;
+}
+
+function getAiTruckRouteLength(truck, destination, game, cache) {
+  const point = getAiTruckPositionLike(destination);
+  if (!point || !truck?.position) return Infinity;
+  const direct = Math.hypot(
+    truck.position.x - point.x,
+    truck.position.z - point.z
+  );
+  if (!game?.scenery || game.mapDef?.terrain !== 'urban' || direct < 2) return direct;
+
+  const key = `${Math.round(point.x * 2)}:${Math.round(point.z * 2)}`;
+  if (cache?.has(key)) return cache.get(key);
+
+  const path = buildMovePath(
+    truck.position.x,
+    truck.position.z,
+    point.x,
+    point.z,
+    game.mapDef,
+    undefined,
+    {
+      scenery: game.scenery,
+      radius: unitPathPlanRadius('truck', game.mapDef),
+      avoidBuildings: true,
+      preferUrbanRoads: true,
+      unitTeam: truck.team,
+      unitType: 'truck',
+    }
+  );
+  let route = Infinity;
+  if (path?.length) {
+    let previous = truck.position;
+    let length = 0;
+    for (const waypoint of path) {
+      if (!Number.isFinite(waypoint?.x) || !Number.isFinite(waypoint?.z)) continue;
+      length += Math.hypot(waypoint.x - previous.x, waypoint.z - previous.z);
+      previous = waypoint;
+    }
+    const stalled =
+      path.length === 1 &&
+      Math.hypot(path[0].x - truck.position.x, path[0].z - truck.position.z) < 1.5 &&
+      direct > 3;
+    if (!stalled && length > 0) route = length;
+  }
+  cache?.set(key, route);
+  return route;
+}
+
+function getAiTruckDropCoverScore(point, game) {
+  let best = 0;
+  for (const zone of game?.coverSystem?.zones ?? []) {
+    if (!Number.isFinite(zone?.x) || !Number.isFinite(zone?.z)) continue;
+    const distance = Math.hypot(point.x - zone.x, point.z - zone.z);
+    if (distance > AI_TRUCK_DROP_COVER_RADIUS) continue;
+    const quality = clamp(1 - (zone.mult ?? 1), 0, 1);
+    const proximity = 1 - distance / AI_TRUCK_DROP_COVER_RADIUS;
+    const typeBonus = zone.type === 'trench' || zone.type === 'bunker' ? 8 : 0;
+    best = Math.max(best, quality * 28 * proximity + typeBonus * proximity);
+  }
+  return best;
+}
+
+function getAiTruckNearestPlayer(point, players) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const player of players ?? []) {
+    if (!player || player.dead || player.surrendered || player._captureExit) continue;
+    const distance = getAiTruckDistanceToPoint(player, point);
+    if (distance < bestDistance) {
+      best = player;
+      bestDistance = distance;
+    }
+  }
+  return best ? { unit: best, distance: bestDistance } : null;
+}
+
+function getAiTruckSafeDropPoint(point, players, keepOut, game, fallbackPoint = null) {
+  const nearest = getAiTruckNearestPlayer(point, players);
+  if (!nearest || nearest.distance >= keepOut + 8) return point;
+  const threat = getAiTruckPositionLike(nearest.unit);
+  let dx = point.x - threat.x;
+  let dz = point.z - threat.z;
+  let length = Math.hypot(dx, dz);
+  if (length < 0.01) {
+    const fallback =
+      getAiTruckPositionLike(fallbackPoint) ??
+      getAiTruckPositionLike(game?.mapDef?.enemyBase) ??
+      point;
+    dx = fallback.x - threat.x;
+    dz = fallback.z - threat.z;
+    length = Math.hypot(dx, dz);
+  }
+  length ||= 1;
+  const safeDistance = keepOut + 5;
+  return clampAiOrderPoint(game?.mapDef, {
+    x: threat.x + (dx / length) * safeDistance,
+    z: threat.z + (dz / length) * safeDistance,
+  });
+}
+
+function getAiTruckThreatValue(gun, target, players) {
+  if (!target) return 0;
+  const type = target.def?.type;
+  const gunType = gun?.def?.type;
+  let value = 8;
+  if (gunType === 'antiTankGun') {
+    if (isTankType(type)) value += 82;
+    else if (isVehicleUnit(type)) value += 42;
+    else if (type === 'antiTankGun' || type === 'artillery') value += 26;
+  } else if (gunType === 'artillery') {
+    if (isTankType(type)) value += 34;
+    else if (isVehicleUnit(type)) value += 24;
+    else value += 16;
+    const targetPosition = getAiTruckPositionLike(target);
+    if (targetPosition) {
+      const nearby = (players ?? []).filter(
+        (player) =>
+          player &&
+          !player.dead &&
+          Math.hypot(
+            player.position.x - targetPosition.x,
+            player.position.z - targetPosition.z
+          ) < 14
+      ).length;
+      value += Math.min(24, nearby * 8);
+    }
+  }
+  if (target.attackOrder && !target.attackOrder.dead) value += 8;
+  return value;
+}
+
+function pickAiTruckGunThreat(gun, players) {
+  let best = null;
+  let bestScore = -Infinity;
+  const range = gun?.def?.range ?? 80;
+  const minRange = gun?.def?.minRange ?? 0;
+  for (const target of players ?? []) {
+    if (!target || target.dead || target.surrendered || target._captureExit) continue;
+    const distance = gun.distanceTo(target);
+    const value = getAiTruckThreatValue(gun, target, players);
+    let score = value - distance * 0.12;
+    if (distance >= minRange && distance <= range * 0.95) score += 18;
+    if (distance < minRange) score -= 32;
+    if (score > bestScore) {
+      best = target;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function getAiTruckFiringPoints(targetPoint, preferredPoint, distance, mapDef) {
+  const dx = preferredPoint.x - targetPoint.x;
+  const dz = preferredPoint.z - targetPoint.z;
+  const length = Math.hypot(dx, dz) || 1;
+  const awayX = dx / length;
+  const awayZ = dz / length;
+  const sideX = -awayZ;
+  const sideZ = awayX;
+  const base = {
+    x: targetPoint.x + awayX * distance,
+    z: targetPoint.z + awayZ * distance,
+  };
+  return [
+    base,
+    { x: base.x + sideX * 8, z: base.z + sideZ * 8 },
+    { x: base.x - sideX * 8, z: base.z - sideZ * 8 },
+  ].map((point) => clampAiOrderPoint(mapDef, point));
+}
+
+function aiTruckGunPointBlocked(gun, point, target, game) {
+  if (!target || !game?.scenery) return false;
+  const targetPoint = getAiTruckPositionLike(target);
+  if (!targetPoint) return false;
+  if (
+    gun.def?.type === 'artillery' &&
+    typeof game.scenery.findArtilleryShellBuildingHit === 'function'
+  ) {
+    return !!game.scenery.findArtilleryShellBuildingHit(
+      point.x,
+      point.z,
+      targetPoint.x,
+      targetPoint.z,
+      {
+        fullScan: true,
+        maxDistanceFromMuzzle: Math.max(0, gun.def?.minRange ?? 0),
+      }
+    );
+  }
+  return !!game.scenery.isLineOfFireBlocked?.(
+    { position: point, def: gun.def, team: gun.team },
+    target
+  );
+}
+
+function getAiTruckTransportDestination(truck, allies, players, game, { mounted = 0, towedGun = null } = {}) {
+  const candidates = getAiTruckObjectiveCandidates(truck, players, game);
+  if (!candidates.length) return null;
+  const routeCache = new Map();
+
+  if (towedGun) {
+    const threat = pickAiTruckGunThreat(towedGun, players);
+    if (!threat) {
+      let best = null;
+      for (const candidate of candidates) {
+        const route = getAiTruckRouteLength(truck, candidate, game, routeCache);
+        if (!Number.isFinite(route)) continue;
+        const score = candidate.priority - route * AI_TRUCK_ROUTE_WEIGHT;
+        if (!best || score > best.score) {
+          best = { candidate, score };
+        }
+      }
+      if (!best) return null;
+      return {
+        destination: { x: best.candidate.x, z: best.candidate.z },
+        kind: mounted > 0 ? 'combined' : 'gun',
+        anchorKind: best.candidate.kind,
+        targetId: null,
+      };
+    }
+
+    const targetPoint = getAiTruckPositionLike(threat);
+    const ownBase = getAiTruckPositionLike(game?.mapDef?.enemyBase) ?? truck.position;
+    const keepOut = getAiTruckGunKeepOut(towedGun);
+    const range = Math.max(keepOut + 2, towedGun.def?.range ?? keepOut + 24);
+    // Keep the gun outside the truck's danger ring, but do not push short-ranged
+    // AT pieces beyond their actual maximum range.
+    const minimum = Math.min(
+      keepOut + 5,
+      Math.max(keepOut + 2, range - 5)
+    );
+    const maximum = Math.max(minimum, range - 3);
+    const desiredDistance = clamp(range * 0.78, minimum, maximum);
+    const threatValue = getAiTruckThreatValue(towedGun, threat, players);
+    let best = null;
+
+    for (const candidate of candidates) {
+      let preferred = getAiTruckPositionLike(candidate) ?? ownBase;
+      if (getAiTruckDistanceToPoint(threat, preferred) < 0.01) preferred = ownBase;
+      const firingPoints = getAiTruckFiringPoints(
+        targetPoint,
+        preferred,
+        desiredDistance,
+        game?.mapDef
+      );
+      for (const destination of firingPoints) {
+        const route = getAiTruckRouteLength(truck, destination, game, routeCache);
+        if (!Number.isFinite(route)) continue;
+        const targetDistance = Math.hypot(
+          destination.x - targetPoint.x,
+          destination.z - targetPoint.z
+        );
+        const blocked = aiTruckGunPointBlocked(towedGun, destination, threat, game);
+        const nearbyEnemy = getAiTruckNearestPlayer(destination, players);
+        let score =
+          candidate.priority * 0.62 +
+          threatValue -
+          route * AI_TRUCK_ROUTE_WEIGHT +
+          (blocked ? -46 : 30);
+        if (targetDistance >= minimum && targetDistance <= range * 0.98) score += 18;
+        if (targetDistance < minimum) score -= 34;
+        if (targetDistance > range) score -= 24;
+        if (nearbyEnemy && nearbyEnemy.distance < keepOut) score -= 80;
+        if (candidate.kind === 'towerDefenseFrontline') score += 10;
+        if (!best || score > best.score) {
+          best = { candidate, destination, score };
+        }
+      }
+    }
+    if (!best) return null;
+    return {
+      destination: best.destination,
+      kind: mounted > 0 ? 'combined' : 'gun',
+      anchorKind: best.candidate.kind,
+      targetId: threat.id ?? null,
+    };
+  }
+
+  let best = null;
+  for (const candidate of candidates) {
+    const destination = getAiTruckSafeDropPoint(
+      { x: candidate.x, z: candidate.z },
+      players,
+      AI_TRUCK_KEEP_OUT,
+      game,
+      truck.position
+    );
+    const route = getAiTruckRouteLength(truck, destination, game, routeCache);
+    if (!Number.isFinite(route)) continue;
+    const nearbyEnemy = getAiTruckNearestPlayer(destination, players);
+    const supportCount = (allies ?? []).filter(
+      (ally) =>
+        ally &&
+        ally !== truck &&
+        !ally.dead &&
+        !ally.surrendered &&
+        !ally._mountedOnTankId &&
+        !ally._pendingMountTankId &&
+        canRideTanks(ally.def?.type) &&
+        getAiTruckDistanceToPoint(ally, destination) < 18
+    ).length;
+    let score =
+      candidate.priority +
+      getAiTruckDropCoverScore(destination, game) +
+      Math.min(18, supportCount * 3) -
+      route * AI_TRUCK_ROUTE_WEIGHT;
+    if (nearbyEnemy && nearbyEnemy.distance < AI_TRUCK_KEEP_OUT - 3) score -= 65;
+    if (candidate.kind === 'towerDefenseFrontline') score += 8;
+    if (!best || score > best.score) {
+      best = { candidate, destination, score };
+    }
+  }
+  if (!best) return null;
+  return {
+    destination: best.destination,
+    kind: 'passengers',
+    anchorKind: best.candidate.kind,
+    targetId: null,
+  };
+}
+
+function markAiTruckRidersDropped(truck, game) {
+  const now = game?.matchTime ?? 0;
+  const replacementId = truck?._replacementCrewUnitId;
+  const riderIds = getTankRiderIds(truck).filter((id) => id !== replacementId);
+  for (const rider of game?.units ?? []) {
+    if (riderIds.includes(rider.id)) rider._aiTruckDroppedAt = now;
+  }
+}
+
+function dismountAiTruckPassengers(truck, game) {
+  if (aiTruckMountedCount(truck) <= 0) return;
+  markAiTruckRidersDropped(truck, game);
+  dismountAllRiders(truck, game.units, game.mapDef);
+}
+
+function wasRecentlyDroppedFromAiTruck(unit, game) {
+  const droppedAt = unit?._aiTruckDroppedAt;
+  if (!Number.isFinite(droppedAt)) return false;
+  return (game?.matchTime ?? 0) - droppedAt < AI_TRUCK_RELOAD_COOLDOWN_SEC;
+}
+
+/** Fortified Line garrison should keep guns on the prepared belt, not limber them. */
+function aiUsesTrucksOffensively(game) {
+  if (game?.clearance && game.clearanceRole !== 'defend') return false;
+  return true;
+}
+
+function gunIsAlreadyEngaged(gun, players) {
+  if (!gun || gun.dead) return false;
+  const nearest = findNearestEnemy(gun, players);
+  if (!nearest) return false;
+  const range = gun.def?.range ?? 60;
+  const minRange = gun.def?.minRange ?? 0;
+  const dist = gun.distanceTo(nearest);
+  return dist <= range * 0.92 && dist >= minRange;
+}
+
+function findAiTowGun(truck, allies, players, claims) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (const gun of allies) {
+    if (!isTowableGun(gun?.def?.type) || gun.dead || gun.surrendered) continue;
+    if (gun._towedByTruckId || gun._pendingTowTruckId) continue;
+    if (claims.has(`tow:${gun.id}`)) continue;
+    if (gun.defensiveHold && !gun.moveTarget && gunIsAlreadyEngaged(gun, players)) continue;
+    const dist = truck.distanceTo(gun);
+    if (dist > AI_TRUCK_GUN_SEEK) continue;
+    const enemyDist = nearestEnemyDistance(gun, players);
+    if (enemyDist < getAiTruckGunKeepOut(gun)) continue;
+    const score = (enemyDist > 48 ? 18 : 8) - dist * 0.45 + (gun.def?.type === 'antiTankGun' ? 4 : 0);
+    if (score > bestScore) {
+      best = gun;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function findAiTruckPassengers(truck, allies, players, game, claims) {
+  const cap = getTankRiderCapacity(truck);
+  const used = aiTruckPassengerCount(truck, allies);
+  if (used >= cap) return [];
+  const picked = [];
+  const ranked = [];
+  for (const unit of allies) {
+    if (!canRideTanks(unit?.def?.type)) continue;
+    if (unit.dead || unit.surrendered || unit._mountedOnTankId || unit._pendingMountTankId) continue;
+    if (unit.defensiveHold && !unit.moveTarget) continue;
+    if (wasRecentlyDroppedFromAiTruck(unit, game)) continue;
+    if (claims.has(`ride:${unit.id}`)) continue;
+    const dist = truck.distanceTo(unit);
+    if (dist > AI_TRUCK_PASSENGER_SEEK) continue;
+    const enemyDist = nearestEnemyDistance(unit, players);
+    if (enemyDist < AI_TRUCK_KEEP_OUT - 6) continue;
+    ranked.push({ unit, score: enemyDist - dist * 0.4 });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  for (const entry of ranked) {
+    if (picked.length + used >= cap) break;
+    picked.push(entry.unit);
+  }
+  return picked;
+}
+
+function getAiTruckAdvancePoint(truck, players, game) {
+  const nearest = findNearestEnemy(truck, players);
+  const keepOut = getAiTruckKeepOut(truck);
+  if (!nearest) {
+    const hq = game?.hqs?.find((h) => h.team === 'player' && !h.dead);
+    if (!hq) return null;
+    const dist = Math.hypot(hq.position.x - truck.position.x, hq.position.z - truck.position.z);
+    if (dist <= keepOut) return null;
+    const dx = hq.position.x - truck.position.x;
+    const dz = hq.position.z - truck.position.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const travel = dist - keepOut;
+    return {
+      x: truck.position.x + (dx / len) * travel,
+      z: truck.position.z + (dz / len) * travel,
+    };
+  }
+  const dist = truck.distanceTo(nearest);
+  if (dist <= keepOut) return null;
+  const dx = nearest.position.x - truck.position.x;
+  const dz = nearest.position.z - truck.position.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const travel = dist - keepOut;
+  return {
+    x: truck.position.x + (dx / len) * travel,
+    z: truck.position.z + (dz / len) * travel,
+  };
+}
+
+function tryAssignAiTruckBrain(truck, allies, players, game, claims) {
+  if (truck.def?.type !== 'truck' || truck._crewless || truck._mobilityDamaged) return false;
+
+  const keepOut = getAiTruckKeepOut(truck);
+  const mounted = aiTruckMountedCount(truck);
+  const pending = aiTruckPendingCount(truck, allies);
+  const riders = mounted + pending;
+  const towedGun = truck._towedGunId
+    ? allies.find((u) => u.id === truck._towedGunId)
+    : null;
+  const enemyDist = nearestEnemyDistance(truck, players);
+  const underFire = (truck._underFireTimer ?? 0) > 0;
+  const tooClose = underFire || enemyDist <= keepOut;
+
+  if (tooClose) {
+    truck.moveTarget = null;
+    truck._movePath = null;
+    if (truck._pendingTowGunId) {
+      const pendingGun = allies.find((unit) => unit.id === truck._pendingTowGunId);
+      if (pendingGun?._pendingTowTruckId === truck.id) pendingGun._pendingTowTruckId = null;
+      truck._pendingTowGunId = null;
+    }
+    if (towedGun) detachGun(truck, game.units, game.mapDef);
+    if (mounted > 0) dismountAiTruckPassengers(truck, game);
+    truck._aiTruckTransport = null;
+    const withdraw = getAiTruckWithdrawPoint(truck, players, keepOut);
+    if (withdraw) {
+      truck.clearAttackOrder?.();
+      truck.moveTarget = withdraw;
+    }
+    return true;
+  }
+
+  if (!aiUsesTrucksOffensively(game)) {
+    if (truck._pendingTowGunId) {
+      const pendingGun = allies.find((unit) => unit.id === truck._pendingTowGunId);
+      if (pendingGun?._pendingTowTruckId === truck.id) pendingGun._pendingTowTruckId = null;
+      truck._pendingTowGunId = null;
+    }
+    truck.moveTarget = null;
+    truck._aiTruckTransport = null;
+    return true;
+  }
+
+  if (truck._pendingTowGunId) {
+    const gun = allies.find((u) => u.id === truck._pendingTowGunId);
+    if (!gun || gun.dead) {
+      truck._pendingTowGunId = null;
+    } else if (nearestEnemyDistance(gun, players) < getAiTruckGunKeepOut(gun)) {
+      truck._pendingTowGunId = null;
+      if (gun._pendingTowTruckId === truck.id) gun._pendingTowTruckId = null;
+      truck._aiTruckTransport = null;
+      truck.moveTarget = null;
+      return true;
+    } else {
+      truck._aiTruckTransport = null;
+      truck.moveTarget = { x: gun.position.x, z: gun.position.z };
+      return true;
+    }
+  }
+
+  if (!towedGun && !truck._towedGunId && !truck._pendingTowGunId) {
+    const gun = findAiTowGun(truck, allies, players, claims);
+    if (gun && issueTowOrder(truck, gun, game.units)) {
+      claims.add(`tow:${gun.id}`);
+      truck._aiTruckTransport = null;
+      return true;
+    }
+  }
+
+  const cap = getTankRiderCapacity(truck);
+  if (riders < cap) {
+    const passengers = findAiTruckPassengers(truck, allies, players, game, claims);
+    if (passengers.length) {
+      const issued = issueMountOrder(passengers, truck, game.units, game);
+      if (issued > 0) {
+        for (const rider of passengers) claims.add(`ride:${rider.id}`);
+        truck._aiTruckTransport = null;
+        return true;
+      }
+    }
+  }
+
+  if (pending > 0) return true;
+  if (mounted > 0 || towedGun) {
+    const payload = `${mounted}:${towedGun?.id ?? truck._towedGunId ?? ''}`;
+    const now = game?.matchTime ?? 0;
+    const existing = truck._aiTruckTransport;
+    let transport =
+      existing &&
+      existing.payload === payload &&
+      now - (existing.createdAt ?? 0) < AI_TRUCK_REASSESS_SEC
+        ? existing
+        : null;
+    if (!transport) {
+      transport = getAiTruckTransportDestination(truck, allies, players, game, {
+        mounted,
+        towedGun,
+      });
+      if (transport) {
+        transport = {
+          ...transport,
+          payload,
+          createdAt: now,
+        };
+        truck._aiTruckTransport = transport;
+      }
+    }
+
+    if (transport?.destination) {
+      if (getAiTruckDistanceToPoint(truck, transport.destination) <= AI_TRUCK_DELIVERY_RADIUS) {
+        if (towedGun) detachGun(truck, game.units, game.mapDef);
+        if (mounted > 0) dismountAiTruckPassengers(truck, game);
+        truck._aiTruckTransport = null;
+        truck.clearAttackOrder?.();
+        truck.moveTarget = null;
+        truck._movePath = null;
+        return true;
+      }
+      truck.clearAttackOrder?.();
+      truck.moveTarget = { ...transport.destination };
+      truck._userMoveOrder = false;
+      return true;
+    }
+  }
+
+  const fallback = getAiTruckAdvancePoint(truck, players, game);
+  if (fallback) {
+    truck.clearAttackOrder?.();
+    truck.moveTarget = fallback;
+    truck._userMoveOrder = false;
+    return true;
+  }
+
+  truck._aiTruckTransport = null;
+  truck.moveTarget = null;
+  return true;
+}
+
+function tryAssignAiTruckRide(unit, allies, players, game, claims) {
+  if (!aiUsesTrucksOffensively(game)) return false;
+  if (!canRideTanks(unit?.def?.type)) return false;
+  if (unit._mountedOnTankId || unit._pendingMountTankId) return true;
+  if (unit.defensiveHold && !unit.moveTarget) return false;
+  if (wasRecentlyDroppedFromAiTruck(unit, game)) return false;
+  if (nearestEnemyDistance(unit, players) < AI_TRUCK_KEEP_OUT - 6) return false;
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const truck of allies) {
+    if (truck.def?.type !== 'truck' || truck.dead || truck._crewless) continue;
+    if (truck._mobilityDamaged) continue;
+    const used = aiTruckPassengerCount(truck, allies);
+    if (used >= getTankRiderCapacity(truck)) continue;
+    const dist = unit.distanceTo(truck);
+    if (dist > AI_TRUCK_PASSENGER_SEEK) continue;
+    const score = 20 - dist + used * 2;
+    if (score > bestScore) {
+      best = truck;
+      bestScore = score;
+    }
+  }
+  if (!best) return false;
+  if (issueMountOrder([unit], best, game.units, game) <= 0) return false;
+  claims.add(`ride:${unit.id}`);
+  return true;
+}
+
+export function tryAssignAiTruckTask(unit, allies, players, game, claims = new Set()) {
+  if (!unit || unit.dead || !game?.units) return false;
+  if (unit._mountedOnTankId || unit._towedByTruckId) return true;
+  if (unit.def?.type === 'truck') {
+    return tryAssignAiTruckBrain(unit, allies, players, game, claims);
+  }
+  return tryAssignAiTruckRide(unit, allies, players, game, claims);
 }
 
 /**
@@ -8702,6 +9963,7 @@ function updateClearanceAttacker(unit, players, allies, mapDef, difficulty, game
 }
 
 function roleFromUnitType(type) {
+  if (type === 'truck') return 'recon';
   if (type === 'tank' || type === 'tankDestroyer' || type === 'superHeavyTank' || type === 'armoredCar') {
     return 'armor';
   }
@@ -8842,7 +10104,8 @@ function rollEnemyUnitType(assault, difficulty) {
     if (roll < 0.26) return 'infantry';
     if (roll < 0.36) return 'machineGun';
     if (roll < 0.46) return 'infantry';
-    if (roll < 0.54) return 'armoredCar';
+    if (roll < 0.52) return 'truck';
+    if (roll < 0.58) return 'armoredCar';
     if (roll < 0.62) return 'mortar';
     if (roll < 0.7) return 'antiTankGun';
     if (roll < 0.82) return 'tank';
@@ -8857,8 +10120,9 @@ function rollEnemyUnitType(assault, difficulty) {
   if (roll < 0.62) return 'radioOperator';
   if (roll < 0.69) return 'infantry';
   if (roll < 0.77) return 'sniper';
-  if (roll < 0.84) return 'armoredCar';
-  if (roll < 0.86) return 'mortar';
+  if (roll < 0.81) return 'truck';
+  if (roll < 0.85) return 'armoredCar';
+  if (roll < 0.88) return 'mortar';
   if (roll < 0.9 - heavyBias * 0.35) return 'antiTankGun';
   if (roll < 0.93 - heavyBias * 0.45) return 'artillery';
   if (roll < 0.95 - heavyBias * 0.35) return 'tank';
@@ -8878,6 +10142,7 @@ function tryProduce(production, resources, spend, assault, difficulty) {
     'medic',
     'engineer',
     'antiTankGun',
+    'truck',
     'armoredCar',
     'sniper',
     'tankDestroyer',

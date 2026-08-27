@@ -15,6 +15,7 @@ const STANDARD_AI_UNIT_TYPES = [
   'sniper',
   'mortar',
   'antiTankGun',
+  'truck',
   'armoredCar',
   'tank',
   'tankDestroyer',
@@ -49,6 +50,7 @@ const FORCE_WEIGHTS = {
   mortar: 1.1,
   antiTankGun: 1.45,
   artillery: 1.55,
+  truck: 0.7,
   armoredCar: 1.35,
   tank: 2.45,
   tankDestroyer: 2.65,
@@ -64,6 +66,7 @@ const BASE_PRODUCTION_PRIORITY = {
   sniper: 0.05,
   mortar: 0.3,
   antiTankGun: 0.45,
+  truck: 0.22,
   armoredCar: 0.25,
   tank: 0.45,
   tankDestroyer: 0.2,
@@ -513,6 +516,10 @@ function getProductionTargets(plan) {
         : operation === 'contain'
           ? 1
           : 0,
+    truck:
+      (enemy.counts.antiTankGun ?? 0) + (enemy.counts.artillery ?? 0) + (enemy.counts.infantry ?? 0) >= 3
+        ? 1
+        : 0,
     armoredCar:
       plan.assessment.needsCapture && (plan.armorMobility >= 0.6 || plan.tier.id !== 'easy') ? 1 : 0,
     tank:
@@ -622,6 +629,10 @@ export function getStandardProductionCandidates({
   if (plan.assessment.needsCapture) {
     addScore(scores, 'infantry', 1.1, adaptation);
     addScore(scores, 'armoredCar', 1.25, adaptation);
+    addScore(scores, 'truck', 0.85, adaptation);
+  }
+  if ((enemy.counts.antiTankGun ?? 0) + (enemy.counts.artillery ?? 0) > (enemy.counts.truck ?? 0)) {
+    addScore(scores, 'truck', 1.15, adaptation);
   }
   if (plan.operation === 'counterattack') {
     addScore(scores, 'tank', 2.1, plan.tier.cohesion);

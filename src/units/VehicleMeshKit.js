@@ -213,6 +213,7 @@ const JAPANESE_ARMY_ARMORED_MODELS = new Set([
   'hoNi1',
   'chiNu',
   'chiyoda',
+  'type94Isuzu',
 ]);
 
 function addJapaneseArmyStar(parent, d, {
@@ -1348,6 +1349,225 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
     for (const child of turretPivot.children) child.position.z -= t.z;
   }
   group.userData.hitRadius = d.hitRadius;
+}
+
+export function buildTruckFromDesign(group, body, detail, dark, d) {
+  const h = d.hull;
+  const hood = d.hood;
+  const cab = d.cab;
+  const bed = d.bed;
+  const hitch = d.hitch ?? { x: 0, y: 0.44, z: -(h.d ?? 4) * 0.52 };
+
+  for (const side of [-1, 1]) {
+    addBox(group, new THREE.BoxGeometry(0.1, 0.14, h.d * 0.94), dark, {
+      x: side * h.w * 0.28,
+      y: h.y,
+      z: h.z ?? 0,
+      part: 'hull',
+    });
+  }
+  addBox(group, new THREE.BoxGeometry(h.w * 0.62, 0.1, 0.12), dark, {
+    y: h.y,
+    z: (h.z ?? 0) + h.d * 0.28,
+    part: 'hull',
+  });
+  addBox(group, new THREE.BoxGeometry(h.w * 0.62, 0.1, 0.12), dark, {
+    y: h.y,
+    z: (h.z ?? 0) - h.d * 0.28,
+    part: 'hull',
+  });
+
+  if (hood) {
+    addBox(group, new THREE.BoxGeometry(hood.w, hood.h, hood.d), body, {
+      y: hood.y,
+      z: hood.z,
+      part: 'hood',
+    });
+    addBox(group, new THREE.BoxGeometry(hood.w * 0.92, hood.h * 0.82, 0.06), dark, {
+      y: hood.y,
+      z: hood.z + hood.d * 0.52,
+      part: 'hood',
+    });
+    if (!d.cabOver) {
+      addBox(group, new THREE.BoxGeometry(0.04, 0.02, hood.d * 0.9), dark, {
+        y: hood.y + hood.h * 0.52,
+        z: hood.z,
+        part: 'hood',
+      });
+    }
+    addJapaneseArmyStar(group, d, {
+      y: hood.y + 0.02,
+      z: hood.z + hood.d * 0.52,
+      rx: -0.12,
+      size: 0.1,
+    });
+  }
+
+  addBox(group, new THREE.BoxGeometry(cab.w, cab.h, cab.d), body, {
+    y: cab.y,
+    z: cab.z,
+    part: 'cab',
+  });
+  addBox(group, new THREE.BoxGeometry(cab.w * 1.04, 0.07, cab.d * 1.06), body, {
+    y: cab.y + cab.h * 0.52,
+    z: cab.z,
+    part: 'cab',
+  });
+  addBox(group, new THREE.BoxGeometry(cab.w * 0.82, cab.h * 0.42, 0.04), dark, {
+    y: cab.y + cab.h * 0.12,
+    z: cab.z + cab.d * 0.5,
+    rx: -0.18,
+    part: 'cab',
+  });
+  for (const side of [-1, 1]) {
+    addBox(group, new THREE.BoxGeometry(0.04, cab.h * 0.36, cab.d * 0.42), dark, {
+      x: side * cab.w * 0.51,
+      y: cab.y + cab.h * 0.08,
+      z: cab.z,
+      part: 'cab',
+    });
+    addBox(group, new THREE.BoxGeometry(0.08, cab.h * 0.72, 0.06), dark, {
+      x: side * cab.w * 0.52,
+      y: cab.y - cab.h * 0.08,
+      z: cab.z + cab.d * 0.12,
+      part: 'cab',
+    });
+  }
+
+  addBox(group, new THREE.BoxGeometry(bed.w, 0.08, bed.d), body, {
+    y: bed.y,
+    z: bed.z,
+    part: 'bed',
+  });
+  for (const side of [-1, 1]) {
+    addBox(group, new THREE.BoxGeometry(0.07, bed.h, bed.d * 0.98), body, {
+      x: side * bed.w * 0.5,
+      y: bed.y + bed.h * 0.5,
+      z: bed.z,
+      part: 'bed',
+    });
+  }
+  addBox(group, new THREE.BoxGeometry(bed.w, bed.h + 0.18, 0.08), body, {
+    y: bed.y + (bed.h + 0.18) * 0.45,
+    z: bed.z + bed.d * 0.5,
+    part: 'bed',
+  });
+  addBox(group, new THREE.BoxGeometry(bed.w * 0.96, bed.h * 0.85, 0.06), body, {
+    y: bed.y + bed.h * 0.38,
+    z: bed.z - bed.d * 0.5,
+    part: 'bed',
+  });
+
+  if (d.canvas) {
+    for (let i = 0; i < 4; i++) {
+      const z = bed.z + bed.d * 0.38 - i * (bed.d * 0.24);
+      addBox(group, new THREE.BoxGeometry(bed.w * 0.92, 0.04, 0.04), dark, {
+        y: bed.y + bed.h + 0.62,
+        z,
+        part: 'canvas',
+      });
+      for (const side of [-1, 1]) {
+        addBox(group, new THREE.BoxGeometry(0.04, 0.7, 0.04), dark, {
+          x: side * bed.w * 0.46,
+          y: bed.y + bed.h + 0.28,
+          z,
+          part: 'canvas',
+        });
+      }
+    }
+    addBox(group, new THREE.BoxGeometry(bed.w * 0.9, 0.08, bed.d * 0.92), detail, {
+      y: bed.y + bed.h + 0.66,
+      z: bed.z,
+      part: 'canvas',
+    });
+    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), detail, {
+      x: -bed.w * 0.44,
+      y: bed.y + bed.h + 0.38,
+      z: bed.z,
+      rz: 0.12,
+      part: 'canvas',
+    });
+    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), detail, {
+      x: bed.w * 0.44,
+      y: bed.y + bed.h + 0.38,
+      z: bed.z,
+      rz: -0.12,
+      part: 'canvas',
+    });
+  }
+
+  const frontZ = hood ? hood.z + hood.d * 0.55 : cab.z + cab.d * 0.55;
+  addBox(group, new THREE.BoxGeometry(h.w * 0.88, 0.1, 0.12), dark, {
+    y: 0.52,
+    z: frontZ,
+    part: 'hull',
+  });
+  for (const side of [-1, 1]) {
+    addCylinder(group, new THREE.CylinderGeometry(0.08, 0.09, 0.08, 10), dark, {
+      x: side * (hood?.w ?? cab.w) * 0.38,
+      y: (hood?.y ?? cab.y) - 0.08,
+      z: frontZ + 0.02,
+      rx: Math.PI / 2,
+      part: 'hull',
+    });
+  }
+
+  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.28, 12);
+  for (const [wx, wy, wz] of d.wheels) {
+    const wheel = new THREE.Mesh(wheelGeo, dark);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(wx, wy, wz);
+    wheel.userData.tankPart = 'track';
+    group.add(wheel);
+    addCylinder(group, new THREE.CylinderGeometry(d.wheelR * 0.32, d.wheelR * 0.32, 0.3, 8), detail, {
+      x: wx,
+      y: wy,
+      z: wz,
+      rz: Math.PI / 2,
+      part: 'track',
+    });
+    addBox(group, new THREE.BoxGeometry(0.32, 0.08, d.wheelR * 1.5), body, {
+      x: wx,
+      y: wy + d.wheelR * 0.78,
+      z: wz,
+      part: 'hull',
+    });
+  }
+
+  if (d.spare) {
+    const spare = new THREE.Mesh(
+      new THREE.CylinderGeometry(d.wheelR * 0.85, d.wheelR * 0.85, 0.18, 12),
+      dark
+    );
+    spare.rotation.y = Math.PI / 2;
+    spare.position.set(d.spare.x, d.spare.y, d.spare.z);
+    spare.userData.tankPart = 'hull';
+    group.add(spare);
+  }
+
+  addCylinder(group, new THREE.CylinderGeometry(0.04, 0.045, 0.55, 8), dark, {
+    x: -h.w * 0.42,
+    y: 0.48,
+    z: -h.d * 0.38,
+    rx: Math.PI / 2,
+    part: 'hull',
+  });
+
+  addBox(group, new THREE.BoxGeometry(0.22, 0.08, 0.28), dark, {
+    x: hitch.x,
+    y: hitch.y,
+    z: hitch.z + 0.08,
+    part: 'hull',
+  });
+  addCylinder(group, new THREE.CylinderGeometry(0.05, 0.05, 0.16, 8), dark, {
+    x: hitch.x,
+    y: hitch.y + 0.08,
+    z: hitch.z,
+    part: 'hull',
+  });
+
+  group.userData.hitRadius = d.hitRadius;
+  group.userData.hitchOffset = hitch;
 }
 
 function buildTowedGunCarriage(group, detail, dark, d) {

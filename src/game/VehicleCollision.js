@@ -1,4 +1,4 @@
-import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
+import { canUseTacticalReverse, isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
 import { unitPathRadius } from './MovePath.js';
 import { advanceUnitOnTerrain } from '../world/Terrain.js';
 
@@ -17,10 +17,12 @@ const WRECK_TRAVERSAL_HEIGHT = Object.freeze({
   artillery: 0.38,
   antiTankGun: 0.32,
   armoredCar: 0.34,
+  truck: 0.36,
 });
 const VEHICLE_MASS_CLASS = Object.freeze({
   antiTankGun: 0.7,
   armoredCar: 1,
+  truck: 1.05,
   artillery: 1.15,
   tank: 2.6,
   tankDestroyer: 3,
@@ -29,6 +31,7 @@ const VEHICLE_MASS_CLASS = Object.freeze({
 const WRECK_DAMAGE_VULNERABILITY = Object.freeze({
   antiTankGun: 0.38,
   armoredCar: 0.42,
+  truck: 0.58,
   artillery: 0.32,
   tank: 0.14,
   tankDestroyer: 0.12,
@@ -42,7 +45,8 @@ function isPhysicalVehicle(unit) {
     unit?.position &&
     isVehicleUnit(unit.def?.type) &&
     (!unit.dead || !!unit.mesh?.parent) &&
-    !unit._mountedOnTankId
+    !unit._mountedOnTankId &&
+    !unit._towedByTruckId
   );
 }
 
@@ -228,7 +232,7 @@ export function updateFriendlyTrafficYield(unit, units, mapDef, dt, options = {}
     state.phase = 'return';
     // Tracked vehicles can back into the position they just vacated instead
     // of spending a long time rotating 180 degrees in the cleared lane.
-    unit._reverseMoveOrder = isTankType(unit.def?.type);
+    unit._reverseMoveOrder = canUseTacticalReverse(unit.def?.type);
   }
 
   const target = state.phase === 'aside'
@@ -239,7 +243,7 @@ export function updateFriendlyTrafficYield(unit, units, mapDef, dt, options = {}
   const beforeZ = unit.position.z;
   const targetDx = target.x - beforeX;
   const targetDz = target.z - beforeZ;
-  const reverseIntoOrigin = state.phase === 'return' && isTankType(unit.def?.type);
+  const reverseIntoOrigin = state.phase === 'return' && canUseTacticalReverse(unit.def?.type);
   const desiredYaw = Math.atan2(
     reverseIntoOrigin ? -targetDx : targetDx,
     reverseIntoOrigin ? -targetDz : targetDz
@@ -285,7 +289,10 @@ export function updateFriendlyTrafficYield(unit, units, mapDef, dt, options = {}
       beforeZ,
       getCollisionRadius(unit),
       {
-        vehicleClass: unit.def?.type === 'armoredCar' ? 'light' : 'tracked',
+        vehicleClass:
+          unit.def?.type === 'armoredCar' || unit.def?.type === 'truck'
+            ? 'light'
+            : 'tracked',
         directionX: unit.position.x - beforeX,
         directionZ: unit.position.z - beforeZ,
       }
