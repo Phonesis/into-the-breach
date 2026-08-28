@@ -59,7 +59,7 @@ export class BattleStats {
   reset() {
     this.losses = { player: {}, enemy: {} };
     this.prisonersTaken = { player: {}, enemy: {} };
-    this.defenseLosses = { player: {} };
+    this.defenseLosses = { player: {}, enemy: {} };
     this.hqLost = { player: false, enemy: false };
     this._hqRecorded = {};
   }
@@ -83,7 +83,7 @@ export class BattleStats {
 
   recordDefense(typeId, team = 'player') {
     if (!typeId || (team !== 'player' && team !== 'enemy')) return;
-    const bucket = this.defenseLosses[team];
+    const bucket = (this.defenseLosses[team] ??= {});
     bucket[typeId] = (bucket[typeId] ?? 0) + 1;
   }
 
@@ -128,7 +128,7 @@ export class BattleStats {
   }
 
   totalDefenseLosses(team = 'player') {
-    return Object.values(this.defenseLosses[team]).reduce((n, c) => n + c, 0);
+    return Object.values(this.defenseLosses[team] ?? {}).reduce((n, c) => n + c, 0);
   }
 
   totalCaptures(team) {
@@ -242,7 +242,7 @@ export class BattleStats {
   }
 
   formatDefenseLosses(team = 'player') {
-    const bucket = this.defenseLosses[team];
+    const bucket = this.defenseLosses[team] ?? {};
     const lines = [];
 
     for (const typeId of DEFENSE_TYPE_ORDER) {

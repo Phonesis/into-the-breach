@@ -1464,10 +1464,26 @@ export function applyBattleSave(game, snapshot) {
   game.smokeScreens?.restore?.(snapshot.smokeScreens ?? []);
 
   if (snapshot.battleStats) {
-    game.battleStats.losses = snapshot.battleStats.losses;
-    game.battleStats.prisonersTaken = snapshot.battleStats.prisonersTaken;
-    game.battleStats.defenseLosses = snapshot.battleStats.defenseLosses;
-    game.battleStats.hqLost = { ...snapshot.battleStats.hqLost };
+    const savedStats = snapshot.battleStats;
+    // SAVE_VERSION predates several battle-stat buckets. Merge the saved data
+    // into the current shape so older version-1 saves cannot restore undefined
+    // buckets and then fail during capture, reporting, or finalization.
+    game.battleStats.losses = {
+      player: { ...savedStats.losses?.player },
+      enemy: { ...savedStats.losses?.enemy },
+    };
+    game.battleStats.prisonersTaken = {
+      player: { ...savedStats.prisonersTaken?.player },
+      enemy: { ...savedStats.prisonersTaken?.enemy },
+    };
+    game.battleStats.defenseLosses = {
+      player: { ...savedStats.defenseLosses?.player },
+      enemy: { ...savedStats.defenseLosses?.enemy },
+    };
+    game.battleStats.hqLost = {
+      player: savedStats.hqLost?.player === true,
+      enemy: savedStats.hqLost?.enemy === true,
+    };
   }
 
   game.units = [];

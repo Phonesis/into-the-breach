@@ -673,7 +673,7 @@ export class UIManager {
         <div class="panel menu-panel saves-panel">
           <h2>Available Field Saves</h2>
           <div class="save-list" id="save-list"></div>
-          <p class="save-list-empty hidden" id="save-list-empty">No field saves are available. Use <strong>Save Battle</strong> from the command bar during an engagement.</p>
+          <p class="save-list-empty hidden" id="save-list-empty">No field saves are available. Use <strong>Save</strong> from the command bar during an engagement.</p>
           <div class="actions">
             <button class="btn btn-secondary btn-back interactive" id="btn-back-saves">Return to Headquarters</button>
           </div>
