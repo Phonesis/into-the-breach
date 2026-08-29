@@ -1623,8 +1623,16 @@ body.portrait-blocked .mobile-support-screen {
   overflow-y: auto;
   overflow-x: hidden;
   width: 100%;
-  scrollbar-width: thin;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
   transition: width 0.18s ease;
+}
+
+/* Match macOS overlay scrollbars on Chromium/Windows without disabling scrolling. */
+.unit-roster-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .unit-roster-empty {
@@ -3965,6 +3973,11 @@ body.portrait-blocked .mobile-support-screen {
 .overlay-msg .end-box {
   max-width: 36rem;
   width: min(92vw, 36rem);
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 .overlay-msg .title-support {
@@ -5035,7 +5048,8 @@ body.portrait-blocked .mobile-support-screen {
 }
 
 .war-stats-screen {
-  justify-content: center;
+  /* Keep the top of an overlong report inside the scrollable range. */
+  justify-content: safe center;
   background-image: var(--menu-bg-war-stats);
 }
 

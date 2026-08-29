@@ -8,6 +8,7 @@ import {
   spawnHandGrenade,
   spawnSmokeShellImpact,
   triggerParatrooperAtRecoil,
+  nextTracerSeq,
 } from '../effects/CombatEffects.js';
 import {
   sampleTerrainHeight,
@@ -67,6 +68,7 @@ import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { getDefenseDamageMultForAttacker } from './DefenseStructures.js';
 import {
+  canFireWhileMoving,
   getMoveReachConfig,
   isTankType,
   isVehicleUnit,
@@ -83,11 +85,14 @@ import {
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 import {
   getInfantryMuzzleWorldPosition,
+  collectInfantrySquadMuzzleShots,
   aimDeployedMachineGun,
   aimDeployedMortar,
   markInfantryFireAim,
   updateInfantryWalkAnimation,
   usesInfantryMuzzleOrigin,
+  usesInfantryWeaponPose,
+  usesSquadVolleyMuzzles,
   isUnitVisuallyProne,
 } from '../units/InfantryVisuals.js';
 import {
@@ -119,19 +124,6 @@ const SMALL_ARMS_TYPES = new Set([
   'commander',
   'medic',
 ]);
-
-function usesInfantryFireAimPose(type) {
-  return (
-    type === 'infantry' ||
-    type === 'radioOperator' ||
-    type === 'engineer' ||
-    type === 'vehicleCrew' ||
-    type === 'truckDriver' ||
-    type === 'paratrooper' ||
-    type === 'sniper' ||
-    type === 'commander'
-  );
-}
 
 export function isSmallArmsFireType(type) {
   return SMALL_ARMS_TYPES.has(type);
@@ -404,6 +396,33 @@ export const HAND_GRENADE_RANGE = 8;
 export const HAND_GRENADE_COOLDOWN_SEC = 9.5;
 const HAND_GRENADE_DAMAGE = 12;
 
+function hasActiveMovement(unit, units = null) {
+  if (!unit) return false;
+  if (
+    unit.moveTarget ||
+    unit._userMoveOrder ||
+    unit._trafficYield ||
+    (unit._walkBlend ?? 0) > 0.06
+  ) {
+    return true;
+  }
+
+  // Mounted infantry follow the vehicle's position without carrying their own
+  // moveTarget. They are still moving whenever their host is repositioning.
+  if (unit._mountedOnTankId != null && units?.length) {
+    const host = units.find((candidate) => candidate.id === unit._mountedOnTankId);
+    return !!host && !!(host.moveTarget || host._userMoveOrder || host._trafficYield);
+  }
+  return false;
+}
+
+function canFireFromCurrentPosition(unit, units = null) {
+  return (
+    canFireWhileMoving(unit?.def?.type) ||
+    !hasActiveMovement(unit, units)
+  );
+}
+
 /** Enemies low or vulnerable enough that a tracked vehicle can overrun them. */
 function isCrushableFootTarget(unit) {
   if (!unit || unit.dead || unit.surrendered || unit._captureExit) return false;
@@ -632,6 +651,7 @@ function shouldRetainBlockedOrder(attacker, target) {
 export function canThrowHandGrenadeAt(attacker, target) {
   if (!attacker || !target || attacker.dead || target.dead) return false;
   if (!HAND_GRENADE_THROWER_TYPES.has(attacker.def?.type)) return false;
+  if (!canFireFromCurrentPosition(attacker)) return false;
   if (!HAND_GRENADE_TARGET_TYPES.has(target.def?.type)) return false;
   if (isCrewlessVehicleTarget(target)) return false;
   if (attacker.team === target.team || attacker.surrendered || attacker._captureExit) return false;
@@ -813,7 +833,9 @@ export function updateCombat(
     const acquire =
       attacker.team === 'player' ? playerAutoAcquire : enemyAutoAcquire;
     const localAcquire = filterAcquireNearAttacker(attacker, acquire);
-    tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire, scenery);
+    if (canFireFromCurrentPosition(attacker, aliveUnits)) {
+      tryThrowHandGrenade(attacker, localAcquire, scene, mapDef, onFire, scenery);
+    }
     const hadAttackOrder = !!attacker.attackOrder;
     const target = resolveAttackTarget(attacker, targets, localAcquire, scenery);
     if (!target) {
@@ -917,22 +939,23 @@ export function updateCombat(
       }
     }
 
+    // Movement may have ended above when an attack order reached its standoff
+    // point, so evaluate the final firing gate after that stop decision.
+    const canFireFromHere = canFireFromCurrentPosition(attacker, aliveUnits);
     const weaponOnBearing = canWeaponBearOnTarget(attacker, target);
-    const canFireMain = mainGunCanAim && weaponOnBearing;
-    if (canFireMain && usesInfantryFireAimPose(attacker.def.type)) {
-      markInfantryFireAim(attacker, 0.28);
-    }
+    const canFireMain = canFireFromHere && mainGunCanAim && weaponOnBearing;
     const mgOnBearing = independentMg
       ? canIndependentMgBearOnTarget(attacker, target)
       : weaponOnBearing;
-    const canFireCoax = coaxInRange && mgOnBearing;
-    const canFireCrewSmallArms = crewSmallArmsInRange;
+    const canFireCoax = canFireFromHere && coaxInRange && mgOnBearing;
+    const canFireCrewSmallArms = canFireFromHere && crewSmallArmsInRange;
+    const canFireSpotterRifle = canFireFromHere && spotterRifleInRange;
     const coaxHandlesSoft =
       coaxInRange && isCoaxSoftTarget(target) && attacker.def.coaxMG;
     const coaxEngagingArmor =
       canFireCoax && isTankType(target.def?.type);
 
-    if (!canFireMain && !canFireCoax && !canFireCrewSmallArms && !spotterRifleInRange) continue;
+    if (!canFireMain && !canFireCoax && !canFireCrewSmallArms && !canFireSpotterRifle) continue;
 
     if (canFireCrewSmallArms && crewSmallArms && attacker.mgCooldown <= 0) {
       const firedCrewWeapon = fire(
@@ -957,7 +980,7 @@ export function updateCombat(
       }
     }
 
-    if (spotterRifleInRange && spotterRifle && attacker.mgCooldown <= 0 && weaponOnBearing) {
+    if (canFireSpotterRifle && spotterRifle && attacker.mgCooldown <= 0 && weaponOnBearing) {
       const firedSpotter = fire(
         attacker,
         target,
@@ -1207,6 +1230,26 @@ function resolveMuzzleFrom(attacker, map, vfxType, coax, muzzleType = vfxType) {
   return { from: _muzzleFrom, exactOrigin: false };
 }
 
+function spawnAttackerMuzzleFlash(scene, attacker, map, vfxType, coax, muzzleType, to) {
+  if (usesSquadVolleyMuzzles(attacker, muzzleType)) {
+    // Squad members fire on independent cadences. Keep a muzzle origin for
+    // impact direction without a synchronized volley flash.
+    const shots = collectInfantrySquadMuzzleShots(attacker, muzzleType);
+    if (shots.length) {
+      _muzzleFrom.copy(shots[0].position);
+      return { from: _muzzleFrom, exactOrigin: true };
+    }
+  }
+  const muzzle = resolveMuzzleFrom(attacker, map, vfxType, coax, muzzleType);
+  const mgTracer = coax || vfxType === 'machineGun' || vfxType === 'armoredCar';
+  spawnMuzzleFlash(scene, muzzle.from, to, vfxType, {
+    exactOrigin: muzzle.exactOrigin,
+    tracerKind: mgTracer ? 'machineGun' : undefined,
+    tracerSeq: mgTracer ? nextTracerSeq(attacker, 3) : undefined,
+  });
+  return muzzle;
+}
+
 function fire(
   attacker,
   target,
@@ -1224,6 +1267,8 @@ function fire(
   options = {},
   fireOpts = {}
 ) {
+  if (!canFireFromCurrentPosition(attacker, livingUnits)) return false;
+
   const crewSmallArms =
     fireOpts.crewSmallArms === true ? attacker.def.crewSmallArms : null;
   const spotterRifle =
@@ -1343,16 +1388,17 @@ function fire(
       const showVfx =
         attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
       if (showVfx && scene) {
-        const { from, exactOrigin } = resolveMuzzleFrom(
+        const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
+        const to = { x: missImpact.x, y: toY, z: missImpact.z };
+        const { from } = spawnAttackerMuzzleFlash(
+          scene,
           attacker,
           map,
           vfxType,
           coax,
-          muzzleType
+          muzzleType,
+          to
         );
-        const toY = map ? sampleTerrainHeight(missImpact.x, missImpact.z, map) + 0.6 : 0.6;
-        const to = { x: missImpact.x, y: toY, z: missImpact.z };
-        spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
         if (smallArmsShot) {
           spawnSmallArmsGroundImpactPattern(scene, map, missImpact, {
             from,
@@ -1773,14 +1819,18 @@ function fire(
   const showVfx =
     attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
 
+  if (usesInfantryWeaponPose(attacker.def.type)) {
+    const attackRate =
+      spotterRifle?.attackSpeed ??
+      crewSmallArms?.attackSpeed ??
+      (paratrooperAt
+        ? attacker.def.atAttackSpeed ?? attacker.def.attackSpeed
+        : attacker.def.attackSpeed);
+    const firingInterval = attacker.def.shellReload ?? 1 / Math.max(attackRate || 1, 0.1);
+    markInfantryFireAim(attacker, 0.55, firingInterval + 0.18, target);
+  }
+
   if (showVfx && scene) {
-    const { from, exactOrigin } = resolveMuzzleFrom(
-      attacker,
-      map,
-      vfxType,
-      coax,
-      muzzleType
-    );
     const toY =
       armorHit?.impactPosition?.y ??
       (map ? sampleTerrainHeight(impact.x, impact.z, map) + 1 : 1);
@@ -1789,7 +1839,15 @@ function fire(
       impact.z = armorHit.impactPosition.z;
     }
     const to = { x: impact.x, y: toY, z: impact.z };
-    spawnMuzzleFlash(scene, from, to, vfxType, { exactOrigin });
+    const { from } = spawnAttackerMuzzleFlash(
+      scene,
+      attacker,
+      map,
+      vfxType,
+      coax,
+      muzzleType,
+      to
+    );
     if (
       smallArmsShot &&
       (target.isGround ||
@@ -1813,9 +1871,6 @@ function fire(
       }
     }
     if (paratrooperAt) triggerParatrooperAtRecoil(attacker.mesh);
-    if (usesInfantryFireAimPose(attacker.def.type)) {
-      markInfantryFireAim(attacker, 0.55);
-    }
   }
 
   if (onFire) {

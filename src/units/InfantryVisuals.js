@@ -23,19 +23,10 @@ const INFANTRY_WALK_TYPES = new Set([
   'commander',
 ]);
 
-const WEAPON_POSE_TYPES = new Set([
-  'radioOperator',
-  'infantry',
-  'paratrooper',
-  'sniper',
-  'engineer',
-  'vehicleCrew',
-  'truckDriver',
-  'commander',
-]);
 const PRONE_FIRE_TYPES = new Set([
   'radioOperator',
   'infantry',
+  'medic',
   'paratrooper',
   'engineer',
   'sniper',
@@ -43,17 +34,21 @@ const PRONE_FIRE_TYPES = new Set([
   'truckDriver',
   'commander',
 ]);
+// All current handheld-weapon roles use the same aim and prone-fire pose.
+// Crew-served MG/mortar teams keep their separate deployed-weapon animation.
+const WEAPON_POSE_TYPES = PRONE_FIRE_TYPES;
 
 // Foot troops use a broad range of movement speeds. Keep the slower support
 // teams on a compact marching gait while allowing riflemen and airborne units
 // to transition naturally into a more urgent run.
 const HUMAN_WALK_SPEED = 3.7;
 const HUMAN_RUN_SPEED = 5.5;
+const PRONE_FIRE_GRACE_SEC = 0.18;
 
 /** True while a foot squad is visually prone (stationary and firing). */
 export function isUnitVisuallyProne(unit) {
   if (!unit?.mesh || unit.dead || unit._trenchId || unit._mountedOnTankId) return false;
-  if (!PRONE_FIRE_TYPES.has(unit.def?.type)) return false;
+  if (!usesInfantryProneFirePose(unit.def?.type)) return false;
   let maxBlend = 0;
   unit.mesh.traverse((child) => {
     if (child.name !== 'squadMember' || !child.visible) return;
@@ -67,6 +62,7 @@ const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'radioOperator',
   'infantry',
   'paratrooper',
+  'medic',
   'sniper',
   'engineer',
   'machineGun',
@@ -76,9 +72,34 @@ const FOOT_MUZZLE_UNIT_TYPES = new Set([
   'commander',
 ]);
 
+/** Shared role contract for handheld infantry weapons and prone firing. */
+export function usesInfantryWeaponPose(type) {
+  return WEAPON_POSE_TYPES.has(type);
+}
+
+export function usesInfantryProneFirePose(type) {
+  return PRONE_FIRE_TYPES.has(type);
+}
+
 const _muzzleTip = new THREE.Vector3();
 const _mgTargetLocal = new THREE.Vector3();
 const _mortarTargetLocal = new THREE.Vector3();
+const _weaponArmShoulderWorld = new THREE.Vector3();
+const _weaponArmStart = new THREE.Vector3();
+const _weaponArmDelta = new THREE.Vector3();
+const _weaponArmOrigin = new THREE.Vector3();
+const _weaponArmShoulderOffsets = [
+  new THREE.Vector3(0.105, 0.1, 0.08),
+  new THREE.Vector3(-0.105, 0.1, 0.08),
+];
+// In the prone pose the visible cylinders read better as bent forearms: the
+// trigger elbow sits outside the right shoulder while the support arm reaches
+// across from the left. This avoids one oversized straight arm through the
+// chest without adding more animated meshes per soldier.
+const _weaponArmProneOffsets = [
+  new THREE.Vector3(0.19, 0.02, -0.016),
+  new THREE.Vector3(-0.12, 0.2, 0.02),
+];
 
 const TACTICAL_FORMATIONS = {
   4: [
@@ -472,6 +493,11 @@ function restoreWalkRest(soldier) {
   soldier.position.copy(rest.group);
   for (const child of soldier.children) {
     if (!child.userData?.infantryPart) continue;
+    // Handheld weapons are posed after movement in updateInfantryWeaponPose.
+    // Restoring them here snaps barrels back to port-arms, so combat muzzle
+    // flashes (which sample between walk restore and the pose pass) leave the
+    // chest instead of the prone barrel.
+    if (child.userData.infantryPart === 'weapon' && soldier.userData.weaponAim) continue;
     const partRest = rest[child.userData.infantryPart];
     if (!partRest) continue;
     child.position.copy(partRest.position);
@@ -607,32 +633,70 @@ function addWebbing(soldier, mats) {
   soldier.add(canteen);
 }
 
+function handPositionsForKind(kind) {
+  if (kind === 'smg') {
+    return [new THREE.Vector3(-0.02, -0.008, 0.07), new THREE.Vector3(0.1, 0.002, 0.07)];
+  }
+  if (kind === 'lmg') {
+    return [new THREE.Vector3(-0.04, -0.012, 0.08), new THREE.Vector3(0.2, 0.008, 0.072)];
+  }
+  return [new THREE.Vector3(-0.02, -0.005, 0.075), new THREE.Vector3(0.17, 0.005, 0.075)];
+}
+
+function tagBarrel(mesh, sign = -1) {
+  mesh.userData.infantryPart = 'barrel';
+  mesh.userData.muzzleTipSign = sign;
+  if (mesh.userData.muzzleMarker) {
+    mesh.userData.muzzleMarker.position.set(
+      0,
+      ((mesh.geometry?.parameters?.height ?? 0.4) / 2) * sign,
+      0
+    );
+    return mesh;
+  }
+  const height = mesh.geometry?.parameters?.height ?? 0.4;
+  const tip = new THREE.Object3D();
+  tip.name = 'muzzleMarker';
+  tip.position.set(0, (height / 2) * sign, 0);
+  mesh.add(tip);
+  mesh.userData.muzzleMarker = tip;
+  return mesh;
+}
+
 function addWeaponHands(weapon, mats) {
   if (weapon.userData.handsAdded) return;
   weapon.userData.handsAdded = true;
+  weapon.userData.weaponHandPositions = handPositionsForKind(
+    weapon.userData.weaponKind ?? 'rifle'
+  );
   const rearHand = new THREE.Mesh(new THREE.SphereGeometry(0.045, 7, 6), mats.skin);
   rearHand.scale.set(1.2, 0.9, 0.9);
-  rearHand.position.set(-0.02, -0.005, 0.075);
+  rearHand.position.copy(weapon.userData.weaponHandPositions[0]);
   weapon.add(rearHand);
 
   const frontHand = rearHand.clone();
-  frontHand.position.set(0.17, 0.005, 0.075);
+  frontHand.position.copy(weapon.userData.weaponHandPositions[1]);
   weapon.add(frontHand);
 
-  addSegment(
+  const rearArm = addSegment(
     weapon,
     new THREE.Vector3(-0.17, 0.1, -0.02),
-    new THREE.Vector3(-0.02, -0.005, 0.075),
+    weapon.userData.weaponHandPositions[0],
     0.043,
     mats.body
   );
-  addSegment(
+  const frontArm = addSegment(
     weapon,
     new THREE.Vector3(0.09, 0.1, -0.02),
-    new THREE.Vector3(0.17, 0.005, 0.075),
+    weapon.userData.weaponHandPositions[1],
     0.043,
     mats.body
   );
+  rearArm.name = 'weaponArmRear';
+  frontArm.name = 'weaponArmFront';
+  rearArm.userData.segmentLength = rearArm.geometry.parameters.height;
+  frontArm.userData.segmentLength = frontArm.geometry.parameters.height;
+  weapon.userData.weaponArms = [rearArm, frontArm];
 }
 
 function createWeaponGroup(soldier, { crouching = false, kind = 'rifle' } = {}) {
@@ -771,9 +835,7 @@ function addFactionRifle(soldier, mats, factionId, { crouching = false, sniper =
   }
 
   const rifleBarrel = weapon.children.find((c) => c.userData.infantryPart === 'barrel');
-  if (rifleBarrel?.geometry?.parameters?.height !== undefined) {
-    rifleBarrel.userData.muzzleTipSign = -1;
-  }
+  if (rifleBarrel) tagBarrel(rifleBarrel, -1);
   if (sniper) addSniperScope(weapon, mats, factionId);
   addWeaponHands(weapon, mats);
 
@@ -784,23 +846,318 @@ export function addFactionSniperRifle(soldier, mats, factionId, { crouching = tr
   return addFactionRifle(soldier, mats, factionId, { crouching, sniper: true });
 }
 
+function addBipod(weapon, mats, x, y = -0.02, z = 0.07) {
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.16, 5), mats.metal);
+    leg.position.set(x, y - 0.05, z + side * 0.04);
+    leg.rotation.x = side * 0.55;
+    leg.rotation.z = 0.18;
+    weapon.add(leg);
+  }
+}
+
+function addFactionSmg(soldier, mats, factionId, { crouching = false } = {}) {
+  const weapon = createWeaponGroup(soldier, { crouching, kind: 'smg' });
+  const dark = mats.dark;
+  const wood = mats.wood;
+  const metal = mats.metal;
+
+  if (factionId === 'germany') {
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.055), dark);
+    receiver.position.set(0.02, 0.01, 0.07);
+    weapon.add(receiver);
+    const stockArm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.018, 0.04), metal);
+    stockArm.position.set(-0.14, 0.005, 0.07);
+    weapon.add(stockArm);
+    const stockPlate = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.07, 0.05), metal);
+    stockPlate.position.set(-0.22, -0.01, 0.07);
+    weapon.add(stockPlate);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.28, 7), dark));
+    barrel.position.set(0.2, 0.012, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.2, 0.055), dark);
+    mag.position.set(0.02, -0.1, 0.07);
+    weapon.add(mag);
+  } else if (factionId === 'usa') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.055), wood);
+    stock.position.set(-0.12, -0.005, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.055, 0.06), dark);
+    receiver.position.set(0.04, 0.01, 0.07);
+    weapon.add(receiver);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.09, 0.04), wood);
+    grip.position.set(-0.02, -0.05, 0.07);
+    grip.rotation.z = 0.25;
+    weapon.add(grip);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.26, 7), dark));
+    barrel.position.set(0.2, 0.014, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const compensator = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.028, 0.028), metal);
+    compensator.position.set(0.34, 0.014, 0.07);
+    weapon.add(compensator);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.18, 0.048), dark);
+    mag.position.set(0.05, -0.085, 0.07);
+    weapon.add(mag);
+  } else if (factionId === 'russia') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.055), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.22, 8), dark);
+    jacket.position.set(0.12, 0.012, 0.07);
+    jacket.rotation.z = Math.PI / 2;
+    weapon.add(jacket);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.2, 7), dark));
+    barrel.position.set(0.28, 0.012, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.05, 10), dark);
+    drum.rotation.x = Math.PI / 2;
+    drum.position.set(0.02, -0.03, 0.1);
+    weapon.add(drum);
+  } else if (factionId === 'japan') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.055, 0.05), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.05), dark);
+    receiver.position.set(0.04, 0.008, 0.07);
+    weapon.add(receiver);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.24, 7), dark));
+    barrel.position.set(0.2, 0.01, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.045), dark);
+    mag.position.set(0.03, -0.06, 0.07);
+    mag.rotation.z = 0.35;
+    weapon.add(mag);
+  } else {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.024, 0.22, 7), metal);
+    tube.position.set(0.04, 0.01, 0.07);
+    tube.rotation.z = Math.PI / 2;
+    weapon.add(tube);
+    const stockWire = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.014, 0.04), metal);
+    stockWire.position.set(-0.12, 0.005, 0.07);
+    weapon.add(stockWire);
+    const stockButt = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.045), metal);
+    stockButt.position.set(-0.2, -0.01, 0.07);
+    weapon.add(stockButt);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.015, 0.18, 7), dark));
+    barrel.position.set(0.2, 0.01, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.042, 0.048), dark);
+    mag.position.set(0.02, 0.0, 0.155);
+    weapon.add(mag);
+  }
+
+  addWeaponHands(weapon, mats);
+  return weapon;
+}
+
+function addFactionLmg(soldier, mats, factionId, { crouching = false } = {}) {
+  const weapon = createWeaponGroup(soldier, { crouching, kind: 'lmg' });
+  const dark = mats.dark;
+  const wood = mats.wood;
+  const metal = mats.metal;
+
+  if (factionId === 'germany') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.055, 0.06), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.055, 0.06), dark);
+    receiver.position.set(0.04, 0.012, 0.07);
+    weapon.add(receiver);
+    const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.03, 0.32, 8), dark);
+    jacket.position.set(0.22, 0.016, 0.07);
+    jacket.rotation.z = Math.PI / 2;
+    weapon.add(jacket);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.22, 7), dark));
+    barrel.position.set(0.44, 0.016, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.05, 10), dark);
+    drum.rotation.x = Math.PI / 2;
+    drum.position.set(0.0, 0.02, 0.12);
+    weapon.add(drum);
+    addBipod(weapon, mats, 0.34, -0.01, 0.07);
+  } else if (factionId === 'usa') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.06), wood);
+    stock.position.set(-0.14, 0, 0.07);
+    weapon.add(stock);
+    const forend = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.055), wood);
+    forend.position.set(0.08, -0.005, 0.07);
+    weapon.add(forend);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 0.42, 7), dark));
+    barrel.position.set(0.28, 0.016, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.17, 0.05), dark);
+    mag.position.set(0.02, -0.085, 0.07);
+    weapon.add(mag);
+    const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.012, 0.22, 6), metal);
+    gasTube.position.set(0.2, 0.04, 0.07);
+    gasTube.rotation.z = Math.PI / 2;
+    weapon.add(gasTube);
+    addBipod(weapon, mats, 0.32, -0.012, 0.07);
+  } else if (factionId === 'russia') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.055, 0.055), wood);
+    stock.position.set(-0.13, 0, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.055), dark);
+    receiver.position.set(0.04, 0.01, 0.07);
+    weapon.add(receiver);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.4, 7), dark));
+    barrel.position.set(0.26, 0.016, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.045, 12), dark);
+    pan.position.set(0.02, 0.065, 0.07);
+    weapon.add(pan);
+    const panRim = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.012, 6, 14), metal);
+    panRim.rotation.x = Math.PI / 2;
+    panRim.position.set(0.02, 0.088, 0.07);
+    weapon.add(panRim);
+    addBipod(weapon, mats, 0.3, -0.012, 0.07);
+  } else if (factionId === 'japan') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.055, 0.055), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.055, 0.055), dark);
+    receiver.position.set(0.04, 0.01, 0.07);
+    weapon.add(receiver);
+    const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.028, 0.28, 8), dark);
+    jacket.position.set(0.22, 0.014, 0.07);
+    jacket.rotation.z = Math.PI / 2;
+    weapon.add(jacket);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.22, 7), dark));
+    barrel.position.set(0.42, 0.014, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.048), dark);
+    mag.position.set(0.02, 0.1, 0.07);
+    mag.rotation.z = -0.12;
+    weapon.add(mag);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.06, 0.02), metal);
+    handle.position.set(0.08, 0.055, 0.07);
+    weapon.add(handle);
+    addBipod(weapon, mats, 0.32, -0.012, 0.07);
+  } else {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.058, 0.06), wood);
+    stock.position.set(-0.12, 0, 0.07);
+    weapon.add(stock);
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.06), dark);
+    receiver.position.set(0.04, 0.012, 0.07);
+    weapon.add(receiver);
+    const barrel = tagBarrel(new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 0.4, 7), dark));
+    barrel.position.set(0.28, 0.02, 0.07);
+    barrel.rotation.z = Math.PI / 2;
+    weapon.add(barrel);
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.03, 0.06, 7), metal);
+    cone.position.set(0.5, 0.02, 0.07);
+    cone.rotation.z = Math.PI / 2;
+    weapon.add(cone);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.22, 0.055), dark);
+    mag.position.set(0.02, 0.13, 0.07);
+    mag.rotation.z = 0.18;
+    weapon.add(mag);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.02), metal);
+    handle.position.set(0.1, 0.06, 0.07);
+    weapon.add(handle);
+    addBipod(weapon, mats, 0.34, -0.01, 0.07);
+  }
+
+  addWeaponHands(weapon, mats);
+  return weapon;
+}
+
+const INFANTRY_SQUAD_LOADOUT = ['smg', 'lmg', 'rifle', 'smg', 'rifle'];
+const ENGINEER_SQUAD_LOADOUT = ['smg', 'rifle', 'smg', 'rifle'];
+const PARATROOPER_SQUAD_LOADOUT = ['atLauncher', 'lmg', 'smg', 'rifle'];
+const COMMANDER_SQUAD_LOADOUT = ['rifle', 'smg', 'rifle', 'smg', 'rifle'];
+
+/** Handheld small-arm kind for a visible squad member. */
+export function squadWeaponKindForMember(unitType, squadIndex = 0) {
+  if (unitType === 'infantry') return INFANTRY_SQUAD_LOADOUT[squadIndex] ?? 'rifle';
+  if (unitType === 'engineer') return ENGINEER_SQUAD_LOADOUT[squadIndex] ?? 'rifle';
+  if (unitType === 'paratrooper') return PARATROOPER_SQUAD_LOADOUT[squadIndex] ?? 'rifle';
+  if (unitType === 'commander') return COMMANDER_SQUAD_LOADOUT[squadIndex] ?? 'rifle';
+  if (unitType === 'vehicleCrew') return squadIndex === 0 ? 'smg' : 'rifle';
+  return 'rifle';
+}
+
+export function addFactionSmallArm(soldier, mats, factionId, opts = {}) {
+  const kind = opts.kind ?? 'rifle';
+  if (kind === 'smg') return addFactionSmg(soldier, mats, factionId, opts);
+  if (kind === 'lmg') return addFactionLmg(soldier, mats, factionId, opts);
+  return addFactionRifle(soldier, mats, factionId, opts);
+}
+
+export function vfxTypeForWeaponKind(kind) {
+  if (kind === 'lmg') return 'machineGun';
+  if (kind === 'atLauncher') return 'paratrooperAt';
+  return 'infantry';
+}
+
 function getWeaponAimPresets(kind, crouching, gunner) {
   if (gunner) return null;
   if (kind === 'atLauncher') {
     return {
       lowered: { x: -0.42, y: 0.32, z: 0.02 },
-      raised: { x: -1.18, y: 0.32, z: 0.02 },
+      raised: { x: -0.12, y: -Math.PI / 2 + 0.08, z: 0.02 },
+      prone: {
+        position: { x: 0.23, y: 0.21, z: 0.42 },
+        lowered: { x: -0.2, y: -Math.PI / 2 + 0.04, z: 0.03 },
+        raised: { x: -0.08, y: -Math.PI / 2 + 0.08, z: 0.02 },
+      },
+    };
+  }
+  if (kind === 'smg') {
+    return {
+      lowered: { x: -0.28, y: 0.42, z: 0.5 },
+      raised: { x: -0.12, y: -Math.PI / 2 + 0.14, z: 0.02 },
+      prone: {
+        position: { x: 0.18, y: 0.23, z: 0.44 },
+        lowered: { x: -0.1, y: -Math.PI / 2 + 0.08, z: 0.04 },
+        raised: { x: -0.04, y: -Math.PI / 2 + 0.12, z: 0.02 },
+      },
+    };
+  }
+  if (kind === 'lmg') {
+    return {
+      lowered: { x: -0.32, y: 0.48, z: 0.52 },
+      raised: { x: -0.16, y: -Math.PI / 2 + 0.1, z: 0.02 },
+      prone: {
+        position: { x: 0.22, y: 0.22, z: 0.5 },
+        lowered: { x: -0.1, y: -Math.PI / 2 + 0.05, z: 0.04 },
+        raised: { x: -0.03, y: -Math.PI / 2 + 0.1, z: 0.02 },
+      },
     };
   }
   if (kind === 'sniperRifle' || crouching) {
     return {
       lowered: { x: -0.3, y: 0.14, z: 0.02 },
-      raised: { x: -1.02, y: 0.18, z: 0.02 },
+      // Compact troops still shoulder the rifle toward the enemy. The old
+      // crouched preset left the barrel pointing across the soldier's side.
+      raised: { x: -0.1, y: -Math.PI / 2 + 0.1, z: 0.02 },
+      prone: {
+        position: { x: 0.2, y: 0.245, z: 0.46 },
+        lowered: { x: -0.12, y: -Math.PI / 2 + 0.06, z: 0.04 },
+        raised: { x: -0.04, y: -Math.PI / 2 + 0.1, z: 0.02 },
+      },
     };
   }
   return {
     lowered: { x: -0.35, y: 0.55, z: 0.62 },
     raised: { x: -0.18, y: -Math.PI / 2 + 0.12, z: 0.02 },
+    prone: {
+      // Keep the butt at the firing shoulder and the barrel just above the
+      // ground in front of the helmet. These are soldier-local coordinates,
+      // so they remain correct while the whole unit turns toward its target.
+      position: { x: 0.2, y: 0.245, z: 0.46 },
+      lowered: { x: -0.12, y: -Math.PI / 2 + 0.06, z: 0.04 },
+      raised: { x: -0.04, y: -Math.PI / 2 + 0.12, z: 0.02 },
+    },
   };
 }
 
@@ -835,6 +1192,17 @@ function getEngagementTarget(unit) {
   return null;
 }
 
+/**
+ * A ground point is an aiming target only while it remains the unit's explicit
+ * fire mission. This keeps rifles trained on open terrain without confusing a
+ * normal movement destination with something the squad should shoot at.
+ */
+function getInfantryFireTarget(unit) {
+  const order = unit.attackOrder;
+  if (order && !order.dead && !isSmokeShellTarget(order)) return order;
+  return getEngagementTarget(unit);
+}
+
 function isSoldierAiming(unit, soldier) {
   if (!soldier.userData.weaponAim) return false;
   if (soldier.userData.walkPose?.gunner) return false;
@@ -842,8 +1210,15 @@ function isSoldierAiming(unit, soldier) {
   if (unit.def?.nonCombat || (unit.def?.damage ?? 0) <= 0) return false;
   if ((unit._fireAimHold ?? 0) > 0) return true;
 
-  const target = getEngagementTarget(unit);
+  const target = getInfantryFireTarget(unit);
   if (!target) return false;
+
+  // Shift+LMB ground fire is a live engagement, not an empty target slot.
+  // Every rifle-bearing member should hold the sight picture until that
+  // explicit order is cancelled, even when there is no scenery object there.
+  if (target.isGround) {
+    return unit.attackOrder === target && isInRange(unit, target);
+  }
 
   const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   const kind = weapon?.userData.weaponKind ?? 'rifle';
@@ -857,7 +1232,7 @@ function isSoldierAiming(unit, soldier) {
   return isInRange(unit, target);
 }
 
-function applySoldierPronePose(soldier, proneBlend) {
+function applySoldierPronePose(soldier, proneBlend, phase = 0, firePulse = 0) {
   const proneRest = soldier.userData.proneRest;
   if (!proneRest) return;
 
@@ -877,13 +1252,66 @@ function applySoldierPronePose(soldier, proneBlend) {
     child.position.x = position.x;
     child.position.y = THREE.MathUtils.lerp(position.y, proneY, t);
     child.position.z = THREE.MathUtils.lerp(position.z, proneZ, t);
-    child.rotation.x = rotation.x + angle * t;
-    child.rotation.y = rotation.y;
+    const part = child.userData.infantryPart;
+    // The body rolls onto its front, but the head stays raised and pitched
+    // toward the unit's forward direction (the unit yaw already tracks its
+    // target). This keeps the face above the rifle instead of looking into
+    // the ground.
+    const pronePitch = part === 'head' || part === 'helmet' ? -0.18 : angle;
+    child.rotation.x = rotation.x + pronePitch * t;
+    child.rotation.y =
+      part === 'head' || part === 'helmet'
+        ? THREE.MathUtils.lerp(rotation.y, rotation.y - soldier.rotation.y, t)
+        : rotation.y;
     child.rotation.z = rotation.z;
+
+    const breathing = Math.sin(phase * 2.1) * 0.0045 * t;
+    if (part === 'torso' || part === 'head' || part === 'helmet') {
+      const headRaise = part === 'head' || part === 'helmet' ? 0.018 * t : 0;
+      child.position.y += breathing + headRaise + firePulse * 0.004;
+      child.position.z += breathing * 0.6;
+    }
   }
 }
 
-function applySoldierWeaponPose(soldier, aimBlend, proneBlend = 0) {
+function updateWeaponArmSegment(mesh, from, to) {
+  if (!mesh) return;
+  _weaponArmDelta.subVectors(to, from);
+  const length = _weaponArmDelta.length();
+  if (length <= 0.0001) {
+    mesh.visible = false;
+    return;
+  }
+  mesh.visible = true;
+  mesh.position.copy(from).add(to).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(_up, _weaponArmDelta.normalize());
+  const baseLength = mesh.userData.segmentLength ?? length;
+  mesh.scale.set(1, length / Math.max(0.0001, baseLength), 1);
+}
+
+/** Keep the low-poly arms connected to the actual shoulder and firing grip. */
+function updateWeaponArmPose(soldier, weapon, proneBlend = 0) {
+  const arms = weapon.userData.weaponArms;
+  const handPositions = weapon.userData.weaponHandPositions;
+  const torso = soldier.children.find((child) => child.userData.infantryPart === 'torso');
+  if (!arms?.length || !handPositions?.length || !torso) return;
+
+  soldier.updateWorldMatrix(true, true);
+  weapon.updateWorldMatrix(true, true);
+  const prone = THREE.MathUtils.clamp(proneBlend, 0, 1);
+  for (let i = 0; i < arms.length; i++) {
+    _weaponArmOrigin.lerpVectors(
+      _weaponArmShoulderOffsets[i],
+      _weaponArmProneOffsets[i],
+      prone
+    );
+    torso.localToWorld(_weaponArmShoulderWorld.copy(_weaponArmOrigin));
+    weapon.worldToLocal(_weaponArmStart.copy(_weaponArmShoulderWorld));
+    updateWeaponArmSegment(arms[i], _weaponArmStart, handPositions[i]);
+  }
+}
+
+function applySoldierWeaponPose(soldier, aimBlend, proneBlend = 0, firePulse = 0) {
   const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   const aim = soldier.userData.weaponAim;
   const rest = soldier.userData.walkRest?.weapon;
@@ -893,12 +1321,41 @@ function applySoldierWeaponPose(soldier, aimBlend, proneBlend = 0) {
   const prone = THREE.MathUtils.clamp(proneBlend, 0, 1);
   const standingY = rest.position.y + THREE.MathUtils.lerp(0, 0.1, t);
   const standingZ = rest.position.z + THREE.MathUtils.lerp(0, 0.06, t);
-  weapon.position.x = rest.position.x;
-  weapon.position.y = THREE.MathUtils.lerp(standingY, 0.2, prone);
-  weapon.position.z = THREE.MathUtils.lerp(standingZ, 0.46, prone);
-  weapon.rotation.x = THREE.MathUtils.lerp(aim.lowered.x, aim.raised.x, t);
-  weapon.rotation.y = THREE.MathUtils.lerp(aim.lowered.y, aim.raised.y, t);
-  weapon.rotation.z = THREE.MathUtils.lerp(aim.lowered.z, aim.raised.z, t);
+  const pronePose = aim.prone ?? {
+    position: { x: rest.position.x, y: 0.21, z: 0.44 },
+    lowered: aim.raised,
+    raised: aim.raised,
+  };
+  const proneRotation = {
+    x: THREE.MathUtils.lerp(pronePose.lowered.x, pronePose.raised.x, t),
+    y: THREE.MathUtils.lerp(pronePose.lowered.y, pronePose.raised.y, t),
+    z: THREE.MathUtils.lerp(pronePose.lowered.z, pronePose.raised.z, t),
+  };
+  weapon.position.x = THREE.MathUtils.lerp(rest.position.x, pronePose.position.x, prone);
+  weapon.position.y = THREE.MathUtils.lerp(standingY, pronePose.position.y, prone);
+  weapon.position.z = THREE.MathUtils.lerp(standingZ, pronePose.position.z, prone);
+  weapon.rotation.x = THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(aim.lowered.x, aim.raised.x, t),
+    proneRotation.x,
+    prone
+  );
+  weapon.rotation.y = THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(aim.lowered.y, aim.raised.y, t),
+    proneRotation.y,
+    prone
+  );
+  weapon.rotation.z = THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(aim.lowered.z, aim.raised.z, t),
+    proneRotation.z,
+    prone
+  );
+
+  // A short, weapon-local recoil kick gives the prone pose a readable firing
+  // beat without moving the soldier's gameplay position or muzzle origin.
+  const recoil = THREE.MathUtils.clamp(firePulse, 0, 1) * (0.018 + prone * 0.01);
+  weapon.position.z -= recoil;
+  weapon.rotation.x -= recoil * (0.7 + prone * 0.35);
+  updateWeaponArmPose(soldier, weapon, prone);
 }
 
 function applyMarchingWeaponSway(soldier, phase, blend, runBlend) {
@@ -921,6 +1378,9 @@ function applyMarchingWeaponSway(soldier, phase, blend, runBlend) {
   weapon.position.z += sway * 0.018 * scale * carry;
   weapon.rotation.x += sway * 0.045 * scale;
   weapon.rotation.z -= sway * 0.035 * scale;
+  if (soldier.userData.weaponAim) {
+    updateWeaponArmPose(soldier, weapon, soldier.userData.proneBlend ?? 0);
+  }
 }
 
 function getVisibleSquadMembers(unitMesh) {
@@ -938,15 +1398,37 @@ function findMuzzleMesh(soldier, weaponType) {
   }
   const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   if (!weapon) return null;
+  let barrel = null;
+  weapon.traverse((child) => {
+    if (barrel || child === weapon) return;
+    if (child.userData.infantryPart === 'barrel') barrel = child;
+  });
   return (
-    weapon.children.find((c) => c.userData.infantryPart === 'barrel') ??
+    barrel ??
     weapon.children.find((c) => c.isMesh && (c.geometry?.parameters?.width ?? 0) > 0.3) ??
     null
   );
 }
 
+/** Re-apply the visible aim/prone weapon pose before sampling a muzzle. */
+function syncSoldierWeaponMuzzlePose(unit, soldier) {
+  if (!soldier?.userData.weaponAim) return;
+  applySoldierWeaponPose(
+    soldier,
+    soldier.userData.weaponAimBlend ?? 0,
+    soldier.userData.proneBlend ?? 0,
+    unit?._fireAimPulse ?? 0
+  );
+}
+
 function meshMuzzleWorldPos(mesh, out) {
   mesh.updateWorldMatrix(true, false);
+  const marker = mesh.userData.muzzleMarker;
+  if (marker) {
+    marker.updateWorldMatrix(true, false);
+    marker.getWorldPosition(out);
+    return out;
+  }
   const params = mesh.geometry?.parameters;
   if (!params) {
     mesh.getWorldPosition(out);
@@ -1012,7 +1494,6 @@ export function getInfantryMuzzleWorldPosition(unit, weaponType, out = new THREE
     if (muzzle) return meshMuzzleWorldPos(muzzle, out);
   }
 
-  root.updateWorldMatrix(true, true);
   const soldiers = getVisibleSquadMembers(root);
   if (!soldiers.length) {
     out.copy(unit.position);
@@ -1021,6 +1502,8 @@ export function getInfantryMuzzleWorldPosition(unit, weaponType, out = new THREE
   }
 
   const soldier = pickFiringSoldier(unit, weaponType, soldiers);
+  syncSoldierWeaponMuzzlePose(unit, soldier);
+  root.updateWorldMatrix(true, true);
   const muzzleMesh = findMuzzleMesh(soldier, weaponType);
   if (muzzleMesh) return meshMuzzleWorldPos(muzzleMesh, out);
 
@@ -1037,6 +1520,147 @@ export function getInfantryMuzzleWorldPosition(unit, weaponType, out = new THREE
 
 export function usesInfantryMuzzleOrigin(unit) {
   return FOOT_MUZZLE_UNIT_TYPES.has(unit?.def?.type);
+}
+
+/** Multi-soldier handheld volleys: every living rifle/SMG/LMG flashes together. */
+export function usesSquadVolleyMuzzles(unit, weaponType) {
+  if (weaponType === 'paratrooperAt' || weaponType === 'spotterRifle') return false;
+  const type = unit?.def?.type;
+  if (type === 'sniper' || type === 'machineGun' || type === 'mortar') return false;
+  return usesInfantryMuzzleOrigin(unit);
+}
+
+const _squadMuzzlePool = Array.from({ length: 8 }, () => new THREE.Vector3());
+
+/**
+ * World-space muzzle origins for every visible squad member still holding a
+ * handheld weapon. AT launchers are skipped unless the shot is a para AT round.
+ */
+export function collectInfantrySquadMuzzleShots(unit, weaponType = 'infantry') {
+  const shots = [];
+  const root = unit?.mesh;
+  if (!root) return shots;
+  const soldiers = getVisibleSquadMembers(root);
+  for (const soldier of soldiers) {
+    const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
+    const kind = weapon?.userData.weaponKind ?? soldier.userData.weaponKind ?? 'rifle';
+    if (kind === 'atLauncher' && weaponType !== 'paratrooperAt') continue;
+    if (weaponType === 'paratrooperAt' && kind !== 'atLauncher') continue;
+    syncSoldierWeaponMuzzlePose(unit, soldier);
+  }
+  root.updateWorldMatrix(true, true);
+  for (const soldier of soldiers) {
+    const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
+    const kind = weapon?.userData.weaponKind ?? soldier.userData.weaponKind ?? 'rifle';
+    if (kind === 'atLauncher' && weaponType !== 'paratrooperAt') continue;
+    if (weaponType === 'paratrooperAt' && kind !== 'atLauncher') continue;
+    const muzzleMesh = findMuzzleMesh(soldier, kind === 'atLauncher' ? 'paratrooperAt' : 'infantry');
+    if (!muzzleMesh) continue;
+    const position = _squadMuzzlePool[shots.length] ?? new THREE.Vector3();
+    meshMuzzleWorldPos(muzzleMesh, position);
+    shots.push({
+      position,
+      kind,
+      vfxType: vfxTypeForWeaponKind(kind),
+    });
+  }
+  return shots;
+}
+
+/** Weapon kinds still carried by living (visible) squad members. */
+export function collectVisibleSquadWeaponKinds(unit) {
+  const kinds = [];
+  const root = unit?.mesh;
+  if (!root) return kinds;
+  root.traverse((child) => {
+    if (child.name !== 'squadMember' || !child.visible) return;
+    const weapon = child.children.find((c) => c.userData.infantryPart === 'weapon');
+    const kind = weapon?.userData.weaponKind ?? child.userData.weaponKind;
+    if (kind && kind !== 'atLauncher') kinds.push(kind);
+  });
+  return kinds;
+}
+
+function handheldKindForSoldier(soldier) {
+  const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
+  const kind = weapon?.userData.weaponKind ?? soldier.userData.weaponKind ?? null;
+  if (!kind || kind === 'atLauncher') return null;
+  return kind;
+}
+
+function squadFireInterval(kind, factionId) {
+  if (kind === 'smg') {
+    return factionId === 'russia' ? 0.24 + Math.random() * 0.28 : 0.34 + Math.random() * 0.36;
+  }
+  if (kind === 'lmg') {
+    if (factionId === 'germany') return 0.18 + Math.random() * 0.22;
+    if (factionId === 'usa') return 0.3 + Math.random() * 0.28;
+    return 0.38 + Math.random() * 0.32;
+  }
+  if (factionId === 'usa') return 0.36 + Math.random() * 0.32;
+  return 0.72 + Math.random() * 0.52;
+}
+
+function squadFireInitialDelay(kind, squadIndex) {
+  const spread = 0.06 + squadIndex * 0.09 + Math.random() * 0.34;
+  if (kind === 'lmg') return spread * 0.55;
+  if (kind === 'smg') return spread * 0.7;
+  return spread;
+}
+
+/**
+ * Advance each living squad member's personal fire clock. Returns soldiers
+ * who discharged this frame so VFX/SFX can spawn after the pose pass.
+ */
+export function tickInfantrySquadFireCadence(unit, dt) {
+  const fired = [];
+  if (!unit?.mesh || unit.dead || unit.surrendered || unit._captureExit || unit._dropping) {
+    return fired;
+  }
+  if (!usesSquadVolleyMuzzles(unit, unit.def?.type)) return fired;
+
+  const frameDt = Math.max(0, dt);
+  const factionId = unit.faction?.id ?? 'germany';
+  unit.mesh.traverse((soldier) => {
+    if (soldier.name !== 'squadMember' || !soldier.visible) return;
+    const kind = handheldKindForSoldier(soldier);
+    if (!kind || !soldier.userData.weaponAim) {
+      soldier.userData.fireWait = null;
+      return;
+    }
+    const aiming =
+      isSoldierAiming(unit, soldier) && (soldier.userData.weaponAimBlend ?? 0) > 0.42;
+    if (!aiming) {
+      soldier.userData.fireWait = null;
+      return;
+    }
+    if (soldier.userData.fireWait == null) {
+      soldier.userData.fireWait = squadFireInitialDelay(kind, soldier.userData.squadIndex ?? 0);
+    }
+    soldier.userData.fireWait -= frameDt;
+    if (soldier.userData.fireWait > 0) return;
+    soldier.userData.fireWait = squadFireInterval(kind, factionId);
+    soldier.userData.firePulse = 1;
+    fired.push({ soldier, kind });
+  });
+  return fired;
+}
+
+export function collectSoldierMuzzleShot(unit, soldier) {
+  const kind = handheldKindForSoldier(soldier);
+  if (!kind) return null;
+  syncSoldierWeaponMuzzlePose(unit, soldier);
+  soldier.updateWorldMatrix(true, true);
+  const muzzleMesh = findMuzzleMesh(soldier, 'infantry');
+  if (!muzzleMesh) return null;
+  const position = new THREE.Vector3();
+  meshMuzzleWorldPos(muzzleMesh, position);
+  return {
+    position,
+    kind,
+    vfxType: vfxTypeForWeaponKind(kind),
+    squadIndex: soldier.userData.squadIndex ?? 0,
+  };
 }
 
 /** Keep the deployed crew-served weapon aligned exactly with its current target. */
@@ -1072,10 +1696,21 @@ export function aimDeployedMortar(unit, target) {
   pivot.userData.deployed = true;
 }
 
-/** Keep rifles raised briefly after shots and while acquired targets stay in range. */
-export function markInfantryFireAim(unit, holdSec = 0.5) {
-  if (!unit || !WEAPON_POSE_TYPES.has(unit.def?.type)) return;
+/** Keep rifles raised after shots and bridge a transient target reacquire gap. */
+export function markInfantryFireAim(
+  unit,
+  holdSec = 0.5,
+  proneHoldSec = holdSec + PRONE_FIRE_GRACE_SEC,
+  target = null
+) {
+  if (!unit || !usesInfantryWeaponPose(unit.def?.type)) return;
   unit._fireAimHold = Math.max(unit._fireAimHold ?? 0, holdSec);
+  unit._infantryProneFireHold = Math.max(
+    unit._infantryProneFireHold ?? 0,
+    proneHoldSec
+  );
+  unit._infantryProneFireTarget = target ?? unit.target ?? unit.attackOrder ?? null;
+  unit._fireAimPulse = Math.max(unit._fireAimPulse ?? 0, 1);
 }
 
 /**
@@ -1095,6 +1730,8 @@ export function buildSquadSoldier(parentGroup, opts) {
     withPack = true,
     withWebbing = true,
     extraMeshes = null,
+    unitType = null,
+    weaponKind = null,
   } = opts;
 
   const mats = getInfantryMaterials(factionId);
@@ -1153,7 +1790,16 @@ export function buildSquadSoldier(parentGroup, opts) {
 
   if (withPack && !gunner) addBackpack(soldier, mats, factionId);
   if (withWebbing) addWebbing(soldier, mats);
-  if (withRifle) addFactionRifle(soldier, mats, factionId, { crouching: gunner || crouching });
+  if (withRifle) {
+    const kind = weaponKind ?? squadWeaponKindForMember(unitType, squadIndex);
+    if (kind && kind !== 'atLauncher') {
+      addFactionSmallArm(soldier, mats, factionId, {
+        crouching: gunner || crouching,
+        kind,
+      });
+      soldier.userData.weaponKind = kind;
+    }
+  }
 
   if (extraMeshes) extraMeshes(soldier, mats);
 
@@ -1178,14 +1824,36 @@ export function buildSquadSoldier(parentGroup, opts) {
 /** Raise rifles while engaging; lower at port-arms when idle or marching. */
 export function updateInfantryWeaponPose(unit, dt) {
   if (!unit?.mesh || unit.dead || unit.surrendered || unit._captureExit || unit._dropping) return;
-  if (!WEAPON_POSE_TYPES.has(unit.def?.type)) return;
+  if (!usesInfantryWeaponPose(unit.def?.type)) return;
+
+  const frameDt = Math.max(0, dt);
+  unit._infantryPoseTime = (unit._infantryPoseTime ?? 0) + frameDt;
+  unit._fireAimPulse = Math.max(0, (unit._fireAimPulse ?? 0) - frameDt * 8.5);
 
   if ((unit._underFireProneTimer ?? 0) > 0) {
     unit._underFireProneTimer = Math.max(0, unit._underFireProneTimer - dt);
   }
 
-  if (unit._fireAimHold > 0) {
-    unit._fireAimHold = Math.max(0, unit._fireAimHold - dt);
+  if ((unit._fireAimHold ?? 0) > 0) {
+    unit._fireAimHold = Math.max(0, unit._fireAimHold - frameDt);
+  }
+
+  if ((unit._infantryProneFireHold ?? 0) > 0) {
+    unit._infantryProneFireHold = Math.max(
+      0,
+      unit._infantryProneFireHold - frameDt
+    );
+  }
+
+  const movingFromPosition =
+    !!unit.moveTarget ||
+    !!unit._userMoveOrder ||
+    (unit._walkBlend ?? 0) > 0.06;
+  if (movingFromPosition) {
+    // A move order is the explicit end of a firing position. Do not let the
+    // last shot's grace period pull the squad back down while it marches.
+    unit._infantryProneFireHold = 0;
+    unit._infantryProneFireTarget = null;
   }
 
   unit.mesh.traverse((child) => {
@@ -1200,15 +1868,30 @@ export function updateInfantryWeaponPose(unit, dt) {
     );
 
     const canGoProne =
-      PRONE_FIRE_TYPES.has(unit.def?.type) &&
+      usesInfantryProneFirePose(unit.def?.type) &&
       !unit._mountedOnTankId &&
       !unit._trenchId &&
       !unit._diggingTrench;
+    const stationary = !movingFromPosition;
     const underFireProne =
-      !unit.moveTarget &&
-      !unit._userMoveOrder &&
+      stationary &&
       (unit._underFireProneTimer ?? 0) > 0;
-    const proneTarget = canGoProne && (targetBlend > 0 || underFireProne) ? 1 : 0;
+    const rememberedFireTarget = unit._infantryProneFireTarget;
+    const rememberedTargetStillActive =
+      !!rememberedFireTarget &&
+      !rememberedFireTarget.dead &&
+      !isSmokeShellTarget(rememberedFireTarget) &&
+      (!rememberedFireTarget.isGround || unit.attackOrder === rememberedFireTarget);
+    const firingGrace =
+      stationary &&
+      (unit._infantryProneFireHold ?? 0) > 0 &&
+      (rememberedTargetStillActive || !!getInfantryFireTarget(unit));
+    const proneTarget =
+      canGoProne &&
+      stationary &&
+      (targetBlend > 0 || firingGrace || underFireProne)
+        ? 1
+        : 0;
     const proneRate = proneTarget > (child.userData.proneBlend ?? 0) ? 7 : 5;
     const previousProneBlend = child.userData.proneBlend ?? 0;
     child.userData.proneBlend = THREE.MathUtils.lerp(
@@ -1218,13 +1901,24 @@ export function updateInfantryWeaponPose(unit, dt) {
     );
     if (child.userData.proneBlend < 0.001) child.userData.proneBlend = 0;
 
+    const firePulse = usesSquadVolleyMuzzles(unit, unit.def?.type)
+      ? child.userData.firePulse ?? 0
+      : unit._fireAimPulse ?? 0;
+    child.userData.firePulse = Math.max(0, (child.userData.firePulse ?? 0) - frameDt * 8.5);
+
     if (child.userData.proneBlend > 0 || previousProneBlend > 0) {
-      applySoldierPronePose(child, child.userData.proneBlend);
+      applySoldierPronePose(
+        child,
+        child.userData.proneBlend,
+        unit._infantryPoseTime + (child.userData.squadIndex ?? 0) * 0.63,
+        firePulse
+      );
     }
     applySoldierWeaponPose(
       child,
       child.userData.weaponAimBlend,
-      child.userData.proneBlend
+      child.userData.proneBlend,
+      firePulse
     );
     applyMarchingWeaponSway(
       child,
@@ -1385,12 +2079,16 @@ export function resetInfantryWalkPose(unit) {
   unit._walkBlend = 0;
   unit._walkMotionRatio = 0;
   unit._walkRunBlend = 0;
+  unit._infantryPoseTime = 0;
+  unit._fireAimPulse = 0;
+  unit._infantryProneFireHold = 0;
+  unit._infantryProneFireTarget = null;
   unit.mesh.traverse((child) => {
     if (child.name !== 'squadMember') return;
     restoreWalkRest(child);
     child.userData.proneBlend = 0;
     applySoldierPronePose(child, 0);
-    applySoldierWeaponPose(child, child.userData.weaponAimBlend ?? 0, 0);
+    applySoldierWeaponPose(child, child.userData.weaponAimBlend ?? 0, 0, 0);
   });
 }
 

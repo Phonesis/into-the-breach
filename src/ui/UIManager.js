@@ -3088,7 +3088,7 @@ export class UIManager {
           'Victory: destroy the enemy HQ · Tap select · Engage/Fire buttons · Tap map = move/attack';
       } else {
         this._defaultHudHint =
-          'Victory: destroy the enemy HQ · WASD pan · wheel zoom · LMB/RMB orders · Shift+LMB fire';
+          'Victory: destroy the enemy HQ · WASD pan · MMB drag camera · wheel zoom · LMB/RMB orders · Shift+LMB fire';
       }
       hint.textContent = this._defaultHudHint;
       if (tabletOn && tutorial) {

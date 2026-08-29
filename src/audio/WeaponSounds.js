@@ -34,8 +34,8 @@ export function isMasterSfxFile(file) {
   if (letter === 'b') return true;
   // Extra original ElevenLabs faction gens
   if (letter === 'f' || letter === 'g') return true;
-  // SMG packs: all lettered variants are pure ElevenLabs gens
-  if (/^smg/i.test(stem)) return true;
+  // SMG / squad LMG packs: all lettered variants are pure ElevenLabs gens
+  if (/^smg/i.test(stem) || /^lmg/i.test(stem)) return true;
   // Extra original ElevenLabs rifle / MG gens beyond f/g
   if ((letter === 'h' || letter === 'i') && /^(rifle|mg)/i.test(stem)) return true;
   // Sustained full-auto MG concentrations (mg-*-long-a/b, mg-extra-long-*)
@@ -85,6 +85,25 @@ export const WEAPON_SAMPLE_FILES = {
     'smg-japan-el-03.wav',
     'smg-japan-el-04.wav',
     'smg-japan-el-05.wav',
+  ],
+  /** Squad LMG (Bren / BAR / MG34 / DP-27 / Type 96) — shorter than MG-team bursts. */
+  lmg: ['mg.wav', 'mg-extra-a.wav', 'mg-extra-b.wav'],
+  lmg_germany: [
+    'lmg-germany-el-01.wav',
+    'lmg-germany-el-02.wav',
+    'lmg-germany-el-03.wav',
+  ],
+  lmg_usa: ['lmg-usa-el-01.wav', 'lmg-usa-el-02.wav', 'lmg-usa-el-03.wav'],
+  lmg_uk: ['lmg-uk-el-01.wav', 'lmg-uk-el-02.wav', 'lmg-uk-el-03.wav'],
+  lmg_russia: [
+    'lmg-russia-el-01.wav',
+    'lmg-russia-el-02.wav',
+    'lmg-russia-el-03.wav',
+  ],
+  lmg_japan: [
+    'lmg-japan-el-01.wav',
+    'lmg-japan-el-02.wav',
+    'lmg-japan-el-03.wav',
   ],
   mg: [
     'mg.wav',
@@ -330,6 +349,12 @@ const PROFILE_FALLBACK = {
   smg_uk: 'smg',
   smg_russia: 'smg',
   smg_japan: 'smg',
+  lmg: 'mg',
+  lmg_germany: 'mg_germany',
+  lmg_usa: 'mg_usa',
+  lmg_uk: 'mg_uk',
+  lmg_russia: 'mg_russia',
+  lmg_japan: 'mg_japan',
   mg_germany: 'mg',
   mg_usa: 'mg',
   mg_uk: 'mg',
@@ -379,6 +404,7 @@ const PROFILE_MIN_GAP_MS = {
   mortar: 200,
   mg: 52,
   smg: 58,
+  lmg: 54,
   rifle: 68,
 };
 
@@ -399,6 +425,9 @@ export function rateJitterForProfile(profile) {
   if (profile === 'smg' || profile.startsWith('smg_')) {
     return { min: 0.985, span: 0.035 };
   }
+  if (profile === 'lmg' || profile.startsWith('lmg_')) {
+    return { min: 0.982, span: 0.036 };
+  }
   if (profile === 'rifle' || profile.startsWith('rifle_')) {
     return { min: 0.982, span: 0.036 }; // ~0.982–1.018
   }
@@ -409,6 +438,7 @@ export function rateJitterForProfile(profile) {
 export function volumeJitterForProfile(profile) {
   if (profile === 'mg' || profile.startsWith('mg_')) return 0.05;
   if (profile === 'smg' || profile.startsWith('smg_')) return 0.05;
+  if (profile === 'lmg' || profile.startsWith('lmg_')) return 0.05;
   if (profile === 'rifle' || profile.startsWith('rifle_')) return 0.04;
   return 0.03;
 }
@@ -438,6 +468,13 @@ export function smgProfileForFaction(factionId = 'germany') {
   const id = factionId ?? 'germany';
   if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia' || id === 'japan') return `smg_${id}`;
   return 'smg';
+}
+
+/** Squad LMG profile (Bren / BAR / MG34 / DP-27 / Type 96) — not the crew-served MG team. */
+export function lmgProfileForFaction(factionId = 'germany') {
+  const id = factionId ?? 'germany';
+  if (id === 'usa' || id === 'uk' || id === 'germany' || id === 'russia' || id === 'japan') return `lmg_${id}`;
+  return 'lmg';
 }
 
 export function resolveWeaponProfile(def, factionId = null) {
@@ -507,6 +544,11 @@ export function resolveProfileFallback(profile) {
   if (profile.startsWith('tank') || profile.startsWith('at')) return 'tank_75';
   if (profile.startsWith('mortar')) return 'howitzer_105';
   if (profile.startsWith('smg')) return 'smg';
+  if (profile.startsWith('lmg')) {
+    const faction = profile.slice(4);
+    if (faction && WEAPON_SAMPLE_FILES[`mg${faction}`]) return `mg${faction}`;
+    return 'mg';
+  }
   if (profile.startsWith('mg')) return 'mg';
   if (profile.startsWith('rifle')) return 'rifle';
   return profile;
@@ -533,6 +575,7 @@ export function sampleWeight(file) {
   const letter = m[1].toLowerCase();
   if (letter === 'b') return 6; // secondary master
   if (/^smg/i.test(stem)) return 5; // all SMG lettered gens are real EL
+  if (/^lmg/i.test(stem)) return 5;
   if (letter === 'f' || letter === 'g' || letter === 'h' || letter === 'i') return 1.8;
   // c / d / e mild offline variants (rifle/mg)
   return 0.7;
@@ -589,6 +632,7 @@ export function minGapMsForProfile(profile) {
   if (profile.startsWith('tank') || profile.startsWith('at')) return PROFILE_MIN_GAP_MS.tank;
   if (profile === 'mg' || profile.startsWith('mg_')) return PROFILE_MIN_GAP_MS.mg;
   if (profile === 'smg' || profile.startsWith('smg_')) return PROFILE_MIN_GAP_MS.smg;
+  if (profile === 'lmg' || profile.startsWith('lmg_')) return PROFILE_MIN_GAP_MS.lmg;
   if (profile === 'rifle' || profile.startsWith('rifle_')) return PROFILE_MIN_GAP_MS.rifle;
   return 75;
 }

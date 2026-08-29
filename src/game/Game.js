@@ -236,6 +236,7 @@ import {
   spawnShellExplosion,
   spawnCollapseDust,
   spawnWaterImpact,
+  spawnMuzzleFlash,
   prewarmImpactLightPrograms,
   updateCombatEffects,
   clearCombatEffects,
@@ -305,6 +306,7 @@ import {
   resolveWeaponProfile,
   mgProfileForFaction,
   smgProfileForFaction,
+  lmgProfileForFaction,
   isInfantryUnitType,
   isVehicleCrewVoiceType,
   isMoveVoiceDue,
@@ -319,7 +321,12 @@ import {
   updateDetachedCorpseFalls,
   clearDetachedCorpseFalls,
 } from '../units/UnitMeshes.js';
-import { updateInfantryWeaponPose } from '../units/InfantryVisuals.js';
+import {
+  collectSoldierMuzzleShot,
+  tickInfantrySquadFireCadence,
+  updateInfantryWeaponPose,
+  usesSquadVolleyMuzzles,
+} from '../units/InfantryVisuals.js';
 import { FireSupportManager } from './FireSupport.js';
 import {
   clearIncomingArtilleryStrikes,
@@ -354,7 +361,35 @@ const LARGE_BATTLE_SIM_MOVEMENT_STEP = 1 / 30;
 const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
 const GARAND_CLIP_SIZE = 8;
 const GARAND_PING_CHANCE = 0.58;
+
+function squadSoldierWeaponProfile(kind, factionId) {
+  if (kind === 'smg') return smgProfileForFaction(factionId);
+  if (kind === 'lmg') return lmgProfileForFaction(factionId);
+  return `rifle_${factionId}`;
+}
+
+function playSquadSoldierWeapon(attacker, kind, pos, squadIndex = 0) {
+  const factionId = attacker?.faction?.id ?? 'germany';
+  const profile = squadSoldierWeaponProfile(kind, factionId);
+  const volume = kind === 'lmg' ? 0.74 : kind === 'smg' ? 0.6 : 0.7;
+  sounds.playWeapon(profile, pos, {
+    gapKey: `squad-${attacker?.id ?? factionId}-${squadIndex}`,
+    volume,
+    rate: 0.99 + Math.random() * 0.02,
+  });
+  if (factionId === 'usa' && kind === 'rifle' && attacker?.def?.type === 'infantry') {
+    attacker._garandRoundsFired = (attacker._garandRoundsFired ?? 0) + 1;
+    if (attacker._garandRoundsFired >= GARAND_CLIP_SIZE) {
+      attacker._garandRoundsFired = 0;
+      if (Math.random() < GARAND_PING_CHANCE) {
+        sounds.playGarandPing(pos, { team: attacker.team });
+      }
+    }
+  }
+}
 const TOWER_DEFENSE_AI_STEP = 0.1;
+const CAMERA_DRAG_ROTATE_PER_PIXEL = 0.006;
+const CAMERA_DRAG_DOLLY_PER_PIXEL = 0.18;
 
 function pickUnitForVoice(units) {
   if (!units?.length) return null;
@@ -745,6 +780,7 @@ export class Game {
         this._syncBattleCursor();
       },
       onBattleCursorChange: () => this._syncBattleCursor(),
+      onCameraDrag: (deltaX, deltaY) => this._handleCameraDrag(deltaX, deltaY),
       getCoverSystem: () => this.coverSystem,
       getSeekCoverMode: () => this.seekCoverMode,
       getGarrisonSources: () => this,
@@ -784,7 +820,14 @@ export class Game {
       }
     };
     this._onPlacementLayerMove = (e) => {
-      if (this.paused || !this._directionalPlacement) return;
+      if (
+        this.paused ||
+        !this._directionalPlacement ||
+        e.buttons & 4 ||
+        this.controller?.isCameraDragging?.()
+      ) {
+        return;
+      }
       const ground = this._screenToGround(e.clientX, e.clientY);
       if (!ground) return;
       const { kind } = this._directionalPlacement;
@@ -797,6 +840,30 @@ export class Game {
     this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerUp);
     this._placementLayer?.addEventListener('pointermove', this._onPlacementLayerMove);
     this._placementLayer?.addEventListener('contextmenu', this._onPlacementLayerContextMenu);
+    this._onPlacementLayerCameraDown = (e) => {
+      if (e.button === 1) this.controller.onPointerDown(e);
+    };
+    this._onPlacementLayerCameraMove = (e) => {
+      if (e.buttons & 4 || this.controller.isCameraDragging()) {
+        this.controller.onPointerMove(e);
+      }
+    };
+    this._onPlacementLayerCameraUp = (e) => {
+      if (e.button === 1 || this.controller.isCameraDragging()) {
+        this.controller.onPointerUp(e);
+      }
+    };
+    this._onPlacementLayerCameraCancel = (e) => {
+      if (this.controller.isCameraDragging()) this.controller.onPointerCancel(e);
+    };
+    this._onPlacementLayerCameraLostCapture = (e) => {
+      if (this.controller.isCameraDragging()) this.controller.onLostPointerCapture(e);
+    };
+    this._placementLayer?.addEventListener('pointerdown', this._onPlacementLayerCameraDown);
+    this._placementLayer?.addEventListener('pointermove', this._onPlacementLayerCameraMove);
+    this._placementLayer?.addEventListener('pointerup', this._onPlacementLayerCameraUp);
+    this._placementLayer?.addEventListener('pointercancel', this._onPlacementLayerCameraCancel);
+    this._placementLayer?.addEventListener('lostpointercapture', this._onPlacementLayerCameraLostCapture);
 
     window.addEventListener('resize', () => this.onResize());
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
@@ -2101,6 +2168,34 @@ export class Game {
     );
     this.camera.position.copy(this.cameraTarget).add(camOffset);
     this.camera.lookAt(this.cameraTarget);
+  }
+
+  _handleCameraDrag(deltaX, deltaY) {
+    if (!this.running || this.gameOver || !this.mapDef) return;
+
+    if (deltaX) {
+      // Match the existing arrow-key rotation: dragging right turns the view
+      // right, just as holding ArrowRight does.
+      this.cameraYaw -= deltaX * CAMERA_DRAG_ROTATE_PER_PIXEL;
+    }
+
+    if (deltaY) {
+      // The arrow keys dolly the look target along the ground-facing camera
+      // direction. A negative mouse delta (dragging up) is ArrowUp-equivalent.
+      const viewForward = new THREE.Vector3();
+      this.camera.getWorldDirection(viewForward);
+      viewForward.y = 0;
+      if (viewForward.lengthSq() > 0.0001) {
+        viewForward.normalize();
+        this.cameraTarget.addScaledVector(
+          viewForward,
+          -deltaY * CAMERA_DRAG_DOLLY_PER_PIXEL
+        );
+      }
+    }
+
+    this._clampCameraTarget();
+    this._updateCameraFromTarget();
   }
 
   _captureCameraFacing() {
@@ -4181,6 +4276,51 @@ export class Game {
     }
   }
 
+  _squadFireAimPoint(unit) {
+    const target = unit?.attackOrder ?? unit?.target;
+    if (!target || target.dead) return null;
+    const pos = target.position ?? target.mesh?.position;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.z)) return null;
+    const y = this.mapDef ? sampleTerrainHeight(pos.x, pos.z, this.mapDef) + 0.7 : (pos.y ?? 0.7);
+    return { x: pos.x, y, z: pos.z };
+  }
+
+  _spawnSquadSoldierShots(unit, shots) {
+    if (!this.scene || !shots?.length) return;
+    const listener = this.cameraTarget ?? unit.position;
+    const dx = unit.position.x - listener.x;
+    const dz = unit.position.z - listener.z;
+    const near = unit.team === PLAYER_TEAM || Math.hypot(dx, dz) < 200;
+    if (!near) return;
+    const to = this._squadFireAimPoint(unit) ?? {
+      x: unit.position.x,
+      y: unit.position.y + 0.6,
+      z: unit.position.z + 4,
+    };
+    for (const pending of shots) {
+      const shot = collectSoldierMuzzleShot(unit, pending.soldier);
+      if (!shot) continue;
+      const shotTo = {
+        x: to.x + (Math.random() - 0.5) * 0.8,
+        y: to.y,
+        z: to.z + (Math.random() - 0.5) * 0.8,
+      };
+      spawnMuzzleFlash(this.scene, shot.position, shotTo, shot.vfxType, {
+        exactOrigin: true,
+        weaponKind: shot.kind,
+      });
+      playSquadSoldierWeapon(unit, shot.kind, { x: shot.position.x, z: shot.position.z }, shot.squadIndex);
+      this.ui?.recordMinimapFire?.({
+        fromX: shot.position.x,
+        fromZ: shot.position.z,
+        toX: shotTo.x,
+        toZ: shotTo.z,
+        team: unit.team,
+        weaponType: shot.vfxType === 'machineGun' ? 'machineGun' : 'infantry',
+      });
+    }
+  }
+
   _recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire }) {
     if (!this.running || this.gameOver || !from || !to) return;
     let weaponType = coaxFire ? 'machineGun' : def?.type ?? 'infantry';
@@ -4351,12 +4491,13 @@ export class Game {
     // Keep base rate near 1.0 — sample pools provide variety; big pitch swings sound fake
     let rate = 0.99 + Math.random() * 0.02;
     let volume = 1;
-    if (def.type === 'infantry' || def.type === 'radioOperator' || def.type === 'engineer') {
-      // Rifle squads and engineers use a mixed small-arms pool; radio operators
-      // carry only their rifle and must never emit an SMG sample.
-      attacker._infVolley = (attacker._infVolley ?? 0) + 1;
-      const useSmg = def.type !== 'radioOperator' && attacker._infVolley % 3 === 0;
-      profile = useSmg ? smgProfileForFaction(factionId) : `rifle_${factionId}`;
+    const squadCadence =
+      !paratrooperAtFire && usesSquadVolleyMuzzles(attacker, def?.type);
+    if (squadCadence) {
+      // Reports come from each soldier's own fire clock, not this damage tick.
+      profile = `rifle_${factionId}`;
+    } else if (def.type === 'infantry' || def.type === 'radioOperator' || def.type === 'engineer') {
+      profile = `rifle_${factionId}`;
       rate = 0.99 + Math.random() * 0.025;
       if (def.type === 'engineer') volume = 0.92;
       if (def.type === 'radioOperator') volume = 0.88;
@@ -4383,12 +4524,10 @@ export class Game {
       volume = def.type === 'paratrooper' ? 0.92 : volume;
     }
 
-    sounds.playWeapon(profile, pos, { rate, volume });
+    if (!squadCadence) sounds.playWeapon(profile, pos, { rate, volume });
 
-    // U.S. rifle squads carry M1 Garands. Count only their actual rifle shots
-    // (the mixed third-volley SMG remains outside the clip) and let a subset of
-    // empty-clip transitions add the short en-bloc eject cue after the report.
     if (
+      !squadCadence &&
       factionId === 'usa' &&
       def?.type === 'infantry' &&
       profile === 'rifle_usa'
@@ -4931,7 +5070,9 @@ export class Game {
 
         if (updateArmyMovement) {
           for (const u of this._aliveUnits) {
+            const squadShots = tickInfantrySquadFireCadence(u, movementDt);
             updateInfantryWeaponPose(u, movementDt);
+            if (squadShots.length) this._spawnSquadSoldierShots(u, squadShots);
           }
         }
 

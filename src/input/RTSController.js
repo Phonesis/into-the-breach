@@ -77,6 +77,7 @@ export class RTSController {
     onOrder,
     onMoveOrder,
     onBattleCursorChange,
+    onCameraDrag,
     getCoverSystem,
     getSeekCoverMode,
     getGarrisonSources,
@@ -121,6 +122,7 @@ export class RTSController {
     this.onOrder = onOrder;
     this.onMoveOrder = onMoveOrder;
     this.onBattleCursorChange = onBattleCursorChange;
+    this.onCameraDrag = onCameraDrag;
     this.getCoverSystem = getCoverSystem ?? (() => null);
     this.getSeekCoverMode = getSeekCoverMode ?? (() => false);
     this.getGarrisonSources = getGarrisonSources ?? (() => null);
@@ -139,10 +141,13 @@ export class RTSController {
     this._tabletTargetMode = false;
     this._tabletFireMode = false;
     this._tabletTargetConfirmKey = null;
+    this._cameraDrag = null;
 
     this._onPointerDown = this.onPointerDown.bind(this);
     this._onPointerMove = this.onPointerMove.bind(this);
     this._onPointerUp = this.onPointerUp.bind(this);
+    this._onPointerCancel = this.onPointerCancel.bind(this);
+    this._onLostPointerCapture = this.onLostPointerCapture.bind(this);
     this._onContextMenu = this.onContextMenu.bind(this);
     this._onPointerDownRmb = this.onPointerDownRmb.bind(this);
   }
@@ -153,11 +158,14 @@ export class RTSController {
     this.domElement.addEventListener('pointerdown', this._onPointerDown);
     this.domElement.addEventListener('pointermove', this._onPointerMove);
     this.domElement.addEventListener('pointerup', this._onPointerUp);
+    this.domElement.addEventListener('pointercancel', this._onPointerCancel);
+    this.domElement.addEventListener('lostpointercapture', this._onLostPointerCapture);
     this.domElement.addEventListener('contextmenu', this._onContextMenu);
     this.domElement.addEventListener('pointerdown', this._onPointerDownRmb);
   }
 
   disable() {
+    this._endCameraDrag();
     this.enabled = false;
     if (this._vehicleHoverClearTimer) clearTimeout(this._vehicleHoverClearTimer);
     this._vehicleHoverClearTimer = null;
@@ -165,6 +173,8 @@ export class RTSController {
     this.domElement.removeEventListener('pointerdown', this._onPointerDown);
     this.domElement.removeEventListener('pointermove', this._onPointerMove);
     this.domElement.removeEventListener('pointerup', this._onPointerUp);
+    this.domElement.removeEventListener('pointercancel', this._onPointerCancel);
+    this.domElement.removeEventListener('lostpointercapture', this._onLostPointerCapture);
     this.domElement.removeEventListener('contextmenu', this._onContextMenu);
     this.domElement.removeEventListener('pointerdown', this._onPointerDownRmb);
   }
@@ -848,7 +858,71 @@ export class RTSController {
     return !this.enabled || this.getPaused?.();
   }
 
+  isCameraDragging() {
+    return !!this._cameraDrag;
+  }
+
+  _isCameraDragEvent(e) {
+    if (!this._cameraDrag) return false;
+    return (
+      this._cameraDrag.pointerId == null ||
+      e.pointerId == null ||
+      e.pointerId === this._cameraDrag.pointerId
+    );
+  }
+
+  _beginCameraDrag(e) {
+    if (!this.enabled || e.button !== 1) return;
+    this._endCameraDrag();
+    e.preventDefault();
+    const element = e.currentTarget ?? this.domElement;
+    this._cameraDrag = {
+      pointerId: e.pointerId ?? null,
+      x: e.clientX,
+      y: e.clientY,
+      element,
+      previousCursor: element?.style?.cursor ?? '',
+    };
+    if (element?.style) element.style.cursor = 'grabbing';
+    if (e.pointerId != null) {
+      try {
+        element?.setPointerCapture?.(e.pointerId);
+      } catch {
+        // Pointer capture is only a convenience; the buttons check below
+        // still keeps the drag alive when a browser declines it.
+      }
+    }
+  }
+
+  _endCameraDrag(e = null) {
+    if (!this._cameraDrag || (e && !this._isCameraDragEvent(e))) return;
+    const drag = this._cameraDrag;
+    this._cameraDrag = null;
+    if (
+      drag.pointerId != null &&
+      drag.element?.hasPointerCapture?.(drag.pointerId)
+    ) {
+      drag.element.releasePointerCapture(drag.pointerId);
+    }
+    if (drag.element?.style) drag.element.style.cursor = drag.previousCursor;
+  }
+
+  onPointerCancel(e) {
+    if (!this._isCameraDragEvent(e)) return;
+    e.preventDefault();
+    this._endCameraDrag(e);
+  }
+
+  onLostPointerCapture(e) {
+    if (!this._isCameraDragEvent(e)) return;
+    this._endCameraDrag(e);
+  }
+
   onPointerDown(e) {
+    if (e.button === 1) {
+      this._beginCameraDrag(e);
+      return;
+    }
     if (this._inputBlocked() || e.button !== 0) return;
     this.setPointerFromEvent(e);
 
@@ -880,6 +954,16 @@ export class RTSController {
   }
 
   onPointerMove(e) {
+    if (this._isCameraDragEvent(e)) {
+      e.preventDefault();
+      const drag = this._cameraDrag;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      if (dx || dy) this.onCameraDrag?.(dx, dy);
+      return;
+    }
     if (this._inputBlocked()) return;
     this.setPointerFromEvent(e);
     const pendingFs = this.getPendingFireSupport?.();
@@ -959,6 +1043,11 @@ export class RTSController {
   }
 
   onPointerUp(e) {
+    if (e.button === 1 || this._isCameraDragEvent(e)) {
+      if (this._isCameraDragEvent(e)) e.preventDefault();
+      this._endCameraDrag(e);
+      return;
+    }
     if (this._inputBlocked() || e.button !== 0) return;
     this.setPointerFromEvent(e);
 

@@ -26,6 +26,7 @@ import {
   spawnArtilleryExplosion,
   spawnShellExplosion,
   spawnMuzzleFlash,
+  nextTracerSeq,
 } from '../effects/CombatEffects.js';
 import { addExplosionCrater } from '../world/TerrainDamage.js';
 import { sounds } from '../audio/SoundManager.js';
@@ -713,7 +714,10 @@ export class DefenseStructureManager {
           this.getTerrainMesh()
         );
       } else {
-        spawnMuzzleFlash(scene, from, to, wType);
+        spawnMuzzleFlash(scene, from, to, wType, {
+          tracerKind: wType === 'machineGun' ? 'machineGun' : undefined,
+          tracerSeq: wType === 'machineGun' ? nextTracerSeq(entry, 3) : undefined,
+        });
         if (armorHit?.deflected) spawnArmorRicochet(scene, to, from);
       }
     }

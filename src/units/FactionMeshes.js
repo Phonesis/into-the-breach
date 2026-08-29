@@ -534,7 +534,7 @@ export function buildFactionEngineer(group, body, dark, factionId) {
   oilCan.position.set(0.28, 0.18, -0.48);
   group.add(oilCan);
 
-  // 4-man combat engineer section with rifles
+  // 4-man combat engineer section with mixed rifles and SMGs
   const positions = configureTacticalSquadFormation(group, 'engineer', 4).map(
     ({ x, z }, index) => ({ x, z, lead: index === 0 })
   );
@@ -547,6 +547,7 @@ export function buildFactionEngineer(group, body, dark, factionId) {
       x,
       z,
       withRifle: true,
+      unitType: 'engineer',
       extraMeshes: lead
         ? (soldier) => {
             // NCO gold armband
@@ -856,7 +857,13 @@ export function buildFactionInfantry(group, _body, _dark, factionId) {
 
   for (let i = 0; i < positions.length; i++) {
     const { x: px, z: pz } = positions[i];
-    buildSquadSoldier(group, { factionId, squadIndex: i, x: px, z: pz });
+    buildSquadSoldier(group, {
+      factionId,
+      squadIndex: i,
+      x: px,
+      z: pz,
+      unitType: 'infantry',
+    });
   }
   group.userData.squadSize = positions.length;
   group.userData.hitRadius = 1.2;
@@ -887,6 +894,7 @@ export function buildFactionCommander(group, _body, dark, factionId) {
       z,
       withPack: !officer,
       withRifle: !officer,
+      unitType: 'commander',
       extraMeshes: officer
         ? (soldier, mats) => {
             const helmet = soldier.children.find(
@@ -963,6 +971,7 @@ export function buildFactionVehicleCrew(group, _body, _dark, factionId) {
       z: positions[i].z,
       withPack: false,
       withWebbing: true,
+      unitType: 'vehicleCrew',
     });
   }
   group.userData.squadSize = positions.length;
@@ -996,6 +1005,7 @@ export function buildFactionParatrooper(group, _body, dark, factionId) {
       x: px,
       z: pz,
       withRifle: !lead,
+      unitType: 'paratrooper',
       extraMeshes: lead
         ? (soldier) => {
             const weapon = new THREE.Group();
@@ -1008,6 +1018,10 @@ export function buildFactionParatrooper(group, _body, dark, factionId) {
             const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, tubeLen, 8), dark);
             tube.name = 'atTube';
             tube.userData.infantryPart = 'barrel';
+            // Cylinder local +Y becomes the rear of the shoulder-fired tube
+            // after its Z rotation. Mark the opposite end as the muzzle so
+            // projectile/VFX origins stay at the warhead end in every pose.
+            tube.userData.muzzleTipSign = -1;
             tube.rotation.z = Math.PI / 2;
             tube.position.set(0.16, 0.08, 0.08);
             weapon.add(tube);

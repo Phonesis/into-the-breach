@@ -17,7 +17,13 @@ import {
   findNearestCoverPoint,
   resolveSeekCoverDestination,
 } from './CoverSeek.js';
-import { canGarrisonType, getBunkerEnterRange, getGarrisonBunkerSources, isUnitGarrisoned } from './BunkerGarrison.js';
+import {
+  canGarrisonType,
+  getBunkerEnterRange,
+  getGarrisonBunkerSources,
+  isUnitGarrisoned,
+  releaseFromBunker,
+} from './BunkerGarrison.js';
 import { getCoverStatus } from './CoverSystem.js';
 import { MEDIC_AURA_RANGE } from './MedicBehavior.js';
 import { ENGINEER_AURA_RANGE, ENGINEER_HQ_REPAIR_RANGE } from './EngineerBehavior.js';
@@ -265,6 +271,7 @@ const CLEARANCE_DEFENDER_TRENCH_MAX_DISTANCE = 48;
 // trenches and field cover are occupied before any trench is filled.
 const CLEARANCE_DEFENDER_TRENCH_SOFT_CAPACITY = 2;
 const CLEARANCE_DEFENDER_COVER_SPREAD_DISTANCE = 7.5;
+const CLEARANCE_DEFENDER_FALLBACK_COVER_HOLD_DISTANCE = 14;
 
 const LAST_STAND_FORCE_WEIGHTS = {
   commander: 0.2,
@@ -3077,8 +3084,8 @@ function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio
   const fallbackUnits = enemies.filter(
     (unit) =>
       isLastStandOperationalUnit(unit) &&
-      !unit._trenchId &&
-      !unit._garrisonBunkerId
+      (!unit._trenchId || unit._clearanceDefenderCover?.kind === 'trench') &&
+      (!unit._garrisonBunkerId || unit._clearanceDefenderCover?.kind === 'bunker')
   );
   const patternIndex = Math.abs((operational.cycle ?? 1) - 1) %
     AI_FALLBACK_PATTERNS.length;
@@ -3102,6 +3109,30 @@ function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio
 
   for (const { unit, destination, slot } of assignments) {
     const role = roleFromUnitType(unit.def?.type);
+    // The opening cover controller stores a persistent shelter assignment.
+    // Without explicitly handing it off here, that old trench/bunker order is
+    // reissued on the next frame and silently replaces this spread fallback
+    // sector, pulling the garrison back into its previous cluster.
+    const coverAssignment = unit._clearanceDefenderCover;
+    if (coverAssignment?.kind === 'trench' && unit._trenchId) {
+      game?.infantryTrenches?.releaseUnit?.(unit);
+    }
+    if (coverAssignment?.kind === 'bunker' && unit._garrisonBunkerId) {
+      releaseFromBunker(unit, getGarrisonBunkerSources(game), {
+        toward: destination,
+        scenery: game?.scenery,
+        mapDef,
+      });
+    }
+    if (coverAssignment) {
+      unit._clearanceDefenderCover = null;
+      unit._clearanceDefenderCoverPending = CLEARANCE_DEFENDER_COVER_TYPES.has(unit.def?.type);
+    }
+    if (!unit._garrisonBunkerId) unit._bunkerEntryId = null;
+    if (!unit._trenchId) {
+      unit._aiTrenchTargetId = null;
+      unit._aiTrenchOccupant = false;
+    }
     unit._clearanceProbe = null;
     clearAiTankManeuver(unit);
     unit.clearAttackOrder();
@@ -3111,6 +3142,8 @@ function issueClearanceDefenderFallback(enemies, mapDef, operational, forceRatio
       radius: role === 'armor' ? 15 : role === 'support' ? 11 : 9,
       clearanceFallbackPattern: pattern,
       clearanceFallbackSector: slot.lateral < -4 ? 'left' : slot.lateral > 4 ? 'right' : 'center',
+      clearanceFallbackAnchorX: destination.x,
+      clearanceFallbackAnchorZ: destination.z,
     };
     unit.moveTarget = { x: destination.x, z: destination.z };
     unit._movePath = null;
@@ -3272,18 +3305,35 @@ function updateClearanceOperationalPlan(
     operational.focus !== focus
   ) {
     const summary = getLastStandForceSummary(enemies);
+    const startsInAttack = focus === 'attack';
     operational = {
       focus,
-      mode: 'opening',
+      // The enemy assault force is released as soon as the defender-only
+      // preparation phase ends. Prepared garrisons keep their opening state so
+      // they can settle into cover without turning the line into a chase.
+      mode: startsInAttack ? 'attack' : 'opening',
       since: now,
-      nextAt: now + CLEARANCE_OPENING_REASSESS_DELAY,
-      attackPulseAt: now + CLEARANCE_OPENING_REASSESS_DELAY,
+      nextAt:
+        now +
+        (startsInAttack
+          ? CLEARANCE_OPERATIONAL_REASSESS_MIN
+          : CLEARANCE_OPENING_REASSESS_DELAY),
+      attackPulseAt: now + CLEARANCE_ATTACK_PULSE_INTERVAL,
       cycle: 0,
       anchor: null,
       lastCenter: { ...summary.center },
       lastStrength: summary.score,
     };
     game.clearanceOperational = operational;
+    if (startsInAttack) {
+      issueClearanceAttackWave(
+        enemies,
+        players,
+        mapDef,
+        game.clearanceAttackPlan,
+        game
+      );
+    }
     return operational.mode;
   }
   if (now < (operational.nextAt ?? 0)) return operational.mode;
@@ -4213,8 +4263,8 @@ export function updateAiArtilleryThreatReactions({
 
 /**
  * Prepared-line garrisons should answer a contact without waiting for the
- * slower strategic reassessment. Combat has already populated `unit.target`
- * by this point, so the common case avoids another full visibility scan.
+ * slower strategic reassessment. Combat usually populates `unit.target` first,
+ * but a quiet approach still gets a direct visible-target check here.
  */
 function updateClearanceDefenderContactReactions(enemyUnits, players, game) {
   if (!game?.clearance || game.clearanceRole === 'defend' || !players?.length) return;
@@ -4245,11 +4295,13 @@ function updateClearanceDefenderContactReactions(enemyUnits, players, game) {
       currentTarget.team === 'player' &&
       !currentTarget.dead &&
       isInRange(unit, currentTarget);
+    // Do not make a quiet approach wait for combat to populate `unit.target`
+    // or for the slower strategic tick to notice it. A prepared defender can
+    // keep its hold order while still checking its immediate line of fire on
+    // every AI frame.
     const target = targetInRange
       ? currentTarget
-      : (unit._underFireTimer ?? 0) > 0
-        ? findNearestVisibleEnemy(unit, players, game.scenery)
-        : null;
+      : findNearestVisibleEnemy(unit, players, game.scenery);
     if (!target || !isInRange(unit, target)) continue;
 
     if (unit.attackOrder === target && !unit.moveTarget) continue;
@@ -7473,9 +7525,26 @@ function canDigAiTrenchType(type) {
 function getClearanceDefenderHoldPoint(unit) {
   const hold = unit?.defensiveHold;
   return {
-    x: Number.isFinite(hold?.x) ? hold.x : unit?.position?.x ?? 0,
-    z: Number.isFinite(hold?.z) ? hold.z : unit?.position?.z ?? 0,
+    x: Number.isFinite(hold?.clearanceFallbackAnchorX)
+      ? hold.clearanceFallbackAnchorX
+      : Number.isFinite(hold?.x)
+        ? hold.x
+        : unit?.position?.x ?? 0,
+    z: Number.isFinite(hold?.clearanceFallbackAnchorZ)
+      ? hold.clearanceFallbackAnchorZ
+      : Number.isFinite(hold?.z)
+        ? hold.z
+        : unit?.position?.z ?? 0,
   };
+}
+
+function getClearanceDefenderCoverMaxHoldDistance(unit) {
+  const hold = unit?.defensiveHold;
+  const holdRadius = hold?.radius ?? 12;
+  if (hold?.clearanceFallbackPattern) {
+    return Math.max(CLEARANCE_DEFENDER_FALLBACK_COVER_HOLD_DISTANCE, holdRadius + 4);
+  }
+  return Math.max(CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE, holdRadius + 18);
 }
 
 function isClearanceDefenderCoverCandidate(unit) {
@@ -7553,18 +7622,30 @@ function getClearanceDefenderShelterAssignments(enemyUnits, excludeUnit) {
   );
 }
 
+function isClearanceFallbackShelterSpaced(unit, x, z, enemyUnits) {
+  if (!unit?.defensiveHold?.clearanceFallbackPattern) return true;
+  return !(enemyUnits ?? []).some((candidate) => {
+    if (
+      !candidate ||
+      candidate === unit ||
+      candidate.dead ||
+      candidate.surrendered ||
+      !candidate.defensiveHold?.clearanceFallbackPattern
+    ) return false;
+    const reserved = candidate._clearanceDefenderCover ?? getClearanceDefenderHoldPoint(candidate);
+    return Math.hypot(reserved.x - x, reserved.z - z) < AI_FALLBACK_MIN_SPACING;
+  });
+}
+
 function findClearanceDefenderBunker(unit, game, enemyUnits = []) {
   const hold = getClearanceDefenderHoldPoint(unit);
-  const holdRadius = unit.defensiveHold?.radius ?? 12;
-  const maxHoldDistance = Math.max(
-    CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
-    holdRadius + 18
-  );
+  const maxHoldDistance = getClearanceDefenderCoverMaxHoldDistance(unit);
   const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
   const candidates = [];
 
   for (const entry of getClearanceBunkerEntries(game)) {
     if (!isClearanceBunkerAvailable(entry, unit)) continue;
+    if (!isClearanceFallbackShelterSpaced(unit, entry.x, entry.z, enemyUnits)) continue;
     const assigned = assignments.filter(
       (candidate) =>
         candidate._clearanceDefenderCover.kind === 'bunker' &&
@@ -7608,11 +7689,7 @@ function findClearanceDefenderTrench(
 ) {
   const trenches = game?.infantryTrenches?.trenches ?? [];
   const hold = getClearanceDefenderHoldPoint(unit);
-  const holdRadius = unit.defensiveHold?.radius ?? 12;
-  const maxHoldDistance = Math.max(
-    CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
-    holdRadius + 18
-  );
+  const maxHoldDistance = getClearanceDefenderCoverMaxHoldDistance(unit);
   const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
   const candidates = [];
 
@@ -7623,6 +7700,7 @@ function findClearanceDefenderTrench(
       trench.team !== unit.team ||
       (trench.garrison?.length ?? 0) >= AI_TRENCH_CAPACITY
     ) continue;
+    if (!isClearanceFallbackShelterSpaced(unit, trench.x, trench.z, enemyUnits)) continue;
     const assigned = assignments.filter(
       (candidate) =>
         candidate._clearanceDefenderCover.kind === 'trench' &&
@@ -7663,11 +7741,7 @@ function findClearanceDefenderTrench(
 function findClearanceDefenderCoverZone(unit, game, enemyUnits = []) {
   const zones = game?.coverSystem?.zones ?? [];
   const hold = getClearanceDefenderHoldPoint(unit);
-  const holdRadius = unit.defensiveHold?.radius ?? 12;
-  const maxHoldDistance = Math.max(
-    CLEARANCE_DEFENDER_COVER_MAX_HOLD_DISTANCE,
-    holdRadius + 18
-  );
+  const maxHoldDistance = getClearanceDefenderCoverMaxHoldDistance(unit);
   const assignments = getClearanceDefenderShelterAssignments(enemyUnits, unit);
   const candidates = [];
 
@@ -7684,6 +7758,7 @@ function findClearanceDefenderCoverZone(unit, game, enemyUnits = []) {
     const distance = Math.hypot(zone.x - unit.position.x, zone.z - unit.position.z);
     const holdDistance = Math.hypot(zone.x - hold.x, zone.z - hold.z);
     if (distance > CLEARANCE_DEFENDER_COVER_MAX_DISTANCE || holdDistance > maxHoldDistance) continue;
+    if (!isClearanceFallbackShelterSpaced(unit, zone.x, zone.z, enemyUnits)) continue;
 
     const coverQuality = Math.max(0, 1 - (zone.mult ?? 0.45));
     const assignedNearby = assignments.filter(
@@ -7806,7 +7881,25 @@ function ensureClearanceDefenderCover(game, enemyUnits) {
     unit._clearanceDefenderCover = null;
 
     const currentCover = game.coverSystem?.getCoverForUnit?.(unit);
-    if (currentCover?.mult < 0.95) {
+    const hold = getClearanceDefenderHoldPoint(unit);
+    const holdDistance = Math.hypot(
+      unit.position.x - hold.x,
+      unit.position.z - hold.z
+    );
+    const currentCoverAcceptanceDistance = unit.defensiveHold?.clearanceFallbackPattern
+      ? Math.max(4.5, (unit.defensiveHold?.radius ?? 9) * 0.55)
+      : getClearanceDefenderCoverMaxHoldDistance(unit);
+    const currentCoverIsSpaced = isClearanceFallbackShelterSpaced(
+      unit,
+      unit.position.x,
+      unit.position.z,
+      enemyUnits
+    );
+    if (
+      currentCover?.mult < 0.95 &&
+      holdDistance <= currentCoverAcceptanceDistance &&
+      currentCoverIsSpaced
+    ) {
       issueClearanceDefenderCoverOrder(unit, {
         kind: 'cover',
         x: unit.position.x,

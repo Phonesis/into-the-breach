@@ -1295,6 +1295,7 @@ export class SoundManager {
     else if (profile.startsWith('howitzer')) typeBoost = 1.42;
     else if (profile.startsWith('tank') || profile.startsWith('at')) typeBoost = 1.4;
     else if (profile === 'mg' || profile.startsWith('mg_')) typeBoost = 1.38;
+    else if (profile === 'lmg' || profile.startsWith('lmg_')) typeBoost = 1.4;
     else if (profile === 'smg' || profile.startsWith('smg_')) typeBoost = 1.36;
     else if (profile === 'rifle' || profile.startsWith('rifle_')) typeBoost = 1.42;
 
@@ -1320,7 +1321,13 @@ export class SoundManager {
       : wetBase * (0.85 + Math.random() * 0.3);
 
     this._lastByType[gapKey] = now;
-    this._playBuffer(buf, { pan, vol: Math.min(2.2, vol), rate, wet });
+    this._playBuffer(buf, {
+      pan,
+      vol: Math.min(2.2, vol),
+      rate,
+      wet,
+      delay: opts.delay ?? 0,
+    });
     return true;
   }
 
@@ -2495,5 +2502,6 @@ export {
   resolveWeaponProfile,
   mgProfileForFaction,
   smgProfileForFaction,
+  lmgProfileForFaction,
   weaponProfileForDef,
 } from './WeaponSounds.js';

@@ -62,6 +62,11 @@ export function isTankType(type) {
   return TANK_TYPES.has(type);
 }
 
+/** Tanks and armoured cars may use their mounted weapons while moving. */
+export function canFireWhileMoving(type) {
+  return TANK_TYPES.has(type) || type === 'armoredCar';
+}
+
 export function isTrackedVehicle(type) {
   return TANK_TYPES.has(type) || type === 'armoredCar' || type === 'artillery';
 }

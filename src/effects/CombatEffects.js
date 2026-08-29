@@ -35,65 +35,110 @@ const _up = new THREE.Vector3(0, 1, 0);
 const _quat = new THREE.Quaternion();
 const _shotDir = new THREE.Vector3();
 
-/** Small-arms tracers only — short fixed-length streak (meters), not full shot path. */
+/**
+ * Tracer flight uses the on-screen soldier scale, not the 10 m/unit range
+ * scale. A standing rifleman is ~0.9 world units vs ~1.8 m, so 1 unit ≈ 2 m.
+ * Rifle ~800 m/s → ~400 units/s on that scale; we run faster (~720) so a
+ * 400–700 m shot still zips in ~0.08 s at RTS camera distance.
+ * AT rockets stay slow. Gameplay ranges are unchanged.
+ */
+const BULLET_FLIGHT = {
+  minTravel: 0.022,
+  maxTravel: 0.08,
+  speed: 720,
+};
+
 const TRACER_PROFILES = {
   infantry: {
-    headColor: 0xfff8c0,
-    trailColor: 0xffdd44,
-    glowColor: 0xff5500,
-    headSize: 0.38,
-    trailRadius: 0.055,
-    glowRadius: 0.09,
-    trailLength: 1.0,
-    minTravel: 0.06,
-    speed: 140,
-    trailOpacity: 0.95,
-    glowOpacity: 0.45,
-    linger: 0.04,
+    chance: 0.07,
+    headColor: 0xfff4c8,
+    trailColor: 0xffcc55,
+    glowColor: 0xff6611,
+    headSize: 0.14,
+    trailRadius: 0.016,
+    glowRadius: 0.028,
+    trailLength: 0.62,
+    trailOpacity: 0.62,
+    glowOpacity: 0.22,
+    linger: 0.016,
+    ...BULLET_FLIGHT,
+  },
+  smg: {
+    chance: 0.05,
+    headColor: 0xffe8b0,
+    trailColor: 0xffc044,
+    glowColor: 0xff5510,
+    headSize: 0.11,
+    trailRadius: 0.013,
+    glowRadius: 0.022,
+    trailLength: 0.48,
+    trailOpacity: 0.55,
+    glowOpacity: 0.18,
+    linger: 0.014,
+    ...BULLET_FLIGHT,
+    speed: 560,
+  },
+  lmg: {
+    chance: 0.16,
+    headColor: 0xfff099,
+    trailColor: 0xffbb33,
+    glowColor: 0xff4400,
+    headSize: 0.22,
+    trailRadius: 0.028,
+    glowRadius: 0.048,
+    trailLength: 1.15,
+    trailOpacity: 0.78,
+    glowOpacity: 0.34,
+    linger: 0.02,
+    ...BULLET_FLIGHT,
   },
   machineGun: {
-    headColor: 0xffff99,
-    trailColor: 0xffbb22,
-    glowColor: 0xff3300,
-    headSize: 0.34,
-    trailRadius: 0.05,
-    glowRadius: 0.085,
-    trailLength: 1.25,
-    minTravel: 0.05,
-    speed: 160,
-    trailOpacity: 0.95,
-    glowOpacity: 0.5,
-    linger: 0.035,
+    every: 3,
+    chance: 0.34,
+    headColor: 0xfff099,
+    trailColor: 0xffbb33,
+    glowColor: 0xff4400,
+    headSize: 0.22,
+    trailRadius: 0.028,
+    glowRadius: 0.048,
+    trailLength: 1.15,
+    trailOpacity: 0.78,
+    glowOpacity: 0.34,
+    linger: 0.02,
+    ...BULLET_FLIGHT,
   },
   armoredCar: {
-    headColor: 0xffff99,
-    trailColor: 0xffbb22,
-    glowColor: 0xff3300,
-    headSize: 0.34,
-    trailRadius: 0.05,
-    glowRadius: 0.085,
-    trailLength: 1.2,
-    minTravel: 0.05,
-    speed: 165,
-    trailOpacity: 0.95,
-    glowOpacity: 0.48,
-    linger: 0.035,
+    every: 3,
+    chance: 0.34,
+    headColor: 0xfff099,
+    trailColor: 0xffbb33,
+    glowColor: 0xff4400,
+    headSize: 0.22,
+    trailRadius: 0.028,
+    glowRadius: 0.048,
+    trailLength: 1.15,
+    trailOpacity: 0.78,
+    glowOpacity: 0.34,
+    linger: 0.02,
+    ...BULLET_FLIGHT,
   },
   sniper: {
+    chance: 0.05,
     headColor: 0xfff0b0,
     trailColor: 0xffcc55,
     glowColor: 0xff6600,
-    headSize: 0.42,
-    trailRadius: 0.045,
-    glowRadius: 0.1,
-    trailLength: 1.6,
-    minTravel: 0.08,
-    speed: 220,
-    trailOpacity: 0.98,
-    glowOpacity: 0.55,
-    linger: 0.05,
+    headSize: 0.16,
+    trailRadius: 0.018,
+    glowRadius: 0.032,
+    trailLength: 0.85,
+    trailOpacity: 0.7,
+    glowOpacity: 0.26,
+    linger: 0.018,
+    ...BULLET_FLIGHT,
+    speed: 760,
   },
   paratrooperAt: {
+    chance: 1,
     headColor: 0xffcc66,
     trailColor: 0xff7722,
     glowColor: 0xff4400,
@@ -101,15 +146,56 @@ const TRACER_PROFILES = {
     trailRadius: 0.11,
     glowRadius: 0.17,
     trailLength: 2.4,
-    minTravel: 0.14,
-    speed: 52,
+    minTravel: 0.16,
+    maxTravel: 0.55,
+    speed: 58,
     trailOpacity: 0.9,
     glowOpacity: 0.52,
     linger: 0.1,
   },
 };
 
-const SMALL_ARMS_TRACERS = new Set(['infantry', 'machineGun', 'armoredCar', 'sniper', 'paratrooperAt']);
+const TRACER_FOOT_TYPES = new Set([
+  'infantry',
+  'rifle',
+  'radioOperator',
+  'engineer',
+  'commander',
+  'paratrooper',
+  'vehicleCrew',
+  'truckDriver',
+  'medic',
+]);
+
+function resolveTracerKey(weaponType, opts = {}) {
+  const kind = opts.weaponKind ?? opts.tracerKind;
+  if (kind === 'smg') return 'smg';
+  if (kind === 'lmg') return 'lmg';
+  if (kind === 'rifle' || kind === 'sniperRifle') return 'infantry';
+  if (weaponType === 'machineGun' || weaponType === 'armoredCar') return weaponType;
+  if (weaponType === 'sniper') return 'sniper';
+  if (weaponType === 'paratrooperAt') return 'paratrooperAt';
+  if (TRACER_FOOT_TYPES.has(weaponType) || TRACER_PROFILES[weaponType]) {
+    return TRACER_PROFILES[weaponType] ? weaponType : 'infantry';
+  }
+  return 'infantry';
+}
+
+const SMALL_ARMS_TRACERS = new Set([
+  'infantry',
+  'rifle',
+  'machineGun',
+  'armoredCar',
+  'sniper',
+  'paratrooperAt',
+  'radioOperator',
+  'engineer',
+  'commander',
+  'paratrooper',
+  'vehicleCrew',
+  'truckDriver',
+  'medic',
+]);
 const activeAtRecoil = [];
 
 const flashTextures = new Map();
@@ -1112,7 +1198,7 @@ function spawnTankMuzzleBlast(scene, pos, toV, weaponType) {
   });
 }
 
-export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {}) {
+export function spawnMuzzleFlash(scene, from, to, weaponType = 'infantry', opts = {}) {
   if (!scene) return;
 
   const fromV = toVec3(from);
@@ -1134,7 +1220,7 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {
   }
 
   if (SMALL_ARMS_TRACERS.has(weaponType)) {
-    spawnBulletTracer(scene, pos, toV, weaponType);
+    spawnBulletTracer(scene, pos, toV, weaponType, opts);
   }
 
   // Tank / super heavy / AT / artillery — dedicated fire + smoke blast
@@ -1195,16 +1281,42 @@ export function spawnMuzzleFlash(scene, from, to, weaponType = 'rifle', opts = {
   }
 }
 
-function spawnBulletTracer(scene, from, to, weaponType) {
-  if (!scene) return;
-  const tracerSlots = active.filter((e) => e.type === 'tracerBullet').length;
-  if (tracerSlots >= 64 || active.length >= MAX_EFFECTS) return;
+export function nextTracerSeq(owner, period = 3) {
+  if (!owner) return period;
+  if (!Number.isFinite(owner._tracerSeq)) {
+    owner._tracerSeq = 1 + Math.floor(Math.random() * Math.max(1, period));
+  } else {
+    owner._tracerSeq += 1;
+  }
+  return owner._tracerSeq;
+}
 
-  const profile = TRACER_PROFILES[weaponType] ?? TRACER_PROFILES.infantry;
+function shouldEmitTracer(profile, opts = {}) {
+  const every = profile.every;
+  if (every > 1) {
+    if (Number.isFinite(opts.tracerSeq)) return opts.tracerSeq % every === 0;
+    return Math.random() < 1 / every;
+  }
+  return Math.random() <= (profile.chance ?? 1);
+}
+
+function spawnBulletTracer(scene, from, to, weaponType, opts = {}) {
+  if (!scene) return;
+  const tracerKey = resolveTracerKey(weaponType, opts);
+  const profile = TRACER_PROFILES[tracerKey] ?? TRACER_PROFILES.infantry;
+  if (!shouldEmitTracer(profile, opts)) return;
+
+  const tracerSlots = active.filter((e) => e.type === 'tracerBullet').length;
+  const slotCap = tracerKey === 'machineGun' || tracerKey === 'armoredCar' ? 48 : 28;
+  if (tracerSlots >= slotCap || active.length >= MAX_EFFECTS) return;
+
   const fromV = from.clone();
   const toV = to.clone();
 
-  const spread = weaponType === 'machineGun' ? 0.35 : 0.18;
+  const spread =
+    tracerKey === 'machineGun' || tracerKey === 'armoredCar' || tracerKey === 'lmg'
+      ? 0.26
+      : 0.14;
   toV.x += (Math.random() - 0.5) * spread;
   toV.z += (Math.random() - 0.5) * spread;
   toV.y += (Math.random() - 0.5) * 0.08;
@@ -1212,7 +1324,11 @@ function spawnBulletTracer(scene, from, to, weaponType) {
   const length = fromV.distanceTo(toV);
   if (length < 0.35) return;
 
-  const travelDuration = Math.min(0.22, Math.max(profile.minTravel, length / profile.speed));
+  const travelDuration = THREE.MathUtils.clamp(
+    length / Math.max(profile.speed, 1),
+    profile.minTravel ?? 0.03,
+    profile.maxTravel ?? 0.14
+  );
 
   const headMat = new THREE.SpriteMaterial({
     map: getTracerHeadTexture(profile.headColor),

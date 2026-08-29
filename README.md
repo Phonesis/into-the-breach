@@ -163,7 +163,7 @@ There are **five playable factions**, each with **13 buildable unit types**. The
 | Unit | Role | Cost | Build | Typical range |
 |---|---|---:|---:|---:|
 | Radio operator | Signals, observation, and fire-support link | 58 | 10 s | Support 720 m; rifle ~400 m |
-| Infantry | Flexible rifle squad with squad automatic weapon | 49–50 | 8 s | 420–500 m |
+| Infantry | Rifle squad with SMGs and a squad LMG | 49–50 | 8 s | 420–500 m |
 | Medic | Heals nearby foot troops and deploys field hospitals | 55 | 9 s | Support role |
 | Engineer | Repairs, builds fieldworks, and lays AT mines | 62 | 10 s | 380–400 m |
 | Machine gun | Sustained defensive fire and ground missions | 64–65 | 10 s | 800–1,000 m |
@@ -202,6 +202,7 @@ Japan’s Type 3 Chi-Nu fills the game’s top armor tier while remaining a hist
 | **Engage target** | Confirm the highlighted enemy in the selection panel |
 | **Ctrl + E / M / A / R** | Select and cycle nearest engineer, medic, artillery, or radio operator |
 | **WASD / arrows** | Pan the camera; left/right arrows rotate; mouse wheel or trackpad zooms |
+| **Middle-mouse drag** | Hold and drag to tilt the camera like the arrow keys: horizontal movement rotates, vertical movement moves the view forward/back |
 | **P** | Pause or resume; camera movement remains available while paused |
 | **Esc** | Cancel targeting, fire missions, construction, deployment placement, or pending emplacement builds |
 | **Tactical map** | Toggle the bottom-right minimap; click it to pan the main camera |
