@@ -645,7 +645,10 @@ export function getInfantryMaterials(factionId) {
 
   const body = new THREE.MeshStandardMaterial({
     color: uniformTex ? 0xffffff : (FACTION_UNIFORM_COLOR[factionId] ?? 0x4a5a38),
-    map: uniformTex ?? undefined,
+    // Three.js accepts null for an absent texture; passing undefined emits a
+    // material warning when a commander is created before its faction texture
+    // has populated the cache (most visible on first-load Far East battles).
+    map: uniformTex,
     normalMap: normal,
     normalScale: new THREE.Vector2(0.32, 0.32),
     roughness: 0.86,
