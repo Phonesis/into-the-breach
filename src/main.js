@@ -110,6 +110,9 @@ const ui = new UIManager(uiRoot, {
     sounds.setMemorialMusicActive(false);
     sounds.setMenuMusicActive(true);
   },
+  onAchievementPresented(achievement) {
+    sounds.playAchievement(achievement?.kind);
+  },
   async onStartGame(factionId, mapId, gameMode, options = {}) {
     primeAudio();
     const audioReady = sounds.primeForCombat();

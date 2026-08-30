@@ -243,6 +243,7 @@ import {
 } from '../effects/CombatEffects.js';
 import {
   spawnShellCasing,
+  spawnSmallArmsCasing,
   updateShellCasings,
   clearShellCasings,
 } from '../effects/ShellCasings.js';
@@ -278,6 +279,7 @@ import {
   updateAI,
   updateAICommandSystems,
   updateAIOffMapSupport,
+  updateIncomingFireReactions,
   resetAI,
 } from './AI.js';
 import {
@@ -301,6 +303,7 @@ import { createCapturePoints } from './CapturePoint.js';
 import { ProductionManager } from './Production.js';
 import { BattleStats } from './BattleStats.js';
 import { recordCompletedBattle } from './WarStats.js';
+import { unlockAchievement } from './Achievements.js';
 import {
   sounds,
   resolveWeaponProfile,
@@ -361,6 +364,7 @@ const LARGE_BATTLE_SIM_MOVEMENT_STEP = 1 / 30;
 const LARGE_BATTLE_SIM_TACTICAL_VISUAL_STEP = 0.1;
 const GARAND_CLIP_SIZE = 8;
 const GARAND_PING_CHANCE = 0.58;
+const ACHIEVEMENT_TANK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank']);
 
 function squadSoldierWeaponProfile(kind, factionId) {
   if (kind === 'smg') return smgProfileForFaction(factionId);
@@ -507,6 +511,12 @@ export class Game {
     this._incomingArtilleryStrikes = [];
     this._hqThreat = null;
     this._hqAlertPlayed = false;
+    this._battleAchievementSeen = new Set();
+    this._battleKillArms = new Set();
+    this._battleEnemyTankKills = 0;
+    this._battleEnemyCommanderKilled = false;
+    this._battleEnemyHqDestroyed = false;
+    this._battleUsedFireSupport = false;
     this.mapDef = null;
     this.units = [];
     this.hqs = [];
@@ -1199,6 +1209,12 @@ export class Game {
       options: startOptions,
     };
     this.gameMode = gameMode;
+    this._battleAchievementSeen = new Set();
+    this._battleKillArms = new Set();
+    this._battleEnemyTankKills = 0;
+    this._battleEnemyCommanderKilled = false;
+    this._battleEnemyHqDestroyed = false;
+    this._battleUsedFireSupport = false;
     this.tutorial = gameMode === 'tutorial';
     this.clearance = isClearanceMode(gameMode);
     this.clearanceRole = this.clearance ? resolveClearanceRole(startOptions) : 'attack';
@@ -3034,6 +3050,7 @@ export class Game {
     }
     if (mode === 'place') {
       if (this.fireSupport.tryPlaceTarget(x, z)) {
+        this._battleUsedFireSupport = true;
         this.ui?.updateFireSupport(this.fireSupport);
         this._syncBattleCursor();
       } else {
@@ -4114,6 +4131,7 @@ export class Game {
     this._postMatchRenderAccum = 0;
     this._pendingEnd = { victory, detail };
     this._finalizeBattleStats();
+    if (victory) this._recordVictoryAchievements();
 
     this.controller.disable();
     this.canvas.style.cursor = '';
@@ -4159,6 +4177,104 @@ export class Game {
       battleStats: this.battleStats,
       liveUnits: this.units,
     });
+  }
+
+  _unlockAchievement(id) {
+    if (!id || this._battleAchievementSeen.has(id)) return false;
+    this._battleAchievementSeen.add(id);
+    const result = unlockAchievement(id, {
+      factionId: this.playerFaction?.id,
+      modeId: this.gameMode === 'clearanceReinforced' ? 'clearance' : this.gameMode,
+    });
+    if (!result.newlyUnlocked || !result.achievement) return false;
+    this.ui?.showAchievementUnlock?.(result.achievement);
+    return true;
+  }
+
+  _recordVictoryAchievements() {
+    const modeId = this.gameMode === 'clearanceReinforced' ? 'clearance' : this.gameMode;
+    this._unlockAchievement(`victory-${modeId}`);
+    this._unlockAchievement(`theatre-${this.mapDef?.id}`);
+
+    // Indirect shells report their impact separately from the HQ object. The
+    // finalized battle state is authoritative for that decisive kill.
+    if (this.hqs?.some((hq) => hq.team === ENEMY_TEAM && hq.dead)) {
+      this._battleEnemyHqDestroyed = true;
+      this._unlockAchievement('destroy-hq');
+    }
+
+    if (this._battleEnemyTankKills >= 3) this._unlockAchievement('tank-ace');
+    if (this._battleEnemyCommanderKilled && this._battleEnemyHqDestroyed) {
+      this._unlockAchievement('decapitation-strike');
+    }
+    if (
+      this.capturePoints?.length &&
+      this.capturePoints.every((point) => point.owner === PLAYER_TEAM)
+    ) {
+      this._unlockAchievement('all-sectors-held');
+    }
+
+    const playerLosses = this.battleStats?.losses?.[PLAYER_TEAM] ?? {};
+    const totalPlayerLosses = this.battleStats?.totalLosses?.(PLAYER_TEAM, {
+      liveUnits: this.units,
+    }) ?? 0;
+    if (
+      !Object.values(playerLosses).some((count) => Number(count) > 0) &&
+      totalPlayerLosses <= 0
+    ) {
+      this._unlockAchievement('iron-man-operation');
+    }
+    if ((this.campaign || this.assault) && Number(this.resources?.player) <= 10) {
+      this._unlockAchievement('last-reserves');
+    }
+    if ((this.campaign || this.assault) && !this._battleUsedFireSupport) {
+      this._unlockAchievement('silent-battery');
+    }
+
+    const commander = this.units.find(
+      (unit) => unit.team === PLAYER_TEAM && unit.def?.type === 'commander' && !unit.dead
+    );
+    if (commander) this._unlockAchievement('commander-survives');
+  }
+
+  _recordAchievementCombatEvent({ attacker, target, killed, targetIsHQ = false }) {
+    if (!killed || attacker?.team !== PLAYER_TEAM || target?.team !== ENEMY_TEAM) return;
+    if (targetIsHQ) {
+      this._battleEnemyHqDestroyed = true;
+      this._unlockAchievement('destroy-hq');
+      if (this._battleEnemyCommanderKilled) this._unlockAchievement('decapitation-strike');
+      return;
+    }
+    const targetType = target?.def?.type;
+    if (!targetType) return;
+
+    this._unlockAchievement('first-kill');
+    if (ACHIEVEMENT_TANK_TYPES.has(targetType)) {
+      this._battleEnemyTankKills += 1;
+      this._unlockAchievement('tank-kill');
+      if (attacker.def?.type === 'antiTankGun') this._unlockAchievement('one-shot-one-kill');
+      if (this._battleEnemyTankKills >= 3) this._unlockAchievement('tank-ace');
+    }
+    if (targetType === 'commander') {
+      this._battleEnemyCommanderKilled = true;
+      this._unlockAchievement('commander-kill');
+      if (this._battleEnemyHqDestroyed) this._unlockAchievement('decapitation-strike');
+    }
+    if (attacker.def?.type === 'artillery') this._unlockAchievement('artillery-kill');
+    if (
+      attacker.def?.type === 'artillery' &&
+      (targetType === 'artillery' || targetType === 'mortar' || targetType === 'antiTankGun')
+    ) {
+      this._unlockAchievement('counter-battery');
+    }
+
+    if (isInfantryUnitType(attacker.def?.type)) this._battleKillArms.add('foot');
+    if (isTankType(attacker.def?.type) || attacker.def?.type === 'armoredCar') {
+      this._battleKillArms.add('armour');
+    }
+    if (this._battleKillArms.has('foot') && this._battleKillArms.has('armour')) {
+      this._unlockAchievement('combined-arms');
+    }
   }
 
   _buildBattleStatsReport(options = {}) {
@@ -4309,6 +4425,7 @@ export class Game {
         exactOrigin: true,
         weaponKind: shot.kind,
       });
+      spawnSmallArmsCasing(this.scene, unit, shot.casingEjectionPoint, shot.kind);
       playSquadSoldierWeapon(unit, shot.kind, { x: shot.position.x, z: shot.position.z }, shot.squadIndex);
       this.ui?.recordMinimapFire?.({
         fromX: shot.position.x,
@@ -4347,6 +4464,8 @@ export class Game {
     targetIsHQ,
     targetIsScenery,
     groundImpact,
+    smallArmsCasingPoint,
+    smallArmsCasingKind,
     smokeMiss,
     smokeDeployed,
     from,
@@ -4363,6 +4482,7 @@ export class Game {
     buildingIntercept,
   }) {
     this._recordMinimapCombatFire({ attacker, def, from, to, coaxFire, paratrooperAtFire });
+    this._recordAchievementCombatEvent({ attacker, target, killed, targetIsHQ });
     if (
       (mortarLoft || artilleryLoft) &&
       attacker?.team === PLAYER_TEAM &&
@@ -4410,6 +4530,9 @@ export class Game {
       (def?.type === 'antiTankGun' || def?.type === 'artillery')
     ) {
       spawnShellCasing(this.scene, attacker);
+    }
+    if (smallArmsCasingPoint) {
+      spawnSmallArmsCasing(this.scene, attacker, smallArmsCasingPoint, smallArmsCasingKind);
     }
     const pos = { x: from.x, z: from.z };
     const factionId = attacker?.faction?.id;
@@ -4772,9 +4895,21 @@ export class Game {
         }
         updateDetachedCorpseFalls(dt);
         tickUnitCooldowns(this._aliveUnits, dt);
-        updateMedicHealing(this._aliveUnits, dt);
+        updateMedicHealing(this._aliveUnits, dt, ({ medic }) => {
+          if (medic.team === PLAYER_TEAM) this._unlockAchievement('medic-heal');
+        });
         updateVehicleBailouts(this, dt);
-        if (updateEngineerHealing(this.units, dt, this.coverSystem) > 0) this._rebuildUnitCaches();
+        if (
+          updateEngineerHealing(this.units, dt, this.coverSystem, ({ engineer, unit, kind }) => {
+            if (engineer.team !== PLAYER_TEAM) return;
+            if (kind === 'wreckRecovered' && ACHIEVEMENT_TANK_TYPES.has(unit.def?.type)) {
+              this._unlockAchievement('recover-wreck');
+            }
+            if (kind === 'mobilityRestored') this._unlockAchievement('field-repair');
+          }) > 0
+        ) {
+          this._rebuildUnitCaches();
+        }
         updateEngineerHqRepair(this.hqs, this._aliveUnits, dt);
         this.engineerSandbags?.update(dt);
         if (this.engineerSandbags?.sites?.length) {
@@ -5057,6 +5192,8 @@ export class Game {
               },
               engineerSandbags: this.engineerSandbags,
               defenses: this.defenses,
+              onKill: ({ attacker, target, killed = true }) =>
+                this._recordAchievementCombatEvent({ attacker, target, killed }),
               spawnSurrenderingVehicleCrew: (vehicle) =>
                 spawnVehicleCrewBailout(this, vehicle),
             }
@@ -5125,6 +5262,17 @@ export class Game {
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
         updateParachuteDrops(dt, this.scene, this.mapDef);
+        // Emergency reactions are deliberately separate from the saved Seek
+        // Cover preference: an idle player foot unit that is actually hit
+        // should drop and seek shelter, while explicit orders remain in charge.
+        updateIncomingFireReactions({
+          units: this._playerAlive,
+          game: this,
+          mapDef: this.mapDef,
+          clearance: this.clearance,
+          team: PLAYER_TEAM,
+          allowRetreat: false,
+        });
         flushTerrainNormals(this._terrainMesh);
 
         if (fieldHasUnits || hasCorpses) {

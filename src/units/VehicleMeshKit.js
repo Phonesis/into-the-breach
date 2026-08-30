@@ -37,6 +37,19 @@ export function getIndependentVehicleMgMuzzleWorldPosition(
   return meshGunTipWorldPos(muzzle, out);
 }
 
+/** Authored receiver/ejection-port origin for vehicle-mounted small arms. */
+export function getVehicleSmallArmsCasingEjectionPoint(unit, coax = false) {
+  const data = unit?.mesh?.userData;
+  if (!data) return null;
+  if (coax) {
+    return data.independentMgCasingEjectionPoint ?? data.coaxCasingEjectionPoint ?? null;
+  }
+  if (unit.def?.type === 'armoredCar') {
+    return data.armoredCarCasingEjectionPoint ?? null;
+  }
+  return null;
+}
+
 /**
  * World-space tip of the main cannon (or muzzle brake if present).
  * Cylinders are oriented with local +Y along the bore after mesh rotation.
@@ -148,6 +161,9 @@ function addIndependentTopMachineGun(root, parent, dark, config) {
   pivot.userData.mgMountKind = 'pintle';
   parent.add(pivot);
 
+  const barrelY = config.barrelY ?? 0.03;
+  const barrelZ = config.barrelZ ?? config.len * 0.36;
+
   addBox(
     pivot,
     new THREE.BoxGeometry(
@@ -164,8 +180,8 @@ function addIndependentTopMachineGun(root, parent, dark, config) {
     new THREE.CylinderGeometry(config.r0 ?? 0.025, config.r1 ?? 0.035, config.len, 8),
     dark,
     {
-      y: config.barrelY ?? 0.03,
-      z: config.barrelZ ?? config.len * 0.36,
+      y: barrelY,
+      z: barrelZ,
       rx: Math.PI / 2,
       part: 'barrel',
     }
@@ -173,8 +189,16 @@ function addIndependentTopMachineGun(root, parent, dark, config) {
   barrel.name = 'independentMgBarrel';
   barrel.userData.isIndependentMg = true;
 
+  const casingPoint = new THREE.Object3D();
+  casingPoint.name = 'smallArmsCasingEjectionPoint';
+  casingPoint.position.set(0.08, barrelY + 0.04, barrelZ - config.len * 0.42);
+  casingPoint.userData.casingEjectionAxis = new THREE.Vector3(1, 0, 0);
+  casingPoint.userData.casingEjectionRearAxis = new THREE.Vector3(0, 0, -1);
+  pivot.add(casingPoint);
+
   root.userData.independentMgPivot = pivot;
   root.userData.independentMgMuzzle = barrel;
+  root.userData.independentMgCasingEjectionPoint = casingPoint;
   return pivot;
 }
 
@@ -949,6 +973,13 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
     );
     coax.position.set(0.12, c.y, c.z);
     coax.userData.tankPart = 'barrel';
+    const casingPoint = new THREE.Object3D();
+    casingPoint.name = 'smallArmsCasingEjectionPoint';
+    casingPoint.position.set(-c.len * 0.38, 0.045, 0.08);
+    casingPoint.userData.casingEjectionAxis = new THREE.Vector3(0, 0, 1);
+    casingPoint.userData.casingEjectionRearAxis = new THREE.Vector3(-1, 0, 0);
+    coax.add(casingPoint);
+    group.userData.coaxCasingEjectionPoint = casingPoint;
     turretPivot.add(coax);
   }
 
@@ -1327,6 +1358,13 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   gun.position.set(b.offsetX ?? 0.22, b.y, b.z);
   gun.userData.tankPart = 'barrel';
   turretPivot.add(gun);
+  const casingPoint = new THREE.Object3D();
+  casingPoint.name = 'smallArmsCasingEjectionPoint';
+  casingPoint.position.set(0.08, -b.len * 0.36, 0);
+  casingPoint.userData.casingEjectionAxis = new THREE.Vector3(1, 0, 0);
+  casingPoint.userData.casingEjectionRearAxis = new THREE.Vector3(0, -1, 0);
+  gun.add(casingPoint);
+  group.userData.armoredCarCasingEjectionPoint = casingPoint;
   addCylinder(turretPivot, new THREE.SphereGeometry(Math.max(b.r1 * 2.1, 0.11), 10, 7), body, {
     x: b.offsetX ?? 0.22,
     y: b.y,

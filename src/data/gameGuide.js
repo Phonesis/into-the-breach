@@ -40,6 +40,7 @@ export const GAME_GUIDE_SECTIONS = [
       'Infantry casualties count as <strong>personnel</strong> (five soldiers per infantry squad) in the totals, not just one vehicle per icon.',
       'Every mode shows an <strong>estimated materiel cost</strong> per side in approximate <strong>1944 USD</strong> (weapons, ammunition loads, vehicles, field construction). Figures are historical approximations for immersion, not exact procurement records.',
       'The main menu’s <strong>War Stats</strong> page keeps a browser-persistent record of unit formations lost, personnel casualties, estimated loss cost, and losses by unit type for every faction across completed operations.',
+      'The main menu’s <strong>Achievements</strong> page keeps a separate permanent service record. Decisive feats earn medals, specialist actions earn service ribbons, and worthwhile field actions can be entered as a positive superior-command report. Rare theatre victories, tank-ace runs, counter-battery work, no-loss operations, and last-reserve wins are all recorded. A period award notice and distinct ceremonial sound play when each achievement is first unlocked.',
     ],
   },
   {
@@ -80,6 +81,7 @@ export const GAME_GUIDE_SECTIONS = [
       ['Save', 'HUD top-right — store battle progress in this browser; resume from <strong>Continue Saved Battle</strong> on the title screen'],
       ['Continue Saved Battle', 'Title screen — resume a saved battle (faction, map, units, supplies, and timer restored)'],
       ['War Stats', 'Main menu — open the dedicated page with cumulative unit losses, personnel casualties, estimated cost, and loss types for every faction (saved in this browser)'],
+      ['Achievements', 'Main menu — review persistent medals, service ribbons, and superior-command commendations, including victory awards for every operation type and rare theatre citations'],
       ['Surrender', 'Quit battle — counts as defeat, then Main Menu'],
       ['Fire support', 'Strafe, Bomb, Barrage, Creep, or Airborne → LMB on map · Esc cancels'],
       ['General Orders', 'HUD panel below Fire Support — Full Retreat, Hold Ground, and Dig In (3 min cooldown each, 30 s command window). Orders require a living commander; the enemy AI uses the same command net and loses these orders when its commander dies'],

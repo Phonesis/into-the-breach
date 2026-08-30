@@ -699,6 +699,23 @@ function addWeaponHands(weapon, mats) {
   weapon.userData.weaponArms = [rearArm, frontArm];
 }
 
+/** Attach the invisible receiver port used as the origin for an ejected case. */
+function addCasingEjectionPoint(weapon, kind = 'rifle') {
+  const point = new THREE.Object3D();
+  point.name = 'smallArmsCasingEjectionPoint';
+  point.position.set(
+    kind === 'lmg' ? 0.055 : 0.035,
+    kind === 'sniperRifle' ? 0.058 : 0.048,
+    kind === 'lmg' ? 0.145 : 0.135
+  );
+  // Handheld weapons point along local +X. The ejection port is on their
+  // visible side (+Z), with the bolt/breech behind it (-X).
+  point.userData.casingEjectionAxis = new THREE.Vector3(0, 0, 1);
+  point.userData.casingEjectionRearAxis = new THREE.Vector3(-1, 0, 0);
+  weapon.add(point);
+  weapon.userData.casingEjectionPoint = point;
+}
+
 function createWeaponGroup(soldier, { crouching = false, kind = 'rifle' } = {}) {
   const torsoY = soldier.userData._torsoY ?? (crouching ? 0.34 : 0.42);
   const weapon = new THREE.Group();
@@ -707,6 +724,7 @@ function createWeaponGroup(soldier, { crouching = false, kind = 'rifle' } = {}) 
   weapon.userData.weaponKind = kind;
   weapon.position.set(0.05, torsoY + 0.02, 0.04);
   soldier.add(weapon);
+  addCasingEjectionPoint(weapon, kind);
   return weapon;
 }
 
@@ -1518,6 +1536,25 @@ export function getInfantryMuzzleWorldPosition(unit, weaponType, out = new THREE
   return out;
 }
 
+/** World-space receiver port for a single handheld small-arms discharge. */
+export function getInfantryCasingEjectionPoint(unit, weaponType = 'infantry') {
+  const root = unit?.mesh;
+  if (!root) return null;
+  if (unit.def?.type === 'machineGun') {
+    return root.userData.machineGunCasingEjectionPoint ?? null;
+  }
+
+  const soldiers = getVisibleSquadMembers(root);
+  if (!soldiers.length) return null;
+  const soldier = pickFiringSoldier(unit, weaponType, soldiers);
+  const weapon = soldier?.children.find((c) => c.userData.infantryPart === 'weapon');
+  const point = weapon?.userData.casingEjectionPoint;
+  if (!point?.isObject3D) return null;
+  syncSoldierWeaponMuzzlePose(unit, soldier);
+  root.updateWorldMatrix(true, true);
+  return point;
+}
+
 export function usesInfantryMuzzleOrigin(unit) {
   return FOOT_MUZZLE_UNIT_TYPES.has(unit?.def?.type);
 }
@@ -1651,6 +1688,7 @@ export function collectSoldierMuzzleShot(unit, soldier) {
   if (!kind) return null;
   syncSoldierWeaponMuzzlePose(unit, soldier);
   soldier.updateWorldMatrix(true, true);
+  const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   const muzzleMesh = findMuzzleMesh(soldier, 'infantry');
   if (!muzzleMesh) return null;
   const position = new THREE.Vector3();
@@ -1658,6 +1696,7 @@ export function collectSoldierMuzzleShot(unit, soldier) {
   return {
     position,
     kind,
+    casingEjectionPoint: weapon?.userData.casingEjectionPoint ?? null,
     vfxType: vfxTypeForWeaponKind(kind),
     squadIndex: soldier.userData.squadIndex ?? 0,
   };

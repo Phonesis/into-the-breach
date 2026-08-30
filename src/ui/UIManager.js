@@ -115,6 +115,12 @@ import {
 import { listBattleSaves, formatSaveMeta, deleteBattleSave } from '../game/BattleSave.js';
 import { readWarStats } from '../game/WarStats.js';
 import {
+  ACHIEVEMENTS,
+  ACHIEVEMENT_KINDS,
+  achievementCompletion,
+  readAchievements,
+} from '../game/Achievements.js';
+import {
   LAST_STAND_DEPLOY_MODE_LIST,
   LAST_STAND_PRESET_SIZE_LIST,
   DEFAULT_LAST_STAND_PRESET_SIZE,
@@ -308,6 +314,8 @@ export class UIManager {
     this.selectedTdStyle = 'emplacements';
     this.selectedLastStandDeployMode = 'manual';
     this.selectedLastStandPresetSize = DEFAULT_LAST_STAND_PRESET_SIZE;
+    this._achievementToastQueue = [];
+    this._achievementToastActive = false;
     this._hudTutorial = false;
     this._hudTowerDefense = false;
     this._productionPanelKey = '';
@@ -382,7 +390,9 @@ export class UIManager {
     if (!first) return;
 
     const focus = () => {
-      if (!screen.classList.contains('hidden') && first.isConnected) first.focus();
+      if (!screen.classList.contains('hidden') && first.isConnected) {
+        first.focus({ preventScroll: true });
+      }
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
     else focus();
@@ -510,6 +520,7 @@ export class UIManager {
           <div class="title-actions title-screen-actions">
             <button class="btn btn-primary interactive" id="btn-start">New Operation</button>
             <button class="btn btn-secondary interactive" id="btn-load-saves">Continue Saved Battle</button>
+            <button class="btn btn-secondary interactive" id="btn-achievements">Achievements</button>
             <button class="btn btn-secondary interactive" id="btn-war-stats">War Stats</button>
             <button class="btn btn-secondary interactive" id="btn-settings">Settings</button>
             <button class="btn btn-secondary interactive" id="btn-guide-title">Field Manual</button>
@@ -517,6 +528,32 @@ export class UIManager {
           </div>
           ${donationMarkup}
           <p class="title-footnote">Plan the operation. Choose your command. Fight the battle.</p>
+        </div>
+      </div>
+
+      <div id="screen-achievements" class="screen menu-screen achievements-screen interactive hidden">
+        <div class="title-block">
+          <span class="menu-kicker">Service Record</span>
+          <h1>Achievements</h1>
+          <p>Medals for decisive feats, ribbons for distinguished service, and commendations entered into the permanent record.</p>
+        </div>
+        <div class="panel menu-panel achievements-panel">
+          <div class="achievements-ledger-header">
+            <div>
+              <span class="menu-kicker">Decorations &amp; Citations</span>
+              <h2>Field Honour Roll</h2>
+            </div>
+            <p id="achievements-summary">0 of ${ACHIEVEMENTS.length} awarded</p>
+          </div>
+          <div class="achievement-kind-legend" aria-label="Award tiers">
+            <span><i class="legend-medal" aria-hidden="true"></i> Medal</span>
+            <span><i class="legend-ribbon" aria-hidden="true"></i> Service ribbon</span>
+            <span><i class="legend-commendation" aria-hidden="true"></i> Mentioned in dispatches</span>
+          </div>
+          <div class="achievements-grid" id="achievements-grid" aria-live="polite"></div>
+          <div class="actions">
+            <button class="btn btn-secondary btn-back interactive" id="btn-back-achievements">Return to Headquarters</button>
+          </div>
         </div>
       </div>
 
@@ -1479,6 +1516,14 @@ export class UIManager {
 
       <div id="select-box" class="select-box"></div>
       <div id="save-toast" class="save-toast hidden" role="status" aria-live="polite"></div>
+      <div id="achievement-toast" class="achievement-toast hidden" role="status" aria-live="assertive" aria-atomic="true">
+        <div class="achievement-toast-insignia" aria-hidden="true"></div>
+        <div class="achievement-toast-copy">
+          <span class="achievement-toast-kicker">Achievement unlocked</span>
+          <strong class="achievement-toast-name"></strong>
+          <span class="achievement-toast-tier"></span>
+        </div>
+      </div>
     `;
 
     this.renderModes();
@@ -1487,6 +1532,7 @@ export class UIManager {
     this.renderMaps();
     this.renderMapSizes();
     this.renderDifficulties();
+    this.renderAchievements();
     this.renderWarStats();
     const guideEl = this.root.querySelector('#guide-content');
     if (guideEl) guideEl.innerHTML = renderGameGuideHtml();
@@ -1570,6 +1616,38 @@ export class UIManager {
           </div>
         </article>
       `;
+    }).join('');
+  }
+
+  renderAchievements() {
+    const grid = this.root.querySelector('#achievements-grid');
+    if (!grid) return;
+    const record = readAchievements();
+    const completion = achievementCompletion(record);
+    const summary = this.root.querySelector('#achievements-summary');
+    if (summary) summary.textContent = `${completion.unlocked} of ${completion.total} awarded`;
+
+    grid.innerHTML = ACHIEVEMENTS.map((achievement) => {
+      const unlocked = record.unlocked[achievement.id] ?? null;
+      const tier = ACHIEVEMENT_KINDS[achievement.kind]?.label ?? 'Citation';
+      const date = unlocked?.unlockedAt
+        ? new Date(unlocked.unlockedAt).toLocaleDateString(undefined, {
+            day: 'numeric', month: 'short', year: 'numeric',
+          })
+        : null;
+      return `
+        <article class="achievement-card achievement-card--${achievement.kind}${unlocked ? ' is-unlocked' : ' is-locked'}" style="--achievement-accent:${achievement.accent}">
+          <div class="achievement-award" aria-hidden="true">
+            <span class="achievement-ribbon-drape"></span>
+            <span class="achievement-insignia">${achievement.insignia}</span>
+          </div>
+          <div class="achievement-card-copy">
+            <span class="achievement-tier">${tier}</span>
+            <h3>${achievement.name}</h3>
+            <p>${achievement.citation}</p>
+            <span class="achievement-status">${unlocked ? `Awarded ${date ?? ''}` : 'Not yet awarded'}</span>
+          </div>
+        </article>`;
     }).join('');
   }
 
@@ -1977,7 +2055,7 @@ export class UIManager {
   }
 
   bind() {
-    const menuScreens = new Set(['title', 'war-stats', 'settings', 'mode', 'assault-role', 'faction', 'map', 'saves']);
+    const menuScreens = new Set(['title', 'achievements', 'war-stats', 'settings', 'mode', 'assault-role', 'faction', 'map', 'saves']);
 
     const show = (id) => {
       this.root.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
@@ -1987,7 +2065,22 @@ export class UIManager {
         this._focusFirstMenuControl(el);
       }
       if (id === 'faction') this.updateFactionScreenBg(this.selectedFaction);
+      if (id === 'title' || id === 'achievements') this.renderAchievements();
       if (id === 'title' || id === 'war-stats') this.renderWarStats();
+      if (id === 'war-stats' || id === 'achievements') {
+        const resetScroll = () => {
+          if (!el || el.classList.contains('hidden')) return;
+          el.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+          el.scrollTop = 0;
+          el.scrollLeft = 0;
+        };
+        // Keep long reports at their first content row when opened. Focus uses
+        // preventScroll above, but the second pass also covers restored focus.
+        resetScroll();
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(resetScroll);
+        }
+      }
       if (this.callbacks.onMenuVisible) {
         this.callbacks.onMenuVisible(menuScreens.has(id), id);
       }
@@ -2021,8 +2114,10 @@ export class UIManager {
       show('saves');
     };
     this.root.querySelector('#btn-war-stats').onclick = () => show('war-stats');
+    this.root.querySelector('#btn-achievements').onclick = () => show('achievements');
     this.root.querySelector('#btn-back-saves').onclick = () => show('title');
     this.root.querySelector('#btn-back-war-stats').onclick = () => show('title');
+    this.root.querySelector('#btn-back-achievements').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
     this.root.querySelectorAll('[data-setting]').forEach((input) => {
       input.addEventListener('change', () => this._setMenuSetting(input.dataset.setting, input.checked));
@@ -2939,6 +3034,40 @@ export class UIManager {
       toast.classList.add('hidden');
     }, 3200);
     this.refreshTitleSaveButton();
+  }
+
+  showAchievementUnlock(achievement) {
+    if (!achievement) return;
+    this._achievementToastQueue.push(achievement);
+    this._showNextAchievementUnlock();
+  }
+
+  _showNextAchievementUnlock() {
+    if (this._achievementToastActive) return;
+    const achievement = this._achievementToastQueue.shift();
+    if (!achievement) return;
+    const toast = this.root.querySelector('#achievement-toast');
+    if (!toast) return;
+
+    this._achievementToastActive = true;
+    toast.className = `achievement-toast achievement-toast--${achievement.kind}`;
+    toast.style.setProperty('--achievement-accent', achievement.accent);
+    toast.querySelector('.achievement-toast-insignia').textContent = achievement.insignia;
+    toast.querySelector('.achievement-toast-name').textContent = achievement.name;
+    toast.querySelector('.achievement-toast-tier').textContent =
+      ACHIEVEMENT_KINDS[achievement.kind]?.label ?? 'Citation';
+    this.callbacks.onAchievementPresented?.(achievement);
+
+    clearTimeout(this._achievementToastTimer);
+    this._achievementToastTimer = setTimeout(() => {
+      toast.classList.add('is-leaving');
+      setTimeout(() => {
+        toast.className = 'achievement-toast hidden';
+        this._achievementToastActive = false;
+        this.renderAchievements();
+        this._showNextAchievementUnlock();
+      }, 420);
+    }, 4200);
   }
 
   showHUD(faction, mapDef, gameMode = 'campaign', options = {}) {

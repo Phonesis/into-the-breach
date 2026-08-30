@@ -468,6 +468,14 @@ export function buildFactionMG(group, body, detail, dark, factionId) {
     gun.add(hose);
   }
 
+  const casingPoint = new THREE.Object3D();
+  casingPoint.name = 'smallArmsCasingEjectionPoint';
+  casingPoint.position.set(0.04, 0.56, 0.17);
+  casingPoint.userData.casingEjectionAxis = new THREE.Vector3(0, 0, 1);
+  casingPoint.userData.casingEjectionRearAxis = new THREE.Vector3(-1, 0, 0);
+  gun.add(casingPoint);
+  group.userData.machineGunCasingEjectionPoint = casingPoint;
+
   if (muzzleMesh) {
     // Cylinders are rotated +90 degrees around Z, so local -Y is the forward tip.
     muzzleMesh.name = 'machineGunMuzzle';

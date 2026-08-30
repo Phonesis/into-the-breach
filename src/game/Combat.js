@@ -85,6 +85,7 @@ import {
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
 import {
   getInfantryMuzzleWorldPosition,
+  getInfantryCasingEjectionPoint,
   collectInfantrySquadMuzzleShots,
   aimDeployedMachineGun,
   aimDeployedMortar,
@@ -97,6 +98,7 @@ import {
 } from '../units/InfantryVisuals.js';
 import {
   getIndependentVehicleMgMuzzleWorldPosition,
+  getVehicleSmallArmsCasingEjectionPoint,
   getVehicleCannonMuzzleWorldPosition,
   usesIndependentVehicleMgMuzzleOrigin,
   usesVehicleCannonMuzzleOrigin,
@@ -1327,6 +1329,26 @@ function fire(
     vfxType = 'infantry';
   }
   const smallArmsShot = !paratrooperAt && (coax || SMALL_ARMS_TYPES.has(attacker.def.type));
+  const squadCadence = usesSquadVolleyMuzzles(attacker, muzzleType);
+  const showVfx =
+    attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
+  const smallArmsCasingKind =
+    coax || attacker.def.type === 'machineGun' || attacker.def.type === 'armoredCar'
+      ? 'machineGun'
+      : attacker.def.type === 'sniper' && !spotterRifle
+        ? 'sniperRifle'
+        : 'rifle';
+  const smallArmsCasingPoint =
+    smallArmsShot && !squadCadence && showVfx && scene
+      ? coax
+        ? getVehicleSmallArmsCasingEjectionPoint(attacker, true)
+        : attacker.def.type === 'armoredCar'
+          ? getVehicleSmallArmsCasingEjectionPoint(attacker, false)
+          : getInfantryCasingEjectionPoint(
+              attacker,
+              spotterRifle ? 'spotterRifle' : 'infantry'
+            )
+      : null;
 
   const map = attacker._mapDef || mapDef;
   const isGroundShot = target.isGround || isSmokeShellTarget(target);
@@ -1423,6 +1445,8 @@ function fire(
           smokeMiss: true,
           from: attacker.position,
           to: missImpact,
+          smallArmsCasingPoint,
+          smallArmsCasingKind,
         });
       }
       return;
@@ -1816,9 +1840,6 @@ function fire(
     );
   }
 
-  const showVfx =
-    attacker.team === 'player' || shouldSpawnVfx(attacker, listenerX, listenerZ);
-
   if (usesInfantryWeaponPose(attacker.def.type)) {
     const attackRate =
       spotterRifle?.attackSpeed ??
@@ -1889,6 +1910,8 @@ function fire(
       armorHit,
       from: attacker.position,
       to: impact,
+      smallArmsCasingPoint,
+      smallArmsCasingKind,
     });
   }
 }
@@ -2009,7 +2032,10 @@ function applySplashDamage(
           });
         }
       }
-      if (other.dead && other.def) recordEnemyKill(attacker, other);
+      if (other.dead && other.def) {
+        recordEnemyKill(attacker, other);
+        options.onKill?.({ attacker, target: other, killed: true });
+      }
     }
   }
 }

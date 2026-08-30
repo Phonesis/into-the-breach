@@ -142,6 +142,7 @@ const AI_COMMANDER_SHELTER_SEEK_RANGE = 58;
 const AI_COMMANDER_SAFETY_HOLD_SEC = 9;
 const AI_INCOMING_FIRE_COVER_HOLD_SEC = 6.5;
 const AI_INCOMING_FIRE_PRONE_SEC = 2.1;
+const AI_INCOMING_FIRE_PRONE_REACTION_SEC = 0.4;
 const AI_INCOMING_FIRE_RETRY_SEC = 3.6;
 const AI_INCOMING_FIRE_CRITICAL_HP_RATIO = 0.34;
 const AI_INCOMING_FIRE_SUSTAINED_HP_RATIO = 0.56;
@@ -3680,15 +3681,25 @@ export function diversifyAiMoveOrders(enemyUnits, game = null) {
 }
 
 function clearAiIncomingFireReaction(unit) {
+  const reaction = unit?._aiIncomingFireReaction;
   unit._aiIncomingFireReaction = null;
-  if (!unit._garrisonBunkerId) unit._bunkerEntryId = null;
+  // Do not clear a building-entry order that the player issued while the
+  // temporary reaction was active. Only the reaction's own bunker claim may
+  // be released here.
+  if (
+    reaction?.bunkerId != null &&
+    !unit._garrisonBunkerId &&
+    unit._bunkerEntryId === reaction.bunkerId
+  ) {
+    unit._bunkerEntryId = null;
+  }
 }
 
-function isAiIncomingFireCandidate(unit) {
+function isAiIncomingFireCandidate(unit, team = 'enemy') {
   const type = unit?.def?.type;
   return !!(
     unit &&
-    unit.team === 'enemy' &&
+    unit.team === team &&
     !unit.dead &&
     !unit.surrendered &&
     !unit._captureExit &&
@@ -3696,9 +3707,10 @@ function isAiIncomingFireCandidate(unit) {
     !unit.retreating &&
     !unit._mountedOnTankId &&
     !unit._crewless &&
-    !isVehicleUnit(type) &&
-    type !== 'commander' &&
-    type !== 'radioOperator' &&
+    isFootSoldier(type) &&
+    // Commanders and radio operators have dedicated AI safety controllers;
+    // player-side versions have no such controller and should still react.
+    (team !== 'enemy' || (type !== 'commander' && type !== 'radioOperator')) &&
     !isUnitGarrisoned(unit) &&
     !unit._trenchId &&
     !unit._diggingTrench &&
@@ -3717,6 +3729,25 @@ function isAiIncomingFireIdle(unit) {
     !unit.moveTarget &&
     !unit._movePath?.length
   );
+}
+
+// Keep this in sync with the live soldier-pose capability. MG and mortar
+// teams still seek cover below, but their deployed-weapon animation does not
+// have the individual prone pose used by rifle-equipped foot troops.
+const INCOMING_FIRE_PRONE_TYPES = new Set([
+  'radioOperator',
+  'infantry',
+  'medic',
+  'paratrooper',
+  'engineer',
+  'sniper',
+  'vehicleCrew',
+  'truckDriver',
+  'commander',
+]);
+
+function typeCanGoProne(type) {
+  return INCOMING_FIRE_PRONE_TYPES.has(type);
 }
 
 function getAiIncomingFireCoverDestination(unit, game) {
@@ -3744,12 +3775,19 @@ function getAiIncomingFireCoverDestination(unit, game) {
   return { x: cover.x, z: cover.z, bunkerId: null };
 }
 
-function issueAiIncomingFireCoverMove(unit, destination, game, now) {
+function issueAiIncomingFireCoverMove(
+  unit,
+  destination,
+  game,
+  now,
+  moveAt = now
+) {
   unit.clearAttackOrder();
   unit._bunkerEntryId = destination.bunkerId ?? null;
-  unit.moveTarget = { x: destination.x, z: destination.z };
+  const moving = now >= moveAt;
+  unit.moveTarget = moving ? { x: destination.x, z: destination.z } : null;
   unit._movePath = null;
-  unit._finalMoveGoal = { x: destination.x, z: destination.z };
+  unit._finalMoveGoal = moving ? { x: destination.x, z: destination.z } : null;
   unit._autoMoveOrderX = null;
   unit._autoMoveOrderZ = null;
   unit._pathRepathAttempts = 0;
@@ -3763,6 +3801,7 @@ function issueAiIncomingFireCoverMove(unit, destination, game, now) {
     x: destination.x,
     z: destination.z,
     bunkerId: destination.bunkerId ?? null,
+    moveAt,
     until: now + AI_INCOMING_FIRE_COVER_HOLD_SEC,
   };
   unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_COVER_HOLD_SEC;
@@ -3782,39 +3821,61 @@ function canAiIncomingFireRetreat(unit, game, clearance) {
 }
 
 /**
- * Exposed enemy foot troops react to a hit before the slower strategic AI tick.
- * A real player move/attack order remains authoritative; idle AI units take
- * cover when possible, otherwise stay low, and withdraw once badly mauled.
- * Radio operators and commanders retain their dedicated safety controllers.
+ * Exposed prone-capable foot troops react to a hit before the slower strategic
+ * AI tick. Explicit move/attack orders remain authoritative; idle units take
+ * cover when possible, otherwise stay low. Enemy units retain the existing
+ * critical-damage withdrawal behavior, while player units only seek cover.
  */
-export function updateAiIncomingFireReactions({
+export function updateIncomingFireReactions({
+  units = null,
   enemyUnits = [],
   game = null,
   mapDef = null,
   clearance = false,
+  team = 'enemy',
+  allowRetreat = team === 'enemy',
 } = {}) {
   const now = game?.matchTime ?? 0;
+  const reactionUnits = Array.isArray(units) ? units : enemyUnits;
 
-  for (const unit of enemyUnits) {
+  for (const unit of reactionUnits) {
     if (!unit) continue;
-    if (unit._aiArtilleryEvasion) continue;
+    if (team === 'enemy' && unit._aiArtilleryEvasion) continue;
 
     const reaction = unit._aiIncomingFireReaction;
     if (reaction) {
-      if (unit.dead || unit.surrendered || unit.retreating || unit._userMoveOrder) {
+      const explicitPlayerOrder =
+        team === 'player' && unit.attackOrder && !unit.attackOrder.dead;
+      if (
+        unit.dead ||
+        unit.surrendered ||
+        unit.retreating ||
+        unit._userMoveOrder ||
+        unit._manualFireMission ||
+        explicitPlayerOrder
+      ) {
         clearAiIncomingFireReaction(unit);
         continue;
       }
 
       if (reaction.mode === 'cover') {
+        if (typeCanGoProne(unit.def?.type)) {
+          // Keep the low posture alive for the whole covered move so a unit
+          // that reaches shelter after the first short hold still drops down.
+          unit._underFireProneTimer = Math.max(
+            unit._underFireProneTimer ?? 0,
+            AI_INCOMING_FIRE_PRONE_SEC
+          );
+        }
         const covered = getCoverStatus(unit).inCover;
         if (covered || now >= reaction.until) {
           clearAiIncomingFireReaction(unit);
-        } else if (!unit.moveTarget) {
+        } else if (!unit.moveTarget && now >= (reaction.moveAt ?? now)) {
           issueAiIncomingFireCoverMove(
             unit,
             { x: reaction.x, z: reaction.z, bunkerId: reaction.bunkerId },
             game,
+            now,
             now
           );
         }
@@ -3831,29 +3892,38 @@ export function updateAiIncomingFireReactions({
       unit._aiIncomingFireNextAt = 0;
       continue;
     }
-    if (!isAiIncomingFireCandidate(unit)) continue;
+    if (!isAiIncomingFireCandidate(unit, team)) continue;
 
-    // Cover status is refreshed before the AI pass. Do not make a unit leave
-    // protection just because a stray shell refreshed its under-fire timer.
-    if (getCoverStatus(unit).inCover) continue;
+    const idle = isAiIncomingFireIdle(unit);
+    // Player units only respond when genuinely idle. The enemy AI keeps its
+    // existing immediate prone response while an automatically acquired target
+    // is active, but it still only redirects idle units to shelter.
+    if (team === 'player' && !idle) continue;
 
-    // Prone is the immediate reaction even when the unit is already engaging
-    // an automatically acquired target. Movement/retreat is reserved for idle
-    // units so explicit attack and movement orders are never hijacked.
-    unit._underFireProneTimer = Math.max(
-      unit._underFireProneTimer ?? 0,
-      AI_INCOMING_FIRE_PRONE_SEC
-    );
-    if (!isAiIncomingFireIdle(unit)) continue;
+    const covered = getCoverStatus(unit).inCover;
+    // Prone is the immediate reaction for roles with a prone visual. Crew-
+    // served teams still use the same emergency cover movement, but their
+    // deployed-weapon animation has no individual prone pose to drive.
+    if (typeCanGoProne(unit.def?.type)) {
+      unit._underFireProneTimer = Math.max(
+        unit._underFireProneTimer ?? 0,
+        AI_INCOMING_FIRE_PRONE_SEC
+      );
+    }
+    // A unit already protected by scenery, a trench, or a garrison needs no
+    // movement response. It may still drop prone above when that pose exists.
+    if (covered || !idle) continue;
     if (now < (unit._aiIncomingFireNextAt ?? 0)) continue;
 
     const responseCount = unit._aiIncomingFireResponseCount ?? 0;
     const hpRatio = unit.hp / Math.max(1, unit.maxHp);
-    const retreatHq = canAiIncomingFireRetreat(unit, game, clearance);
+    const retreatHq = allowRetreat
+      ? canAiIncomingFireRetreat(unit, game, clearance)
+      : null;
     unit._aiIncomingFireResponseCount = responseCount + 1;
 
-    // A critically damaged exposed soldier should stop trading shots and
-    // withdraw. Less damaged units first try to reach nearby shelter.
+    // A critically damaged enemy soldier should stop trading shots and
+    // withdraw. Player units only perform the requested emergency cover move.
     if (retreatHq && hpRatio <= AI_INCOMING_FIRE_CRITICAL_HP_RATIO) {
       startRetreat(unit, retreatHq, {
         mapDef: mapDef ?? game?.mapDef ?? null,
@@ -3865,12 +3935,21 @@ export function updateAiIncomingFireReactions({
 
     const destination = getAiIncomingFireCoverDestination(unit, game);
     if (destination) {
-      issueAiIncomingFireCoverMove(unit, destination, game, now);
+      // Give the squad a short stationary prone reaction before it starts
+      // moving. The visual prone pose is intentionally stationary, so an
+      // immediate move would make the requested drop-to-cover invisible.
+      issueAiIncomingFireCoverMove(
+        unit,
+        destination,
+        game,
+        now,
+        now + AI_INCOMING_FIRE_PRONE_REACTION_SEC
+      );
       continue;
     }
 
-    // If there is no usable shelter and the unit has already tried to stay low
-    // once, a second sustained exposure is enough to trigger a withdrawal.
+    // If there is no usable shelter and the enemy has already tried to stay
+    // low once, a second sustained exposure is enough to trigger withdrawal.
     if (
       retreatHq &&
       responseCount >= 1 &&
@@ -3890,6 +3969,16 @@ export function updateAiIncomingFireReactions({
     };
     unit._aiIncomingFireNextAt = now + AI_INCOMING_FIRE_RETRY_SEC;
   }
+}
+
+/** Preserve the existing enemy-AI API for normal and Tower Defence callers. */
+export function updateAiIncomingFireReactions(options = {}) {
+  return updateIncomingFireReactions({
+    ...options,
+    units: options.units ?? options.enemyUnits,
+    team: 'enemy',
+    allowRetreat: true,
+  });
 }
 
 function isAiArtilleryUnitCandidate(unit) {

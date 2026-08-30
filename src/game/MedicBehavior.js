@@ -21,7 +21,7 @@ export function getMedicRetreatMultiplier(unit, units) {
   return 1;
 }
 
-export function updateMedicHealing(units, dt) {
+export function updateMedicHealing(units, dt, onHeal = null) {
   if (dt <= 0) return;
 
   const medics = units.filter((u) => !u.dead && u.def?.type === 'medic');
@@ -40,7 +40,10 @@ export function updateMedicHealing(units, dt) {
       const before = ally.hp;
       const proximity = 1 - (dist / MEDIC_AURA_RANGE) * 0.55;
       ally.hp = Math.min(ally.maxHp, ally.hp + MEDIC_HEAL_PER_SEC * proximity * dt);
-      if (ally.hp > before) updateSquadCasualtyVisual(ally);
+      if (ally.hp > before) {
+        updateSquadCasualtyVisual(ally);
+        onHeal?.({ medic, unit: ally, amount: ally.hp - before });
+      }
     }
   }
 }

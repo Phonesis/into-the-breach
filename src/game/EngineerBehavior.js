@@ -54,7 +54,7 @@ export function isHqBeingRepairedByEngineers(hq, units) {
   return false;
 }
 
-export function updateEngineerHealing(units, dt, coverSystem = null) {
+export function updateEngineerHealing(units, dt, coverSystem = null, onService = null) {
   if (dt <= 0) return 0;
 
   const engineers = units.filter((u) => !u.dead && u.def?.type === 'engineer');
@@ -76,6 +76,7 @@ export function updateEngineerHealing(units, dt, coverSystem = null) {
         );
         if (ally._wreckRepairProgress >= 1 && ally.restoreRecoverableVehicle?.(coverSystem)) {
           restoredVehicles += 1;
+          onService?.({ engineer, unit: ally, kind: 'wreckRecovered' });
         }
         continue;
       }
@@ -93,6 +94,7 @@ export function updateEngineerHealing(units, dt, coverSystem = null) {
         );
         if (ally._mobilityRepairProgress >= 1 && clearMobilityDamage(ally)) {
           restoredVehicles += 1;
+          onService?.({ engineer, unit: ally, kind: 'mobilityRestored' });
         }
       }
       if (ally.hp < ally.maxHp) {

@@ -981,6 +981,7 @@ export class FireSupportManager {
       if (airBomb && u.def && d <= (bombDef.directHitRadius ?? 2.5)) {
         dmg *= bombDef.directHitDamageMult ?? 1.15;
       }
+      const wasDead = u.dead;
       const explosive = !strafe;
       u.takeDamage(dmg, {
         explosive,
@@ -992,6 +993,15 @@ export class FireSupportManager {
             Math.sqrt(Math.max(0.3, incomingCoverMultiplier))
           : undefined,
       });
+      if (!wasDead && u.dead && u.def && u.team !== this.ownerTeam) {
+        // Fire-support kills do not pass through the direct-fire combat event;
+        // forward them so persistent combat achievements see barrage kills too.
+        this.game._recordAchievementCombatEvent?.({
+          attacker: { team: this.ownerTeam, def: { type: attackerType } },
+          target: u,
+          killed: true,
+        });
+      }
       if (dmg > 0) {
         handleFireSupportImpactMorale(
           u,

@@ -2,7 +2,7 @@
 
 A browser-based World War II real-time tactics game built with **Three.js** and **Vite**. Command a historically grounded combined-arms force across European, North African, Eastern Front, Far East, and Berlin theaters. Capture vital ground, build or reinforce your army, use fieldworks and fire support, and adapt to an enemy that changes its plan as the battle develops.
 
-The title screen includes an illustrated **Field Manual** with the in-game controls, unit cards, faction equipment tables, and detailed battlefield rules.
+The title screen includes an illustrated **Field Manual** with the in-game controls, unit cards, faction equipment tables, and detailed battlefield rules. A persistent **Achievements** cabinet records medals, service ribbons, and superior-command commendations earned across operations.
 
 ## Quick start
 
@@ -288,7 +288,7 @@ Recoverable vehicle knockouts leave an intact, crewless hull. An engineer must r
 
 Destroyed units leave burning vehicles, fallen infantry, field-gun wrecks, and terrain craters. Wrecks provide neutral cover to foot troops from either side. Vehicle damage produces black engine smoke below 50% HP until repair or destruction. Bodies and wreck retention is controlled in Settings and saved battles retain visible battlefield casualties and wrecks.
 
-The end-of-battle report includes victory or defeat detail, losses by unit type, prisoners captured, estimated 1944 USD materiel cost, and — in Hold the Line — emplacements lost and waves cleared.
+The end-of-battle report includes victory or defeat detail, losses by unit type, prisoners captured, estimated 1944 USD materiel cost, and — in Hold the Line — emplacements lost and waves cleared. First-time achievements display an in-battle period notification with tier-specific ElevenLabs ceremonial audio; victory medals exist for every selectable mode and theater, alongside combat, medical, engineering, combined-arms, command, tank-ace, counter-battery, and no-loss operation citations.
 
 ## Audio and visual identity
 

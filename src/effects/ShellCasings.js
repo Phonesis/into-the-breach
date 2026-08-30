@@ -8,9 +8,18 @@ const assetCache = new Map();
 const _origin = new THREE.Vector3();
 const _side = new THREE.Vector3();
 const _rear = new THREE.Vector3();
+const _localSide = new THREE.Vector3();
+const _localRear = new THREE.Vector3();
 const _worldQuaternion = new THREE.Quaternion();
+const SMALL_ARMS_CASE_LIMIT = 1800;
 
-function casingDimensions(caliber, type) {
+function casingDimensions(caliber, type, kind = null) {
+  if (type === 'smallArms') {
+    if (kind === 'machineGun') return { radius: 0.018, length: 0.09 };
+    if (kind === 'sniperRifle') return { radius: 0.0165, length: 0.097 };
+    if (kind === 'smg') return { radius: 0.015, length: 0.072 };
+    return { radius: 0.016, length: 0.083 };
+  }
   if (type === 'artillery') {
     if (caliber >= 120) return { radius: 0.12, length: 0.56 };
     return { radius: 0.105, length: 0.48 };
@@ -19,7 +28,16 @@ function casingDimensions(caliber, type) {
   return { radius: 0.067, length: 0.31 };
 }
 
-function casingFinish(factionId) {
+function casingFinish(factionId, type) {
+  if (type === 'smallArms') {
+    if (factionId === 'germany') {
+      return { body: 0x9a7837, rim: 0x665022, metalness: 0.76 };
+    }
+    if (factionId === 'russia') {
+      return { body: 0x92733b, rim: 0x5f4a29, metalness: 0.72 };
+    }
+    return { body: 0xb88632, rim: 0x76541f, metalness: 0.78 };
+  }
   if (factionId === 'germany') {
     return { body: 0x77735d, rim: 0x514f43, metalness: 0.72 };
   }
@@ -29,9 +47,11 @@ function casingFinish(factionId) {
   return { body: 0xb88632, rim: 0x76541f, metalness: 0.78 };
 }
 
-function assetKey(caliber, type, factionId) {
+function assetKey(caliber, type, factionId, kind = null) {
   const size =
-    type === 'artillery'
+    type === 'smallArms'
+      ? `small-${kind ?? 'rifle'}`
+      : type === 'artillery'
       ? caliber >= 120
         ? 'arty-heavy'
         : 'arty'
@@ -42,13 +62,13 @@ function assetKey(caliber, type, factionId) {
   return `${size}:${finish}`;
 }
 
-function getCasingAssets(caliber, type, factionId) {
-  const key = assetKey(caliber, type, factionId);
+function getCasingAssets(caliber, type, factionId, kind = null) {
+  const key = assetKey(caliber, type, factionId, kind);
   const cached = assetCache.get(key);
   if (cached) return cached;
 
-  const dimensions = casingDimensions(caliber, type);
-  const finish = casingFinish(factionId);
+  const dimensions = casingDimensions(caliber, type, kind);
+  const finish = casingFinish(factionId, type);
   const bodyGeometry = new THREE.CylinderGeometry(
     dimensions.radius * 0.86,
     dimensions.radius,
@@ -83,10 +103,11 @@ function getCasingAssets(caliber, type, factionId) {
   return assets;
 }
 
-function makeCasingMesh(assets) {
+function makeCasingMesh(assets, type) {
   const group = new THREE.Group();
-  group.name = 'persistentShellCasing';
+  group.name = type === 'smallArms' ? 'persistentSmallArmsCasing' : 'persistentShellCasing';
   group.userData.persistentShellCasing = true;
+  if (type === 'smallArms') group.userData.persistentSmallArmsCasing = true;
 
   const body = new THREE.Mesh(assets.bodyGeometry, assets.bodyMaterial);
   body.castShadow = true;
@@ -100,17 +121,32 @@ function makeCasingMesh(assets) {
   return group;
 }
 
-/**
- * Eject one persistent cartridge case from a towed AT gun or field howitzer.
- * Settled cases are intentionally never culled during the battle.
- */
-export function spawnShellCasing(scene, unit) {
-  if (!scene || !unit?.mesh) return null;
-  const type = unit.def?.type;
-  if (type !== 'antiTankGun' && type !== 'artillery') return null;
+function trimSmallArmsCasings() {
+  let smallArmsCount = 0;
+  for (const mesh of settledCasings) {
+    if (mesh.userData?.persistentSmallArmsCasing) smallArmsCount += 1;
+  }
+  if (smallArmsCount <= SMALL_ARMS_CASE_LIMIT) return;
 
-  const ejectionPoint = unit.mesh.userData.shellEjectionPoint;
+  for (let index = 0; index < settledCasings.length && smallArmsCount > SMALL_ARMS_CASE_LIMIT;) {
+    const mesh = settledCasings[index];
+    if (!mesh.userData?.persistentSmallArmsCasing) {
+      index += 1;
+      continue;
+    }
+    mesh.parent?.remove(mesh);
+    settledCasings.splice(index, 1);
+    smallArmsCount -= 1;
+  }
+}
+
+function spawnCasing(scene, unit, ejectionPoint, { type, kind = null, caliber = null } = {}) {
+  if (!scene || !unit?.mesh) return null;
+  const isSmallArms = type === 'smallArms';
+  if (isSmallArms && !ejectionPoint?.isObject3D) return null;
+
   if (ejectionPoint?.isObject3D) {
+    ejectionPoint.updateWorldMatrix(true, false);
     ejectionPoint.getWorldPosition(_origin);
     ejectionPoint.getWorldQuaternion(_worldQuaternion);
   } else {
@@ -119,16 +155,32 @@ export function spawnShellCasing(scene, unit) {
     unit.mesh.getWorldQuaternion(_worldQuaternion);
   }
 
-  _side.set(1, 0, 0).applyQuaternion(_worldQuaternion).setY(0).normalize();
-  _rear.set(0, 0, -1).applyQuaternion(_worldQuaternion).setY(0).normalize();
+  _localSide.copy(
+    ejectionPoint?.userData?.casingEjectionAxis ??
+      (isSmallArms ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 })
+  );
+  _localRear.copy(
+    ejectionPoint?.userData?.casingEjectionRearAxis ??
+      (isSmallArms ? { x: -1, y: 0, z: 0 } : { x: 0, y: 0, z: -1 })
+  );
+  _side.copy(_localSide).applyQuaternion(_worldQuaternion).setY(0).normalize();
+  _rear.copy(_localRear).applyQuaternion(_worldQuaternion).setY(0).normalize();
 
   const assets = getCasingAssets(
-    unit.def?.caliber ?? (type === 'artillery' ? 105 : 75),
+    caliber ?? (type === 'artillery' ? 105 : type === 'antiTankGun' ? 75 : 8),
     type,
-    unit.faction?.id
+    unit.faction?.id,
+    kind
   );
-  const mesh = makeCasingMesh(assets);
-  mesh.position.copy(_origin);
+  const mesh = makeCasingMesh(assets, type);
+  if (isSmallArms) {
+    // Start just outside the ejection port so the case visibly clears the
+    // receiver instead of appearing inside the weapon silhouette.
+    mesh.position.copy(_origin).addScaledVector(_side, assets.radius * 1.25);
+    mesh.position.y += assets.radius * 0.45;
+  } else {
+    mesh.position.copy(_origin);
+  }
   mesh.rotation.set(
     Math.random() * Math.PI,
     Math.random() * Math.PI,
@@ -136,11 +188,17 @@ export function spawnShellCasing(scene, unit) {
   );
   scene.add(mesh);
 
-  const sideSpeed = (type === 'artillery' ? 2.6 : 2.15) * (0.78 + Math.random() * 0.55);
-  const rearSpeed = (Math.random() - 0.18) * (type === 'artillery' ? 1.7 : 1.25);
+  const sideSpeed = isSmallArms
+    ? (kind === 'machineGun' ? 1.05 : 0.82) * (0.78 + Math.random() * 0.45)
+    : (type === 'artillery' ? 2.6 : 2.15) * (0.78 + Math.random() * 0.55);
+  const rearSpeed = isSmallArms
+    ? (Math.random() - 0.2) * 0.52
+    : (Math.random() - 0.18) * (type === 'artillery' ? 1.7 : 1.25);
   const velocity = new THREE.Vector3(
     _side.x * sideSpeed + _rear.x * rearSpeed + (Math.random() - 0.5) * 0.55,
-    (type === 'artillery' ? 3.7 : 3.15) + Math.random() * 1.35,
+    isSmallArms
+      ? 2.25 + Math.random() * 0.9
+      : (type === 'artillery' ? 3.7 : 3.15) + Math.random() * 1.35,
     _side.z * sideSpeed + _rear.z * rearSpeed + (Math.random() - 0.5) * 0.55
   );
   activeCasings.push({
@@ -151,8 +209,33 @@ export function spawnShellCasing(scene, unit) {
     spinY: (Math.random() - 0.5) * 10,
     spinZ: (Math.random() - 0.5) * 13,
     bounces: 0,
+    smallArms: isSmallArms,
   });
   return mesh;
+}
+
+/**
+ * Eject one persistent cartridge case from a towed AT gun or field howitzer.
+ * Settled field-gun cases are intentionally never culled during the battle;
+ * small-arms cases use a separate soft cap because they are much more frequent.
+ */
+export function spawnShellCasing(scene, unit) {
+  if (!scene || !unit?.mesh) return null;
+  const type = unit.def?.type;
+  if (type !== 'antiTankGun' && type !== 'artillery') return null;
+  return spawnCasing(scene, unit, unit.mesh.userData.shellEjectionPoint, {
+    type,
+    caliber: unit.def?.caliber,
+  });
+}
+
+/** Eject one small-arms cartridge from an authored weapon receiver. */
+export function spawnSmallArmsCasing(scene, unit, ejectionPoint, kind = 'rifle') {
+  return spawnCasing(scene, unit, ejectionPoint, {
+    type: 'smallArms',
+    kind,
+    caliber: 8,
+  });
 }
 
 export function updateShellCasings(dt, mapDef, terrainMesh = null) {
@@ -196,6 +279,7 @@ export function updateShellCasings(dt, mapDef, terrainMesh = null) {
     );
     casing.mesh.updateMatrix();
     settledCasings.push(casing.mesh);
+    if (casing.smallArms) trimSmallArmsCasings();
     activeCasings.splice(index, 1);
   }
 }

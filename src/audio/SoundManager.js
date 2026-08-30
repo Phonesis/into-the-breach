@@ -168,6 +168,11 @@ const BOMB_EXPLOSION_FILES = [
 ];
 /** Occasional US rifle reload cue — M1 Garand en-bloc clip eject. */
 const GARAND_PING_FILES = ['m1-garand-ping-el-01.wav'];
+const ACHIEVEMENT_FILES = {
+  medal: ['achievement-medal.wav'],
+  ribbon: ['achievement-ribbon.wav'],
+  commendation: ['achievement-commendation.wav'],
+};
 
 /** Scenery / structure collapse one-shots (ElevenLabs) by building scale. */
 const BUILDING_COLLAPSE_FILES = {
@@ -392,6 +397,7 @@ export class SoundManager {
     this.bombExplosionBuffers = [];
     /** @type {AudioBuffer[]} */
     this.garandPingBuffers = [];
+    this.achievementBuffers = { medal: [], ribbon: [], commendation: [] };
     /** @type {Record<'small'|'medium'|'large', AudioBuffer[]>} */
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     this._atmosSrc = null;
@@ -996,6 +1002,7 @@ export class SoundManager {
     this.fireSupportSalvoBuffers = { barrage: [], creepingBarrage: [] };
     this.bombExplosionBuffers = [];
     this.garandPingBuffers = [];
+    this.achievementBuffers = { medal: [], ribbon: [], commendation: [] };
     this.buildingCollapseBuffers = { small: [], medium: [], large: [] };
     const limit = (files, tabletCount) => this._constrainedAudio ? files.slice(0, tabletCount) : files;
     loadPool(limit(EXPLOSION_SAMPLE_FILES, 7), this.explosionBuffers);
@@ -1015,6 +1022,9 @@ export class SoundManager {
     loadPool(ARTILLERY_IMPACT_FILES, this.artilleryImpactBuffers);
     loadPool(BOMB_EXPLOSION_FILES, this.bombExplosionBuffers);
     loadPool(GARAND_PING_FILES, this.garandPingBuffers);
+    for (const [kind, files] of Object.entries(ACHIEVEMENT_FILES)) {
+      loadPool(files, this.achievementBuffers[kind]);
+    }
     for (const [kind, files] of Object.entries(FIRE_SUPPORT_SALVO_FILES)) {
       loadPool(files, this.fireSupportSalvoBuffers[kind]);
     }
@@ -2165,6 +2175,23 @@ export class SoundManager {
               ? 0.98 + Math.random() * 0.1
               : 0.95 + Math.random() * 0.09,
         wet: key === 'large' ? 0.34 + Math.random() * 0.08 : 0.26 + Math.random() * 0.08,
+      });
+    });
+  }
+
+  /** Period award cue generated for the achievement's presentation tier. */
+  playAchievement(kind = 'commendation') {
+    this._runWhenReady(() => {
+      const key = kind === 'medal' || kind === 'ribbon' ? kind : 'commendation';
+      const buffer = this._pickFromPool(
+        this.achievementBuffers[key],
+        `_lastAchievement${key}`
+      );
+      if (!buffer) return;
+      this._playBuffer(buffer, {
+        vol: key === 'medal' ? 0.92 : key === 'ribbon' ? 0.82 : 0.76,
+        rate: 1,
+        wet: key === 'commendation' ? 0.12 : 0.22,
       });
     });
   }
