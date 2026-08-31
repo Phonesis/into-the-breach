@@ -51,6 +51,8 @@ import {
 } from '../game/RadioOperatorBehavior.js';
 import {
   canDismountRiders,
+  canExitVehicleCrew,
+  canExitVehicleCrewNow,
   canHostRiders,
   canUnitEnterVehicle,
   getTankRiderIds,
@@ -670,8 +672,8 @@ export class UIManager {
           <h2 class="settings-section-title">Other</h2>
           <div class="debris-setting">
             <div class="debris-setting-copy">
-              <strong>Bodies / Destroyed Vehicle Despawn Delay</strong>
-              <small>How long fallen troops and knocked-out vehicles remain before being despawned from map.</small>
+              <strong>Battlefield Debris Despawn Delay</strong>
+              <small>How long fallen troops, knocked-out vehicles, and spent ammunition remain before being removed from the map.</small>
             </div>
             <output id="debris-retention-value" for="debris-retention-slider">Permanent</output>
             <input
@@ -684,7 +686,7 @@ export class UIManager {
               aria-describedby="debris-performance-warning"
             />
             <div class="debris-scale" aria-hidden="true"><span>10 sec</span><span>30 sec</span><span>1 min</span><span>2 min</span><span>5 min</span><span>Permanent</span></div>
-            <p class="settings-warning" id="debris-performance-warning"><strong>Performance warning:</strong> Longer retention — especially Permanent — can reduce frame rate as casualties and wrecks accumulate.</p>
+            <p class="settings-warning" id="debris-performance-warning"><strong>Performance warning:</strong> Longer retention — especially Permanent — can reduce frame rate as casualties, wrecks, and spent ammunition accumulate.</p>
           </div>
 
           <div class="actions">
@@ -1155,7 +1157,7 @@ export class UIManager {
             <div class="target-offer hidden" id="target-offer">
               <p class="target-offer-label" id="target-offer-label">Enemy in sights</p>
               <button type="button" class="btn btn-target interactive" id="btn-engage-target">Engage target</button>
-              <p class="target-offer-hint" id="target-offer-hint">Or left-click the highlighted enemy</p>
+              <p class="target-offer-hint" id="target-offer-hint">Or left-click that enemy</p>
             </div>
             <div class="engagement-stance-actions hidden" id="engagement-stance-actions">
               <p class="engagement-stance-label">Engagement stance</p>
@@ -1212,6 +1214,14 @@ export class UIManager {
               </button>
               <p class="tank-rider-hint" id="tank-rider-hint">
                 Riders also disembark automatically when the vehicle comes under fire.
+              </p>
+            </div>
+            <div class="tank-rider-actions hidden" id="vehicle-crew-actions">
+              <button type="button" class="btn btn-secondary interactive" id="btn-exit-vehicle-crew">
+                Exit vehicle crew
+              </button>
+              <p class="tank-rider-hint" id="vehicle-crew-hint">
+                Leave the vehicle empty so it can be reclaimed by your crew or captured by the enemy.
               </p>
             </div>
             <div class="tank-rider-actions hidden" id="truck-tow-actions">
@@ -2149,6 +2159,9 @@ export class UIManager {
     });
     this.root.querySelector('#btn-dismount-riders')?.addEventListener('click', () => {
       this.callbacks.onDismountTankRiders?.();
+    });
+    this.root.querySelector('#btn-exit-vehicle-crew')?.addEventListener('click', () => {
+      this.callbacks.onExitVehicleCrew?.();
     });
     this.root.querySelector('#btn-attach-gun')?.addEventListener('click', () => {
       const gun = this._selectedTowGun;
@@ -3685,6 +3698,32 @@ export class UIManager {
     }
   }
 
+  updateVehicleCrewActions(units, game = null) {
+    const panel = this.root.querySelector('#vehicle-crew-actions');
+    const hint = this.root.querySelector('#vehicle-crew-hint');
+    const button = this.root.querySelector('#btn-exit-vehicle-crew');
+    if (!panel) return;
+
+    const selected = units ?? [];
+    const vehicles = selected.filter((unit) => canExitVehicleCrew(unit));
+    const readyVehicles = vehicles.filter((unit) => canExitVehicleCrewNow(unit));
+    const show = vehicles.length > 0;
+    panel.classList.toggle('hidden', !show);
+    if (button) {
+      button.disabled = readyVehicles.length === 0;
+      button.textContent = vehicles.length === 1
+        ? 'Exit vehicle crew'
+        : `Exit vehicle crews (${vehicles.length})`;
+    }
+    if (hint && show) {
+      hint.textContent = readyVehicles.length === 0
+        ? 'Stop the selected vehicle before putting its crew on the ground.'
+        : vehicles.length === 1
+          ? 'Leave an empty hull — your crew can re-enter it, or the enemy can capture it first.'
+          : `${readyVehicles.length}/${vehicles.length} vehicles stopped — exit their crews and leave the hulls available for reclaiming or capture.`;
+    }
+  }
+
   updateTruckTowActions(units, game = null) {
     const panel = this.root.querySelector('#truck-tow-actions');
     const hint = this.root.querySelector('#truck-tow-hint');
@@ -4883,6 +4922,7 @@ export class UIManager {
     this.root.querySelector('#hud').classList.add('hidden');
     this.root.querySelector('#vehicle-entry-action')?.classList.add('hidden');
     this.root.querySelector('#gun-tow-action')?.classList.add('hidden');
+    this.root.querySelector('#vehicle-crew-actions')?.classList.add('hidden');
     this.root.querySelector('#hud')?.classList.remove('hud-chrome-hidden');
     this.hideTdBreachAlert();
     const panel = this.root.querySelector('#firesupport-panel');
@@ -5807,6 +5847,7 @@ export class UIManager {
     const offerLabel = this.root.querySelector('#target-offer-label');
     if (!body) return;
     try {
+    this.updateVehicleCrewActions(hq ? [] : units, game);
     this.updateEngagementStance(hq ? [] : units);
     this.updateSeekCoverOverride(hq ? [] : units, game);
 
@@ -5838,7 +5879,7 @@ export class UIManager {
     if (targetHint) {
       targetHint.textContent = tabletOn
         ? 'Tap enemy again or press Engage'
-        : 'Or left-click the highlighted enemy';
+        : 'Or left-click that enemy';
     }
 
     if (hq && !hq.dead) {
@@ -6007,13 +6048,16 @@ export class UIManager {
       const ridingVehicle = u._mountedOnTankId
         ? game?.units?.find((unit) => unit.id === u._mountedOnTankId)
         : null;
+      const replacementCrewStatus = u.def?.type === 'truck'
+        ? '<p class="unit-support-status"><strong>Replacement driver aboard</strong> — one troop operates the truck; the remaining squad members ride in the cargo bed.</p>'
+        : `<p class="unit-support-status"><strong>Replacement crew aboard</strong> — two troops operate the vehicle; the remaining squad members ride on the hull${riderN > 1 ? ` with ${riderN - 1} additional rider unit${riderN > 2 ? 's' : ''}` : ''}.</p>`;
       const riderBlock =
         ridingVehicle && !u._replacementCrewVehicleId
           ? `<p class="unit-support-status"><strong>Riding ${ridingVehicle.name ?? ridingVehicle.def?.name ?? 'vehicle'}</strong> — use Disembark rider below to put this unit down manually; incoming fire also makes riders bail out.</p>`
           : u._crewless
           ? '<p class="unit-support-status"><strong>CREWLESS — disabled</strong> — its surviving bailed crew can reclaim this hull, or infantry/airborne from either side can capture it. Select an eligible unit and RMB the vehicle.</p>'
           : u._replacementCrewUnitId
-            ? `<p class="unit-support-status"><strong>Replacement crew aboard</strong> — two troops operate the tank; the remaining squad members ride on the hull${riderN > 1 ? ` with ${riderN - 1} additional rider unit${riderN > 2 ? 's' : ''}` : ''}.</p>`
+            ? replacementCrewStatus
             : riderN > 0
           ? `<p class="unit-support-status"><strong>${riderN} rider${riderN === 1 ? '' : 's'} aboard</strong> — use Get on or RMB with selected infantry to mount more. Stop the vehicle and press Disembark riders to put them down manually; incoming fire makes them bail out automatically.</p>`
           : canHostRiders(u.def?.type) && u.def?.type !== 'armoredCar'

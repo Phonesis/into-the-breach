@@ -327,22 +327,6 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   ring.name = 'selectionRing';
   group.add(ring);
 
-  const targetRing = new THREE.Mesh(
-    new THREE.RingGeometry(hitR * 0.58, hitR * 0.68, 32),
-    new THREE.MeshBasicMaterial({
-      color: 0xff4444,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      depthTest: false,
-    })
-  );
-  targetRing.rotation.x = -Math.PI / 2;
-  targetRing.position.y = isTankType(type) || type === 'armoredCar' || type === 'truck' ? 0.28 : 0.12;
-  targetRing.renderOrder = 10;
-  targetRing.name = 'targetHighlightRing';
-  group.add(targetRing);
-
   group.userData.type = type;
   group.userData.factionId = factionId;
   if (isTankType(type) && !group.userData.isTank) group.userData.isTank = true;
@@ -365,20 +349,11 @@ export function setSelectionRing(mesh, visible) {
   }
 }
 
-export function setTargetHighlight(mesh, visible, engaged = false, action = false) {
-  const ring = mesh.getObjectByName('targetHighlightRing');
-  if (ring) {
-    ring.material.opacity = visible ? (engaged ? 0.75 : 0.95) : 0;
-    ring.material.color.setHex(action ? 0x62e58b : engaged ? 0xff8800 : 0xff3333);
-  }
-}
-
-const WRECK_SKIP_MESHES = new Set(['selectionRing', 'targetHighlightRing', 'selectionHitbox']);
+const WRECK_SKIP_MESHES = new Set(['selectionRing', 'selectionHitbox']);
 const WRECK_REMOVED_PARTS = new Set(['turret', 'barrel', 'mantlet']);
 
 function hideUnitChrome(mesh) {
   setSelectionRing(mesh, false);
-  setTargetHighlight(mesh, false);
   mesh.traverse((child) => {
     if (WRECK_SKIP_MESHES.has(child.name)) child.visible = false;
   });

@@ -242,6 +242,7 @@ const CLEARANCE_DEFENDER_FALLBACK_MIN_DURATION = 10;
 const AI_DUPLICATE_ORDER_RADIUS = 2.75;
 const AI_ORDER_SEPARATION_GAP = 0.4;
 const AI_ORDER_MAX_COLUMNS = 5;
+const AI_AIRBORNE_DEFENSIVE_HOLD_RADIUS = 12;
 
 const CLEARANCE_MOBILE_DEFENDER_TYPES = new Set([
   'infantry',
@@ -322,6 +323,271 @@ function findNearestVisibleEnemy(unit, targets, scenery) {
     unit,
     targets.filter((target) => isVisibleAttackTarget(unit, target, scenery))
   );
+}
+
+function isAiParatrooperOrderCandidate(unit) {
+  return !!(
+    unit &&
+    unit.team === 'enemy' &&
+    unit.def?.type === 'paratrooper' &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._dropping &&
+    !unit.retreating &&
+    !unit._crewless &&
+    !unit._mountedOnTankId &&
+    !unit._towedByTruckId &&
+    !unit._aiIncomingFireReaction &&
+    !unit._aiArtilleryEvasion &&
+    !unit._aiRadioSafety &&
+    !unit._aiCommanderScreen &&
+    !unit._aiSupportMode &&
+    !unit._userMoveOrder &&
+    !isUnitGarrisoned(unit) &&
+    !unit._trenchId &&
+    !unit._garrisonBunkerId &&
+    !unit._diggingTrench &&
+    !unit._trenchDigSite &&
+    !unit._sandbagSite &&
+    !unit._medicTentSite
+  );
+}
+
+function getAiParatrooperDoctrine(game, standardPlan = null) {
+  if (game?.towerDefense) return 'attack';
+
+  if (game?.clearance) {
+    // In Fortified Line the player role describes the player's force, so the
+    // enemy attacks when the player is defending and holds when the player is
+    // assaulting.
+    return game.clearanceRole === 'defend' ? 'attack' : 'defend';
+  }
+
+  if (game?.assault) {
+    return game.assault.attackerTeam === 'enemy' ? 'attack' : 'defend';
+  }
+
+  if (game?.lastStand) {
+    const mode = game.lastStand.enemyOperational?.mode ?? 'opening';
+    return mode === 'probe' || mode === 'attack' ? 'attack' : 'defend';
+  }
+
+  const operation = standardPlan?.operation ?? game?._standardAiPlan?.operation;
+  return operation === 'defend' || operation === 'contain' || operation === 'regroup'
+    ? 'defend'
+    : 'attack';
+}
+
+function getAiParatrooperAttackTarget(unit, playerUnits, game) {
+  const players = Array.isArray(playerUnits) ? playerUnits : [];
+  const visible = findNearestVisibleEnemy(unit, players, game?.scenery);
+  if (visible) return visible;
+
+  const nearest = findNearestEnemy(unit, players);
+  if (nearest) return nearest;
+
+  const defenses = game?.defenses?.getAttackTargets?.() ?? [];
+  let bestDefense = null;
+  let bestDistance = Infinity;
+  for (const defense of defenses) {
+    if (!defense || defense.dead) continue;
+    const x = defense.position?.x;
+    const z = defense.position?.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    const distance = Math.hypot(unit.position.x - x, unit.position.z - z);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestDefense = defense;
+    }
+  }
+  if (bestDefense) return bestDefense;
+
+  return (
+    game?.hqs?.find((hq) => hq.team === 'player' && !hq.dead) ??
+    null
+  );
+}
+
+function getAiParatrooperAdvanceDestination(unit, playerUnits, game, standardPlan) {
+  const target = getAiParatrooperAttackTarget(unit, playerUnits, game);
+  if (target?.position) {
+    return getStandoffPosition(unit, target);
+  }
+
+  if (game?.towerDefense) {
+    const td = game.towerDefense;
+    const frontline = game.mapDef?.frontline ?? game.mapDef?.capturePoints?.[0];
+    return {
+      x: unit._tdFrontlineTarget?.x ?? td.frontlineX ?? frontline?.x ?? game.mapDef?.playerBase?.x ?? 0,
+      z: unit._tdFrontlineTarget?.z ?? td.frontlineZ ?? frontline?.z ?? game.mapDef?.playerBase?.z ?? 0,
+    };
+  }
+
+  if (game?.assault?.frontlineCp) {
+    return {
+      x: game.assault.frontlineCp.x,
+      z: game.assault.frontlineCp.z,
+    };
+  }
+
+  if (standardPlan?.attackPoint) {
+    return { x: standardPlan.attackPoint.x, z: standardPlan.attackPoint.z };
+  }
+
+  const players = Array.isArray(playerUnits) ? playerUnits : [];
+  if (players.length) return averagePosition(players);
+  return {
+    x: game?.mapDef?.playerBase?.x ?? 0,
+    z: game?.mapDef?.playerBase?.z ?? 0,
+  };
+}
+
+function issueAiParatrooperMoveOrder(unit, destination) {
+  if (!destination || !Number.isFinite(destination.x) || !Number.isFinite(destination.z)) {
+    return false;
+  }
+  unit.clearAttackOrder();
+  if (unit._aiAirborneDefensiveHold) unit.defensiveHold = null;
+  unit._aiAirborneDefensiveHold = false;
+  unit._aiParatrooperOrderMode = 'attack';
+  unit.moveTarget = { x: destination.x, z: destination.z };
+  unit._movePath = null;
+  unit._finalMoveGoal = { x: destination.x, z: destination.z };
+  unit._autoMoveOrderX = null;
+  unit._autoMoveOrderZ = null;
+  unit._pathRepathAttempts = 0;
+  unit._lastPathRepathX = null;
+  unit._lastPathRepathZ = null;
+  unit._urbanCanalRoute = null;
+  unit._userMoveOrder = false;
+  unit._reverseMoveOrder = false;
+  unit._chasingAttack = false;
+  return true;
+}
+
+function issueAiParatrooperDefensiveOrder(unit, playerUnits, game) {
+  const target = getAiParatrooperAttackTarget(unit, playerUnits, game);
+  if (target && isInRange(unit, target)) {
+    unit.setAttackOrder(target, { respectStance: true });
+    unit._aiParatrooperOrderMode = 'attack';
+    unit._aiAirborneDefensiveHold = false;
+    return true;
+  }
+
+  if (unit.attackOrder) unit.clearAttackOrder();
+  const hold = unit._aiAirborneDefensiveHold && unit.defensiveHold
+    ? unit.defensiveHold
+    : {
+        x: unit.position.x,
+        z: unit.position.z,
+        radius: AI_AIRBORNE_DEFENSIVE_HOLD_RADIUS,
+        aiAirborneDefense: true,
+      };
+  unit.defensiveHold = hold;
+  unit._aiAirborneDefensiveHold = true;
+  unit._aiParatrooperOrderMode = 'defend';
+  if (game?.clearance && game.clearanceRole !== 'defend') {
+    unit._clearanceDefenderCoverPending = true;
+  }
+  const distance = Math.hypot(
+    unit.position.x - hold.x,
+    unit.position.z - hold.z
+  );
+  if (distance > Math.max(4, hold.radius)) {
+    unit.moveTarget = { x: hold.x, z: hold.z };
+    unit._movePath = null;
+    unit._finalMoveGoal = { x: hold.x, z: hold.z };
+    unit._userMoveOrder = false;
+  } else {
+    unit.moveTarget = null;
+    unit._movePath = null;
+    unit._finalMoveGoal = null;
+  }
+  unit._chasingAttack = false;
+  return true;
+}
+
+/**
+ * Give enemy airborne squads a mode-aware order as soon as they are grounded.
+ *
+ * Dropped paratroopers are created after the mode's initial formation pass, so
+ * they do not have the role/hold metadata that later mode planners expect.
+ * Keep this handoff shared by the regular and Tower Defence AI loops; it only
+ * fills a genuinely idle airborne squad and leaves active combat, cover,
+ * retreat, and player orders untouched.
+ */
+export function updateAIParatrooperOrders({
+  enemyUnits = [],
+  playerUnits = [],
+  game = null,
+  standardPlan = null,
+} = {}) {
+  const doctrine = getAiParatrooperDoctrine(game, standardPlan);
+  let assigned = 0;
+
+  for (const unit of enemyUnits ?? []) {
+    if (!isAiParatrooperOrderCandidate(unit)) continue;
+
+    if (game?.towerDefense) {
+      // Tower Defence counts wave attackers explicitly. A late airborne
+      // arrival must join that accounting or a wave can be marked clear while
+      // the dropped squads are still alive.
+      unit._tdAttacker = true;
+      unit._tdFrontlineTarget ??= {
+        x: game.towerDefense.frontlineX ?? game.mapDef?.frontline?.x ?? 0,
+        z: game.towerDefense.frontlineZ ?? game.mapDef?.frontline?.z ?? 0,
+      };
+    }
+    if (game?.clearance && doctrine === 'attack') {
+      unit.clearanceAttackRole ??= 'line';
+    }
+    if (game?.lastStand || game?.assault) {
+      unit.lastStandRole ??= 'line';
+    }
+
+    const activeAttack =
+      unit.attackOrder &&
+      !unit.attackOrder.dead &&
+      !unit.attackOrder._dropping;
+    const activeMove = !!unit.moveTarget || !!unit._movePath?.length;
+    if (activeAttack || activeMove) continue;
+
+    if (game?.lastStand || game?.assault) {
+      unit.lastStandStance = doctrine === 'attack' ? 'attack' : 'defend';
+    }
+
+    if (
+      unit._aiParatrooperOrderMode === 'defend' &&
+      doctrine === 'attack' &&
+      unit._aiAirborneDefensiveHold
+    ) {
+      unit.defensiveHold = null;
+      unit._aiAirborneDefensiveHold = false;
+    }
+
+    if (doctrine === 'defend') {
+      if (issueAiParatrooperDefensiveOrder(unit, playerUnits, game)) assigned++;
+      continue;
+    }
+
+    const target = getAiParatrooperAttackTarget(unit, playerUnits, game);
+    if (target && unit.setAttackOrder(target)) {
+      unit._aiParatrooperOrderMode = 'attack';
+      unit._aiAirborneDefensiveHold = false;
+      assigned++;
+      continue;
+    }
+
+    if (issueAiParatrooperMoveOrder(
+      unit,
+      getAiParatrooperAdvanceDestination(unit, playerUnits, game, standardPlan)
+    )) {
+      assigned++;
+    }
+  }
+
+  return assigned;
 }
 
 function clearAiTankManeuver(unit) {
@@ -4453,6 +4719,23 @@ export function updateAI({
     return;
   }
 
+  // Most airborne support calls happen after the first strategic plan has
+  // been cached. If one arrives on the first live AI frame, build that plan
+  // once so its attack/defend doctrine is still respected by the handoff.
+  const airborneStandardPlan = standardCampaign
+    ? game?._standardAiPlan ??
+      ((enemyUnits ?? []).some(isAiParatrooperOrderCandidate)
+        ? getStandardAiPlan(
+            game,
+            enemyUnits,
+            playerUnits,
+            capturePoints,
+            mapDef,
+            d
+          )
+        : null)
+    : null;
+
   updateAiIncomingFireReactions({
     enemyUnits,
     game,
@@ -4516,6 +4799,16 @@ export function updateAI({
   }
 
   updateAiArtilleryThreatReactions({ enemyUnits, game, mapDef });
+
+  // Airborne squads are added after the opening formation/operation pass.
+  // Give a grounded enemy drop an order even while the slower strategic tick
+  // is waiting, then let the mode-specific planner refine it below.
+  updateAIParatrooperOrders({
+    enemyUnits,
+    playerUnits,
+    game,
+    standardPlan: airborneStandardPlan,
+  });
 
   if (aiTimer > 0) return;
   aiTimer = (AI_TICK_MIN + Math.random() * (AI_TICK_MAX - AI_TICK_MIN)) * d.aiTickMult;
@@ -4942,6 +5235,16 @@ export function updateAI({
     unit.moveTarget.x = clamp(unit.moveTarget.x, -half, half);
     unit.moveTarget.z = clamp(unit.moveTarget.z, -half, half);
   }
+
+  // A mode planner may intentionally keep its main force in reserve. A newly
+  // dropped airborne squad still needs a concrete attack or defensive hold,
+  // so fill any remaining idle handoff after the full planning pass.
+  updateAIParatrooperOrders({
+    enemyUnits: aliveEnemies,
+    playerUnits: alivePlayers,
+    game,
+    standardPlan,
+  });
 
   // Apply after every active AI planning tick so all standard, assault,
   // campaign, Clear Defenses, and Battle Simulation branches share the same

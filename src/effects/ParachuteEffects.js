@@ -354,6 +354,25 @@ function landingScatter(tx, tz, index, count, dropRadius) {
   };
 }
 
+function markEnemyParatrooperDrop(unit, game) {
+  if (unit?.team !== 'enemy') return;
+  unit._aiAirborneDrop = true;
+
+  // Hold the wave open as soon as the squad is created. The Tower Defence
+  // wave counter runs independently of the regular AI and otherwise cannot
+  // see a late airborne arrival until the next AI pass.
+  if (game?.towerDefense) {
+    unit._tdAttacker = true;
+    const frontline = game.mapDef?.frontline ?? game.mapDef?.capturePoints?.[0];
+    unit._tdFrontlineTarget = {
+      x: game.towerDefense.frontlineX ?? frontline?.x ?? game.mapDef?.playerBase?.x ?? 0,
+      z: game.towerDefense.frontlineZ ?? frontline?.z ?? game.mapDef?.playerBase?.z ?? 0,
+    };
+    unit._tdGoalStale = true;
+    unit._tdMoveGoal = null;
+  }
+}
+
 /**
  * Instant full-canopy drop (legacy / no transport). Squads appear under open chutes.
  */
@@ -379,6 +398,7 @@ export function spawnParatrooperSquad(game, tx, tz, opts = {}) {
     });
     unit._mapDef = game.mapDef;
     unit._dropping = true;
+    markEnemyParatrooperDrop(unit, game);
     grantEliteStatus(unit);
 
     const rig = createParachuteRig(game.scene, unit);
@@ -430,6 +450,7 @@ export function spawnParatrooperExit(game, opts = {}) {
   });
   unit._mapDef = game.mapDef;
   unit._dropping = true;
+  markEnemyParatrooperDrop(unit, game);
   grantEliteStatus(unit);
 
   // During freefall the squad hangs in a simple jump group (no canopy yet)

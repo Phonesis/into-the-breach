@@ -197,6 +197,7 @@ Japan’s Type 3 Chi-Nu fills the game’s top armor tier while remaining a hist
 | **LMB** | Select a unit or HQ; click a highlighted enemy to attack |
 | **LMB drag** | Box-select units |
 | **RMB** | Move, attack an enemy under the cursor, or mount selected foot troops on a friendly tank |
+| **Exit vehicle crew** | Select a stopped operational vehicle and use the selection-panel action to leave an empty hull for your crew, eligible infantry or airborne, or the enemy to reclaim |
 | **Shift + LMB** | Manual fire at open ground or cover scenery such as trees, hedges, and bunkers |
 | **Alt + Shift + LMB** | Fire a smoke shell from one ready selected artillery piece; 45 s cooldown and 60 s screen |
 | **Engage target** | Confirm the highlighted enemy in the selection panel |
@@ -228,7 +229,7 @@ Settings are saved in browser storage and apply across operations where relevant
 - **Battlefield interface:** Tactical map, Field icons, Unit status markers, Capture circles, and Frontline visibility.
 - **Unit behaviour:** Seek Cover, Automatic radio positioning, Hold Ground by default, and Artillery auto-fire.
 - **Build queue automation:** separate saved Auto Build preferences for the Central Command and Forward Bases structures in Frontline Command.
-- **Bodies / Destroyed Vehicle Despawn Delay:** 10 seconds, 30 seconds, 1 minute, 2 minutes, 5 minutes, or Permanent. Longer retention can reduce frame rate.
+- **Battlefield Debris Despawn Delay:** 10 seconds, 30 seconds, 1 minute, 2 minutes, 5 minutes, or Permanent. Controls fallen troops, knocked-out vehicles, and spent ammunition; longer retention can reduce frame rate.
 
 ## Battlefield systems
 
@@ -282,7 +283,7 @@ Commanders, radio operators, infantry, airborne, MG teams, and snipers can dig t
 
 Isolated foot troops and gun crews under pressure may surrender. A friendly unit close by liberates them; an enemy close by captures them and marches them off the map. Surrendered units stop firing and are not targeted while surrendering.
 
-Recoverable vehicle knockouts leave an intact, crewless hull. An engineer must restore a destroyed wreck before it can move or fire. Surviving bailed crews can reclaim their original vehicle, while infantry or airborne squads from **either side** can reman an operational crewless tank. Tank riders can mount friendly tanks and super-heavies, fire from the hull, and bail out under fire.
+Recoverable vehicle knockouts leave an intact, crewless hull. An engineer must restore a destroyed wreck before it can move or fire. Select a stopped operational vehicle and use **Exit vehicle crew** to deliberately leave an empty hull; its crew can re-enter, while infantry or airborne squads from **either side** can reman or capture it. Surviving bailed crews can reclaim their original vehicle. Tank riders can mount friendly tanks and super-heavies, fire from the hull, and bail out under fire.
 
 ### Battlefield persistence and reports
 

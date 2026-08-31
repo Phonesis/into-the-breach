@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { distanceBetween } from './Targeting.js';
+import { spawnVehicleCrewBailout } from './VehicleBailout.js';
 import { releaseFromBunker, getGarrisonBunkerSources } from './BunkerGarrison.js';
 import { applyMountedRiderVisuals, resetInfantryWalkPose } from '../units/InfantryVisuals.js';
 import { getVehicleDesign } from '../units/vehicleDesigns.js';
@@ -21,6 +22,13 @@ const RIDER_TYPES = new Set([
 
 const HOST_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'armoredCar', 'truck']);
 const RIDER_DECK_TYPES = new Set(['tank', 'tankDestroyer', 'superHeavyTank', 'truck']);
+const CREWED_VEHICLE_TYPES = new Set([
+  'tank',
+  'tankDestroyer',
+  'superHeavyTank',
+  'armoredCar',
+  'truck',
+]);
 
 const HOST_CAPACITY = {
   tank: 2,
@@ -100,6 +108,29 @@ export function canHostRiders(unitType) {
   return HOST_TYPES.has(unitType);
 }
 
+/** True when a live powered vehicle still has an operating crew aboard. */
+export function canExitVehicleCrew(vehicle) {
+  return !!(
+    vehicle &&
+    !vehicle.dead &&
+    !vehicle.surrendered &&
+    !vehicle._captureExit &&
+    !vehicle._crewless &&
+    !vehicle._crewBailedOut &&
+    CREWED_VEHICLE_TYPES.has(vehicle.def?.type)
+  );
+}
+
+/** Manual crew exit is a stationary action; moving vehicles must stop first. */
+export function canExitVehicleCrewNow(vehicle) {
+  return !!(
+    canExitVehicleCrew(vehicle) &&
+    !vehicle.moveTarget &&
+    !vehicle._movePath?.length &&
+    !vehicle._trafficYield
+  );
+}
+
 /** True when this specific unit can currently enter this specific vehicle. */
 export function canUnitEnterVehicle(unit, tank) {
   if (
@@ -107,6 +138,7 @@ export function canUnitEnterVehicle(unit, tank) {
     unit.dead ||
     unit.surrendered ||
     unit._captureExit ||
+    unit._dropping ||
     unit._mountedOnTankId ||
     !tank ||
     tank.dead ||
@@ -167,6 +199,9 @@ function squadLivingCount(unit) {
 }
 
 export function canSupplyReplacementCrew(unit, tank = null) {
+  if (!unit || unit.dead || unit.surrendered || unit._captureExit || unit._dropping) {
+    return false;
+  }
   const needed =
     unit?.def?.type === 'truckDriver' ? 1 : getReplacementCrewCount(tank);
   if (squadLivingCount(unit) < needed) return false;
@@ -243,6 +278,9 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
   if (tank?._replacementCrewUnitId === rider.id) {
     tank._replacementCrewUnitId = null;
     tank._crewless = !tank.dead;
+    // The internal crew has left the hull. This also prevents a later wreck
+    // pass from spawning a second bailout team for the same surviving crew.
+    tank._crewBailedOut = true;
     rider._replacementCrewVehicleId = null;
     rider._embeddedCrewCount = 0;
     syncEmbeddedCrewVisibility(rider, false);
@@ -258,6 +296,60 @@ export function releaseFromTank(rider, units, mapDef = null, dismountIndex = nul
     rider.position.z = pos.z;
     rider.position.y = pos.y;
   }
+}
+
+function clearVehicleOrders(vehicle, units = []) {
+  vehicle.clearAttackOrder?.();
+  vehicle.target = null;
+  vehicle.moveTarget = null;
+  vehicle._movePath = null;
+  vehicle._finalMoveGoal = null;
+  vehicle._autoMoveOrderX = null;
+  vehicle._autoMoveOrderZ = null;
+  vehicle._userMoveOrder = false;
+  vehicle._reverseMoveOrder = false;
+  vehicle._trafficYield = null;
+  vehicle._chasingAttack = false;
+  vehicle._aiTankManeuver = null;
+  vehicle._aiTankManeuverNextAt = 0;
+  const pendingGun = findUnitById(units, vehicle._pendingTowGunId);
+  if (pendingGun?._pendingTowTruckId === vehicle.id) {
+    pendingGun._pendingTowTruckId = null;
+  }
+  vehicle._pendingTowGunId = null;
+}
+
+/**
+ * Put a live vehicle's internal crew on the ground and leave the hull
+ * neutral/crewless. Existing replacement crews are released from the hull;
+ * ordinary vehicles receive the same animated crew used by bailout events.
+ */
+export function exitVehicleCrew(game, vehicle) {
+  if (!canExitVehicleCrewNow(vehicle)) return null;
+
+  const units = game?.units ?? [];
+  const mapDef = game?.mapDef ?? vehicle?._mapDef ?? null;
+  const replacementId = vehicle._replacementCrewUnitId;
+  if (replacementId != null) {
+    const crew = findUnitById(units, replacementId);
+    if (!crew || crew.dead || crew._mountedOnTankId !== vehicle.id) return null;
+    const index = Math.max(0, vehicle._tankRiderIds?.indexOf(crew.id) ?? 0);
+    releaseFromTank(crew, units, mapDef, index);
+    vehicle._crewless = true;
+    vehicle._crewBailedOut = true;
+    clearVehicleOrders(vehicle, units);
+    game?._rebuildUnitCaches?.();
+    return crew;
+  }
+
+  const crew = spawnVehicleCrewBailout(game, vehicle);
+  if (!crew) return null;
+  vehicle._crewless = true;
+  vehicle._replacementCrewUnitId = null;
+  vehicle._crewBailedOut = true;
+  clearVehicleOrders(vehicle, units);
+  game?._rebuildUnitCaches?.();
+  return crew;
 }
 
 export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null) {
@@ -290,6 +382,7 @@ export function tryRemanCrewlessTank(rider, tank, units, garrisonSources = null)
     tank.team = rider.team;
   }
   tank._crewless = false;
+  tank._crewBailedOut = false;
   // A captured hull must not inherit the former enemy crew's unfinished
   // tactical reverse/flank state.
   tank._aiTankManeuver = null;
@@ -323,7 +416,13 @@ export function dismountAllRiders(tank, units, mapDef = null) {
 }
 
 export function tryMountTank(rider, tank, units, garrisonSources = null) {
-  if (!rider || rider.dead || rider.surrendered || rider._captureExit) return false;
+  if (
+    !rider ||
+    rider.dead ||
+    rider.surrendered ||
+    rider._captureExit ||
+    rider._dropping
+  ) return false;
   if (!tank || tank.dead || tank.surrendered) return false;
   if (tank.team !== rider.team && !tank._crewless) return false;
   const reclaimingOwnVehicle =
@@ -371,6 +470,7 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
         rider &&
         !rider.dead &&
         !rider.surrendered &&
+        !rider._dropping &&
         canSupplyReplacementCrew(rider, tank)
     );
     if (!replacement) return 0;
@@ -386,7 +486,13 @@ export function issueMountOrder(riders, tank, units, garrisonSources = null) {
   if (!RIDER_DECK_TYPES.has(tank.def?.type)) return 0;
 
   for (const rider of riders) {
-    if (!rider || rider.dead || rider.surrendered || !canRideTanks(rider.def?.type)) continue;
+    if (
+      !rider ||
+      rider.dead ||
+      rider.surrendered ||
+      rider._dropping ||
+      !canRideTanks(rider.def?.type)
+    ) continue;
     if (rider.team !== tank.team) continue;
     if (issued + getTankRiderIds(tank).length >= cap) break;
 

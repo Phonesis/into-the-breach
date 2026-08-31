@@ -108,7 +108,13 @@ import { MedicFieldHospitalManager } from './MedicFieldHospital.js';
 import { BaseBuildingManager } from './BaseBuildingManager.js';
 import { getGarrisonBunkerSources, updateBunkerGarrison } from './BunkerGarrison.js';
 import { applyObstaclePath } from './MovePath.js';
-import { dismountAllRiders, releaseFromTank, updateTankRiders } from './TankRiders.js';
+import {
+  canExitVehicleCrew,
+  dismountAllRiders,
+  exitVehicleCrew,
+  releaseFromTank,
+  updateTankRiders,
+} from './TankRiders.js';
 import {
   updateTruckTowing,
   issueTowOrder,
@@ -246,6 +252,7 @@ import {
   spawnSmallArmsCasing,
   updateShellCasings,
   clearShellCasings,
+  pruneShellCasings,
 } from '../effects/ShellCasings.js';
 import { RangeRingManager } from '../visual/RangeRings.js';
 import { TargetIndicators } from '../visual/TargetIndicators.js';
@@ -2417,6 +2424,23 @@ export class Game {
     this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
   }
 
+  exitSelectedVehicleCrews() {
+    if (!this.running || this.gameOver || this.paused) return 0;
+    const selected = this._playerAlive.filter((u) => u.selected);
+    const selectedVehicles = selected.filter((unit) => canExitVehicleCrew(unit));
+    let exited = 0;
+    for (const vehicle of selectedVehicles) {
+      if (exitVehicleCrew(this, vehicle)) exited++;
+    }
+    if (exited === 0) return 0;
+    this.controller?.setHoveredTarget(null);
+    this._selectionUiKey = '';
+    const sel = this._playerAlive.filter((u) => u.selected);
+    this.ui?.updateSelection(sel, this.controller?.hoveredTarget, this.selectedHq, this);
+    this._syncUnitRoster();
+    return exited;
+  }
+
   detachSelectedTowedGun() {
     const selected = this._playerAlive.filter((u) => u.selected);
     const trucks = selected.filter((unit) => canDetachTowedGun(unit) && unit.def?.type === 'truck');
@@ -2505,6 +2529,7 @@ export class Game {
     this.debrisRetentionSeconds = Number.isFinite(seconds)
       ? Math.max(10, seconds)
       : Infinity;
+    pruneShellCasings(this.debrisRetentionSeconds);
   }
 
   _updateMinimap() {
@@ -4826,7 +4851,12 @@ export class Game {
         updateVehicleCookOffs(this, dt);
         updateHqBurnEffects(dt, this.camera, this.hqs);
         updateCombatEffects(dt);
-        updateShellCasings(dt, this.mapDef, this._terrainMesh);
+        updateShellCasings(
+          dt,
+          this.mapDef,
+          this._terrainMesh,
+          this.debrisRetentionSeconds
+        );
         updateDetachedCorpseFalls(dt);
         this._renderFrame();
         return;
@@ -4838,7 +4868,12 @@ export class Game {
       updateVehicleCookOffs(this, dt);
       updateHqBurnEffects(dt, this.camera, this.hqs);
       updateCombatEffects(dt);
-      updateShellCasings(dt, this.mapDef, this._terrainMesh);
+      updateShellCasings(
+        dt,
+        this.mapDef,
+        this._terrainMesh,
+        this.debrisRetentionSeconds
+      );
       updateDetachedCorpseFalls(dt);
       this._postMatchRenderAccum += dt;
       if (this._postMatchRenderAccum < 0.05) return;
@@ -5275,6 +5310,13 @@ export class Game {
         });
         flushTerrainNormals(this._terrainMesh);
 
+        updateShellCasings(
+          dt,
+          this.mapDef,
+          this._terrainMesh,
+          this.debrisRetentionSeconds
+        );
+
         if (fieldHasUnits || hasCorpses) {
           updateWreckEffects(dt, this.camera);
           updateVehicleCookOffs(this, dt);
@@ -5292,7 +5334,6 @@ export class Game {
             this.targetIndicators.update(playerSelected, this._playerAlive);
           }
           updateCombatEffects(dt);
-          updateShellCasings(dt, this.mapDef, this._terrainMesh);
           this._fireSupportUiAccum += dt;
           if (this._fireSupportUiAccum >= 0.15) {
             this._fireSupportUiAccum = 0;

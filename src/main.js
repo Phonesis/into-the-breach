@@ -294,6 +294,9 @@ const ui = new UIManager(uiRoot, {
   onDismountTankRiders() {
     game?.dismountSelectedTankRiders();
   },
+  onExitVehicleCrew() {
+    game?.exitSelectedVehicleCrews();
+  },
   onMinimapPan(x, z) {
     game?.panCameraTo(x, z);
   },

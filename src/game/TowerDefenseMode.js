@@ -36,6 +36,7 @@ import {
   diversifyAiMoveOrders,
   updateAiIncomingFireReactions,
   updateAiArtilleryThreatReactions,
+  updateAIParatrooperOrders,
   updateAiAbandonedTrenchCapture,
   maintainAiCommanderScreen,
 } from './AI.js';
@@ -642,6 +643,11 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
       mapDef: game?.mapDef,
     });
   }
+  updateAIParatrooperOrders({
+    enemyUnits,
+    playerUnits: game?._playerAlive ?? [],
+    game,
+  });
   updateAiAbandonedTrenchCapture(game, enemyUnits);
   const crewlessTankClaims = new Set();
   const truckClaims = new Set();
@@ -704,6 +710,12 @@ export function updateTowerDefenseEnemyAI(enemyUnits, game, defenses, dt) {
     unit._tdGoalStale = false;
     unit.moveTarget = { x: unit._tdMoveGoal.x, z: unit._tdMoveGoal.z };
   }
+
+  updateAIParatrooperOrders({
+    enemyUnits,
+    playerUnits: game?._playerAlive ?? [],
+    game,
+  });
 
   // This also repairs older saves whose march goals predate per-unit slots.
   diversifyAiMoveOrders(enemyUnits, game);

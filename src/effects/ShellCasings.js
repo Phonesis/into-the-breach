@@ -12,6 +12,7 @@ const _localSide = new THREE.Vector3();
 const _localRear = new THREE.Vector3();
 const _worldQuaternion = new THREE.Quaternion();
 const SMALL_ARMS_CASE_LIMIT = 1800;
+let casingClock = 0;
 
 function casingDimensions(caliber, type, kind = null) {
   if (type === 'smallArms') {
@@ -140,6 +141,28 @@ function trimSmallArmsCasings() {
   }
 }
 
+function pruneExpiredShellCasings(retentionSeconds) {
+  const retention = Number(retentionSeconds);
+  if (!Number.isFinite(retention)) return;
+  const lifetime = Math.max(0, retention);
+
+  for (let index = activeCasings.length - 1; index >= 0; index--) {
+    const casing = activeCasings[index];
+    const createdAt = casing.mesh.userData?.shellCasingCreatedAt ?? casingClock;
+    if (casingClock - createdAt < lifetime) continue;
+    casing.mesh.parent?.remove(casing.mesh);
+    activeCasings.splice(index, 1);
+  }
+
+  for (let index = settledCasings.length - 1; index >= 0; index--) {
+    const mesh = settledCasings[index];
+    const createdAt = mesh.userData?.shellCasingCreatedAt ?? casingClock;
+    if (casingClock - createdAt < lifetime) continue;
+    mesh.parent?.remove(mesh);
+    settledCasings.splice(index, 1);
+  }
+}
+
 function spawnCasing(scene, unit, ejectionPoint, { type, kind = null, caliber = null } = {}) {
   if (!scene || !unit?.mesh) return null;
   const isSmallArms = type === 'smallArms';
@@ -173,6 +196,7 @@ function spawnCasing(scene, unit, ejectionPoint, { type, kind = null, caliber = 
     kind
   );
   const mesh = makeCasingMesh(assets, type);
+  mesh.userData.shellCasingCreatedAt = casingClock;
   if (isSmallArms) {
     // Start just outside the ejection port so the case visibly clears the
     // receiver instead of appearing inside the weapon silhouette.
@@ -215,9 +239,9 @@ function spawnCasing(scene, unit, ejectionPoint, { type, kind = null, caliber = 
 }
 
 /**
- * Eject one persistent cartridge case from a towed AT gun or field howitzer.
- * Settled field-gun cases are intentionally never culled during the battle;
- * small-arms cases use a separate soft cap because they are much more frequent.
+ * Eject one cartridge case from a towed AT gun or field howitzer.
+ * Casing lifetime follows the shared bodies/wrecks retention setting. Small-arms
+ * cases also keep a separate emergency soft cap because they are much more frequent.
  */
 export function spawnShellCasing(scene, unit) {
   if (!scene || !unit?.mesh) return null;
@@ -238,8 +262,15 @@ export function spawnSmallArmsCasing(scene, unit, ejectionPoint, kind = 'rifle')
   });
 }
 
-export function updateShellCasings(dt, mapDef, terrainMesh = null) {
+export function updateShellCasings(
+  dt,
+  mapDef,
+  terrainMesh = null,
+  retentionSeconds = Infinity
+) {
   const step = Math.min(0.05, Math.max(0, dt));
+  if (step > 0) casingClock += step;
+  pruneExpiredShellCasings(retentionSeconds);
   if (step <= 0) return;
 
   for (let index = activeCasings.length - 1; index >= 0; index--) {
@@ -289,6 +320,7 @@ export function clearShellCasings(scene = null) {
   for (const mesh of settledCasings) mesh.parent?.remove(mesh);
   activeCasings.length = 0;
   settledCasings.length = 0;
+  casingClock = 0;
 
   for (const assets of assetCache.values()) {
     assets.bodyGeometry.dispose();
@@ -305,6 +337,10 @@ export function clearShellCasings(scene = null) {
     });
     for (const object of strays) object.parent?.remove(object);
   }
+}
+
+export function pruneShellCasings(retentionSeconds) {
+  pruneExpiredShellCasings(retentionSeconds);
 }
 
 export function getShellCasingCounts() {

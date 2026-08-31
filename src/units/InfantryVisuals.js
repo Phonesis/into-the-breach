@@ -2135,7 +2135,6 @@ const RIDER_GROUND_KIT_KEEP = new Set([
   'squadMember',
   'selectionHitbox',
   'selectionRing',
-  'targetHighlightRing',
   'fieldUnitIcon',
   'healthBar',
   'inspiredMarker',

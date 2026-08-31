@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { setTargetHighlight } from '../units/UnitMeshes.js';
 import { getSceneryTargetLabel, isSceneryTarget } from '../game/SceneryTarget.js';
 import { getBaseBuildingTargetLabel, isBaseBuildingTarget } from '../game/BaseBuildingTarget.js';
 import { canUnitEnterVehicle } from '../game/TankRiders.js';
@@ -25,7 +24,6 @@ export class TargetIndicators {
     this.scene = scene;
     this.hoverTarget = null;
     this.hoverAction = false;
-    this.engagedTargets = new Set();
     this._hqHoverRing = null;
     this._sceneryHoverRing = null;
     this._linePool = [];
@@ -55,7 +53,6 @@ export class TargetIndicators {
 
   clear() {
     this.setHoverTarget(null);
-    this.engagedTargets.clear();
     for (const line of this._linePool) line.visible = false;
     if (this._hqHoverRing) {
       this.scene.remove(this._hqHoverRing);
@@ -69,10 +66,6 @@ export class TargetIndicators {
       this._sceneryHoverRing.material.dispose();
       this._sceneryHoverRing = null;
     }
-    for (const u of this._lastUnits ?? []) {
-      if (u.mesh) setTargetHighlight(u.mesh, false);
-    }
-    this._lastUnits = [];
   }
 
   setHoverTarget(target, { action = false } = {}) {
@@ -93,9 +86,7 @@ export class TargetIndicators {
       return;
     }
     if (target.dead) return;
-    if (target.mesh && target.def) {
-      if (!this.engagedTargets.has(target)) setTargetHighlight(target.mesh, false);
-    } else if (target.mesh && this._hqHoverRing && target === this.hoverTarget) {
+    if (!target.def && target.mesh && this._hqHoverRing && target === this.hoverTarget) {
       this._hqHoverRing.visible = false;
     }
   }
@@ -128,11 +119,7 @@ export class TargetIndicators {
       this._sceneryHoverRing.visible = true;
       return;
     }
-    if (target.mesh && target.def) {
-      setTargetHighlight(target.mesh, true, engaged, action);
-      return;
-    }
-    if (target.mesh) {
+    if (target.mesh && !target.def) {
       if (!this._hqHoverRing) {
         const geo = new THREE.RingGeometry(5.5, 6.2, 40);
         const mat = new THREE.MeshBasicMaterial({
@@ -172,16 +159,6 @@ export class TargetIndicators {
       });
     }
 
-    for (const prev of this.engagedTargets) {
-      if (!engaged.has(prev) && prev.mesh?.def) setTargetHighlight(prev.mesh, false);
-    }
-
-    this.engagedTargets = engaged;
-
-    for (const t of engaged) {
-      if (t.mesh && t.def) setTargetHighlight(t.mesh, true, true);
-    }
-
     const hoverAction = !!(
       this.hoverTarget &&
       selectedUnits.some((unit) => canUnitEnterVehicle(unit, this.hoverTarget))
@@ -215,7 +192,6 @@ export class TargetIndicators {
     }
     for (; li < this._linePool.length; li++) this._linePool[li].visible = false;
 
-    this._lastUnits = allPlayerUnits;
   }
 
   static getTargetLabel(target) {
