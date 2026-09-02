@@ -3387,15 +3387,23 @@ export class UIManager {
       const heading = row?.querySelector('strong')?.textContent?.trim();
       title.textContent = heading || 'Highlight a setting';
       text.textContent = detail || 'Hover over or focus a setting to see how it changes the battlefield.';
+      panel.classList.toggle('is-active', !!row);
+      settingsShell?.classList.toggle('has-info', !!row);
       if (row && settingsShell) {
         const rowRect = row.getBoundingClientRect();
         const shellRect = settingsShell.getBoundingClientRect();
-        panel.style.setProperty('--settings-info-top', `${Math.max(0, rowRect.top - shellRect.top)}px`);
+        const panelRect = panel.getBoundingClientRect();
+        const screenRect = settingsScreen?.getBoundingClientRect();
+        const viewportPadding = 0.85 * parseFloat(getComputedStyle(document.documentElement).fontSize || '16');
+        const viewportTop = Math.max(screenRect?.top ?? 0, 0) + viewportPadding;
+        const viewportBottom = Math.min(screenRect?.bottom ?? window.innerHeight, window.innerHeight) - viewportPadding;
+        const preferredTop = rowRect.top;
+        const maxTop = viewportBottom - panelRect.height;
+        const boundedTop = Math.min(Math.max(preferredTop, viewportTop), Math.max(viewportTop, maxTop));
+        panel.style.setProperty('--settings-info-top', `${boundedTop - shellRect.top}px`);
       } else {
         panel.style.removeProperty('--settings-info-top');
       }
-      panel.classList.toggle('is-active', !!row);
-      settingsShell?.classList.toggle('has-info', !!row);
     };
 
     for (const row of rows) {

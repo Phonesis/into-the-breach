@@ -5685,7 +5685,7 @@ body.portrait-blocked .mobile-support-screen {
   top: var(--settings-info-top, 0);
   left: calc(100% + 1rem);
   width: 20rem;
-  max-height: 14rem;
+  max-height: min(14rem, calc(100vh - 1.7rem));
   flex-direction: column;
   gap: 0.25rem;
   overflow: hidden;
