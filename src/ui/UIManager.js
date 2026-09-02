@@ -2740,7 +2740,11 @@ export class UIManager {
     const overlay = this.root.querySelector('#overlay-guide');
     if (!overlay) return;
     const guideScroll = this.root.querySelector('#guide-content');
+    const guideMain = guideScroll?.querySelector('.guide-main');
+    const guideRail = guideScroll?.querySelector('.guide-rail');
     if (guideScroll) guideScroll.scrollTop = 0;
+    if (guideMain) guideMain.scrollTop = 0;
+    if (guideRail) guideRail.scrollTop = 0;
     overlay.classList.remove('hidden');
     overlay.classList.toggle('guide-from-menu', fromMenu);
     this._syncGuideCloseButton();

@@ -11,6 +11,40 @@ import { applyPublicAssetCssVars } from './lib/publicUrl.js';
 
 applyPublicAssetCssVars();
 
+const APP_HISTORY_GUARD_KEY = '__intoTheBreachHistoryGuard';
+
+function installBrowserNavigationGuard() {
+  if (!globalThis.history?.pushState || !globalThis.addEventListener) return;
+
+  // Menu screens are an in-page flow rather than separate browser documents.
+  // The browser toolbar cannot be disabled by page JavaScript, but a same-page
+  // guard entry prevents Back from unloading the app. Forward has no effect in
+  // the normal flow because the guard remains the latest history entry.
+  const currentState = globalThis.history.state;
+  if (currentState?.[APP_HISTORY_GUARD_KEY] !== true) {
+    const guardState = currentState && typeof currentState === 'object'
+      ? { ...currentState, [APP_HISTORY_GUARD_KEY]: true }
+      : { [APP_HISTORY_GUARD_KEY]: true };
+    globalThis.history.pushState(
+      guardState,
+      globalThis.document.title,
+      globalThis.location.href
+    );
+  }
+
+  let restoring = false;
+  globalThis.addEventListener('popstate', () => {
+    if (restoring) {
+      restoring = false;
+      return;
+    }
+    restoring = true;
+    globalThis.history.forward();
+  });
+}
+
+installBrowserNavigationGuard();
+
 const constrainedAudio = isConstrainedMobileAudio();
 let orientationHeldPause = false;
 
