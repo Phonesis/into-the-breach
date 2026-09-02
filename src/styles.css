@@ -5988,10 +5988,10 @@ body.portrait-blocked .mobile-support-screen {
   animation-delay: 120ms;
 }
 
-@media (min-width: 721px) and (max-width: 1380px) {
+@media (min-width: 721px) and (max-width: 1800px) {
   .settings-screen .title-block,
   .settings-screen .settings-panel-shell {
-    width: 96vw;
+    width: min(83rem, 96vw);
   }
 
   .settings-panel-shell {
