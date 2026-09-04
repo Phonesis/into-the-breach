@@ -8,6 +8,7 @@ import {
   requiresLandscapeOrientation,
 } from './lib/tabletDetect.js';
 import { applyPublicAssetCssVars } from './lib/publicUrl.js';
+import { getBattleSaveLoadError } from './game/BattleSave.js';
 
 applyPublicAssetCssVars();
 
@@ -147,6 +148,15 @@ const ui = new UIManager(uiRoot, {
   onAchievementPresented(achievement) {
     sounds.playAchievement(achievement?.kind);
   },
+  isBattlePaused() {
+    return !!game?.paused;
+  },
+  onPauseBattle() {
+    game?.setPaused(true);
+  },
+  onResumeBattle() {
+    if (game?.paused) game.setPaused(false);
+  },
   async onStartGame(factionId, mapId, gameMode, options = {}) {
     primeAudio();
     const audioReady = sounds.primeForCombat();
@@ -179,7 +189,14 @@ const ui = new UIManager(uiRoot, {
       wireSelectBox(canvas, ui);
     }
     if (!game.loadBattle(saveId)) {
-      ui.showSaveToast?.('Could not load that save.');
+      const why = getBattleSaveLoadError(saveId);
+      ui.showSaveToast?.(
+        why === 'version'
+          ? 'That save is from an older game version and cannot be loaded.'
+          : why === 'corrupt'
+            ? 'That save is incomplete and cannot be loaded.'
+            : 'Could not load that save.'
+      );
       sounds.leaveBattle();
       ui.hideHUD();
       return;
@@ -341,11 +358,34 @@ const ui = new UIManager(uiRoot, {
 function wireSelectBox(canvas, uiManager) {
   const box = uiManager.getSelectBoxEl();
   let start = null;
+  let pointerId = null;
+
+  const dragSlop = (e) =>
+    e.pointerType === 'touch' || e.pointerType === 'pen' ? 18 : 6;
+
+  const endBox = () => {
+    if (pointerId != null && canvas.hasPointerCapture?.(pointerId)) {
+      try {
+        canvas.releasePointerCapture(pointerId);
+      } catch {
+        /* already released */
+      }
+    }
+    pointerId = null;
+    start = null;
+    box.classList.remove('active');
+  };
 
   canvas.addEventListener('pointerdown', (e) => {
     resumeAudioContext();
-    if (e.button !== 0 || !game?.running) return;
+    if (e.button !== 0 || !game?.running || game.paused) return;
     start = { x: e.clientX, y: e.clientY };
+    pointerId = e.pointerId;
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* capture is best-effort */
+    }
     box.style.left = `${e.clientX}px`;
     box.style.top = `${e.clientY}px`;
     box.style.width = '0';
@@ -354,10 +394,10 @@ function wireSelectBox(canvas, uiManager) {
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!start || !game?.running) return;
+    if (!start || !game?.running || game.paused) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
-    if (Math.sqrt(dx * dx + dy * dy) < 6) return;
+    if (Math.hypot(dx, dy) < dragSlop(e)) return;
     box.classList.add('active');
     const left = Math.min(start.x, e.clientX);
     const top = Math.min(start.y, e.clientY);
@@ -367,9 +407,10 @@ function wireSelectBox(canvas, uiManager) {
     box.style.height = `${Math.abs(dy)}px`;
   });
 
-  canvas.addEventListener('pointerup', () => {
-    start = null;
-    box.classList.remove('active');
+  canvas.addEventListener('pointerup', endBox);
+  canvas.addEventListener('pointercancel', endBox);
+  canvas.addEventListener('lostpointercapture', (e) => {
+    if (e.pointerId === pointerId) endBox();
   });
 }
 

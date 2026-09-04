@@ -11,6 +11,7 @@ export { isLastStandMode, LAST_STAND_SUPPLIES };
 import { resolveUnitSpawnPosition, spawnUnitAt } from './Spawner.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { canAddRadioOperator } from './RadioOperatorBehavior.js';
+import { isCombatLiving } from './EliminationRules.js';
 
 /** Minimum gap between placed units (game meters). */
 export const LAST_STAND_MIN_SPACING = 3.8;
@@ -594,15 +595,7 @@ export function assignLastStandEnemyStances(game) {
 function livingTeamCount(units, team) {
   let n = 0;
   for (const u of units) {
-    if (
-      u.team === team &&
-      !u.dead &&
-      !u.surrendered &&
-      !u._captureExit &&
-      u.def?.type !== 'commander'
-    ) {
-      n++;
-    }
+    if (u.team === team && isCombatLiving(u)) n++;
   }
   return n;
 }
@@ -612,19 +605,26 @@ export function countLastStandCombatUnits(units, team) {
   return livingTeamCount(units, team);
 }
 
+function teamHasInboundAirborne(game, team) {
+  const support = team === 'player' ? game.fireSupport : game.enemyFireSupport;
+  return !!support?.hasPendingUnitSpawns?.();
+}
+
 export function checkLastStandVictory(game) {
   if (!game.lastStand || game.lastStand.phase !== 'battle') return null;
 
   const playerAlive = livingTeamCount(game.units, 'player');
   const enemyAlive = livingTeamCount(game.units, 'enemy');
+  const playerInbound = teamHasInboundAirborne(game, 'player');
+  const enemyInbound = teamHasInboundAirborne(game, 'enemy');
 
-  if (playerAlive === 0 && enemyAlive === 0) {
+  if (playerAlive === 0 && enemyAlive === 0 && !playerInbound && !enemyInbound) {
     return { victory: false, detail: 'Mutual annihilation — your forces are gone.' };
   }
-  if (enemyAlive === 0) {
+  if (enemyAlive === 0 && !enemyInbound) {
     return { victory: true, detail: 'Last man standing — all enemy forces destroyed!' };
   }
-  if (playerAlive === 0) {
+  if (playerAlive === 0 && !playerInbound) {
     return { victory: false, detail: 'Your forces have been wiped out.' };
   }
   return null;

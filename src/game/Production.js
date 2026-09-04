@@ -4,10 +4,12 @@ import { resolveUnitSpawnPosition } from './Spawner.js';
 import {
   MAX_RADIO_OPERATORS_PER_SIDE,
   canAddRadioOperator,
+  countRadioOperators,
 } from './RadioOperatorBehavior.js';
 
 const MAX_QUEUE = 4;
 const SPAWN_RING_DIST = 11;
+const SPAWN_RETRY_LIMIT = 12;
 
 export class ProductionManager {
   constructor({
@@ -19,6 +21,7 @@ export class ProductionManager {
     getScenery = null,
     onSpawn,
     onQueueChange,
+    refundResources = null,
     getUnlockedUnits = null,
     getPlayerProductionUnits = null,
     isProductionBlocked = null,
@@ -40,6 +43,7 @@ export class ProductionManager {
     this.getScenery = getScenery;
     this.onSpawn = onSpawn;
     this.onQueueChange = onQueueChange;
+    this.refundResources = refundResources;
     this.queues = { player: [], enemy: [] };
     this._spawnAngle = { player: 0, enemy: Math.PI };
     this.buildTimeMult = 1;
@@ -115,9 +119,7 @@ export class ProductionManager {
     const units = this.getUnits?.() ?? [];
     const queued = (this.queues[team] ?? []).filter((j) => j.unitType === 'radioOperator')
       .length;
-    const living = units.filter(
-      (u) => u && !u.dead && u.team === team && u.def?.type === 'radioOperator'
-    ).length;
+    const living = countRadioOperators(units, team);
     return {
       limit: MAX_RADIO_OPERATORS_PER_SIDE,
       living,
@@ -171,6 +173,8 @@ export class ProductionManager {
       unitType,
       def,
       remaining: buildTime,
+      cost: playerCheat ? 0 : def.cost,
+      spawnFails: 0,
     });
     if (this.onQueueChange) this.onQueueChange(team);
     return true;
@@ -192,6 +196,14 @@ export class ProductionManager {
         const unit = this._spawn(team, job.def, job.unitType);
         if (!unit) {
           // Dense urban pads can fail a spawn; retry instead of eating a paid unit.
+          job.spawnFails = (job.spawnFails ?? 0) + 1;
+          if (job.spawnFails >= SPAWN_RETRY_LIMIT) {
+            q.shift();
+            const refund = job.cost ?? job.def?.cost ?? 0;
+            if (refund > 0) this.refundResources?.(team, refund);
+            if (this.onQueueChange) this.onQueueChange(team);
+            continue;
+          }
           job.remaining = 0.35;
           continue;
         }

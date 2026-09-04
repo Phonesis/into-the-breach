@@ -2,6 +2,8 @@
 
 import { currentLivingPersonnel } from '../data/squadSizes.js';
 import { isTankType, isVehicleUnit } from '../units/VehicleTypes.js';
+import { isDefenseTarget } from './DefenseTarget.js';
+import { isBaseBuildingTarget } from './BaseBuildingTarget.js';
 
 /** Small boundary tolerance used by weapon checks to prevent range-edge flicker. */
 export const WEAPON_RANGE_SLACK = 1.02;
@@ -135,13 +137,16 @@ export function isInArtilleryCrewSmallArmsRange(
   if (
     attacker?.def?.type !== 'artillery' ||
     !weapon ||
-    !target?.def ||
+    !target ||
     target.dead ||
     target.isGround ||
     isCrewlessVehicleTarget(target)
   ) {
     return false;
   }
+  const structureTarget =
+    isHqTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target);
+  if (!target.def && !structureTarget) return false;
   return distanceBetween(attacker, target) <= weapon.range * slack;
 }
 

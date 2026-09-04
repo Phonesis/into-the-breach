@@ -7,6 +7,7 @@ import {
 } from '../world/UrbanLayout.js';
 import { resolveUnitSpawnPosition } from './Spawner.js';
 import { canAddRadioOperator } from './RadioOperatorBehavior.js';
+import { isCombatLiving } from './EliminationRules.js';
 
 /** Defender layout scaled by difficulty.enemyArmyMult in spawn. */
 export const CLEARANCE_DEFENDER_LAYOUT = [
@@ -815,48 +816,59 @@ export function spawnClearanceDefenders({
   return units;
 }
 
-export function checkClearanceVictory(game) {
-  const enemyAlive = game.units.filter(
-    (u) =>
-      u.team === 'enemy' &&
-      !u.dead &&
-      !u.surrendered &&
-      !u._captureExit &&
-      u.def?.type !== 'commander'
-  ).length;
-  const playerAlive = game.units.filter(
-    (u) =>
-      u.team === 'player' &&
-      !u.dead &&
-      !u.surrendered &&
-      !u._captureExit &&
-      u.def?.type !== 'commander'
-  ).length;
-  const playerAttacks = isClearancePlayerAttacker(game);
+/** True while a 3-minute reinforcement cycle is still scheduled to arrive. */
+export function clearanceHasPendingReinforcements(game) {
+  const state = game?.clearanceReinforcements;
+  if (!state?.enabled) return false;
+  const nextAt = state.nextAt;
+  if (!Number.isFinite(nextAt) || game.matchTime >= nextAt) return false;
+  if (
+    game.clearanceTimeLimitEnabled !== false &&
+    nextAt >= CLEARANCE_TIME_LIMIT
+  ) {
+    return false;
+  }
+  return true;
+}
 
-  if (enemyAlive === 0 && playerAlive === 0) {
-    return {
-      victory: false,
-      detail: playerAttacks
-        ? 'Mutual annihilation — the assault collapsed with the garrison.'
-        : 'Mutual annihilation — the garrison fell with the assault force.',
-    };
-  }
-  if (enemyAlive === 0) {
-    return {
-      victory: true,
-      detail: playerAttacks
-        ? 'All enemy defensive positions cleared!'
-        : 'Assault broken — the attacking force has been destroyed!',
-    };
-  }
-  if (playerAlive === 0) {
-    return {
-      victory: false,
-      detail: playerAttacks
-        ? 'All your units have been lost!'
-        : 'Defenses overrun — your garrison has been wiped out!',
-    };
+export function checkClearanceVictory(game) {
+  const enemyAlive = game.units.filter((u) => u.team === 'enemy' && isCombatLiving(u)).length;
+  const playerAlive = game.units.filter((u) => u.team === 'player' && isCombatLiving(u)).length;
+  const playerAttacks = isClearancePlayerAttacker(game);
+  const pendingWaves = clearanceHasPendingReinforcements(game);
+  const playerInbound = !!game.fireSupport?.hasPendingUnitSpawns?.();
+  const enemyInbound = !!game.enemyFireSupport?.hasPendingUnitSpawns?.();
+
+  const holdWipe =
+    pendingWaves ||
+    (playerAlive === 0 && playerInbound) ||
+    (enemyAlive === 0 && enemyInbound);
+
+  if (!holdWipe) {
+    if (enemyAlive === 0 && playerAlive === 0) {
+      return {
+        victory: false,
+        detail: playerAttacks
+          ? 'Mutual annihilation — the assault collapsed with the garrison.'
+          : 'Mutual annihilation — the garrison fell with the assault force.',
+      };
+    }
+    if (enemyAlive === 0) {
+      return {
+        victory: true,
+        detail: playerAttacks
+          ? 'All enemy defensive positions cleared!'
+          : 'Assault broken — the attacking force has been destroyed!',
+      };
+    }
+    if (playerAlive === 0) {
+      return {
+        victory: false,
+        detail: playerAttacks
+          ? 'All your units have been lost!'
+          : 'Defenses overrun — your garrison has been wiped out!',
+      };
+    }
   }
   if (game.clearanceTimeLimitEnabled !== false && game.matchTime >= CLEARANCE_TIME_LIMIT) {
     return {

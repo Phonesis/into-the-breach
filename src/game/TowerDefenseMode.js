@@ -230,6 +230,7 @@ export function updateHqDefenseFrontlineRetreat(game, dt) {
   // Any enemy past the line toward HQ (same margin as emplacement breach defeat)
   let pastLine = false;
   for (const u of game._enemyAlive) {
+    if (u._crewless || u.surrendered || u._captureExit || u._tdAttacker === false) continue;
     const vx = u.position.x - fl.x;
     const vz = u.position.z - fl.z;
     const towardPlayer = (vx * toPlayerX + vz * toPlayerZ) / len;
@@ -496,7 +497,9 @@ export function updateTowerDefenseMode(game, dt) {
       td.spawnTimer += td.spawnInterval;
     }
 
-    const enemiesAlive = game._enemyAlive.filter((u) => u._tdAttacker).length;
+    const enemiesAlive = game._enemyAlive.filter(
+      (u) => u._tdAttacker && !u._crewless && !u.surrendered && !u._captureExit
+    ).length;
     if (td.spawnQueue.length === 0 && enemiesAlive === 0) {
       onWaveCleared(game, td);
     }
@@ -754,6 +757,7 @@ export function checkTowerDefenseBreach(game, dt = 0) {
 
   let pastLine = false;
   for (const u of game._enemyAlive) {
+    if (u._crewless || u.surrendered || u._captureExit || u._tdAttacker === false) continue;
     const vx = u.position.x - fl.x;
     const vz = u.position.z - fl.z;
     const towardPlayer = (vx * toPlayerX + vz * toPlayerZ) / len;

@@ -94,6 +94,7 @@ export class FireSupportManager {
     this.pendingStrikeMarker = null;
     this.cooldowns = makeCooldowns();
     this.events = [];
+    this.scheduledStrikes = [];
     this.preview = null;
     this._previewScale = 1;
     this.targetRejectReason = null;
@@ -122,10 +123,23 @@ export class FireSupportManager {
   }
 
   get targetUnits() {
-    const units =
-      this.targetTeam === ENEMY ? this.game._enemyAlive : this.game._playerAlive;
-    if (this.targetTeam !== PLAYER) return units;
-    return [...units, ...(this.game.defenses?.getAttackTargets?.() ?? [])];
+    return this.targetTeam === ENEMY ? this.game._enemyAlive : this.game._playerAlive;
+  }
+
+  /** Enemy structures in the blast — base buildings, emplacements, and fieldworks. */
+  get targetStructures() {
+    const team = this.targetTeam;
+    const out = [];
+    const add = (targets) => {
+      for (const target of targets ?? []) {
+        if (!target || target.dead || target.team !== team) continue;
+        out.push(target);
+      }
+    };
+    add(this.game.baseBuildings?.getAttackTargets?.());
+    add(this.game.defenses?.getAttackTargets?.());
+    add(this.game.engineerSandbags?.getAttackTargets?.());
+    return out;
   }
 
   reset() {
@@ -133,6 +147,7 @@ export class FireSupportManager {
     this.clearPendingStrike();
     this.cooldowns = makeCooldowns();
     this.events = [];
+    this.scheduledStrikes = [];
     this.clearPreview();
     this.targetRejectReason = null;
     this.airborneCloudCoverRemaining = AIRBORNE_CLOUD_COVER_SECONDS;
@@ -143,6 +158,11 @@ export class FireSupportManager {
 
   getDef(type) {
     return FIRE_SUPPORT_TYPES[type];
+  }
+
+  /** True while an airborne drop still has squads that have not left the aircraft. */
+  hasPendingUnitSpawns() {
+    return this.events.some((ev) => ev.spawnsUnits && ev.at > 0);
   }
 
   /** False after the single Clear Defenses airborne has been spent. */
@@ -508,11 +528,15 @@ export class FireSupportManager {
     this.airborneUsesLeft = Math.max(0, this.airborneUsesLeft - 1);
   }
 
-  scheduleStrike(type, tx, tz) {
-    if (!this.hasCommandLink()) return false;
-    if (type === 'airborneDrop' && this.isAirborneCloudCovered()) return false;
-    if (this.getTargetRejectReason(type, tx, tz)) return false;
+  scheduleStrike(type, tx, tz, { restoring = false } = {}) {
+    if (!restoring) {
+      if (!this.hasCommandLink()) return false;
+      if (type === 'airborneDrop' && this.isAirborneCloudCovered()) return false;
+      if (this.getTargetRejectReason(type, tx, tz)) return false;
+    }
     const def = this.getDef(type);
+    if (!def) return false;
+    this._restoringStrike = restoring;
     const scene = this.game.scene;
     const mapDef = this.game.mapDef;
 
@@ -546,7 +570,7 @@ export class FireSupportManager {
       const flyDuration =
         approachTime + (def.runLength + fireTrail) / planeSpeed + 1.2;
 
-      spawnStrikeWarning(scene, mapDef, tx, tz, def.runLength * 0.5, false);
+      this._warnStrike(scene, mapDef, tx, tz, def.runLength * 0.5, false);
 
       // Impacts track the fighter along the extended gun run (lead → corridor → trail).
       // Light lateral scatter so the scar trail reads as a spray, not a dotted line.
@@ -664,7 +688,7 @@ export class FireSupportManager {
       const releaseAt = spawnAt + releaseDist / planeSpeed;
       const flyDuration = approachTime + runLen / planeSpeed + 1.4;
 
-      spawnStrikeWarning(scene, mapDef, tx, tz, def.hitRadius, true);
+      this._warnStrike(scene, mapDef, tx, tz, def.hitRadius, true);
       prewarmStrikeImpacts(this.game.renderer, mapDef, [{ x: tx, z: tz }], true, this.game.scene);
       registerIncomingArtilleryStrike(this.game, {
         ownerTeam: this.ownerTeam,
@@ -736,7 +760,7 @@ export class FireSupportManager {
       });
 
     } else if (type === 'barrage') {
-      spawnStrikeWarning(scene, mapDef, tx, tz, def.radius, true);
+      this._warnStrike(scene, mapDef, tx, tz, def.radius, true);
       sounds.playFireSupportSalvo('barrage', { x: tx, z: tz });
 
       const impacts = [];
@@ -777,8 +801,8 @@ export class FireSupportManager {
       const startX = tx - dx * def.creepLength;
       const startZ = tz - dz * def.creepLength;
 
-      spawnStrikeWarning(scene, mapDef, tx, tz, def.targetRadius, true);
-      spawnStrikeWarning(scene, mapDef, startX, startZ, def.laneWidth * 0.55, true);
+      this._warnStrike(scene, mapDef, tx, tz, def.targetRadius, true);
+      this._warnStrike(scene, mapDef, startX, startZ, def.laneWidth * 0.55, true);
 
       sounds.playFireSupportSalvo('creepingBarrage', { x: tx, z: tz });
 
@@ -831,7 +855,7 @@ export class FireSupportManager {
       });
       prewarmStrikeImpacts(this.game.renderer, mapDef, impacts, false, this.game.scene);
     } else if (type === 'airborneDrop') {
-      spawnStrikeWarning(scene, mapDef, tx, tz, def.dropRadius, false);
+      this._warnStrike(scene, mapDef, tx, tz, def.dropRadius, false);
 
       const hq = this.ownerHq;
       const hx = hq?.position?.x ?? this.ownerBase.x;
@@ -863,6 +887,7 @@ export class FireSupportManager {
 
       this.events.push({
         at: spawnAt,
+        spawnsUnits: true,
         fn: () => {
           flight = spawnTransportPlane(
             scene,
@@ -901,6 +926,7 @@ export class FireSupportManager {
 
         this.events.push({
           at: Math.max(def.warnTime * 0.85, jumpAt),
+          spawnsUnits: true,
           fn: () => {
             const age = approachTime + (runLen * tAlong) / planeSpeed;
             const doorLocal = flight?.doorLocal ?? { x: -1, y: -0.2, z: -1.1 };
@@ -935,6 +961,49 @@ export class FireSupportManager {
         });
       }
     }
+    if (!restoring) {
+      this.scheduledStrikes.push({ type, x: tx, z: tz, age: 0 });
+    }
+    this._restoringStrike = false;
+    return true;
+  }
+
+  _warnStrike(scene, mapDef, x, z, radius, explosive) {
+    if (this._restoringStrike) return;
+    spawnStrikeWarning(scene, mapDef, x, z, radius, explosive);
+  }
+
+  exportScheduledStrikes() {
+    return (this.scheduledStrikes ?? [])
+      .filter((strike) => strike?.type && Number.isFinite(strike.x) && Number.isFinite(strike.z))
+      .map((strike) => ({
+        type: strike.type,
+        x: strike.x,
+        z: strike.z,
+        age: Math.max(0, strike.age ?? 0),
+      }));
+  }
+
+  restoreScheduledStrikes(strikes) {
+    this.events = [];
+    this.scheduledStrikes = [];
+    for (const saved of strikes ?? []) {
+      if (!saved?.type || !Number.isFinite(saved.x) || !Number.isFinite(saved.z)) continue;
+      const age = Math.max(0, saved.age ?? 0);
+      const before = this.events.length;
+      if (!this.scheduleStrike(saved.type, saved.x, saved.z, { restoring: true })) continue;
+      this.scheduledStrikes.push({ type: saved.type, x: saved.x, z: saved.z, age });
+      for (let i = before; i < this.events.length; i++) {
+        this.events[i].at -= age;
+      }
+    }
+    const due = [];
+    this.events = this.events.filter((ev) => {
+      if (ev.at > 0) return true;
+      due.push(ev);
+      return false;
+    });
+    for (const ev of due) ev.fn();
   }
 
   applyDamage(x, z, radius, unitDamage, hqDamage, attackerType = 'artillery') {
@@ -965,25 +1034,28 @@ export class FireSupportManager {
       scenery: this.game.scenery,
     };
 
-    for (const u of this.targetUnits ?? []) {
-      const dx = u.position.x - x;
-      const dz = u.position.z - z;
+    const applyBlast = (target, { recordKill = false, morale = false } = {}) => {
+      const px = target.position?.x;
+      const pz = target.position?.z;
+      if (!Number.isFinite(px) || !Number.isFinite(pz)) return;
+      const dx = px - x;
+      const dz = pz - z;
       const d2 = dx * dx + dz * dz;
-      if (d2 > radiusSq) continue;
+      if (d2 > radiusSq) return;
       const d = Math.sqrt(d2);
       const t = 1 - d / radius;
       let dmg = unitDamage * t * t;
-      const incomingCoverMultiplier = getIncomingDamageMultiplier(u, cover, {
+      const incomingCoverMultiplier = getIncomingDamageMultiplier(target, cover, {
         def: { type: attackerType },
         position: { x, z },
       });
       dmg *= incomingCoverMultiplier;
-      if (airBomb && u.def && d <= (bombDef.directHitRadius ?? 2.5)) {
+      if (airBomb && target.def && d <= (bombDef.directHitRadius ?? 2.5)) {
         dmg *= bombDef.directHitDamageMult ?? 1.15;
       }
-      const wasDead = u.dead;
+      const wasDead = target.dead;
       const explosive = !strafe;
-      u.takeDamage(dmg, {
+      target.takeDamage(dmg, {
         explosive,
         blastOrigin: explosive ? { x, z } : undefined,
         impactFrom: explosive ? { x, z } : undefined,
@@ -993,23 +1065,30 @@ export class FireSupportManager {
             Math.sqrt(Math.max(0.3, incomingCoverMultiplier))
           : undefined,
       });
-      if (!wasDead && u.dead && u.def && u.team !== this.ownerTeam) {
+      if (recordKill && !wasDead && target.dead && target.def && target.team !== this.ownerTeam) {
         // Fire-support kills do not pass through the direct-fire combat event;
         // forward them so persistent combat achievements see barrage kills too.
         this.game._recordAchievementCombatEvent?.({
           attacker: { team: this.ownerTeam, def: { type: attackerType } },
-          target: u,
+          target,
           killed: true,
         });
       }
-      if (dmg > 0) {
+      if (morale && dmg > 0) {
         handleFireSupportImpactMorale(
-          u,
+          target,
           this.game.hqs ?? [],
           retreatUnits,
           retreatOptions
         );
       }
+    };
+
+    for (const u of this.targetUnits ?? []) {
+      applyBlast(u, { recordKill: true, morale: true });
+    }
+    for (const structure of this.targetStructures) {
+      applyBlast(structure);
     }
 
     for (const h of this.game.hqs) {
@@ -1090,13 +1169,18 @@ export class FireSupportManager {
       }
     }
 
-    for (let i = this.events.length - 1; i >= 0; i--) {
-      const ev = this.events[i];
-      ev.at -= dt;
-      if (ev.at <= 0) {
-        ev.fn();
-        this.events.splice(i, 1);
-      }
+    for (const strike of this.scheduledStrikes) {
+      strike.age = (strike.age ?? 0) + dt;
     }
+    this.scheduledStrikes = this.scheduledStrikes.filter((strike) => (strike.age ?? 0) < 40);
+
+    for (const ev of this.events) ev.at -= dt;
+    const due = [];
+    this.events = this.events.filter((ev) => {
+      if (ev.at > 0) return true;
+      due.push(ev);
+      return false;
+    });
+    for (const ev of due) ev.fn();
   }
 }

@@ -369,6 +369,95 @@ function scheduleIndirectImpact(payload) {
   pendingIndirectImpacts.push({ ...payload, epoch: indirectImpactEpoch });
 }
 
+export function exportPendingIndirectImpacts() {
+  return pendingIndirectImpacts
+    .filter((shell) => shell.epoch === indirectImpactEpoch && shell.timeLeft > 0)
+    .map((shell) => ({
+      kind: shell.kind === 'artillery' ? 'artillery' : 'mortar',
+      timeLeft: shell.timeLeft,
+      x: shell.x,
+      z: shell.z,
+      damage: shell.damage,
+      attackerId: shell.attacker?.id ?? null,
+      from:
+        Number.isFinite(shell.from?.x) && Number.isFinite(shell.from?.z)
+          ? { x: shell.from.x, z: shell.from.z }
+          : null,
+      sceneryMapKey: shell.sceneryEntry?.mapKey ?? null,
+    }));
+}
+
+export function restorePendingIndirectImpacts(shells, game) {
+  if (!Array.isArray(shells) || !game) return 0;
+  const livingUnits = (game._aliveUnits ?? game.units ?? []).filter(
+    (unit) => unit && !unit.dead
+  );
+  const hqs = (game.hqs ?? []).filter((hq) => !hq.dead);
+  const scenery = game.scenery ?? null;
+  const allTargets = [
+    ...livingUnits,
+    ...hqs,
+    ...(scenery?.getAttackTargets?.() ?? []),
+    ...(game.defenses?.getAttackTargets?.() ?? []),
+    ...(game.baseBuildings?.getAttackTargets?.() ?? []),
+    ...(game.engineerSandbags?.getAttackTargets?.() ?? []),
+  ];
+  const options = {
+    practiceHqDamageMult: game.tutorial ? 0.2 : 1,
+    clearance: !!game.clearance,
+    tutorial: !!game.tutorial,
+    towerDefense: game.towerDefense,
+    smokeScreens: game.smokeScreens,
+    engineerSandbags: game.engineerSandbags,
+    defenses: game.defenses,
+    mapDef: game.mapDef,
+    scenery,
+    generalOrders: {
+      player: game.generalOrders,
+      enemy: game.enemyGeneralOrders,
+    },
+    onKill: ({ attacker, target, killed = true }) =>
+      game._recordAchievementCombatEvent?.({ attacker, target, killed }),
+  };
+  let restored = 0;
+  for (const saved of shells) {
+    if (!Number.isFinite(saved?.x) || !Number.isFinite(saved?.z)) continue;
+    if (!Number.isFinite(saved.timeLeft) || saved.timeLeft <= 0) continue;
+    const attacker =
+      saved.attackerId != null
+        ? game.units.find((unit) => unit.id === saved.attackerId)
+        : null;
+    if (!attacker?.def) continue;
+    const sceneryEntry = saved.sceneryMapKey
+      ? scenery?.objects?.find((obj) => obj.mapKey === saved.sceneryMapKey)
+      : null;
+    pendingIndirectImpacts.push({
+      kind: saved.kind === 'artillery' ? 'artillery' : 'mortar',
+      timeLeft: saved.timeLeft,
+      x: saved.x,
+      z: saved.z,
+      damage: saved.damage,
+      attacker,
+      allTargets,
+      livingUnits,
+      coverSystem: game.coverSystem,
+      scenery,
+      sceneryEntry: sceneryEntry && !sceneryEntry.destroyed ? sceneryEntry : null,
+      hqs,
+      options,
+      mapDef: game.mapDef,
+      scene: game.scene,
+      listenerX: game.cameraTarget?.x ?? 0,
+      listenerZ: game.cameraTarget?.z ?? 0,
+      onFire: (event) => game.onCombatFire?.(event),
+      from: saved.from,
+      epoch: indirectImpactEpoch,
+    });
+    restored += 1;
+  }
+  return restored;
+}
+
 /** @deprecated */
 function scheduleMortarImpact(payload) {
   scheduleIndirectImpact({ ...payload, kind: 'mortar' });
@@ -792,9 +881,15 @@ export function updateCombat(
     if (h.team === 'player') playerHqs.push(h);
     else if (h.team === 'enemy') enemyHqs.push(h);
   }
-  /** Auto-acquire lists — enemies only scan opposing forces (not every unit on the map). */
+  /** Auto-acquire lists — each side scans opposing forces and structures. */
   const playerAutoAcquire = [...enemyAlive];
   if (!tutorialPassiveNoHq) playerAutoAcquire.push(...enemyHqs);
+  for (const target of defenseTargets) {
+    if (target.team && target.team !== 'player') playerAutoAcquire.push(target);
+  }
+  for (const target of baseBuildingTargets) {
+    if (target.team && target.team !== 'player') playerAutoAcquire.push(target);
+  }
   const enemyAutoAcquire = [...playerAlive, ...playerHqs, ...defenseTargets, ...baseBuildingTargets];
   const lx = listener?.x ?? 0;
   const lz = listener?.z ?? 0;
@@ -806,7 +901,8 @@ export function updateCombat(
       attacker.surrendered ||
       attacker._captureExit ||
       attacker._crewless ||
-      attacker._towedByTruckId
+      attacker._towedByTruckId ||
+      attacker._replacementCrewVehicleId
     ) continue;
     if (
       attacker.def.type === 'medic' ||
@@ -1089,7 +1185,7 @@ export function updateCombat(
 }
 
 function isPracticeHq(target) {
-  return target && !target.def && !target.isGround && target.team === 'enemy';
+  return isHqTarget(target) && target.team === 'enemy';
 }
 
 function scalePracticeHqDamage(target, damage, options) {
@@ -1903,7 +1999,7 @@ function fire(
       coaxFire: coax,
       paratrooperAtFire: paratrooperAt,
       killed: !target.isGround && target.dead,
-      targetIsHQ: !target.isGround && !target.def && !isSceneryTarget(target),
+      targetIsHQ: !!(target?.mesh?.userData?.hq === target),
       targetIsScenery:
         isSceneryTarget(target) || isDefenseTarget(target) || isBaseBuildingTarget(target),
       groundImpact: target.isGround,

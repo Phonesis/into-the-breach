@@ -257,9 +257,14 @@ export class CapturePoint {
         this.progress = Math.min(1, this.progress - push);
         if (this.progress >= 1) this.owner = 'enemy';
       }
+    } else if (playerCount > 0 && enemyCount > 0) {
+      // Equal numbers: freeze the flag instead of snapping a half-taken
+      // point back to fully owned.
     } else if (this.owner) {
       this.capturingTeam = null;
-      this.progress = 1;
+      if (this.progress < 1) {
+        this.progress = Math.min(1, this.progress + dt * 0.12);
+      }
     } else {
       this.progress = Math.max(0, this.progress - dt * 0.05);
       if (this.progress <= 0.001) this.capturingTeam = null;
@@ -361,6 +366,11 @@ export class CapturePoint {
       this.flag.material.emissive.setHex(hex);
       this.flag.material.emissiveIntensity = this._contested ? 0.35 : 0.2;
     }
+  }
+
+  /** True when the team owns the point uncontested. */
+  isHeldSecurely(team) {
+    return this.owner === team && this.progress >= 0.995 && !this._contested;
   }
 
   /** HUD helper */

@@ -201,7 +201,7 @@ import {
   getCampaignDifficulty,
   spreadCampaignCapturePoints,
 } from '../data/campaignPace.js';
-import { teamIsEliminated, estimateTeamIncomePerSec } from './EliminationRules.js';
+import { teamIsEliminated, estimateTeamIncomePerSec, isCombatLiving } from './EliminationRules.js';
 import { buildTerrain, sampleTerrainHeight } from '../world/Terrain.js';
 import { isUrbanCanalWater } from '../world/UrbanScenery.js';
 import {
@@ -586,6 +586,7 @@ export class Game {
         this.units.reduce((count, unit) => {
           if (!unit || unit.dead || unit.team !== team) return count;
           if (unit.surrendered || unit._crewless || unit._captureExit) return count;
+          if (unit._replacementCrewVehicleId) return count;
           if (unit.def?.type === 'commander') return count;
           return count + 1;
         }, 0),
@@ -636,6 +637,11 @@ export class Game {
         this._rebuildUnitCaches();
       },
       onQueueChange: () => this.ui?.updateProduction(this),
+      refundResources: (team, amount) => {
+        if (!Number.isFinite(amount) || amount <= 0) return;
+        if (this.cheatMode && team === PLAYER_TEAM) return;
+        this.resources[team] = (this.resources[team] ?? 0) + amount;
+      },
     });
 
     this.rangeRings = new RangeRingManager(this.scene);
@@ -890,7 +896,7 @@ export class Game {
         e.ctrlKey && !e.metaKey && !e.altKey && !this._isTextInputFocused(e.target)
           ? UNIT_SELECTION_SHORTCUTS.get(e.code)
           : null;
-      if (selectionShortcut && this.running && !this.gameOver) {
+      if (selectionShortcut && this.running && !this.gameOver && !this.paused) {
         // Keep selection shortcuts discrete so they never feed the held-key
         // camera movement path.
         this.keys[e.code] = false;
@@ -916,59 +922,53 @@ export class Game {
       ) {
         e.preventDefault();
       }
-      if (e.code === 'Escape' && this.viewingBattlefield) {
-        this.exitPostMatchView();
-      }
-      if (e.code === 'Escape' && this.generalOrders?.isActive()) {
-        if (this.generalOrders.cancelActive()) {
-          this.ui?.updateGeneralOrders(this.generalOrders);
+      if (e.code === 'Escape') {
+        if (this.ui?.isGuideOpen?.()) {
+          this.ui.closeGuide();
+        } else if (this.viewingBattlefield) {
+          this.exitPostMatchView();
+        } else if (this.fireSupport?.pending || this.fireSupport?.pendingStrike) {
+          this.fireSupport.cancel();
+          this.ui?.updateFireSupport(this.fireSupport);
+        } else if (this.smokeShellTargeting) {
+          this.cancelSmokeShellTargeting();
+        } else if (this.defenses?.getPending()) {
+          this.defenses.cancelPending();
+          this.ui?.updateDefenses(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.lastStand?.pendingType) {
+          this.lastStand.pendingType = null;
+          this.ui?.updateLastStandDeploy(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.engineerSandbags?.getPending()) {
+          this.engineerSandbags.cancel();
+          this.ui?.updateEngineerBuild(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.infantryTrenches?.getPending()) {
+          this.infantryTrenches.cancel();
+          this.ui?.updateInfantryTrench(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.medicFieldHospitals?.getPending()) {
+          this.medicFieldHospitals.cancel();
+          this.ui?.updateMedicTent(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.baseBuildings?.getPending()) {
+          this.baseBuildings.cancelPending();
+          this.ui?.updateBaseBuild(this);
+          this._syncPlacementCapture();
+          this._syncBattleCursor();
+        } else if (this.generalOrders?.isActive()) {
+          if (this.generalOrders.cancelActive()) {
+            this.ui?.updateGeneralOrders(this.generalOrders);
+          }
+        } else if (this._countActiveFireMissions() > 0) {
+          this.cancelAllFireMissions();
         }
-      }
-      if (e.code === 'Escape' && this.fireSupport?.pending) {
-        this.fireSupport.cancel();
-        this.ui?.updateFireSupport(this.fireSupport);
-      }
-      if (e.code === 'Escape' && this.smokeShellTargeting) {
-        this.cancelSmokeShellTargeting();
-      }
-      if (e.code === 'Escape' && this._countActiveFireMissions() > 0) {
-        this.cancelAllFireMissions();
-      }
-      if (e.code === 'Escape' && this.defenses?.getPending()) {
-        this.defenses.cancelPending();
-        this.ui?.updateDefenses(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
-      }
-      if (e.code === 'Escape' && this.lastStand?.pendingType) {
-        this.lastStand.pendingType = null;
-        this.ui?.updateLastStandDeploy(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
-      }
-      if (e.code === 'Escape' && this.engineerSandbags?.getPending()) {
-        this.engineerSandbags.cancel();
-        this.ui?.updateEngineerBuild(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
-      }
-      if (e.code === 'Escape' && this.infantryTrenches?.getPending()) {
-        this.infantryTrenches.cancel();
-        this.ui?.updateInfantryTrench(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
-      }
-      if (e.code === 'Escape' && this.medicFieldHospitals?.getPending()) {
-        this.medicFieldHospitals.cancel();
-        this.ui?.updateMedicTent(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
-      }
-      if (e.code === 'Escape' && this.baseBuildings?.getPending()) {
-        this.baseBuildings.cancelPending();
-        this.ui?.updateBaseBuild(this);
-        this._syncPlacementCapture();
-        this._syncBattleCursor();
       }
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._syncBattleCursor();
       if (
@@ -983,6 +983,14 @@ export class Game {
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._syncBattleCursor();
+    });
+    const clearHeldKeys = () => {
+      this.keys = {};
+      this._syncBattleCursor();
+    };
+    window.addEventListener('blur', clearHeldKeys);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) clearHeldKeys();
     });
 
     this.onResize();
@@ -1422,7 +1430,10 @@ export class Game {
     }
 
     const useCaptureZones =
-      !this.lastStand && !this.clearance && (!this.campaign || this.captureZonesEnabled);
+      !this.lastStand &&
+      !this.clearance &&
+      !this.towerDefense &&
+      (!this.campaign || this.captureZonesEnabled);
     this.capturePoints = useCaptureZones
       ? createCapturePoints(this.mapDef, this.scene)
       : [];
@@ -1712,7 +1723,7 @@ export class Game {
     this._endOverlayShown = false;
     this._pendingEnd = null;
     this._pendingCookOffs = [];
-    clearPendingMortarImpacts();
+    if (!restoreSnapshot) clearPendingMortarImpacts();
     this._teardownPending = false;
     this.viewingBattlefield = false;
     this._hudUiAccum = 0;
@@ -1817,9 +1828,10 @@ export class Game {
       ) {
         this.ui.showLastStandBriefing(this.lastStand.briefing, {
           onBegin: () => {
+            if (this.paused) this.setPaused(false);
+            if (!this.launchLastStandBattle()) return;
             this.lastStand.briefingShown = true;
             this.ui.hideLastStandBriefing();
-            this.launchLastStandBattle();
           },
           onDismiss: () => {
             this.lastStand.briefingShown = true;
@@ -2003,6 +2015,27 @@ export class Game {
   }
 
   _maybeUpdateSelectionPanel(selected, dt) {
+    if (!this.ui) return;
+    const tdEmplacements =
+      this.towerDefense && !isTdHqDefenseStyle(this.towerDefense);
+    if (
+      !this.gameOver &&
+      !this.lastStand &&
+      !this.clearance &&
+      !tdEmplacements &&
+      this._countAlive(PLAYER_TEAM) === 0 &&
+      !selected.length &&
+      !this.selectedHq
+    ) {
+      const hq = this.hqs.find((h) => h.team === PLAYER_TEAM && !h.dead);
+      if (hq) {
+        this._selectionPanelDismissed = false;
+        this.selectedHq = hq;
+        hq.setSelected(true);
+        this.ui.updateSelection([], null, hq, this);
+        return;
+      }
+    }
     if (this._selectionPanelDismissed) {
       // Panel stays empty after orders; drop the flag if selection is gone.
       if (!selected.length && !this.selectedHq) this._selectionPanelDismissed = false;
@@ -2150,7 +2183,7 @@ export class Game {
 
   /** End Tower Defence prepare countdown and start the current wave immediately. */
   skipTowerDefenseWave() {
-    if (!this.running || this.gameOver || !this.towerDefense) return;
+    if (!this.running || this.gameOver || this.paused || !this.towerDefense) return;
     void sounds.primeForCombat();
     if (!skipTowerDefensePrepare(this)) return;
     sounds.play('order');
@@ -2719,9 +2752,15 @@ export class Game {
     if (!this.running || this.gameOver) return false;
     try {
       const snapshot = captureBattleSave(this, { id: this.activeSaveId });
-      const id = writeBattleSave(snapshot, this.activeSaveId);
+      const result = writeBattleSave(snapshot, this.activeSaveId);
+      const id = result?.id ?? result;
       this.activeSaveId = id;
-      this.ui?.showSaveToast?.('Battle saved — resume later from the main menu');
+      const dropped = result?.droppedOldest;
+      this.ui?.showSaveToast?.(
+        dropped
+          ? `Battle saved — oldest archive discarded (${dropped.label ?? 'previous operation'})`
+          : 'Battle saved — resume later from the main menu'
+      );
       this.ui?.refreshTitleSaveButton?.();
       return true;
     } catch (err) {
@@ -2770,6 +2809,10 @@ export class Game {
   setTabletTargetMode(on) {
     this.controller?.setTabletTargetMode(on);
     this.ui?.setTabletTargetMode(on);
+    if (on) {
+      this.controller?.setTabletFireMode(false);
+      this.ui?.setTabletFireMode(false);
+    }
   }
 
   setTabletMode(on) {
@@ -2787,6 +2830,10 @@ export class Game {
   setTabletFireMode(on) {
     this.controller?.setTabletFireMode(on);
     this.ui?.setTabletFireMode(on);
+    if (on) {
+      this.controller?.setTabletTargetMode(false);
+      this.ui?.setTabletTargetMode(false);
+    }
     this._syncBattleCursor();
   }
 
@@ -2796,6 +2843,7 @@ export class Game {
 
   launchLastStandBattle() {
     if (!this.lastStand || this.lastStand.phase !== 'deploy') return false;
+    if (this.paused) return false;
     if (countLastStandCombatUnits(this.units, PLAYER_TEAM) === 0) return false;
 
     if (isLastStandPresetForce(this)) {
@@ -2856,7 +2904,7 @@ export class Game {
     syncUnitFieldIcon(result.unit, this.showUnitFieldIcons);
     this.resources.player = this.lastStand.supplies.player;
     this.ui?.updateLastStandDeploy(this);
-    this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+    this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode, this._resourceHudOptions());
   }
 
   cancelSmokeShellTargeting() {
@@ -3049,7 +3097,7 @@ export class Game {
     this.ui?.setCheatHud(this.cheatMode);
     if (this.running) {
       this.ui?.updateProduction(this);
-      this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+      this.ui?.updateResources(this.resources.player, this.capturePoints, this.cheatMode, this._resourceHudOptions());
       this.ui?.updateDefenses?.(this);
       this.ui?.showCheatToast(this.cheatMode);
     }
@@ -3295,7 +3343,7 @@ export class Game {
   }
 
   armEngineerBuild(buildType) {
-    if (!this.running || this.gameOver) return;
+    if (!this.running || this.gameOver || this.paused) return;
     const mgr = this.engineerSandbags;
     if (!mgr) return;
     if (buildType === 'sandbags' && !mgr.canBuildSandbags()) return;
@@ -3332,7 +3380,7 @@ export class Game {
   }
 
   armTrenchDig() {
-    if (!this.running || this.gameOver) return;
+    if (!this.running || this.gameOver || this.paused) return;
     const mgr = this.infantryTrenches;
     if (!mgr?.canUse()) return;
     if (this._isPlayerDeployZoneActive()) return;
@@ -3500,7 +3548,7 @@ export class Game {
   }
 
   armMedicTent() {
-    if (!this.running || this.gameOver) return;
+    if (!this.running || this.gameOver || this.paused) return;
     const mgr = this.medicFieldHospitals;
     if (!mgr?.canUse()) return;
     if (this._isPlayerDeployZoneActive()) return;
@@ -3590,7 +3638,7 @@ export class Game {
   }
 
   armBaseBuilding(typeId) {
-    if (!this.running || this.gameOver || !this.baseBuildings?.active) return;
+    if (!this.running || this.gameOver || this.paused || !this.baseBuildings?.active) return;
     if (this._isPlayerDeployZoneActive()) return;
     sounds.unlock();
     if (!this.baseBuildings.arm(typeId)) return;
@@ -3629,7 +3677,7 @@ export class Game {
     }
     if (placed === true && !this._directionalPlacement) {
       sounds.play('select');
-      this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+      this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode, this._resourceHudOptions());
     }
     this.ui?.updateBaseBuild(this);
     this._syncPlacementCapture();
@@ -3675,7 +3723,7 @@ export class Game {
       if (placed) {
         void sounds.primeForCombat();
         this.ui?.updateDefenses(this);
-        this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode);
+        this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode, this._resourceHudOptions());
         this._syncPlacementCapture();
         this._syncBattleCursor();
         return;
@@ -3775,7 +3823,7 @@ export class Game {
     const ok = this.defenses.tryUpgrade((cost) => this.spendResources(PLAYER_TEAM, cost));
     if (ok) {
       this.ui?.updateDefenses(this);
-      this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints);
+      this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode, this._resourceHudOptions());
     }
     return ok;
   }
@@ -3785,7 +3833,7 @@ export class Game {
     const ok = this.defenses.tryResupply((cost) => this.spendResources(PLAYER_TEAM, cost));
     if (ok) {
       this.ui?.updateDefenses(this);
-      this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints);
+      this.ui?.updateResources(Math.floor(this.resources.player), this.capturePoints, this.cheatMode, this._resourceHudOptions());
     } else if (this.defenses.getSelected() && !this.defenses.canResupply()) {
       this.ui?.showDefensePlacementHint?.('Emplacement ammo is already full.', this);
     } else {
@@ -3799,7 +3847,7 @@ export class Game {
   }
 
   armDefense(typeId) {
-    if (!this.running || this.gameOver || !this.defenses) return;
+    if (!this.running || this.gameOver || this.paused || !this.defenses) return;
     sounds.unlock();
     void sounds.primeForCombat();
     this.fireSupport?.cancel();
@@ -3818,7 +3866,7 @@ export class Game {
   }
 
   armTowerDefenseBarrage() {
-    if (!this.running || this.gameOver || !this.defenses) return;
+    if (!this.running || this.gameOver || this.paused || !this.defenses) return;
     if (!hasRadioOperator(this, PLAYER_TEAM)) return;
     sounds.unlock();
     if (!this.defenses.armBarrage()) return;
@@ -3875,13 +3923,14 @@ export class Game {
     if (ok) {
       sounds.play('produce');
       this.ui.updateProduction(this);
-      this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode);
+      this.ui.updateResources(this.resources.player, this.capturePoints, this.cheatMode, this._resourceHudOptions());
     }
     return ok;
   }
 
   tickEconomy(dt) {
     if (this.lastStand || this.clearance) return;
+    if (isBattleStagingPhase(this)) return;
     if (this.towerDefense) {
       if (isTdHqDefenseStyle(this.towerDefense)) {
         this.resources.player += HQ_INCOME_RATE * dt;
@@ -3904,7 +3953,7 @@ export class Game {
   }
 
   updateCapturePoints(dt) {
-    if (isBattleStagingPhase(this)) return;
+    if (this.towerDefense || isBattleStagingPhase(this)) return;
     const alive = this._aliveUnits;
     for (const cp of this.capturePoints) {
       cp.update(alive, dt, (point, owner) => {
@@ -3991,7 +4040,16 @@ export class Game {
 
   _countAlive(team) {
     const units = team === PLAYER_TEAM ? this._playerAlive : this._enemyAlive;
-    return units.filter((unit) => unit.def?.type !== 'commander').length;
+    return units.filter((unit) => isCombatLiving(unit)).length;
+  }
+
+  _resourceHudOptions() {
+    return {
+      lastStand: !!this.lastStand,
+      lastStandDeploy: !!(this.lastStand && this.lastStand.phase === 'deploy'),
+      towerDefense: !!this.towerDefense,
+      tdHqDefense: isTdHqDefenseStyle(this.towerDefense),
+    };
   }
 
   /** HUD panels — throttled so DOM work does not scale with frame rate. */
@@ -4117,7 +4175,14 @@ export class Game {
   }
 
   _getArmyWipeHint(playerAlive) {
-    if (this.tutorial || this.clearance || this.lastStand || playerAlive > 0 || this.gameOver) {
+    if (
+      this.tutorial ||
+      this.clearance ||
+      this.lastStand ||
+      this.towerDefense ||
+      playerAlive > 0 ||
+      this.gameOver
+    ) {
       return null;
     }
 
@@ -5261,12 +5326,16 @@ export class Game {
           this._hudUiAccum = 0;
           this._tickBattleHud();
         }
+        this.fireSupport.update(dt);
+        this.enemyFireSupport.update(dt);
+        updateParachuteDrops(dt, this.scene, this.mapDef);
+        this._rebuildUnitCaches();
+
         if (!fieldHasUnits) {
           if (!this._emptyFieldHandled) this._handleEmptyBattlefield();
           this._victoryCheckAccum += dt;
           if (this._victoryCheckAccum >= 0.1) {
             this._victoryCheckAccum = 0;
-            this._rebuildUnitCaches();
             this.checkVictory();
           }
         } else {
@@ -5279,7 +5348,6 @@ export class Game {
             livingEnemy === 0
           ) {
             this._victoryCheckAccum = 0;
-            this._rebuildUnitCaches();
             this.checkVictory();
           }
         }
@@ -5289,14 +5357,11 @@ export class Game {
           return;
         }
 
-        this.fireSupport.update(dt);
-        this.enemyFireSupport.update(dt);
         this.generalOrders.update(dt);
         this.enemyGeneralOrders.update(dt);
         updateRadioOperatorBinoculars(this.units, dt);
         this.smokeScreens.update(dt);
         updateFireSupportEffects(dt, this.scene);
-        updateParachuteDrops(dt, this.scene, this.mapDef);
         // Emergency reactions are deliberately separate from the saved Seek
         // Cover preference: an idle player foot unit that is actually hit
         // should drop and seek shelter, while explicit orders remain in charge.

@@ -52,7 +52,7 @@ export function updateHospitalHealing(baseBuildings, units, dt, hospitalsIn = nu
     const hz = hospital.z;
 
     for (const ally of units) {
-      if (ally.dead || ally.team !== team) continue;
+      if (ally.dead || ally.surrendered || ally._captureExit || ally.team !== team) continue;
       if (!canReceiveHospitalHeal(ally)) continue;
 
       const dx = ally.position.x - hx;

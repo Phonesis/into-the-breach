@@ -1482,6 +1482,32 @@ export class UIManager {
         </div>
       </div>
 
+      <div
+        id="overlay-save-delete-confirm"
+        class="surrender-confirm-overlay hidden interactive"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-delete-confirm-title"
+        aria-describedby="save-delete-confirm-message"
+        aria-hidden="true"
+      >
+        <div class="surrender-confirm-box">
+          <p class="surrender-confirm-eyebrow">Operations archive</p>
+          <h2 id="save-delete-confirm-title">Delete Saved Battle?</h2>
+          <p id="save-delete-confirm-message">
+            This saved operation will be removed from this browser. This cannot be undone.
+          </p>
+          <div class="surrender-confirm-actions">
+            <button type="button" class="btn btn-secondary interactive" id="btn-save-delete-cancel">
+              Keep Save
+            </button>
+            <button type="button" class="btn btn-danger interactive" id="btn-save-delete-confirm">
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div id="overlay-end" class="overlay-msg hidden interactive">
         <div class="box end-box">
           <h2 id="end-title">Victory</h2>
@@ -1548,6 +1574,7 @@ export class UIManager {
     if (guideEl) guideEl.innerHTML = renderGameGuideHtml();
     this.guideFromMenu = false;
     this.guideFromPause = false;
+    this.guideHeldBattlePause = false;
     this.bind();
     this._bindUnitRoster();
     this.refreshTitleSaveButton();
@@ -2125,7 +2152,10 @@ export class UIManager {
     };
     this.root.querySelector('#btn-war-stats').onclick = () => show('war-stats');
     this.root.querySelector('#btn-achievements').onclick = () => show('achievements');
-    this.root.querySelector('#btn-back-saves').onclick = () => show('title');
+    this.root.querySelector('#btn-back-saves').onclick = () => {
+      this.closeSaveDeleteConfirm({ restoreFocus: false });
+      show('title');
+    };
     this.root.querySelector('#btn-back-war-stats').onclick = () => show('title');
     this.root.querySelector('#btn-back-achievements').onclick = () => show('title');
     this.root.querySelector('#btn-guide-title').onclick = () => this.openGuide(true);
@@ -2142,7 +2172,12 @@ export class UIManager {
     });
     this.root.querySelector('#btn-about')?.addEventListener('click', () => this.openAbout());
     this.root.querySelector('#btn-about-close')?.addEventListener('click', () => this.closeAbout());
-    this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => this.openGuide(false));
+    this.root.querySelector('#btn-guide-hud')?.addEventListener('click', () => {
+      const alreadyPaused = !!this.callbacks.isBattlePaused?.();
+      this.guideHeldBattlePause = !alreadyPaused;
+      if (!alreadyPaused) this.callbacks.onPauseBattle?.();
+      this.openGuide(false, null, true);
+    });
     this.root.querySelectorAll('[data-guide-text-size]').forEach((button) => {
       button.addEventListener('click', () => this.setGuideTextSize(button.dataset.guideTextSize));
     });
@@ -2563,6 +2598,7 @@ export class UIManager {
     });
 
     this.root.querySelector('#produce-btns')?.addEventListener('pointerdown', (e) => {
+      if (e.button != null && e.button !== 0) return;
       const btn = e.target.closest?.('.produce-btn');
       if (!btn?.dataset?.type || btn.disabled) return;
       e.preventDefault();
@@ -2627,6 +2663,38 @@ export class UIManager {
     this.root.querySelector('#btn-surrender-confirm')?.addEventListener('click', () => {
       this.closeSurrenderConfirm({ restoreFocus: false });
       this.callbacks.onSurrender?.();
+    });
+    this.root.querySelector('#btn-save-delete-cancel')?.addEventListener('click', () => {
+      this.closeSaveDeleteConfirm();
+    });
+    this.root.querySelector('#btn-save-delete-confirm')?.addEventListener('click', () => {
+      this._confirmSaveDelete();
+    });
+    const saveDeleteOverlay = this.root.querySelector('#overlay-save-delete-confirm');
+    saveDeleteOverlay?.addEventListener('pointerdown', (event) => {
+      if (event.target === saveDeleteOverlay) this.closeSaveDeleteConfirm();
+    });
+    saveDeleteOverlay?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeSaveDeleteConfirm();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const buttons = [
+        this.root.querySelector('#btn-save-delete-cancel'),
+        this.root.querySelector('#btn-save-delete-confirm'),
+      ].filter(Boolean);
+      if (buttons.length < 2) return;
+      const current = buttons.indexOf(document.activeElement);
+      if (event.shiftKey && current <= 0) {
+        event.preventDefault();
+        buttons[buttons.length - 1].focus();
+      } else if (!event.shiftKey && current === buttons.length - 1) {
+        event.preventDefault();
+        buttons[0].focus();
+      }
     });
     const surrenderOverlay = this.root.querySelector('#overlay-surrender-confirm');
     surrenderOverlay?.addEventListener('pointerdown', (event) => {
@@ -2706,6 +2774,44 @@ export class UIManager {
     this._surrenderPreviousFocus = null;
   }
 
+  openSaveDeleteConfirm(save) {
+    const overlay = this.root.querySelector('#overlay-save-delete-confirm');
+    if (!overlay || !save?.id) return;
+    const message = this.root.querySelector('#save-delete-confirm-message');
+    const cancel = this.root.querySelector('#btn-save-delete-cancel');
+    const meta = formatSaveMeta(save);
+    const label = save.label ?? `${meta.faction} — ${meta.map}`;
+    this._pendingDeleteSaveId = save.id;
+    if (message) {
+      message.textContent =
+        `Delete “${label}”? The saved operation will be removed from this browser and cannot be undone.`;
+    }
+    this._saveDeletePreviousFocus = document.activeElement;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => cancel?.focus());
+  }
+
+  closeSaveDeleteConfirm({ restoreFocus = true } = {}) {
+    const overlay = this.root.querySelector('#overlay-save-delete-confirm');
+    if (!overlay || overlay.classList.contains('hidden')) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    this._pendingDeleteSaveId = null;
+    if (restoreFocus && this._saveDeletePreviousFocus?.focus) {
+      this._saveDeletePreviousFocus.focus();
+    }
+    this._saveDeletePreviousFocus = null;
+  }
+
+  _confirmSaveDelete() {
+    const id = this._pendingDeleteSaveId;
+    this.closeSaveDeleteConfirm({ restoreFocus: false });
+    if (!id) return;
+    deleteBattleSave(id);
+    this.renderSaveList();
+  }
+
   setGuideTextSize(size) {
     this.guideTextSize = GUIDE_TEXT_SIZE_OPTIONS.includes(size) ? size : 'standard';
     writeGuideTextSize(this.guideTextSize);
@@ -2726,7 +2832,7 @@ export class UIManager {
   _syncGuideCloseButton() {
     const button = this.root.querySelector('#btn-guide-close');
     if (!button) return;
-    const returnToPause = this.guideFromPause;
+    const returnToPause = this.guideFromPause && !this.guideHeldBattlePause;
     button.textContent = returnToPause ? 'Return to paused game' : 'Close';
     button.setAttribute(
       'aria-label',
@@ -2772,15 +2878,22 @@ export class UIManager {
     if (this.guideFromMenu) {
       this.root.querySelector('#screen-title')?.classList.remove('hidden');
     }
+    const resumeBattle = this.guideHeldBattlePause;
+    this.guideHeldBattlePause = false;
     this.guideFromMenu = false;
     this.guideFromPause = false;
     this._syncGuideCloseButton();
+    if (resumeBattle) this.callbacks.onResumeBattle?.();
+  }
+
+  isGuideOpen() {
+    return !this.root.querySelector('#overlay-guide')?.classList.contains('hidden');
   }
 
   isGuideFromPauseOpen() {
     return (
       this.guideFromPause &&
-      !this.root.querySelector('#overlay-guide')?.classList.contains('hidden')
+      this.isGuideOpen()
     );
   }
 
@@ -2930,18 +3043,26 @@ export class UIManager {
       list.innerHTML = '';
       return;
     }
+    const escapeHtml = (value) =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     list.innerHTML = saves
       .map((save) => {
         const meta = formatSaveMeta(save);
+        const label = escapeHtml(save.label ?? `${meta.faction} — ${meta.map}`);
+        const id = escapeHtml(save.id);
         return `
-          <div class="save-card" data-id="${save.id}">
+          <div class="save-card" data-id="${id}">
             <div class="save-card-main">
-              <span class="save-card-label">${save.label ?? `${meta.faction} — ${meta.map}`}</span>
-              <span class="save-card-meta">${meta.mode} · ${meta.elapsed} elapsed · ${meta.when}</span>
+              <span class="save-card-label">${label}</span>
+              <span class="save-card-meta">${escapeHtml(meta.mode)} · ${escapeHtml(meta.elapsed)} elapsed · ${escapeHtml(meta.when)}</span>
             </div>
             <div class="save-card-actions">
-              <button type="button" class="btn btn-primary interactive save-load-btn" data-id="${save.id}">Resume</button>
-              <button type="button" class="btn btn-secondary interactive save-delete-btn" data-id="${save.id}">Delete</button>
+              <button type="button" class="btn btn-primary interactive save-load-btn" data-id="${id}">Resume</button>
+              <button type="button" class="btn btn-secondary interactive save-delete-btn" data-id="${id}">Delete</button>
             </div>
           </div>
         `;
@@ -2961,8 +3082,8 @@ export class UIManager {
     });
     list.querySelectorAll('.save-delete-btn').forEach((btn) => {
       btn.onclick = () => {
-        deleteBattleSave(btn.dataset.id);
-        this.renderSaveList();
+        const save = saves.find((entry) => entry.id === btn.dataset.id);
+        if (save) this.openSaveDeleteConfirm(save);
       };
     });
   }
@@ -4478,6 +4599,7 @@ export class UIManager {
     this._unitRosterBound = true;
 
     const handlePick = (e) => {
+      if (e.button != null && e.button !== 0) return;
       const btn = e.target.closest('.unit-roster-item');
       if (!btn || btn.disabled) return;
       e.preventDefault();
@@ -5279,8 +5401,7 @@ export class UIManager {
     if (value) value.textContent = String(playerCount);
     if (sub) {
       if (preset) {
-        const theater =
-          MAP_SIZE_LIST.find((size) => size.id === game.mapDef?.mapSize)?.name ?? 'Medium';
+        const theater = game.mapDef?.name ?? 'the';
         sub.textContent = `${playerCount} friendly · ${enemyCount} enemy · combined-arms formations · ${theater} theater`;
       } else {
         const plan = game.lastStand.enemyTactic?.name;
@@ -5614,7 +5735,12 @@ export class UIManager {
     const queue = game.production.getQueue('player');
 
     if (!options.skipResources) {
-      this.updateResources(resources, game.capturePoints, game.cheatMode);
+      this.updateResources(resources, game.capturePoints, game.cheatMode, {
+        lastStand: !!game.lastStand,
+        lastStandDeploy: game.lastStand?.phase === 'deploy',
+        towerDefense: !!game.towerDefense,
+        tdHqDefense: game.towerDefense?.style === 'hqDefense',
+      });
     }
     this.setCheatHud(game.cheatMode);
 

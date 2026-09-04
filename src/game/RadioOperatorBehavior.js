@@ -32,7 +32,7 @@ export const MAX_RADIO_OPERATORS_PER_SIDE = 3;
 export function countRadioOperators(units, team) {
   let n = 0;
   for (const unit of units ?? []) {
-    if (!unit || unit.dead || unit.team !== team) continue;
+    if (!unit || unit.dead || unit.surrendered || unit._captureExit || unit.team !== team) continue;
     if (unit.def?.type === 'radioOperator') n += 1;
   }
   return n;

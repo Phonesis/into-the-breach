@@ -328,7 +328,7 @@ export function updateTruckTowing(units, dt, mapDef) {
       truck._towedGunType = null;
       continue;
     }
-    if (truck.dead) {
+    if (truck.dead || truck._crewless) {
       detachGun(truck, units, mapDef);
       continue;
     }
@@ -341,9 +341,14 @@ export function restoreTruckTowLinks(units, mapDef = null) {
   for (const truck of units) {
     if (!truck._towedGunId) continue;
     const gun = unitById.get(truck._towedGunId);
-    if (!gun) {
+    if (!gun || truck.dead || truck._crewless) {
       truck._towedGunId = null;
       truck._towedGunType = null;
+      if (gun && gun._towedByTruckId === truck.id) {
+        gun._towedByTruckId = null;
+        gun._towAttaching = false;
+        setTowedGunCrewVisible(gun, true);
+      }
       continue;
     }
     gun._towedByTruckId = truck.id;

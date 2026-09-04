@@ -29,7 +29,7 @@ export function updateMedicHealing(units, dt, onHeal = null) {
 
   for (const medic of medics) {
     for (const ally of units) {
-      if (ally.dead || ally.team !== medic.team || ally.id === medic.id) continue;
+      if (ally.dead || ally.surrendered || ally._captureExit || ally.team !== medic.team || ally.id === medic.id) continue;
       if (!isFootSoldier(ally.def?.type) || ally.def?.type === 'medic' || ally.def?.type === 'engineer')
         continue;
       if (ally.hp >= ally.maxHp) continue;

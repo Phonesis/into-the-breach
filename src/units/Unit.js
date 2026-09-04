@@ -178,8 +178,8 @@ export class Unit {
     if (isCrewlessVehicleTarget(target)) return false;
     if (
       this.def?.type === 'artillery' &&
-      target?.def === undefined &&
       (this.def.minRange ?? 0) > 0 &&
+      (target?.isGround || target?.isSmokeShell) &&
       distanceBetween(this, target) < this.def.minRange
     ) {
       return false;
@@ -601,6 +601,9 @@ export class Unit {
       removeDamageSmoke(this);
       removeUnitHealthBar(this);
       if (this.selected) this.setSelected(false);
+      this._mountedOnTankId = null;
+      this._pendingMountTankId = null;
+      this._replacementCrewVehicleId = null;
       applyUnitDeathVisual(this);
     }
   }

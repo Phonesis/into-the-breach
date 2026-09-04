@@ -12,6 +12,19 @@ export function teamHasProduction(team, game) {
   return !!game.production;
 }
 
+/** Living combatant — excludes commanders, POWs, and abandoned hulls. */
+export function isCombatLiving(unit) {
+  return !!(
+    unit &&
+    !unit.dead &&
+    !unit.surrendered &&
+    !unit._captureExit &&
+    !unit._crewless &&
+    !unit._replacementCrewVehicleId &&
+    unit.def?.type !== 'commander'
+  );
+}
+
 function getFactionForTeam(team, game) {
   return team === 'player' ? game.playerFaction : game.enemyFaction;
 }
@@ -54,8 +67,8 @@ export function estimateTeamIncomePerSec(team, game) {
 export function teamIsEliminated(team, game, aliveCount) {
   if (aliveCount > 0) return false;
 
-  const hq = game.hqs?.find((h) => h.team === team);
-  if (!hq || hq.dead) return true;
+  const hq = game.hqs?.find((h) => h.team === team && !h.dead);
+  if (!hq) return true;
 
   if (!teamHasProduction(team, game)) return true;
 

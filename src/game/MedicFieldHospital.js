@@ -464,7 +464,7 @@ export class MedicFieldHospitalManager {
       const rate = tent.healPerSec ?? TENT_HEAL_PER_SEC;
 
       for (const ally of units) {
-        if (ally.dead || ally.team !== tent.team) continue;
+        if (ally.dead || ally.surrendered || ally._captureExit || ally.team !== tent.team) continue;
         if (!canReceiveFieldTentHeal(ally)) continue;
 
         const dx = ally.position.x - tent.x;

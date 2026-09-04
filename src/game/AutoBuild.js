@@ -1,6 +1,7 @@
 import { UNIT_TYPE_ORDER, getProducibleUnits } from '../data/gameModes.js';
 import { HQ_BASE_UNITS, isBaseBuildingCampaign } from '../data/baseBuildings.js';
 import { isPlayerStagingPhase } from './OpeningDeployZone.js';
+import { isCombatLiving } from './EliminationRules.js';
 
 const PLAYER_TEAM = 'player';
 const MAX_QUEUE = 4;
@@ -45,7 +46,7 @@ function countPlayerArmy(units) {
   const counts = {};
   let total = 0;
   for (const u of units) {
-    if (!u || u.dead || u.team !== PLAYER_TEAM || !u.def?.type) continue;
+    if (u.team !== PLAYER_TEAM || !isCombatLiving(u) || !u.def?.type) continue;
     counts[u.def.type] = (counts[u.def.type] ?? 0) + 1;
     total++;
   }
@@ -121,6 +122,11 @@ export function updateAutoBuild(game) {
 
   if (queued > 0) {
     game.ui?.updateProduction(game);
-    game.ui?.updateResources(game.resources.player, game.capturePoints, game.cheatMode);
+    game.ui?.updateResources(
+      game.resources.player,
+      game.capturePoints,
+      game.cheatMode,
+      game._resourceHudOptions?.() ?? {}
+    );
   }
 }

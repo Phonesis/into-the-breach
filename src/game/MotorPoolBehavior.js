@@ -49,7 +49,7 @@ export function updateMotorPoolHealing(baseBuildings, units, dt, motorPoolsIn = 
     const pz = pool.z;
 
     for (const ally of units) {
-      if (ally.dead || ally.team !== team) continue;
+      if (ally.dead || ally.surrendered || ally._captureExit || ally._crewless || ally.team !== team) continue;
       if (!canReceiveMotorPoolHeal(ally)) continue;
 
       const dx = ally.position.x - px;

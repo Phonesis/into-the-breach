@@ -2,6 +2,7 @@ import {
   ASSAULT_HOLD_TIME,
   ASSAULT_DEFEND_TIME,
 } from '../data/gameModes.js';
+import { isCombatLiving, teamIsEliminated } from './EliminationRules.js';
 
 const PLAYER = 'player';
 const ENEMY = 'enemy';
@@ -102,35 +103,19 @@ export function updateAssaultTimers(assault, dt) {
   assault.matchTimer += dt;
 
   const cp = assault.frontlineCp;
-  if (cp && cp.owner === assault.attackerTeam) {
+  if (cp?.isHeldSecurely?.(assault.attackerTeam)) {
     assault.holdTimer += dt;
   } else {
     assault.holdTimer = 0;
   }
 }
 
-import { teamIsEliminated } from './EliminationRules.js';
-
 export function checkAssaultVictory(game) {
   const a = game.assault;
   if (!a) return null;
 
-  const playerAlive = game.units.filter(
-    (u) =>
-      u.team === PLAYER &&
-      !u.dead &&
-      !u.surrendered &&
-      !u._captureExit &&
-      u.def?.type !== 'commander'
-  );
-  const enemyAlive = game.units.filter(
-    (u) =>
-      u.team === ENEMY &&
-      !u.dead &&
-      !u.surrendered &&
-      !u._captureExit &&
-      u.def?.type !== 'commander'
-  );
+  const playerAlive = game.units.filter((u) => u.team === PLAYER && isCombatLiving(u));
+  const enemyAlive = game.units.filter((u) => u.team === ENEMY && isCombatLiving(u));
   const playerHQ = game.hqs.find((h) => h.team === PLAYER);
   const enemyHQ = game.hqs.find((h) => h.team === ENEMY);
 
@@ -209,25 +194,34 @@ export function formatAssaultHud(assault) {
   const holdPct = Math.min(100, Math.round((assault.holdTimer / assault.holdTimeRequired) * 100));
   const timeLeft = Math.max(0, Math.ceil(assault.defendTimeRequired - assault.matchTimer));
   const cp = assault.frontlineCp;
-  const attackerHolds = cp?.owner === assault.attackerTeam;
+  const attackerHolds = cp?.isHeldSecurely?.(assault.attackerTeam) ?? false;
+  const attackerOwns = cp?.owner === assault.attackerTeam;
 
   if (playerIsAttacker) {
+    let objective = `Capture ${cp?.name ?? 'frontline'} and hold ${assault.holdTimeRequired}s`;
+    if (attackerHolds) {
+      objective = `Hold frontline: ${holdPct}% (${Math.ceil(assault.holdTimeRequired - assault.holdTimer)}s left)`;
+    } else if (attackerOwns) {
+      objective = `Frontline contested — hold paused at ${holdPct}%`;
+    }
     return {
       role: 'Attacking',
-      objective: attackerHolds
-        ? `Hold frontline: ${holdPct}% (${Math.ceil(assault.holdTimeRequired - assault.holdTimer)}s left)`
-        : `Capture ${cp?.name ?? 'frontline'} and hold ${assault.holdTimeRequired}s`,
+      objective,
       timer: `Assault time left: ${timeLeft}s`,
       holdPct,
       attackerHolds,
     };
   }
 
+  let objective = `Hold ${cp?.name ?? 'frontline'} — repel the assault`;
+  if (attackerHolds) {
+    objective = `Frontline lost — ${holdPct}% enemy hold progress`;
+  } else if (attackerOwns) {
+    objective = `Frontline contested — enemy hold paused at ${holdPct}%`;
+  }
   return {
     role: 'Defending',
-    objective: attackerHolds
-      ? `Frontline contested — ${holdPct}% enemy hold progress`
-      : `Hold ${cp?.name ?? 'frontline'} — repel the assault`,
+    objective,
     timer: `Hold until: ${timeLeft}s`,
     holdPct,
     attackerHolds,

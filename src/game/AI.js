@@ -1376,13 +1376,24 @@ export function resetAI(openingDelay = 0, firstProdDelay = 5, defenseDelay = 24)
 }
 
 export function exportAIState() {
-  return { timer: aiTimer, prodTimer: aiProdTimer };
+  return {
+    timer: aiTimer,
+    prodTimer: aiProdTimer,
+    supportTimer: aiSupportTimer,
+    defenseTimer: aiDefenseTimer,
+  };
 }
 
-export function importAIState({ timer = 0, prodTimer = 5, defenseTimer = 24 } = {}) {
+export function importAIState({
+  timer = 0,
+  prodTimer = 5,
+  defenseTimer = 24,
+  supportTimer = 28,
+} = {}) {
   aiTimer = Math.max(0, timer);
   aiProdTimer = Math.max(0, prodTimer);
   aiDefenseTimer = Math.max(0, defenseTimer);
+  aiSupportTimer = Math.max(0, supportTimer);
 }
 
 function isLastStandOperationalUnit(unit) {

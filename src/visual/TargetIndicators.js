@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { getSceneryTargetLabel, isSceneryTarget } from '../game/SceneryTarget.js';
 import { getBaseBuildingTargetLabel, isBaseBuildingTarget } from '../game/BaseBuildingTarget.js';
+import { getDefenseTargetLabel, isDefenseTarget } from '../game/DefenseTarget.js';
+import { isHqTarget } from '../game/Targeting.js';
 import { canUnitEnterVehicle } from '../game/TankRiders.js';
 
 const MAX_LINES = 48;
@@ -10,6 +12,7 @@ function targetLabel(target) {
   if (target.isGround) return 'ground';
   if (isSceneryTarget(target)) return getSceneryTargetLabel(target);
   if (isBaseBuildingTarget(target)) return getBaseBuildingTargetLabel(target);
+  if (isDefenseTarget(target)) return getDefenseTargetLabel(target);
   if (target.def) return target.name ?? target.def.name;
   return target.name ?? target.label ?? 'Enemy HQ';
 }
@@ -86,7 +89,7 @@ export class TargetIndicators {
       return;
     }
     if (target.dead) return;
-    if (!target.def && target.mesh && this._hqHoverRing && target === this.hoverTarget) {
+    if (isHqTarget(target) && target.mesh && this._hqHoverRing && target === this.hoverTarget) {
       this._hqHoverRing.visible = false;
     }
   }
@@ -119,7 +122,7 @@ export class TargetIndicators {
       this._sceneryHoverRing.visible = true;
       return;
     }
-    if (target.mesh && !target.def) {
+    if (isHqTarget(target) && target.mesh) {
       if (!this._hqHoverRing) {
         const geo = new THREE.RingGeometry(5.5, 6.2, 40);
         const mat = new THREE.MeshBasicMaterial({

@@ -20,6 +20,10 @@ import { exportAIState, importAIState } from './AI.js';
 import { CLEARANCE_ATTACK_PLANS } from './ClearanceMode.js';
 import { restoreTankRiderLinks } from './TankRiders.js';
 import { restoreTruckTowLinks } from './TruckTowing.js';
+import {
+  exportPendingIndirectImpacts,
+  restorePendingIndirectImpacts,
+} from './Combat.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import {
   deformTerrainForTrench,
@@ -229,6 +233,14 @@ export function deleteBattleSave(id) {
   writeStore(store);
 }
 
+export function getBattleSaveLoadError(id) {
+  const entry = readStore().saves.find((s) => s.id === id);
+  if (!entry) return 'missing';
+  if (entry.version !== SAVE_VERSION) return 'version';
+  if (!entry.session?.factionId || !entry.session?.mapId) return 'corrupt';
+  return null;
+}
+
 export function loadBattleSaveData(id) {
   const entry = readStore().saves.find((s) => s.id === id);
   if (!entry || entry.version !== SAVE_VERSION) return null;
@@ -346,6 +358,7 @@ export function captureBattleSave(game, { id = null } = {}) {
       _reverseMoveOrder: !!u._reverseMoveOrder,
       _trafficYield: u._trafficYield ? { ...u._trafficYield } : null,
       _chasingAttack: !!u._chasingAttack,
+      hardAttackOrder: !!u._hardAttackOrder,
       engagementStance: u.engagementStance === 'pursue' ? 'pursue' : 'hold',
       autoFire: !!u.autoFire,
       seekCoverOverride:
@@ -425,14 +438,19 @@ export function captureBattleSave(game, { id = null } = {}) {
         player: game.production.queues.player.map((j) => ({
           unitType: j.unitType,
           remaining: j.remaining,
+          spawnFails: j.spawnFails ?? 0,
+          cost: j.cost ?? j.def?.cost ?? 0,
         })),
         enemy: game.production.queues.enemy.map((j) => ({
           unitType: j.unitType,
           remaining: j.remaining,
+          spawnFails: j.spawnFails ?? 0,
+          cost: j.cost ?? j.def?.cost ?? 0,
         })),
       },
       spawnAngle: { ...game.production._spawnAngle },
     },
+    indirectImpacts: exportPendingIndirectImpacts(),
     fireSupport: {
       cooldowns: { ...game.fireSupport.cooldowns },
       airborneUsesLeft: game.fireSupport.airborneUsesLeft,
@@ -446,11 +464,13 @@ export function captureBattleSave(game, { id = null } = {}) {
             radioId: game.fireSupport.pendingStrike.radioId ?? null,
           }
         : null,
+      scheduledStrikes: game.fireSupport.exportScheduledStrikes?.() ?? [],
     },
     enemyFireSupport: {
       cooldowns: { ...game.enemyFireSupport?.cooldowns },
       airborneUsesLeft: game.enemyFireSupport?.airborneUsesLeft,
       airborneCloudCoverRemaining: game.enemyFireSupport?.airborneCloudCoverRemaining,
+      scheduledStrikes: game.enemyFireSupport?.exportScheduledStrikes?.() ?? [],
     },
     generalOrders: {
       cooldowns: { ...game.generalOrders.cooldowns },
@@ -763,13 +783,15 @@ export function writeBattleSave(snapshot, existingId = null) {
   if (idx >= 0) store.saves[idx] = entry;
   else store.saves.unshift(entry);
   store.saves.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+  let droppedOldest = null;
   if (store.saves.length > MAX_SAVES) {
+    droppedOldest = store.saves[MAX_SAVES] ?? null;
     store.saves = store.saves.slice(0, MAX_SAVES);
   }
   if (!writeStore(store)) {
     throw new Error('localStorage write failed');
   }
-  return id;
+  return { id, droppedOldest };
 }
 
 function restoreEngineerScenery(game, placements) {
@@ -1391,6 +1413,8 @@ export function applyBattleSave(game, snapshot) {
         unitType: job.unitType,
         def,
         remaining: job.remaining,
+        spawnFails: job.spawnFails ?? 0,
+        cost: job.cost ?? def.cost ?? 0,
       });
     }
   }
@@ -1650,6 +1674,11 @@ export function applyBattleSave(game, snapshot) {
       unit.attackOrder = attackOrder;
       unit.target = target ?? attackOrder;
       unit._manualFireMission = !!uData.manualFireMission;
+      unit._hardAttackOrder = uData.hardAttackOrder !== false && !uData.stanceBoundAttackOrder;
+      unit._chasingAttack = !!uData._chasingAttack;
+      unit._stancePursuitOrder = !!uData.stancePursuitOrder;
+      unit._stanceBoundAttackOrder = !!uData.stanceBoundAttackOrder;
+      unit._attackOrderReachedRange = !!uData.attackOrderReachedRange;
     } else {
       unit._stancePursuitOrder = false;
       unit._stanceBoundAttackOrder = false;
@@ -1732,6 +1761,11 @@ export function applyBattleSave(game, snapshot) {
       }
     );
   }
+  restorePendingIndirectImpacts(snapshot.indirectImpacts, game);
+  game.fireSupport.restoreScheduledStrikes?.(snapshot.fireSupport?.scheduledStrikes);
+  game.enemyFireSupport?.restoreScheduledStrikes?.(
+    snapshot.enemyFireSupport?.scheduledStrikes
+  );
   syncRankMarkers(game.units);
   for (const u of game._playerAlive) {
     syncUnitFieldIcon(u, game.showUnitFieldIcons);

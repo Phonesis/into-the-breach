@@ -7,6 +7,7 @@ import { applyMountedRiderVisuals, resetInfantryWalkPose } from '../units/Infant
 import { getVehicleDesign } from '../units/vehicleDesigns.js';
 import { SQUAD_SIZES } from '../data/squadSizes.js';
 import { removeFieldIcon } from '../visual/UnitFieldIcons.js';
+import { detachGun } from './TruckTowing.js';
 
 export const TANK_MOUNT_RANGE = 4.2;
 export const TANK_DISMOUNT_SPREAD = 2.4;
@@ -338,6 +339,7 @@ export function exitVehicleCrew(game, vehicle) {
     vehicle._crewless = true;
     vehicle._crewBailedOut = true;
     clearVehicleOrders(vehicle, units);
+    if (vehicle._towedGunId) detachGun(vehicle, units, mapDef);
     game?._rebuildUnitCaches?.();
     return crew;
   }
@@ -348,6 +350,7 @@ export function exitVehicleCrew(game, vehicle) {
   vehicle._replacementCrewUnitId = null;
   vehicle._crewBailedOut = true;
   clearVehicleOrders(vehicle, units);
+  if (vehicle._towedGunId) detachGun(vehicle, units, mapDef);
   game?._rebuildUnitCaches?.();
   return crew;
 }
@@ -596,6 +599,11 @@ export function updateTankRiders(units, dt, mapDef, garrisonSources = null) {
 export function restoreTankRiderLinks(units, mapDef = null) {
   const unitById = new Map(units.map((u) => [u.id, u]));
   for (const unit of units) {
+    if (unit.dead) {
+      unit._mountedOnTankId = null;
+      unit._pendingMountTankId = null;
+      continue;
+    }
     if (!unit._mountedOnTankId) continue;
     const tank = unitById.get(unit._mountedOnTankId);
     if (!tank) {

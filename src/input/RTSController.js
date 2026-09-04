@@ -35,6 +35,8 @@ const HQ_ATTACK_PROXIMITY = 18;
  */
 const UNIT_ATTACK_PROXIMITY_PAD = 3.8;
 const VEHICLE_ACTION_HOVER_GRACE_MS = 1100;
+const SELECT_DRAG_THRESHOLD_PX = 6;
+const SELECT_DRAG_THRESHOLD_TOUCH_PX = 18;
 
 export class RTSController {
   constructor({
@@ -130,6 +132,7 @@ export class RTSController {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.dragStart = null;
+    this._selectPointerId = null;
     this.enabled = false;
     this._lastOrderAt = 0;
     this.hoveredTarget = null;
@@ -219,11 +222,16 @@ export class RTSController {
 
   setTabletTargetMode(on) {
     this._tabletTargetMode = !!on;
+    if (on) this._tabletFireMode = false;
     if (!this._tabletTargetMode) this._tabletTargetConfirmKey = null;
   }
 
   setTabletFireMode(on) {
     this._tabletFireMode = !!on;
+    if (on) {
+      this._tabletTargetMode = false;
+      this._tabletTargetConfirmKey = null;
+    }
     this.onBattleCursorChange?.();
   }
 
@@ -369,7 +377,7 @@ export class RTSController {
       let obj = hit.object;
       while (obj && !obj.userData?.unit) obj = obj.parent;
       const unit = resolveMountedHost(obj?.userData?.unit, units);
-      if (!unit || unit.dead || unit.team === player) continue;
+      if (!unit || unit.dead || unit.team === player || unit.surrendered || unit._captureExit) continue;
       if (hit.distance < bestDist) {
         bestDist = hit.distance;
         best = unit;
@@ -907,15 +915,38 @@ export class RTSController {
     if (drag.element?.style) drag.element.style.cursor = drag.previousCursor;
   }
 
+  _endSelectPointer() {
+    const id = this._selectPointerId;
+    if (id != null && this.domElement.hasPointerCapture?.(id)) {
+      try {
+        this.domElement.releasePointerCapture(id);
+      } catch {
+        /* already released */
+      }
+    }
+    this._selectPointerId = null;
+  }
+
   onPointerCancel(e) {
-    if (!this._isCameraDragEvent(e)) return;
-    e.preventDefault();
-    this._endCameraDrag(e);
+    if (this._isCameraDragEvent(e)) {
+      e.preventDefault();
+      this._endCameraDrag(e);
+      return;
+    }
+    this._endSelectPointer();
+    this.dragStart = null;
+    this._dragSelecting = false;
   }
 
   onLostPointerCapture(e) {
-    if (!this._isCameraDragEvent(e)) return;
-    this._endCameraDrag(e);
+    if (this._isCameraDragEvent(e)) {
+      this._endCameraDrag(e);
+      return;
+    }
+    if (this._selectPointerId == null || e.pointerId !== this._selectPointerId) return;
+    this._selectPointerId = null;
+    this.dragStart = null;
+    this._dragSelecting = false;
   }
 
   onPointerDown(e) {
@@ -947,6 +978,12 @@ export class RTSController {
 
     this.dragStart = { x: e.clientX, y: e.clientY };
     this._dragSelecting = false;
+    this._selectPointerId = e.pointerId;
+    try {
+      this.domElement.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* capture is best-effort; HUD release still ends the box via pointerup */
+    }
 
     if (this._tabletMode && this.getSelectedPlayerUnits().length > 0) {
       this._refreshHoverTargetNow();
@@ -1012,7 +1049,11 @@ export class RTSController {
     if (!this.dragStart) return;
     const dx = e.clientX - this.dragStart.x;
     const dy = e.clientY - this.dragStart.y;
-    if (Math.hypot(dx, dy) > 6) {
+    const dragSlop =
+      this._tabletMode || e.pointerType === 'touch' || e.pointerType === 'pen'
+        ? SELECT_DRAG_THRESHOLD_TOUCH_PX
+        : SELECT_DRAG_THRESHOLD_PX;
+    if (Math.hypot(dx, dy) > dragSlop) {
       this._dragSelecting = true;
     }
   }
@@ -1048,7 +1089,14 @@ export class RTSController {
       this._endCameraDrag(e);
       return;
     }
-    if (this._inputBlocked() || e.button !== 0) return;
+    if (this._inputBlocked() || e.button !== 0) {
+      if (e.button === 0) {
+        this._endSelectPointer();
+        this.dragStart = null;
+        this._dragSelecting = false;
+      }
+      return;
+    }
     this.setPointerFromEvent(e);
 
     const pendingFs = this.getPendingFireSupport?.();
@@ -1066,6 +1114,7 @@ export class RTSController {
         ground &&
         this.onFireSupportTarget('pending-interact', ground.x, ground.z)
       ) {
+        this._endSelectPointer();
         this.dragStart = null;
         this._dragSelecting = false;
         return;
@@ -1087,6 +1136,7 @@ export class RTSController {
       if (pendingRadio?.def?.type === 'radioOperator' && this.onFireSupportTarget) {
         const handled = this.onFireSupportTarget('radio-interact', pendingRadio);
         if (handled) {
+          this._endSelectPointer();
           this.dragStart = null;
           this._dragSelecting = false;
           return;
@@ -1119,6 +1169,7 @@ export class RTSController {
           this.onBaseBuildingPlacement('place', ground.x, ground.z);
         }
       }
+      this._endSelectPointer();
       this.dragStart = null;
       this._dragSelecting = false;
       return;
@@ -1133,6 +1184,7 @@ export class RTSController {
       if (ground) {
         this.onDefensePlacement('pick', ground.x, ground.z);
       }
+      this._endSelectPointer();
       this.dragStart = null;
       return;
     }
@@ -1143,6 +1195,7 @@ export class RTSController {
     if (!this._dragSelecting && this._shouldIssueTabletTapOrder(team)) {
       this.issueMoveOrAttack();
       this._tabletTargetConfirmKey = null;
+      this._endSelectPointer();
       this.dragStart = null;
       this._dragSelecting = false;
       this.updateHoverTarget();
@@ -1160,17 +1213,22 @@ export class RTSController {
       const minY = Math.min(y1, y2);
       const maxY = Math.max(y1, y2);
 
+      const additive = e.shiftKey && !this._tabletFireMode;
       for (const u of units) {
-        if (u.dead) continue;
+        if (u.dead || u.surrendered || u._captureExit || u._crewless) continue;
         if (u._mountedOnTankId) {
-          u.setSelected(false);
+          if (!additive) u.setSelected(false);
           continue;
         }
         const p = u.mesh.position.clone().project(this.camera);
         const inside = p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY && p.z < 1;
-        u.setSelected(inside);
+        if (additive) {
+          if (inside) u.setSelected(true);
+        } else {
+          u.setSelected(inside);
+        }
       }
-      this.getHqs().forEach((h) => h.setSelected(false));
+      if (!additive) this.getHqs().forEach((h) => h.setSelected(false));
       this._notifySelection(units, null, null);
     } else {
       const selectedBefore = units.filter((u) => u.selected && !u.dead);
@@ -1240,6 +1298,7 @@ export class RTSController {
       }
     }
 
+    this._endSelectPointer();
     this.dragStart = null;
     this._dragSelecting = false;
     this.updateHoverTarget();

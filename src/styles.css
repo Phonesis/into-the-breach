@@ -3550,7 +3550,7 @@ body.portrait-blocked .mobile-support-screen {
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  pointer-events: auto;
   background: rgba(4, 8, 14, 0.38);
 }
 
