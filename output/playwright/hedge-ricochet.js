@@ -1,0 +1,17 @@
+import * as THREE from 'three';
+import { buildTerrain } from '/src/world/Terrain.js';
+import { setupRenderer, setupSceneEnvironment, setupLighting } from '/src/world/SceneSetup.js';
+import { MAPS } from '/src/data/maps.js';
+import { scheduleShellRicochet, updateShellRicochets } from '/src/game/ShellRicochet.js';
+import { updateCombatEffects, spawnArmorRicochet } from '/src/effects/CombatEffects.js';
+import { createUnitMesh } from '/src/units/UnitMeshes.js';
+import { preloadUnitTextures, setActiveVehicleTheatre } from '/src/units/UnitTextures.js';
+const renderer = new THREE.WebGLRenderer({antialias:true}); renderer.setSize(1280,720);renderer.setPixelRatio(1);document.body.append(renderer.domElement);setupRenderer(renderer);
+const scene = new THREE.Scene(), map = MAPS.normandy;
+setupSceneEnvironment(scene,map,renderer);setupLighting(scene,map);
+const hedges=[];buildTerrain(map,scene,{register(group,entry){if(entry.kind==='hedge')hedges.push(group);scene.add(group);}});
+const h=hedges[7],p=h.position;
+const camera=new THREE.PerspectiveCamera(42,1280/720,.1,1000);camera.position.set(p.x+9,p.y+10,p.z+15);camera.lookAt(p.x,p.y+.6,p.z);
+const label=document.querySelector('#results');
+let last=performance.now(),frames=0;
+function tick(now){const dt=Math.min((now-last)/1000,.1);last=now;updateShellRicochets(dt);updateCombatEffects(dt);renderer.render(scene,camera);frames++;label.textContent='Normandy hedgerow — '+renderer.info.render.calls+' scene draws / '+renderer.info.render.triangles+' triangles';requestAnimationFrame(tick);}requestAnimationFrame(tick);

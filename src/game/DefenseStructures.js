@@ -33,6 +33,7 @@ import { sounds } from '../audio/SoundManager.js';
 import { mgProfileForFaction } from '../audio/WeaponSounds.js';
 import { getStructureDamageMultiplier } from './StructureDamage.js';
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
+import { scheduleShellRicochet } from './ShellRicochet.js';
 import { handleFireSupportImpactMorale } from './RetreatBehavior.js';
 import { getBlastProfile } from './BlastProfile.js';
 
@@ -648,6 +649,11 @@ export class DefenseStructureManager {
         )
       : null;
     if (armorHit) {
+      scheduleShellRicochet({
+        attacker: { def: { ...def, type: 'antiTankGun' }, position: { x: entry.x, z: entry.z }, team: entry.team },
+        target, armorHit, damage, units: this.getAllUnits(), scenery: this.getScenery(), scene,
+        heightAt: (x, z) => mapDef ? sampleTerrainHeight(x, z, mapDef) : 0,
+      });
       damage *= armorHit.damageMultiplier;
       if (armorHit.mobilityDamaged) applyMobilityDamage(target, armorHit.mobilityDamageKind);
     }

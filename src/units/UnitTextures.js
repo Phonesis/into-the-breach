@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { publicUrl } from '../lib/publicUrl.js';
+import { markSharedResource, registerBattleSceneCleanup } from '../world/SceneDispose.js';
 
 const FACTIONS = ['germany', 'usa', 'uk', 'russia', 'japan'];
 
@@ -49,7 +50,14 @@ let fabricNormalMap = null;
 let vehicleSurfaceBumpMap = null;
 let vehicleSurfaceRoughnessMap = null;
 let sharedInfantryGlobals = null;
+const surfaceMapCache = new Map();
+const vehicleMaterialCache = new Map();
+// Keep just the most recent theatre's five CPU paint sheets across matches.
+// GPU wrappers are battle-owned; stable uniforms and small surface maps are
+// session-owned. Replaying the same map does not redraw the large canvases.
+const vehicleCamoCanvasCache = new Map();
 let activeVehicleTheatre = 'normandy';
+export function getActiveVehicleTheatre() { return activeVehicleTheatre; }
 let proceduralVehicleTexturesReady = false;
 
 const THEATRE_CAMO = {
@@ -109,9 +117,12 @@ function stringSeed(value) {
 
 function createTheatreCamoTexture(theatreId, factionId) {
   if (typeof document === 'undefined') return null;
+  const canvasKey = `${theatreId}:${factionId}`;
+  const cachedCanvas = vehicleCamoCanvasCache.get(canvasKey);
+  if (cachedCanvas) return createTheatreTexture(cachedCanvas);
   const spec = THEATRE_CAMO[theatreId]?.[factionId] ?? THEATRE_CAMO.normandy.germany;
-  // Only the active theatre is generated (four faction sheets), so the paint
-  // can stay sharp without pre-allocating sixteen 1K textures at startup.
+  // Only the active theatre is generated (five faction sheets), so the paint
+  // can stay sharp without pre-allocating every theatre at startup.
   const size = 1024;
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -122,34 +133,55 @@ function createTheatreCamoTexture(theatreId, factionId) {
   ctx.fillStyle = spec.base;
   ctx.fillRect(0, 0, size, size);
 
-  if (spec.pattern === 'bands') {
-    ctx.lineCap = 'round';
-    ctx.filter = 'blur(2px)';
-    for (let i = 0; i < 24; i++) {
-      ctx.strokeStyle = spec.accents[i % spec.accents.length];
-      ctx.globalAlpha = 0.58 + random() * 0.12;
-      ctx.lineWidth = 30 + random() * 42;
+  // Preserve recognizable factory olive finishes on Allied vehicles, while
+  // German/Japanese disruptive coats retain distinct green/brown paint fields.
+  // The edges are irregular and softly sprayed rather than translucent blobs.
+  const camoStrength = factionId === 'germany' ? 0.9
+    : factionId === 'japan' ? 0.84
+      : theatreId === 'northAfrica' && factionId === 'uk' ? 0.86 : 0.32;
+  ctx.filter = 'blur(2px)';
+  for (let i = 0; i < 19; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const rx = 80 + random() * (spec.pattern === 'bands' ? 175 : 135);
+    const ry = 65 + random() * 115;
+    const phase = random() * Math.PI * 2;
+    const points = Array.from({ length: 16 }, (_, n) => {
+      const angle = n / 16 * Math.PI * 2;
+      const radius = 0.62 + random() * 0.52;
+      return [Math.cos(angle + phase) * rx * radius, Math.sin(angle + phase) * ry * radius];
+    });
+    ctx.fillStyle = spec.accents[i % spec.accents.length];
+    ctx.globalAlpha = camoStrength * (0.88 + random() * 0.12);
+    for (const dx of [-size, 0, size]) for (const dy of [-size, 0, size]) {
+      if (x + dx + rx < 0 || x + dx - rx > size || y + dy + ry < 0 || y + dy - ry > size) continue;
       ctx.beginPath();
-      ctx.moveTo(-60, random() * size);
-      const midY = random() * size;
-      ctx.bezierCurveTo(size * 0.2, random() * size, size * 0.68, midY, size + 60, random() * size);
-      ctx.stroke();
-    }
-    ctx.filter = 'none';
-  } else {
-    ctx.filter = 'blur(2px)';
-    for (let i = 0; i < 76; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      const rx = 28 + random() * 82;
-      const ry = 18 + random() * 54;
-      ctx.fillStyle = spec.accents[i % spec.accents.length];
-      ctx.globalAlpha = 0.52 + random() * 0.18;
-      ctx.beginPath();
-      ctx.ellipse(x, y, rx, ry, random() * Math.PI, 0, Math.PI * 2);
+      for (let n = 0; n < points.length; n++) {
+        const p = points[n], next = points[(n + 1) % points.length];
+        const prev = points[(n + points.length - 1) % points.length];
+        if (!n) ctx.moveTo(x + dx + (prev[0] + p[0]) / 2, y + dy + (prev[1] + p[1]) / 2);
+        ctx.quadraticCurveTo(x + dx + p[0], y + dy + p[1],
+          x + dx + (p[0] + next[0]) / 2, y + dy + (p[1] + next[1]) / 2);
+      }
+      ctx.closePath();
       ctx.fill();
     }
-    ctx.filter = 'none';
+  }
+  ctx.filter = 'none';
+
+  // Uneven sun-fading and ingrained dust soften the coat at model scale, while
+  // the existing small paint chips remain available at close camera distances.
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < 12; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const radius = 130 + random() * 240;
+    const fade = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    const alpha = theatreId === 'northAfrica' ? 0.095 : 0.055;
+    fade.addColorStop(0, `rgba(192, 181, 148, ${alpha})`);
+    fade.addColorStop(1, 'rgba(192, 181, 148, 0)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
   }
 
   // Fine paint modulation breaks up the uniform digital fill without making
@@ -170,8 +202,8 @@ function createTheatreCamoTexture(theatreId, factionId) {
     const s = 0.7 + random() * 3.2;
     ctx.fillRect(random() * size, random() * size, s, s * (0.45 + random()));
   }
-  ctx.globalAlpha = 0.14;
-  ctx.strokeStyle = '#d0c5a8';
+  ctx.globalAlpha = 0.24;
+  ctx.strokeStyle = '#c4b593';
   ctx.lineCap = 'round';
   for (let i = 0; i < 72; i++) {
     const x = random() * size;
@@ -183,8 +215,21 @@ function createTheatreCamoTexture(theatreId, factionId) {
     ctx.lineTo(x + (random() - 0.5) * len * 0.35, y + len);
     ctx.stroke();
   }
-  ctx.globalAlpha = 0.09;
-  ctx.strokeStyle = '#1f241d';
+  // Small exposed primer chips with a lighter broken paint edge. They remain
+  // sparse so a vehicle reads as maintained equipment, not uniformly rusty.
+  ctx.globalAlpha = 0.48;
+  for (let i = 0; i < 110; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const width = 1.3 + random() * 4;
+    const height = 0.8 + random() * 2;
+    ctx.fillStyle = '#baaa84';
+    ctx.fillRect(x - 0.6, y - 0.6, width + 1.2, height + 1.2);
+    ctx.fillStyle = '#423c31';
+    ctx.fillRect(x, y, width, height);
+  }
+  ctx.globalAlpha = 0.17;
+  ctx.strokeStyle = '#302e25';
   for (let i = 0; i < 58; i++) {
     const x = random() * size;
     ctx.lineWidth = 1 + random() * 2;
@@ -195,10 +240,15 @@ function createTheatreCamoTexture(theatreId, factionId) {
   }
   ctx.globalAlpha = 1;
 
-  const texture = new THREE.CanvasTexture(canvas);
+  vehicleCamoCanvasCache.set(canvasKey, canvas);
+  return createTheatreTexture(canvas);
+}
+
+function createTheatreTexture(canvas) {
+  const texture = markSharedResource(new THREE.CanvasTexture(canvas));
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 1.5);
+  texture.repeat.set(1.2, 1);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -207,6 +257,22 @@ function createTheatreCamoTexture(theatreId, factionId) {
   texture.needsUpdate = true;
   return texture;
 }
+
+function releaseTheatreResources(keepTheatre = null) {
+  for (const [key, texture] of cache) {
+    if (!key.startsWith('vehicle:') || key.split(':').length !== 3) continue;
+    if (keepTheatre && key.startsWith(`vehicle:${keepTheatre}:`)) continue;
+    texture.dispose();
+    cache.delete(key);
+  }
+  for (const [key, material] of vehicleMaterialCache) {
+    if (!key.startsWith('canvas:') || key === `canvas:${keepTheatre}`) continue;
+    material.dispose();
+    vehicleMaterialCache.delete(key);
+  }
+}
+
+registerBattleSceneCleanup(() => releaseTheatreResources());
 
 function ensureTheatreCamoTextures(theatreId) {
   if (!proceduralVehicleTexturesReady) return;
@@ -220,6 +286,12 @@ function ensureTheatreCamoTextures(theatreId) {
 
 export function setActiveVehicleTheatre(theatreId) {
   activeVehicleTheatre = THEATRE_CAMO[theatreId] ? theatreId : 'normandy';
+  // Game.startGame selects the theatre after the previous battle is torn down.
+  // Also evict the default paint generated by menu preload on the first match.
+  releaseTheatreResources(activeVehicleTheatre);
+  for (const key of vehicleCamoCanvasCache.keys()) {
+    if (!key.startsWith(`${activeVehicleTheatre}:`)) vehicleCamoCanvasCache.delete(key);
+  }
   ensureTheatreCamoTextures(activeVehicleTheatre);
 }
 
@@ -255,7 +327,7 @@ function configureTexture(tex, repeat) {
   tex.anisotropy = 8;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  return tex;
+  return markSharedResource(tex);
 }
 
 function loadTexture(path, repeat) {
@@ -318,85 +390,128 @@ export function getVehicleCamoTexture(factionId) {
   );
 }
 
-/** Fine rolled-steel grain, weld scarring, chips, and accumulated grit. */
-export function getVehicleSurfaceBumpMap() {
-  if (vehicleSurfaceBumpMap || typeof document === 'undefined') return vehicleSurfaceBumpMap;
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const image = ctx.createImageData(size, size);
-  const random = seededRandom(0x19441945);
-  for (let i = 0; i < image.data.length; i += 4) {
-    const grain = Math.round(116 + random() * 28 + (random() > 0.992 ? 55 : 0));
-    image.data[i] = grain;
-    image.data[i + 1] = grain;
-    image.data[i + 2] = grain;
-    image.data[i + 3] = 255;
+/**
+ * Small, shared, seamless material sheets. Broad variation survives RTS zoom;
+ * fine pores and grain resolve as the camera approaches. Data maps stay linear.
+ */
+function getSurfaceMaps(kind) {
+  if (surfaceMapCache.has(kind)) return surfaceMapCache.get(kind);
+  const size = 256;
+  const bump = new Uint8Array(size * size * 4);
+  const roughness = new Uint8Array(size * size * 4);
+  const color = new Uint8Array(size * size * 4);
+  const random = seededRandom(stringSeed(`surface:${kind}`));
+  const tau = Math.PI * 2;
+  const clampByte = (n) => Math.round(Math.max(0, Math.min(255, n)));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const grain = random() - 0.5;
+      const broad = Math.sin(u * tau * 3 + Math.sin(v * tau * 2)) *
+        Math.cos(v * tau * 4 + Math.sin(u * tau));
+      let height = 128 + grain * 18 + broad * 13;
+      let rough = 222 + broad * 19 + grain * 12;
+      let shade = 235 + broad * 9 + grain * 8;
+      if (kind === 'rubber') {
+        // Fine ribs break the highlight without suggesting shiny bare metal.
+        const ribs = Math.pow(Math.max(0, Math.cos(u * tau * 32)), 8);
+        height = 108 + ribs * 38 + grain * 14;
+        rough = 240 + broad * 9;
+        shade = 216 + broad * 18 + ribs * 8;
+      } else if (kind === 'wood') {
+        const rings = Math.sin(u * tau * 12 + Math.sin(v * tau) * 1.6 + Math.sin(u * tau * 3));
+        height = 128 + rings * 18 + grain * 10;
+        rough = 215 + rings * 12;
+        shade = 216 + rings * 25 + broad * 8;
+      } else if (kind === 'leather') {
+        height = 128 + grain * 46 + broad * 10;
+        rough = 216 + broad * 24;
+        shade = 222 + broad * 15 + grain * 12;
+      } else if (kind === 'fabric') {
+        const thread = Math.sin(u * tau * 48) * Math.cos(v * tau * 48);
+        height = 128 + thread * 25 + grain * 6;
+        rough = 243 + broad * 9;
+        shade = 237 + broad * 10 + thread * 5;
+      } else if (kind === 'track') {
+        const worn = Math.pow(Math.max(0, Math.sin(v * tau * 12)), 8);
+        height = 116 + grain * 36 + broad * 20 + worn * 20;
+        rough = 218 + broad * 23 - worn * 48;
+        shade = 207 + broad * 24 + worn * 24;
+      }
+      const i = (y * size + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        bump[i + c] = clampByte(height);
+        roughness[i + c] = clampByte(rough);
+        color[i + c] = clampByte(shade);
+      }
+      bump[i + 3] = roughness[i + 3] = color[i + 3] = 255;
+    }
   }
-  ctx.putImageData(image, 0, 0);
-  ctx.globalAlpha = 0.3;
-  ctx.strokeStyle = '#e0e0e0';
-  ctx.lineWidth = 2.5;
-  for (let y = 48; y < size; y += 96) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    for (let x = 0; x <= size; x += 12) ctx.lineTo(x, y + Math.sin(x * 0.31) * 1.5);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 0.46;
-  ctx.fillStyle = '#585858';
-  for (let i = 0; i < 280; i++) {
-    const w = 1 + random() * 3;
-    ctx.fillRect(random() * size, random() * size, w, 0.6 + random() * 1.4);
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.5, 3.5);
-  texture.anisotropy = 8;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  vehicleSurfaceBumpMap = texture;
-  return vehicleSurfaceBumpMap;
+  const make = (data, isColor = false) => {
+    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    texture.name = `unit-${kind}-${isColor ? 'color' : data === bump ? 'bump' : 'roughness'}`;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, 2);
+    texture.anisotropy = 8;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    if (isColor) texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return markSharedResource(texture);
+  };
+  const maps = { bump: make(bump), roughness: make(roughness), color: make(color, true) };
+  surfaceMapCache.set(kind, maps);
+  return maps;
 }
 
-/** Uneven matt paint, polished wear, and oily patches for non-uniform highlights. */
+/** Fine cast/rolled steel texture, without repeating arbitrary weld lines. */
+export function getVehicleSurfaceBumpMap() {
+  return vehicleSurfaceBumpMap ??= getSurfaceMaps('steel').bump;
+}
+
+/** Matt paint with broad, subtle variation instead of a uniform plastic gloss. */
 export function getVehicleSurfaceRoughnessMap() {
-  if (vehicleSurfaceRoughnessMap || typeof document === 'undefined') return vehicleSurfaceRoughnessMap;
-  const size = 384;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const image = ctx.createImageData(size, size);
-  const random = seededRandom(0x524f5547);
-  for (let i = 0; i < image.data.length; i += 4) {
-    let value = 188 + Math.round((random() - 0.5) * 34);
-    if (random() > 0.994) value -= 62;
-    image.data[i] = value;
-    image.data[i + 1] = value;
-    image.data[i + 2] = value;
-    image.data[i + 3] = 255;
-  }
-  ctx.putImageData(image, 0, 0);
-  ctx.globalAlpha = 0.18;
-  ctx.fillStyle = '#5a5a5a';
-  for (let i = 0; i < 46; i++) {
-    ctx.beginPath();
-    ctx.ellipse(random() * size, random() * size, 3 + random() * 16, 1 + random() * 6, random() * Math.PI, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2.8, 2.8);
-  texture.anisotropy = 8;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  vehicleSurfaceRoughnessMap = texture;
-  return vehicleSurfaceRoughnessMap;
+  return vehicleSurfaceRoughnessMap ??= getSurfaceMaps('steel').roughness;
+}
+
+export function getVehicleRubberMaterial() {
+  if (vehicleMaterialCache.has('rubber')) return vehicleMaterialCache.get('rubber');
+  const maps = getSurfaceMaps('rubber');
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x30312d, map: maps.color, bumpMap: maps.bump, bumpScale: 0.012,
+    roughnessMap: maps.roughness, roughness: 1, metalness: 0,
+  });
+  material.name = 'weathered-tyre-rubber';
+  vehicleMaterialCache.set('rubber', material);
+  return markSharedResource(material);
+}
+
+export function getVehicleTrackMaterial() {
+  if (vehicleMaterialCache.has('track')) return vehicleMaterialCache.get('track');
+  const maps = getSurfaceMaps('track');
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x555047, map: maps.color, bumpMap: maps.bump, bumpScale: 0.018,
+    roughnessMap: maps.roughness, roughness: 0.92, metalness: 0.42,
+  });
+  material.name = 'worn-track-steel';
+  vehicleMaterialCache.set('track', material);
+  return markSharedResource(material);
+}
+
+export function getVehicleCanvasMaterial() {
+  const key = `canvas:${activeVehicleTheatre}`;
+  if (vehicleMaterialCache.has(key)) return vehicleMaterialCache.get(key);
+  const maps = getSurfaceMaps('fabric');
+  const material = new THREE.MeshStandardMaterial({
+    color: activeVehicleTheatre === 'northAfrica' ? 0x978466 : 0x706e50,
+    map: maps.color, normalMap: getFabricNormalMap(), normalScale: new THREE.Vector2(0.6, 0.6),
+    roughnessMap: maps.roughness, roughness: 1, metalness: 0,
+  });
+  material.name = 'weathered-canvas';
+  vehicleMaterialCache.set(key, material);
+  return markSharedResource(material);
 }
 
 export function getInfantryUniformTexture(factionId) {
@@ -564,7 +679,7 @@ function createFactionGhillieTexture(factionId) {
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   texture.needsUpdate = true;
-  return texture;
+  return markSharedResource(texture);
 }
 
 export function getFactionGhillieTexture(factionId) {
@@ -578,57 +693,57 @@ export function getFactionGhillieTexture(factionId) {
   return cache.get('ghillie') ?? null;
 }
 
-/** Procedural weave normal — generated once, shared by all infantry uniforms. */
+/** Woven threads and soft cloth creases, shared by uniforms and canvas. */
 export function getFabricNormalMap() {
   if (fabricNormalMap) return fabricNormalMap;
-
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(size, size);
-
-  const weave = (u, v) => {
-    const warp = Math.sin(u * Math.PI * 28) * 0.55;
-    const weft = Math.sin(v * Math.PI * 28) * 0.55;
-    const thread = Math.sin((u + v) * Math.PI * 14) * 0.25;
-    return warp + weft + thread;
-  };
-
-  const strength = 3.2;
+  const size = 256;
+  const data = new Uint8Array(size * size * 4);
+  const tau = Math.PI * 2;
+  const weave = (u, v) =>
+    Math.sin(u * tau * 48) * Math.cos(v * tau * 48) * 0.0007 +
+    Math.sin(u * tau * 3 + Math.sin(v * tau) * 0.6) * 0.025 +
+    Math.sin(v * tau * 5 + Math.sin(u * tau * 2) * 0.4) * 0.009;
+  const epsilon = 1 / size;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const u = x / size;
       const v = y / size;
-      const dx = (weave(u + 0.004, v) - weave(u - 0.004, v)) * strength;
-      const dy = (weave(u, v + 0.004) - weave(u, v - 0.004)) * strength;
+      const dx = (weave(u + epsilon, v) - weave(u - epsilon, v)) / (2 * epsilon);
+      const dy = (weave(u, v + epsilon) - weave(u, v - epsilon)) / (2 * epsilon);
+      const length = Math.hypot(dx, dy, 1);
       const i = (y * size + x) * 4;
-      img.data[i] = Math.min(255, Math.max(0, 128 + dx * 70));
-      img.data[i + 1] = Math.min(255, Math.max(0, 128 + dy * 70));
-      img.data[i + 2] = 255;
-      img.data[i + 3] = 255;
+      data[i] = Math.round(127.5 - dx / length * 127.5);
+      data[i + 1] = Math.round(127.5 - dy / length * 127.5);
+      data[i + 2] = Math.round(127.5 + 1 / length * 127.5);
+      data[i + 3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
-
-  fabricNormalMap = new THREE.CanvasTexture(canvas);
-  fabricNormalMap.wrapS = THREE.RepeatWrapping;
-  fabricNormalMap.wrapT = THREE.RepeatWrapping;
-  fabricNormalMap.repeat.set(3, 3);
-  return fabricNormalMap;
+  fabricNormalMap = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  fabricNormalMap.name = 'woven-cloth-and-creases';
+  fabricNormalMap.wrapS = fabricNormalMap.wrapT = THREE.RepeatWrapping;
+  fabricNormalMap.repeat.set(1, 1);
+  fabricNormalMap.anisotropy = 8;
+  fabricNormalMap.minFilter = THREE.LinearMipmapLinearFilter;
+  fabricNormalMap.magFilter = THREE.LinearFilter;
+  fabricNormalMap.generateMipmaps = true;
+  fabricNormalMap.needsUpdate = true;
+  return markSharedResource(fabricNormalMap);
 }
 
 function getSharedInfantryGlobals() {
   if (sharedInfantryGlobals) return sharedInfantryGlobals;
+  const steel = getSurfaceMaps('steel');
+  const wood = getSurfaceMaps('wood');
+  const leather = getSurfaceMaps('leather');
   sharedInfantryGlobals = {
-    dark: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.5, roughness: 0.55 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x252725, metalness: 0.68, roughness: 0.62, roughnessMap: steel.roughness, bumpMap: steel.bump, bumpScale: 0.003 }),
     skin: new THREE.MeshStandardMaterial({ color: 0xc8a882, roughness: 0.8, metalness: 0 }),
-    helmetUk: new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 0.75, metalness: 0.1 }),
-    metal: new THREE.MeshStandardMaterial({ color: 0x6a7078, metalness: 0.72, roughness: 0.45 }),
-    wood: new THREE.MeshStandardMaterial({ color: 0x70472d, roughness: 0.8, metalness: 0 }),
-    leather: new THREE.MeshStandardMaterial({ color: 0x29251f, roughness: 0.92, metalness: 0 }),
+    helmetUk: new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 0.94, metalness: 0.08, roughnessMap: steel.roughness, bumpMap: steel.bump, bumpScale: 0.004 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x6a7078, metalness: 0.72, roughness: 0.56, roughnessMap: steel.roughness }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x805339, map: wood.color, roughness: 0.9, roughnessMap: wood.roughness, bumpMap: wood.bump, bumpScale: 0.004, metalness: 0 }),
+    leather: new THREE.MeshStandardMaterial({ color: 0x3b3329, map: leather.color, roughness: 0.94, roughnessMap: leather.roughness, bumpMap: leather.bump, bumpScale: 0.004, metalness: 0 }),
   };
+  Object.values(sharedInfantryGlobals).forEach(markSharedResource);
   return sharedInfantryGlobals;
 }
 
@@ -650,9 +765,10 @@ export function getInfantryMaterials(factionId) {
     // has populated the cache (most visible on first-load Far East battles).
     map: uniformTex,
     normalMap: normal,
-    normalScale: new THREE.Vector2(0.32, 0.32),
-    roughness: 0.86,
-    metalness: 0.02,
+    normalScale: new THREE.Vector2(0.7, 0.7),
+    roughness: 1,
+    roughnessMap: getSurfaceMaps('fabric').roughness,
+    metalness: 0,
   });
 
   const mats = {
@@ -662,14 +778,20 @@ export function getInfantryMaterials(factionId) {
     skin: globals.skin,
     helmet: new THREE.MeshStandardMaterial({
       color: FACTION_HELMETS[factionId] ?? FACTION_HELMETS.germany,
-      roughness: 0.78,
-      metalness: 0.12,
+      roughness: 0.96,
+      roughnessMap: getVehicleSurfaceRoughnessMap(),
+      bumpMap: getVehicleSurfaceBumpMap(),
+      bumpScale: 0.004,
+      metalness: 0.08,
     }),
     helmetUk: globals.helmetUk,
     webbing: new THREE.MeshStandardMaterial({
       color: FACTION_WEBBING[factionId] ?? 0x4a4035,
-      roughness: 0.9,
-      metalness: 0.02,
+      map: getSurfaceMaps('fabric').color,
+      bumpMap: getSurfaceMaps('fabric').bump,
+      bumpScale: 0.004,
+      roughness: 1,
+      metalness: 0,
     }),
     metal: globals.metal,
     wood: globals.wood,
@@ -677,9 +799,10 @@ export function getInfantryMaterials(factionId) {
   };
 
   infantryMatCache.set(factionId, mats);
+  Object.values(mats).forEach(markSharedResource);
   return mats;
 }
 
 export function unitTexturesReady() {
-  return cache.size >= FACTIONS.length * 2 + 1;
+  return proceduralVehicleTexturesReady;
 }

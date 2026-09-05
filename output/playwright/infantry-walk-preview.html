@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="icon" href="data:,">
+  <title>Infantry walk preview</title>
+  <style>
+    body { margin: 0; background: #1b221c; color: #ddd; font: 13px monospace; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { createUnitMesh } from '/src/units/UnitMeshes.js';
+import { preloadUnitTextures, setActiveVehicleTheatre } from '/src/units/UnitTextures.js';
+import { updateInfantryWalkAnimation, updateInfantryWeaponPose } from '/src/units/InfantryVisuals.js';
+import { FACTIONS } from '/src/data/factions.js';
+
+await preloadUnitTextures();
+setActiveVehicleTheatre('normandy');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(1280, 720);
+renderer.shadowMap.enabled = true;
+document.body.append(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6f7d6a);
+scene.add(new THREE.HemisphereLight(0xc9d6c4, 0x3a3224, 1.15));
+const sun = new THREE.DirectionalLight(0xfff1d0, 2.1);
+sun.position.set(6, 12, 8);
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x5a6148, roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+const usa = FACTIONS.usa;
+const squad = createUnitMesh('infantry', usa.color, usa.accent, 'usa');
+squad.position.set(0, 0, 0);
+scene.add(squad);
+
+const unit = {
+  mesh: squad,
+  position: squad.position,
+  def: { type: 'infantry', speed: 5.2 },
+  dead: false,
+  moveTarget: { x: 0, z: 80 },
+};
+updateInfantryWalkAnimation(unit, 0);
+
+const camera = new THREE.PerspectiveCamera(32, 1280 / 720, 0.1, 80);
+camera.position.set(-3.2, 0.95, 2.2);
+camera.lookAt(0, 0.62, 0);
+
+let frames = 0;
+function tick(now) {
+  const dt = Math.min(0.05, (tick.prev ? now - tick.prev : 16) / 1000);
+  tick.prev = now;
+  unit.position.z += 4.6 * dt;
+  updateInfantryWalkAnimation(unit, dt);
+  updateInfantryWeaponPose(unit, dt);
+  camera.position.set(-3.2, 0.95, unit.position.z + 2.2);
+  camera.lookAt(unit.position.x, 0.62, unit.position.z);
+  renderer.render(scene, camera);
+  frames++;
+  const soldiers = [];
+  squad.traverse((child) => {
+    if (child.name === 'squadMember') soldiers.push(child);
+  });
+  window.walkPreview = {
+    frames,
+    blend: unit._walkBlend,
+    yaws: soldiers.map((s) => {
+      const torso = s.children.find((c) => c.userData.infantryPart === 'torso');
+      return Number(torso?.rotation.y.toFixed(3));
+    }),
+  };
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

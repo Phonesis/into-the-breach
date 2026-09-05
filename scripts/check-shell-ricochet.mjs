@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { createServer } from 'vite';
+const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false, watch: null }, appType: 'custom' });
+try {
+  const { scheduleShellRicochet, clearShellRicochets, updateShellRicochets, reflectedShellVelocity, segmentBoxHit } = await server.ssrLoadModule('/src/game/ShellRicochet.js');
+  const attacker = { def: { type: 'tank' }, team: 'player', position: { x: 0, z: 10 } };
+  const target = { def: { type: 'tank' }, position: { x: 0, z: 0 }, mesh: { rotation: { y: 0 } } };
+  const armorHit = { deflected: true, aspect: 'front', angleDeg: 0, impactPosition: { x: 0, y: 0.7, z: 1.6 } };
+  assert.ok(reflectedShellVelocity(attacker, target, armorHit).z > 0, 'front plate reflects back out');
+  const side = reflectedShellVelocity({ position: { x: 10, z: 3 } }, target, { ...armorHit, aspect: 'side' });
+  assert.ok(side.x > 0 && side.z < 0, 'side plate preserves tangential travel');
+  const bounds = new THREE.Box3(new THREE.Vector3(-1,-1,4),new THREE.Vector3(1,1,5));
+  assert.equal(segmentBoxHit(new THREE.Vector3(), new THREE.Vector3(0,0,10), bounds), .4, 'sweep catches thin obstacles');
+  assert.equal(segmentBoxHit(new THREE.Vector3(), new THREE.Vector3(3,0,10), bounds), null);
+  let damage = 0, kills = 0;
+  const victim = { team: 'player', position: { x: 0, y: 0, z: 5 }, def: { type: 'infantry' }, takeDamage(n) { damage += n; this.dead = true; } };
+  function launch(extra = {}) { return scheduleShellRicochet({ attacker, target, armorHit, damage: 100, units: [target, victim], heightAt: () => 0, random: () => 0, onKill: () => kills++, ...extra }); }
+  assert.equal(launch(), true);
+  updateShellRicochets(.3);
+  assert.equal(damage, 32, 'friendly secondary collision receives reduced damage');
+  assert.equal(kills, 1);
+  updateShellRicochets(.3);
+  assert.equal(damage, 32, 'no repeat damage or recursive bounce');
+  victim.dead = false; damage = 0;
+  launch(); clearShellRicochets(); updateShellRicochets(.3);
+  assert.equal(damage, 0, 'battle cleanup clears flight');
+  launch(); victim.position.x = 10; updateShellRicochets(.3);
+  assert.equal(damage, 0, 'moving victim can leave trajectory'); clearShellRicochets(); victim.position.x = 0;
+  const group = new THREE.Mesh(new THREE.BoxGeometry(2, 3, .3)); group.position.set(0,1.5,3);
+  const entry = { x: 0, z: 3, radius: 2, group }; let sceneryDamage = 0;
+  launch({ scenery: { objects: [entry], damageObject(o,n) { assert.equal(o, entry); sceneryDamage += n; } } });
+  updateShellRicochets(.3); assert.equal(sceneryDamage, 32); assert.equal(damage, 0, 'nearer scenery shields unit');
+  launch({ heightAt: () => 2 }); updateShellRicochets(.3); assert.equal(damage, 0, 'ground stops round');
+  assert.equal(launch({ attacker: { ...attacker, def: { type: 'paratrooper' } } }), false, 'no HEAT ricochet');
+  assert.equal(launch({ armorHit: { ...armorHit, deflected: false } }), false, 'no penetrating-shot ricochet');
+  assert.equal(launch({ random: () => .99 }), false, 'intact ricochets only occasional');
+  clearShellRicochets();
+  console.log('PASS: reflection, swept collision, friendly hit, moving target, scenery occlusion, terrain, reduced damage, cleanup and eligibility');
+} finally { await server.close(); }

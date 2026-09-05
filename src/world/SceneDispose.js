@@ -1,29 +1,58 @@
 import * as THREE from 'three';
 
-function disposeMaterial(mat) {
-  if (!mat) return;
-  for (const key of [
-    'map',
-    'normalMap',
-    'roughnessMap',
-    'aoMap',
-    'emissiveMap',
-    'alphaMap',
-    'metalnessMap',
-  ]) {
-    if (mat[key]?.dispose) mat[key].dispose();
+// Cache ownership is identity-based: Material.clone() copies userData, so a
+// marker on the material would incorrectly keep private corpse/wreck clones.
+const sharedResources = new WeakSet();
+const battleCleanupCallbacks = new Set();
+
+/** A cache owns this resource and is responsible for releasing it. */
+export function markSharedResource(resource) {
+  if (resource) sharedResources.add(resource);
+  return resource;
+}
+
+/** Run cache cleanup only after all renderable battle objects are removed. */
+export function registerBattleSceneCleanup(callback) {
+  battleCleanupCallbacks.add(callback);
+}
+
+const TEXTURE_SLOTS = [
+  'map',
+  'normalMap',
+  'bumpMap',
+  'roughnessMap',
+  'aoMap',
+  'emissiveMap',
+  'alphaMap',
+  'metalnessMap',
+  'displacementMap',
+  'lightMap',
+];
+
+function disposeResource(resource, disposed) {
+  if (!resource?.dispose || sharedResources.has(resource) || disposed.has(resource)) return;
+  disposed.add(resource);
+  resource.dispose();
+}
+
+function disposeMaterial(mat, disposed) {
+  if (!mat || sharedResources.has(mat) || disposed.has(mat)) return;
+  for (const key of TEXTURE_SLOTS) {
+    disposeResource(mat[key], disposed);
   }
-  mat.dispose();
+  disposeResource(mat, disposed);
 }
 
 /** Dispose GPU resources on a single object (mesh, line, points, sprite). */
-export function disposeObject3D(root) {
+export function disposeObject3D(root, disposed = new Set()) {
   if (!root) return;
   root.traverse((obj) => {
-    if (obj.geometry) obj.geometry.dispose();
+    // InstancedMesh owns separate instance buffers outside its geometry.
+    if (obj.isInstancedMesh) disposeResource(obj, disposed);
+    disposeResource(obj.geometry, disposed);
     if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(disposeMaterial);
-      else disposeMaterial(obj.material);
+      if (Array.isArray(obj.material)) obj.material.forEach((mat) => disposeMaterial(mat, disposed));
+      else disposeMaterial(obj.material, disposed);
     }
   });
 }
@@ -32,10 +61,12 @@ export function disposeObject3D(root) {
 export function disposeBattleScene(scene) {
   if (!scene) return;
   const children = [...scene.children];
+  const disposed = new Set();
   for (const child of children) {
     scene.remove(child);
-    disposeObject3D(child);
+    disposeObject3D(child, disposed);
   }
+  for (const cleanup of battleCleanupCallbacks) cleanup();
 }
 
 const pendingDispose = [];
@@ -71,8 +102,9 @@ export function flushDisposeQueue() {
 /** Sync-dispose a capped batch so menu transitions do not freeze the tab. */
 export function flushDisposeQueueSync(maxMeshes = 32) {
   let n = 0;
+  const disposed = new Set();
   while (pendingDispose.length > 0 && n < maxMeshes) {
-    disposeObject3D(pendingDispose.shift());
+    disposeObject3D(pendingDispose.shift(), disposed);
     n++;
   }
   if (pendingDispose.length > 0) scheduleDisposeFlush();
@@ -83,18 +115,23 @@ export function flushDisposeQueueSync(maxMeshes = 32) {
  * @param {THREE.Object3D[]} meshes
  */
 export function disposeMeshesIdle(meshes) {
-  const queue = meshes.filter(Boolean);
+  const queue = [...new Set(meshes.filter(Boolean))];
   if (queue.length === 0) return;
 
   let idx = 0;
   const perSlice = 3;
+  const disposed = new Set();
 
   const run = (deadline) => {
-    const budget = deadline?.timeRemaining?.() ?? 12;
-    while (idx < queue.length && (deadline == null || budget > 1)) {
-      for (let n = 0; n < perSlice && idx < queue.length; n++, idx++) {
-        disposeObject3D(queue[idx]);
-      }
+    const started = performance.now();
+    let processed = 0;
+    // Check the live budget after each object. A captured timeRemaining value
+    // let the old loop dispose the entire casualty batch in one callback.
+    while (idx < queue.length && processed < perSlice &&
+      (processed === 0 ||
+        (performance.now() - started < 6 && (deadline?.timeRemaining?.() ?? 6) > 1))) {
+      disposeObject3D(queue[idx++], disposed);
+      processed++;
     }
     if (idx < queue.length) schedule(run);
   };

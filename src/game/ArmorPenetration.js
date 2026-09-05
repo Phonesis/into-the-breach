@@ -216,7 +216,7 @@ export function isDirectArmorShell(attacker, target, { coax = false, paratrooper
 export function resolveArmorHit(
   attacker,
   target,
-  { distance = 0, weaponRange = 1, coax = false, paratrooperAt = false, random = Math.random } = {}
+  { distance = 0, weaponRange = 1, coax = false, paratrooperAt = false, random = Math.random, powerScale = 1 } = {}
 ) {
   if (!isDirectArmorShell(attacker, target, { coax, paratrooperAt })) return null;
 
@@ -232,7 +232,7 @@ export function resolveArmorHit(
   const slope = aspect === 'front' ? profile.frontSlope ?? 1 : 1;
   const obliquity = 1 + (1 - plateAlignment) * 0.72;
   const effectiveArmor = profile.armor * aspectArmor * slope * obliquity;
-  const penetrationRatio = (basePower * rangePower) / Math.max(0.2, effectiveArmor);
+  const penetrationRatio = (basePower * rangePower * clamp(powerScale, 0.1, 1)) / Math.max(0.2, effectiveArmor);
 
   let penetrationChance = 0.35 + (penetrationRatio - 0.78) * 0.82;
   if (aspect === 'side') penetrationChance += 0.07;

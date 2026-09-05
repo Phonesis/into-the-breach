@@ -41,6 +41,7 @@ import { sounds, isInfantryUnitType, isVehicleCrewVoiceType } from '../audio/Sou
 import { removeWreckEffect } from '../effects/WreckEffects.js';
 import { classifyVehicleKnockout } from '../game/VehicleKnockout.js';
 import { sampleTerrainMeshHeight } from '../world/Terrain.js';
+import { disposeObject3D } from '../world/SceneDispose.js';
 
 let nextId = 1;
 
@@ -640,11 +641,7 @@ export class Unit {
     replacement.userData.unit = this;
     parent.add(replacement);
     parent.remove(oldMesh);
-    oldMesh.traverse((child) => {
-      child.geometry?.dispose?.();
-      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
-      else child.material?.dispose?.();
-    });
+    disposeObject3D(oldMesh);
 
     this.mesh = replacement;
     this.dead = false;
@@ -703,12 +700,6 @@ export class Unit {
     removeDamageSmoke(this);
     removeUnitHealthBar(this);
     scene.remove(this.mesh);
-    this.mesh.traverse((child) => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) {
-        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-        else child.material.dispose();
-      }
-    });
+    disposeObject3D(this.mesh);
   }
 }

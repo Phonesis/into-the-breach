@@ -267,12 +267,15 @@ The **General Orders** panel provides **Full Retreat**, **Hold Ground**, and **D
 - **Hold Ground** greatly reduces, but does not remove, automatic panic retreats.
 - **Dig In** sends eligible commanders, radio operators, infantry, airborne, MG, and sniper units to dig and occupy trenches facing the enemy.
 
+Vehicle identification uses projected wartime-style markings, including German Balkenkreuze, US stars, British recognition/squadron signs, Soviet tactical numbers and Japanese Army stars. See [vehicle marking schemes and historical exceptions](docs/vehicle-markings.md).
+
 ### Combat, cover, and morale
 
 Combat uses line of sight, directional cover, range falloff, armor facing, slope, and sampled vehicle hit locations. Intact buildings block direct fire; mortars, artillery, and off-map barrages can fire indirectly over distant obstacles. Artillery has a minimum range of roughly 220 m and can fire smoke screens.
 
 - Rifles and MGs cannot damage tanks, tank destroyers, or top-tier armor. Infantry, engineers, and airborne squads can throw close-range anti-tank grenades; dedicated AT guns, tank guns, tank destroyers, and artillery are the primary armor counters.
 - Medium and top-tier tanks carry a separate coaxial MG for soft targets while the main cannon reloads. Tracked tanks pivot deliberately and can break tracks; armored cars can lose wheels.
+- Some deflected tank and AT-gun shells survive as visible ricochets. They follow a short falling trajectory and can hit nearby units (including friendlies) or scenery with reduced damage and penetration. Each stops at its next impact; rockets do not ricochet.
 - Cover is directional. Bunkers, sandbags, wrecks, and occupied trenches provide the strongest protection; hedges and stone walls provide medium cover. The **Seek Cover** setting routes eligible foot troops toward suitable cover on move orders.
 - A nearby commander inspires troops within roughly 34 m, reducing automatic retreat and surrender pressure. One kill promotes a unit to Veteran; three kills promote it to Elite. Rank badges persist with the unit.
 - Medics heal nearby foot troops and can deploy field hospital tents. Engineers repair vehicles, running gear, recoverable wrecks, and damaged HQs, and can build sandbags, bunkers, and AT mines.
@@ -297,6 +300,9 @@ The end-of-battle report includes victory or defeat detail, losses by unit type,
 - Vehicle engine and exhaust loops for tanks, tank destroyers, super-heavies, armored cars, and artillery, with dedicated track audio for stationary tank pivots.
 - Spatial fighter and transport fly-bys for strafing, bombing, and airborne operations.
 - Menu and end-of-battle music, pooled muzzle flashes and impacts, shell casings, craters, wreck fire, smoke, parachutes, and faction-specific unit/vehicle meshes.
+- Detailed terrain surfaces across all six theaters, with matching surface relief and roughness, stones, dry grass, leaf litter, and wind-shaped sand. Restrained earth colours, irregular foliage, curved palm leaves, and outdoor light give the battlefield a more natural appearance.
+- Shaped tank track belts with exposed road wheels, bevelled armor edges, raised hatch lids and handles, engine-deck grilles, rounded tyres, irregular camouflage, and distinct weathered paint, steel, rubber, canvas, leather, wood, and uniform fabric finishes.
+- Browser rendering batches rigid vehicle fittings and foliage, reuses surface textures, and spreads casualty cleanup across short idle slices. Articulated guns, wreck deformation, texture resolution, and shadow resolution are retained.
 - Theater-specific vehicle camouflage and historically named faction equipment. Vehicle SVG silhouettes are generated into `public/vehicles/svg/` from the proportions in `src/units/vehicleDesigns.js`.
 
 ## Project structure

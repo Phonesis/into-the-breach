@@ -83,6 +83,7 @@ import {
   hasIndependentMgPivot,
 } from '../units/VehicleRotation.js';
 import { applyMobilityDamage, resolveArmorHit } from './ArmorPenetration.js';
+import { scheduleShellRicochet, updateShellRicochets, clearShellRicochets } from './ShellRicochet.js';
 import {
   getInfantryMuzzleWorldPosition,
   getInfantryCasingEjectionPoint,
@@ -103,6 +104,7 @@ import {
   usesIndependentVehicleMgMuzzleOrigin,
   usesVehicleCannonMuzzleOrigin,
 } from '../units/VehicleMeshKit.js';
+import { updateTrackedVehicleAnimation } from '../units/TrackAnimation.js';
 import { isFootSoldier } from '../units/VehicleTypes.js';
 import { isUnitGarrisoned } from './BunkerGarrison.js';
 import {
@@ -273,6 +275,7 @@ export function clearPendingMortarImpacts() {
 }
 
 export function clearPendingIndirectImpacts() {
+  clearShellRicochets();
   pendingIndirectImpacts.length = 0;
   indirectImpactEpoch += 1;
 }
@@ -285,6 +288,7 @@ export function updatePendingMortarImpacts(dt) {
 }
 
 export function updatePendingIndirectImpacts(dt) {
+  updateShellRicochets(dt);
   if (!pendingIndirectImpacts.length) return;
   // Cap so a hitch cannot force every in-flight shell to land in one frame.
   const step = Math.min(Math.max(0, dt), 0.35);
@@ -1672,6 +1676,12 @@ function fire(
         })
       : null;
   if (armorHit) {
+    if (!paratrooperAt) scheduleShellRicochet({
+      attacker, target, armorHit, damage, units: livingUnits, scenery,
+      scene: showVfx ? scene : null,
+      heightAt: (x, z) => map ? sampleTerrainHeight(x, z, map) : 0,
+      onKill: (victim) => recordEnemyKill(attacker, victim),
+    });
     damage *= armorHit.damageMultiplier;
     if (armorHit.mobilityDamaged) {
       applyMobilityDamage(target, armorHit.mobilityDamageKind);
@@ -2198,6 +2208,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit._userMoveOrder = false;
       unit._chasingAttack = false;
       updateUnitTerrainPose(unit, mapDef, dt);
+      updateTrackedVehicleAnimation(unit);
       continue;
     }
 
@@ -2216,6 +2227,7 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
       unit._wreckPosePrevZ = unit.position.z;
       updateUnitTerrainPose(unit, mapDef, dt);
       updateInfantryWalkAnimation(unit, dt);
+      updateTrackedVehicleAnimation(unit);
       continue;
     }
 
@@ -2653,5 +2665,6 @@ export function updateMovement(units, dt, mapDef, hqs = [], options = {}) {
     unit._wreckPosePrevZ = unit.position.z;
     updateUnitTerrainPose(unit, mapDef, dt);
     updateInfantryWalkAnimation(unit, dt);
+    updateTrackedVehicleAnimation(unit);
   }
 }

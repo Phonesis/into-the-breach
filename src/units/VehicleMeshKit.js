@@ -1,4 +1,16 @@
 import * as THREE from 'three';
+import {
+  getVehicleRubberMaterial,
+  getVehicleTrackMaterial,
+  getVehicleCanvasMaterial,
+} from './UnitTextures.js';
+import {
+  TRACK_SHOE_EXTRA_R,
+  TRACK_SHOE_LENGTH,
+  TRACK_SHOE_THICKNESS,
+  measureTrackLoop,
+  registerTrackRun,
+} from './TrackAnimation.js';
 
 /** Shared mesh parts for faction vehicles — driven by vehicleDesigns.js proportions. */
 
@@ -132,7 +144,86 @@ function meshGunTipWorldPos(mesh, out) {
   return out;
 }
 
+/** Six flat plates, twelve narrow bevels and eight corners: 44 triangles. */
+function chamferArmorBox(source) {
+  const { width, height, depth } = source.parameters;
+  const half = [width / 2, height / 2, depth / 2];
+  const bevel = Math.min(0.032, Math.min(width, height, depth) * 0.075);
+  const inset = half.map((value) => value - bevel);
+  const positions = [];
+  const normals = [];
+  const uvs = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const addFace = (points) => {
+    a.fromArray(points[1]).sub(new THREE.Vector3().fromArray(points[0]));
+    b.fromArray(points[2]).sub(new THREE.Vector3().fromArray(points[0]));
+    normal.crossVectors(a, b).normalize();
+    if (normal.dot(new THREE.Vector3().fromArray(points[0])) < 0) {
+      points.reverse();
+      normal.negate();
+    }
+    const axis = [Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z)]
+      .indexOf(Math.max(Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z)));
+    const uvAxes = axis === 0 ? [2, 1] : axis === 1 ? [0, 2] : [0, 1];
+    for (let i = 1; i < points.length - 1; i++) {
+      for (const index of [0, i, i + 1]) {
+        const point = points[index];
+        positions.push(...point);
+        normals.push(normal.x, normal.y, normal.z);
+        uvs.push(point[uvAxes[0]] / (half[uvAxes[0]] * 2) + 0.5,
+          point[uvAxes[1]] / (half[uvAxes[1]] * 2) + 0.5);
+      }
+    }
+  };
+  for (let axis = 0; axis < 3; axis++) {
+    const u = (axis + 1) % 3;
+    const v = (axis + 2) % 3;
+    for (const side of [-1, 1]) {
+      addFace([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([su, sv]) => {
+        const point = [0, 0, 0];
+        point[axis] = half[axis] * side;
+        point[u] = inset[u] * su;
+        point[v] = inset[v] * sv;
+        return point;
+      }));
+    }
+    // Edges parallel to this axis.
+    for (const su of [-1, 1]) for (const sv of [-1, 1]) {
+      addFace([[-1, false], [1, false], [1, true], [-1, true]].map(([end, other]) => {
+        const point = [0, 0, 0];
+        point[axis] = inset[axis] * end;
+        point[u] = (other ? inset[u] : half[u]) * su;
+        point[v] = (other ? half[v] : inset[v]) * sv;
+        return point;
+      }));
+    }
+  }
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    const signs = [sx, sy, sz];
+    addFace([0, 1, 2].map((axis) => half.map((value, i) =>
+      (i === axis ? value : inset[i]) * signs[i])));
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.parameters = { ...source.parameters };
+  geometry.name = 'chamfered-armour';
+  return geometry;
+}
+
 export function addBox(group, geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, part = null }) {
+  // Keep plates and authored sloped noses intact; only substantial box-shaped
+  // armour needs the small highlights that make its thickness readable.
+  if (['hull', 'turret', 'cab', 'hood', 'mantlet'].includes(part) &&
+      geo.type === 'BoxGeometry' && !geo.userData.authoredShape &&
+      Math.min(geo.parameters.width, geo.parameters.height, geo.parameters.depth) >= 0.14) {
+    const source = geo;
+    geo = chamferArmorBox(source);
+    source.dispose();
+  }
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.rotation.set(rx, ry, rz);
@@ -212,130 +303,6 @@ function markingMaterial(color) {
     polygonOffsetUnits: -2,
     side: THREE.DoubleSide,
   });
-}
-
-function starShape(outer = 0.2, inner = 0.082) {
-  const shape = new THREE.Shape();
-  for (let i = 0; i < 10; i++) {
-    const angle = Math.PI / 2 + i * Math.PI / 5;
-    const radius = i % 2 === 0 ? outer : inner;
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  return shape;
-}
-
-function starGeometry(outer = 0.2, inner = 0.082) {
-  return new THREE.ShapeGeometry(starShape(outer, inner));
-}
-
-const JAPANESE_ARMY_ARMORED_MODELS = new Set([
-  'shinhotoChiHa',
-  'hoNi1',
-  'chiNu',
-  'chiyoda',
-  'type94Isuzu',
-]);
-
-function addJapaneseArmyStar(parent, d, {
-  x = 0,
-  y,
-  z,
-  rx = 0,
-  size = 0.115,
-}) {
-  if (!JAPANESE_ARMY_ARMORED_MODELS.has(d.model)) return;
-
-  const star = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(starShape(size, size * 0.42), {
-      depth: 0.02,
-      bevelEnabled: true,
-      bevelSegments: 1,
-      bevelSize: 0.006,
-      bevelThickness: 0.005,
-      steps: 1,
-    }),
-    new THREE.MeshStandardMaterial({
-      color: 0xc8aa55,
-      metalness: 0.34,
-      roughness: 0.58,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
-    })
-  );
-  star.name = 'ijaArmyStar';
-  star.position.set(x, y, z);
-  star.rotation.x = rx;
-  star.userData.tankPart = 'hull';
-  parent.add(star);
-}
-
-function addNationalMarkings(parent, d, {
-  width,
-  y,
-  z,
-  part,
-  curvedSurface = null,
-}) {
-  const model = d.model ?? '';
-  const german = new Set(['panzer4', 'jagdpanther', 'tiger1', 'sdkfz222']);
-  const american = new Set(['sherman', 'm10', 'pershing', 'm8']);
-  const british = new Set(['churchill4', 'achilles', 'blackPrince', 'daimler']);
-  const soviet = new Set(['t3485', 'su100', 'is2', 'ba64']);
-
-  for (const side of [-1, 1]) {
-    const facetAngle = curvedSurface ? Math.PI / curvedSurface.segments : 0;
-    const surfaceRadius = curvedSurface?.radius ?? 0;
-    const x = curvedSurface
-      ? side * surfaceRadius * Math.cos(facetAngle)
-      : side * (width * 0.5 + 0.018);
-    const markingZ = curvedSurface
-      ? z + side * surfaceRadius * Math.sin(facetAngle)
-      : z;
-    const markingRotationY = curvedSurface
-      ? side * Math.PI / 2 - facetAngle
-      : side * Math.PI / 2;
-    if (german.has(model)) {
-      const cream = markingMaterial(0xd8d2bd);
-      const black = markingMaterial(0x171815);
-      addBox(parent, new THREE.BoxGeometry(0.018, 0.4, 0.13), cream, { x, y, z: markingZ, part });
-      addBox(parent, new THREE.BoxGeometry(0.018, 0.14, 0.4), cream, { x, y, z: markingZ, part });
-      addBox(parent, new THREE.BoxGeometry(0.022, 0.31, 0.075), black, {
-        x: x + side * 0.006, y, z: markingZ, part,
-      });
-      addBox(parent, new THREE.BoxGeometry(0.022, 0.075, 0.31), black, {
-        x: x + side * 0.006, y, z: markingZ, part,
-      });
-    } else if (american.has(model) || soviet.has(model)) {
-      const star = new THREE.Mesh(
-        starGeometry(american.has(model) ? 0.23 : 0.21, american.has(model) ? 0.095 : 0.086),
-        markingMaterial(american.has(model) ? 0xe5e1cf : 0xb32d24)
-      );
-      star.position.set(x, y, markingZ);
-      star.rotation.y = markingRotationY;
-      star.userData.tankPart = part;
-      parent.add(star);
-    } else if (british.has(model)) {
-      const rings = [
-        { radius: 0.2, color: 0xb52b2a },
-        { radius: 0.14, color: 0xe0d9c3 },
-        { radius: 0.075, color: 0x273d68 },
-      ];
-      rings.forEach((ring, index) => {
-        addCylinder(parent, new THREE.CylinderGeometry(ring.radius, ring.radius, 0.016, 24), markingMaterial(ring.color), {
-          x: x + side * index * 0.009,
-          y,
-          z,
-          rz: Math.PI / 2,
-          part,
-        });
-      });
-    }
-  }
 }
 
 function addBoltRows(group, detail, d) {
@@ -517,12 +484,7 @@ function addTankModelDetails(group, turretPivot, body, detail, dark, d) {
     addFuelDrums(group, body, detail, d);
   }
 
-  addNationalMarkings(turretPivot, d, {
-    width: t.w,
-    y: t.y,
-    z: t.z - t.d * 0.05,
-    part: 'turret',
-  });
+
 }
 
 function addArmoredCarDetails(group, turretPivot, body, detail, dark, d) {
@@ -620,108 +582,129 @@ function addArmoredCarDetails(group, turretPivot, body, detail, dark, d) {
   const markingWidth = t.style === 'cylinder' || t.style === 'openRound' || t.style === 'openFaceted'
     ? t.w * 2
     : t.w;
-  addNationalMarkings(turretPivot, d, {
-    width: markingWidth,
-    y: t.y,
-    z: t.z,
-    curvedSurface: t.style === 'openRound' || t.style === 'openFaceted'
-      ? { radius: t.w * 0.95 + 0.006, segments: t.style === 'openFaceted' ? 8 : 14 }
-      : null,
-    part: 'turret',
-  });
+
 }
 
-export function trackRun(group, dark, side, spec) {
+/** Rounded tyre shoulders keep wheels from reading as flat black cylinders. */
+function createTyreGeometry(radius, width) {
+  const half = width / 2;
+  const profile = [
+    [radius * 0.3, -half * 0.9], [radius * 0.78, -half],
+    [radius * 0.96, -half * 0.68], [radius, -half * 0.3],
+    [radius, half * 0.3], [radius * 0.96, half * 0.68],
+    [radius * 0.78, half], [radius * 0.3, half * 0.9],
+    [radius * 0.3, -half * 0.9],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+/** A hollow belt exposes the suspension instead of burying it in a solid box. */
+function createTrackBeltGeometry(width, height, length) {
+  const radius = height * 0.5;
+  const endZ = length * 0.5 - radius;
+  const thickness = Math.min(0.075, height * 0.13);
+  const shape = new THREE.Shape();
+  shape.absarc(endZ, 0, radius, -Math.PI / 2, Math.PI / 2, false);
+  shape.absarc(-endZ, 0, radius, Math.PI / 2, Math.PI * 1.5, false);
+  shape.closePath();
+  const hole = new THREE.Path();
+  hole.absarc(-endZ, 0, radius - thickness, Math.PI * 1.5, Math.PI / 2, true);
+  hole.absarc(endZ, 0, radius - thickness, Math.PI / 2, -Math.PI / 2, true);
+  hole.closePath();
+  shape.holes.push(hole);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: width, steps: 1, bevelEnabled: false, curveSegments: 4,
+  });
+  geometry.rotateY(Math.PI / 2);
+  geometry.translate(-width / 2, 0, 0);
+  geometry.name = 'open-track-belt';
+  return geometry;
+}
+
+export function trackRun(group, dark, side, spec, wheelMaterial = dark) {
   const x = side * spec.spread;
   const roadWheelCount = spec.wheels ?? 8;
   const trackW = spec.width ?? 0.44;
   const trackY = spec.height * 0.7;
+  const steel = getVehicleTrackMaterial();
+  const rubber = getVehicleRubberMaterial();
+  const wheels = [];
 
-  addBox(
-    group,
-    new THREE.BoxGeometry(trackW, spec.height, spec.length),
-    dark,
-    { x, y: trackY, z: 0, part: 'track' }
-  );
-  addBox(group, new THREE.BoxGeometry(trackW * 0.78, spec.height * 0.18, spec.length * 0.95), dark, {
-    x,
-    y: spec.height * 1.12,
-    z: 0,
-    part: 'track',
-  });
+  addBox(group, createTrackBeltGeometry(trackW, spec.height, spec.length), steel,
+    { x, y: trackY, z: 0, part: 'track' });
 
   const wheelR = spec.wheelR ?? Math.min(0.24, spec.height * 0.38);
-  const wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, trackW * 0.54, 14);
+  const wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, trackW * 0.7, 16);
   wheelGeo.rotateZ(Math.PI / 2);
-  const hubGeo = new THREE.CylinderGeometry(wheelR * 0.34, wheelR * 0.34, trackW * 0.6, 10);
+  const hubGeo = new THREE.CylinderGeometry(wheelR * 0.64, wheelR * 0.64, trackW * 0.78, 12);
   hubGeo.rotateZ(Math.PI / 2);
   for (let i = 0; i < roadWheelCount; i++) {
     const z = -spec.length * 0.39 + i * (spec.length / Math.max(roadWheelCount - 1, 1)) * 0.78;
-    const wheel = new THREE.Mesh(wheelGeo, dark);
+    const wheel = new THREE.Mesh(wheelGeo, rubber);
     wheel.position.set(x, spec.height * 0.66, z);
     wheel.userData.tankPart = 'track';
     group.add(wheel);
+    wheels.push({ mesh: wheel, axis: 'x', radius: wheelR, sign: 1 });
 
-    const hub = new THREE.Mesh(hubGeo, dark);
+    const hub = new THREE.Mesh(hubGeo, wheelMaterial);
     hub.position.set(x + side * trackW * 0.03, spec.height * 0.66, z);
     hub.userData.tankPart = 'track';
     group.add(hub);
+    wheels.push({ mesh: hub, axis: 'x', radius: wheelR, sign: 1 });
   }
 
+  const sprocketR = wheelR * 1.1;
   for (const z of [-spec.length * 0.43, spec.length * 0.43]) {
     const endWheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(wheelR * 1.1, wheelR * 1.1, trackW * 0.58, 16),
-      dark
+      new THREE.CylinderGeometry(sprocketR, sprocketR, trackW * 0.76, 16), steel
     );
     endWheel.rotation.z = Math.PI / 2;
     endWheel.position.set(x, spec.height * 0.7, z);
     endWheel.userData.tankPart = 'track';
     group.add(endWheel);
+    wheels.push({ mesh: endWheel, axis: 'y', radius: sprocketR, sign: -1 });
   }
 
-  const linkCount = spec.links ?? 12;
-  const shoeGeometry = new THREE.BoxGeometry(trackW * 0.92, 0.045, 0.105);
-  const bottomShoes = new THREE.InstancedMesh(shoeGeometry, dark, linkCount);
-  const shoeMatrix = new THREE.Matrix4();
-  for (let i = 0; i < linkCount; i++) {
-    const z = -spec.length * 0.46 + i * (spec.length * 0.92) / Math.max(linkCount - 1, 1);
-    addBox(group, new THREE.BoxGeometry(trackW * 0.9, 0.035, 0.09), dark, {
-      x: x + side * 0.01,
-      y: spec.height * 1.02,
-      z,
-      part: 'track',
-    });
-    shoeMatrix.makeTranslation(x + side * 0.015, spec.height * 0.24, z);
-    bottomShoes.setMatrixAt(i, shoeMatrix);
-  }
-  bottomShoes.userData.tankPart = 'track';
-  bottomShoes.instanceMatrix.needsUpdate = true;
-  group.add(bottomShoes);
+  const { perimeter } = measureTrackLoop(spec, TRACK_SHOE_EXTRA_R);
+  const linkCount = Math.max(18, Math.round(perimeter / (TRACK_SHOE_LENGTH * 1.22)));
+  const shoeGeometry = new THREE.BoxGeometry(
+    trackW * 1.02,
+    TRACK_SHOE_THICKNESS,
+    TRACK_SHOE_LENGTH
+  );
+  const shoes = new THREE.InstancedMesh(shoeGeometry, steel, linkCount);
+  shoes.name = 'track-shoes';
+  shoes.userData.tankPart = 'track';
+  group.add(shoes);
+  registerTrackRun(group, {
+    side,
+    spread: spec.spread,
+    spec,
+    extraR: TRACK_SHOE_EXTRA_R,
+    x,
+    trackY,
+    shoes,
+    linkCount,
+    perimeter,
+    distance: 0,
+    wheels,
+  });
   if (spec.skirt) {
-    addBox(
-      group,
-      new THREE.BoxGeometry(0.07, spec.height * 0.88, spec.length * 0.88),
-      dark,
-      { x: side * (spec.spread + 0.14), y: spec.height * 0.62, z: 0 }
-    );
+    addBox(group, new THREE.BoxGeometry(0.07, spec.height * 0.88, spec.length * 0.88), dark,
+      { x: side * (spec.spread + 0.14), y: spec.height * 0.62, z: 0 });
   }
   if (spec.fender) {
-    addBox(group, new THREE.BoxGeometry(0.24, 0.08, spec.length * 1.02), dark, {
-      x: side * (spec.spread + 0.02),
-      y: spec.height * 1.12,
-      z: spec.fenderZ ?? 0,
-    });
+    addBox(group, new THREE.BoxGeometry(0.24, 0.08, spec.length * 1.02), dark,
+      { x: side * (spec.spread + 0.02), y: spec.height * 1.12, z: spec.fenderZ ?? 0 });
   }
   if (spec.rollers) {
     for (let i = 0; i < 3; i++) {
-      const roller = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.2, 0.2, 0.26, 10),
-        dark
-      );
+      const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.26, 10), rubber);
       roller.rotation.z = Math.PI / 2;
       roller.position.set(x, spec.height * 0.68, -0.85 + i * 0.85);
       roller.userData.tankPart = 'track';
       group.add(roller);
+      wheels.push({ mesh: roller, axis: 'y', radius: 0.2, sign: -1 });
     }
   }
 }
@@ -752,6 +735,23 @@ function addTankExternalDetails(group, turretPivot, body, detail, dark, d) {
       z: hatch.z,
       ry: hatch.ry ?? 0,
       part: hatch.turret ? 'turret' : 'hull',
+    });
+    const parent = hatch.turret ? turretPivot : group;
+    const part = hatch.turret ? 'turret' : 'hull';
+    const yaw = hatch.ry ?? 0;
+    // Raised lid leaves a dark gasket around its edge; a three-piece lifting
+    // handle has actual clearance beneath it instead of a painted-on line.
+    addBox(parent, new THREE.BoxGeometry(0.32, 0.018, 0.24), body, {
+      x: hatch.x ?? 0, y: hatch.y + 0.027, z: hatch.z, ry: yaw, part,
+    });
+    for (const side of [-1, 1]) {
+      addBox(parent, new THREE.BoxGeometry(0.022, 0.06, 0.025), detail, {
+        x: (hatch.x ?? 0) + Math.cos(yaw) * side * 0.055,
+        y: hatch.y + 0.06, z: hatch.z - Math.sin(yaw) * side * 0.055, ry: yaw, part,
+      });
+    }
+    addBox(parent, new THREE.BoxGeometry(0.135, 0.022, 0.025), detail, {
+      x: hatch.x ?? 0, y: hatch.y + 0.09, z: hatch.z, ry: yaw, part,
     });
   }
 
@@ -790,11 +790,10 @@ function addTankExternalDetails(group, turretPivot, body, detail, dark, d) {
       z: h.z - h.d * 0.28,
       part: 'hull',
     });
-    for (let i = -1; i <= 1; i++) {
-      addBox(group, new THREE.BoxGeometry(h.w * 0.18, 0.052, 0.055), dark, {
-        x: i * h.w * 0.22,
+    for (let i = 0; i < 8; i++) {
+      addBox(group, new THREE.BoxGeometry(h.w * 0.62, 0.025, 0.022), dark, {
         y: h.y + h.h * 0.58,
-        z: h.z - h.d * 0.34,
+        z: h.z - h.d * 0.37 + i * h.d * 0.024,
         part: 'hull',
       });
     }
@@ -826,6 +825,7 @@ function addTankExternalDetails(group, turretPivot, body, detail, dark, d) {
  */
 function createSlopedTankNoseGeometry(hull, glacis, depth) {
   const geometry = new THREE.BoxGeometry(hull.w, hull.h, depth, 1, 1, 1);
+  geometry.userData.authoredShape = true;
   const position = geometry.attributes.position;
   const tilt = Math.abs(glacis.tilt ?? 0.36);
   const drop = THREE.MathUtils.clamp(
@@ -872,12 +872,9 @@ export function buildTankFromDesign(group, body, detail, dark, d) {
       { y: h.y, z: h.z, part: 'hull' }
     );
   }
-  addJapaneseArmyStar(group, d, {
-    y: h.y + h.h * 0.02,
-    z: h.z + h.d * 0.5 + 0.012,
-  });
-  trackRun(group, dark, -1, d.track);
-  trackRun(group, dark, 1, d.track);
+
+  trackRun(group, dark, -1, d.track, body);
+  trackRun(group, dark, 1, d.track, body);
 
   const turretPivot = new THREE.Group();
   turretPivot.name = 'turretPivot';
@@ -1026,14 +1023,10 @@ export function buildTankDestroyerFromDesign(group, body, detail, dark, d) {
     });
     const tilt = g.tilt ?? 0;
     const faceOffset = g.d * 0.5 + 0.012;
-    addJapaneseArmyStar(group, d, {
-      y: g.y - Math.sin(tilt) * faceOffset,
-      z: g.z + Math.cos(tilt) * faceOffset,
-      rx: tilt,
-    });
+
   }
-  trackRun(group, dark, -1, d.track);
-  trackRun(group, dark, 1, d.track);
+  trackRun(group, dark, -1, d.track, body);
+  trackRun(group, dark, 1, d.track, body);
 
   const s = d.superstructure;
   let gunMount = group;
@@ -1216,12 +1209,7 @@ export function buildTankDestroyerFromDesign(group, body, detail, dark, d) {
 
   addHullFittings(group, body, detail, dark, d);
   if (d.model === 'su100') addFuelDrums(group, body, detail, d);
-  addNationalMarkings(gunMount, d, {
-    width: s.w,
-    y: s.y,
-    z: (s.z ?? 0) - mountZ,
-    part: s.style === 'openTurret' ? 'turret' : 'hull',
-  });
+
 
   group.userData.hitRadius = d.hitRadius;
   group.userData.isTank = true;
@@ -1240,12 +1228,7 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
     });
     const tilt = n.tilt ?? 0;
     const faceOffset = n.d * 0.5 + 0.012;
-    addJapaneseArmyStar(group, d, {
-      y: n.y - Math.sin(tilt) * faceOffset,
-      z: n.z + Math.cos(tilt) * faceOffset,
-      rx: tilt,
-      size: 0.1,
-    });
+
   }
   if (d.rear) {
     const r = d.rear;
@@ -1265,8 +1248,8 @@ export function buildArmoredCarFromDesign(group, body, detail, dark, d) {
   }
   for (const [wx, wy, wz] of d.wheels) {
     const wheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.28, 12),
-      dark
+      createTyreGeometry(d.wheelR, 0.28),
+      getVehicleRubberMaterial()
     );
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(wx, wy, wz);
@@ -1433,12 +1416,7 @@ export function buildTruckFromDesign(group, body, detail, dark, d) {
         part: 'hood',
       });
     }
-    addJapaneseArmyStar(group, d, {
-      y: hood.y + 0.02,
-      z: hood.z + hood.d * 0.52,
-      rx: -0.12,
-      size: 0.1,
-    });
+
   }
 
   addBox(group, new THREE.BoxGeometry(cab.w, cab.h, cab.d), body, {
@@ -1497,6 +1475,7 @@ export function buildTruckFromDesign(group, body, detail, dark, d) {
   });
 
   if (d.canvas) {
+    const canvas = getVehicleCanvasMaterial();
     for (let i = 0; i < 4; i++) {
       const z = bed.z + bed.d * 0.38 - i * (bed.d * 0.24);
       addBox(group, new THREE.BoxGeometry(bed.w * 0.92, 0.04, 0.04), dark, {
@@ -1513,19 +1492,19 @@ export function buildTruckFromDesign(group, body, detail, dark, d) {
         });
       }
     }
-    addBox(group, new THREE.BoxGeometry(bed.w * 0.9, 0.08, bed.d * 0.92), detail, {
+    addBox(group, new THREE.BoxGeometry(bed.w * 0.9, 0.08, bed.d * 0.92), canvas, {
       y: bed.y + bed.h + 0.66,
       z: bed.z,
       part: 'canvas',
     });
-    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), detail, {
+    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), canvas, {
       x: -bed.w * 0.44,
       y: bed.y + bed.h + 0.38,
       z: bed.z,
       rz: 0.12,
       part: 'canvas',
     });
-    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), detail, {
+    addBox(group, new THREE.BoxGeometry(0.08, 0.55, bed.d * 0.9), canvas, {
       x: bed.w * 0.44,
       y: bed.y + bed.h + 0.38,
       z: bed.z,
@@ -1550,9 +1529,9 @@ export function buildTruckFromDesign(group, body, detail, dark, d) {
     });
   }
 
-  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.28, 12);
+  const wheelGeo = createTyreGeometry(d.wheelR, 0.28);
   for (const [wx, wy, wz] of d.wheels) {
-    const wheel = new THREE.Mesh(wheelGeo, dark);
+    const wheel = new THREE.Mesh(wheelGeo, getVehicleRubberMaterial());
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(wx, wy, wz);
     wheel.userData.tankPart = 'track';
@@ -1625,10 +1604,10 @@ function buildTowedGunCarriage(group, detail, dark, d) {
     z: 0.14,
   });
 
-  const wheelGeo = new THREE.CylinderGeometry(d.wheelR, d.wheelR, 0.24, 14);
+  const wheelGeo = createTyreGeometry(d.wheelR, 0.24);
   wheelGeo.rotateZ(Math.PI / 2);
   for (const x of [-wheelSpread, wheelSpread]) {
-    const wheel = new THREE.Mesh(wheelGeo, dark);
+    const wheel = new THREE.Mesh(wheelGeo, getVehicleRubberMaterial());
     wheel.position.set(x, axleY, axleZ);
     wheel.userData.tankPart = 'track';
     group.add(wheel);

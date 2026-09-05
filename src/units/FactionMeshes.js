@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { addVehicleMarkings } from './VehicleMarkings.js';
 import { getVehicleDesign } from './vehicleDesigns.js';
 import {
   buildTankFromDesign,
@@ -1325,6 +1326,7 @@ export function buildFactionVehicle(group, type, factionId, body, detail, dark) 
   if (fn) {
     fn(group, body, detail, dark);
     addShadows(group);
+    addVehicleMarkings(group, type, factionId, getVehicleDesign(factionId, type), body);
     return true;
   }
   return false;

@@ -1,38 +1,23 @@
 import * as THREE from 'three';
 
-function hex(n) {
-  return `#${n.toString(16).padStart(6, '0')}`;
-}
+const COLOR_SIZE = 1024;
+const DETAIL_SIZE = 512;
+const TAU = Math.PI * 2;
+// Cache CPU sources, not live textures: completed battles dispose their own GPU
+// resources, while later battles can upload a fresh set from the same images.
+const surfaceSources = new Map();
+const MAX_CACHED_SURFACES = 3;
 
-function rgba(n, alpha) {
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
-}
+const SURFACES = {
+  bocage: { tileMeters: 18, soil: 0x756343, stone: 0x999384, stem: 0x918355, soilAmount: 0.52, roughness: 0.94, stones: 1150, stems: 9200, relief: 1 },
+  desert: { tileMeters: 20, soil: 0xb89a70, stone: 0xb7ac95, stem: 0x9b885d, soilAmount: 0.25, roughness: 0.98, stones: 1750, stems: 0, relief: 0.7 },
+  steppe: { tileMeters: 18, soil: 0x8d7950, stone: 0xa59c81, stem: 0xb1a16b, soilAmount: 0.58, roughness: 0.96, stones: 900, stems: 11600, relief: 0.85 },
+  hills: { tileMeters: 18, soil: 0x837660, stone: 0xb0ada0, stem: 0xa19467, soilAmount: 0.56, roughness: 0.95, stones: 2650, stems: 6800, relief: 1.2 },
+  jungle: { tileMeters: 16, soil: 0x68553c, stone: 0x858b76, stem: 0x96804c, soilAmount: 0.7, roughness: 0.9, stones: 650, stems: 6200, relief: 1.05 },
+  urban: { tileMeters: 16, soil: 0x807566, stone: 0xaaa69b, stem: 0x9c8b60, soilAmount: 0.45, roughness: 0.96, stones: 5600, stems: 0, relief: 0.8 },
+};
 
-function noise2d(x, y, seed) {
-  const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-function smoothNoise2d(x, y, seed) {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const fx = x - ix;
-  const fy = y - iy;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  const n00 = noise2d(ix, iy, seed);
-  const n10 = noise2d(ix + 1, iy, seed);
-  const n01 = noise2d(ix, iy + 1, seed);
-  const n11 = noise2d(ix + 1, iy + 1, seed);
-  const nx0 = n00 + (n10 - n00) * sx;
-  const nx1 = n01 + (n11 - n01) * sx;
-  return nx0 + (nx1 - nx0) * sy;
-}
-
-function stringSeed(value = '') {
+function stringSeed(value) {
   let seed = 2166136261;
   for (let i = 0; i < value.length; i++) {
     seed ^= value.charCodeAt(i);
@@ -52,306 +37,205 @@ function seededRandom(seed) {
   };
 }
 
-export function createGroundTexture(mapDef) {
-  const size = 1024;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-
-  const base = mapDef.groundColor ?? 0x4a6b3a;
-  const c2 = mapDef.groundColor2 ?? 0x3d5a32;
-
-  // A diagonal base gradient becomes an obvious checkerboard when repeated.
-  // Keep the base uniform and introduce the secondary tone through organic
-  // patches below, allowing mirrored wrapping to remain visually seamless.
-  ctx.fillStyle = hex(base);
-  ctx.fillRect(0, 0, size, size);
-
-  const terrain = mapDef.terrain;
-  const seed = stringSeed(`${mapDef.id}:ground`);
-  const random = seededRandom(seed);
-
-  // Broad, translucent soil and vegetation patches break up the tiled base at
-  // normal RTS camera heights without obscuring units or capture markings.
-  const macroPalette = terrain === 'desert'
-    ? [rgba(c2, 0.2), 'rgba(239,211,157,0.12)', 'rgba(113,82,47,0.1)', 'rgba(171,132,77,0.09)']
-    : terrain === 'urban'
-      ? [rgba(c2, 0.22), 'rgba(126,123,114,0.12)', 'rgba(45,43,39,0.12)', 'rgba(105,89,69,0.08)']
-    : terrain === 'steppe'
-      ? [rgba(c2, 0.16), 'rgba(133,119,67,0.13)', 'rgba(50,75,39,0.11)', 'rgba(91,73,39,0.08)']
-      : terrain === 'jungle'
-        ? [rgba(c2, 0.2), 'rgba(30,72,35,0.15)', 'rgba(85,67,43,0.14)', 'rgba(18,52,29,0.12)']
-      : [rgba(c2, 0.16), 'rgba(73,98,47,0.12)', 'rgba(33,58,29,0.1)', 'rgba(112,91,57,0.07)'];
-  for (let i = 0; i < 170; i++) {
-    const x = random() * size;
-    const y = random() * size;
-    const rx = 12 + random() * 56;
-    const ry = 8 + random() * 35;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(random() * Math.PI);
-    ctx.scale(1, ry / rx);
-    const patch = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-    patch.addColorStop(0, macroPalette[i % macroPalette.length]);
-    patch.addColorStop(0.72, macroPalette[(i + 1) % macroPalette.length]);
-    patch.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = patch;
-    ctx.beginPath();
-    ctx.arc(0, 0, rx, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  for (let octave = 0; octave < 3; octave++) {
-    const step = 4 + octave * 2;
-    const a = 0.03 + octave * 0.02;
-    for (let y = 0; y < size; y += step) {
-      for (let x = 0; x < size; x += step) {
-        const n = noise2d(x * 0.02, y * 0.02, seed + octave);
-        ctx.fillStyle = `rgba(0,0,0,${a * n * 0.72})`;
-        ctx.fillRect(x, y, step, step);
-      }
-    }
-  }
-
-  const speckle = terrain === 'desert' ? 6000 : 9000;
-  for (let i = 0; i < speckle; i++) {
-    const x = random() * size;
-    const y = random() * size;
-    const bright = random() > 0.5;
-    ctx.fillStyle = bright ? `rgba(255,255,240,${0.02 + random() * 0.04})` : `rgba(0,0,0,${0.03 + random() * 0.06})`;
-    ctx.fillRect(x, y, 1 + random() * 2, 1);
-  }
-
-  if (terrain === 'desert') {
-    for (let i = 0; i < 80; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      const r = 10 + random() * 32;
-      const grd = ctx.createRadialGradient(x, y, 0, x, y, r);
-      grd.addColorStop(0, 'rgba(255,235,190,0.18)');
-      grd.addColorStop(0.6, 'rgba(180,140,90,0.06)');
-      grd.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grd;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    }
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 125; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      ctx.strokeStyle = `rgba(104,76,42,${0.025 + random() * 0.045})`;
-      ctx.lineWidth = 0.6 + random() * 1.4;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.bezierCurveTo(x + 15, y - 3, x + 35, y + 3, x + 55 + random() * 50, y - 1);
-      ctx.stroke();
-    }
-  } else if (terrain === 'urban') {
-    for (let i = 0; i < 1200; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      const w = 2 + random() * 7;
-      ctx.fillStyle = random() > 0.2 ? 'rgba(184,181,170,0.055)' : 'rgba(66,58,48,0.08)';
-      ctx.fillRect(x, y, w, 0.7 + random() * 1.4);
-    }
-  } else if (terrain === 'jungle') {
-    for (let i = 0; i < 180; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      const r = 8 + random() * 34;
-      const mud = ctx.createRadialGradient(x, y, 0, x, y, r);
-      mud.addColorStop(0, 'rgba(73,56,38,0.18)');
-      mud.addColorStop(0.65, 'rgba(42,72,37,0.07)');
-      mud.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = mud;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    }
-    for (let i = 0; i < 3200; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      ctx.strokeStyle = random() > 0.2 ? 'rgba(20,66,30,0.18)' : 'rgba(129,109,61,0.13)';
-      ctx.lineWidth = 0.55 + random() * 0.7;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + (random() - 0.5) * 4, y - 4 - random() * 8);
-      ctx.stroke();
-    }
-  } else if (terrain === 'bocage' || terrain === 'hills') {
-    ctx.strokeStyle = 'rgba(25,45,20,0.12)';
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < 80; i++) {
-      ctx.beginPath();
-      let x = random() * size;
-      let y = random() * size;
-      ctx.moveTo(x, y);
-      for (let j = 0; j < 5; j++) {
-        x += (random() - 0.5) * 36;
-        y += (random() - 0.5) * 36;
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(45,70,35,0.08)';
-    for (let i = 0; i < 120; i++) {
-      ctx.beginPath();
-      ctx.arc(random() * size, random() * size, 2 + random() * 8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Fine blade and dead-stem strokes survive close zooms better than speckle.
-    for (let i = 0; i < 2600; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      const h = 2 + random() * 5;
-      ctx.strokeStyle = random() > 0.22 ? 'rgba(31,58,27,0.16)' : 'rgba(143,124,73,0.13)';
-      ctx.lineWidth = 0.45 + random() * 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + (random() - 0.5) * 2, y - h);
-      ctx.stroke();
-    }
-  } else if (terrain === 'steppe') {
-    ctx.strokeStyle = 'rgba(90,80,50,0.08)';
-    for (let i = 0; i < 75; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + 40 + random() * 60, y + (random() - 0.5) * 8);
-      ctx.stroke();
-    }
-    for (let i = 0; i < 2200; i++) {
-      const x = random() * size;
-      const y = random() * size;
-      ctx.strokeStyle = random() > 0.45 ? 'rgba(104,95,48,0.15)' : 'rgba(44,72,34,0.14)';
-      ctx.lineWidth = 0.5 + random() * 0.55;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + (random() - 0.5) * 3, y - 3 - random() * 6);
-      ctx.stroke();
-    }
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = terrain === 'desert' ? 3.2 : terrain === 'urban' ? 4.2 : 5.5;
-  tex.repeat.set(repeats, repeats);
-  tex.anisotropy = 16;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+function rgb(color) {
+  return [(color >> 16) & 255, (color >> 8) & 255, color & 255];
 }
 
-export function createRoughnessMap(mapDef) {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(size, size);
-  const seed = (mapDef?.id?.length ?? 1) * 7;
-  const base =
-    mapDef?.terrain === 'desert'
-      ? 200
-      : mapDef?.terrain === 'urban'
-        ? 214
-        : mapDef?.terrain === 'jungle'
-          ? 188
-          : 175;
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      const macro = noise2d(x * 0.04, y * 0.04, seed);
-      const micro = noise2d(x * 0.25, y * 0.25, seed + 2);
-      const n = base + macro * 35 + micro * 25;
-      const v = Math.min(255, Math.max(0, n));
-      img.data[i] = v;
-      img.data[i + 1] = v;
-      img.data[i + 2] = v;
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = mapDef?.terrain === 'desert' ? 3.2 : mapDef?.terrain === 'urban' ? 4.2 : 5.5;
-  tex.repeat.set(repeats, repeats);
-  return tex;
+function smoothstep(lo, hi, value) {
+  const t = Math.max(0, Math.min(1, (value - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
 }
 
-export function createNormalMap(mapDef = null) {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(size, size);
-
-  const terrain = mapDef?.terrain ?? 'bocage';
-  const seed = stringSeed(`${mapDef?.id ?? 'map'}:normal`);
-  const heightAt = (x, y) => {
-    const broad = (smoothNoise2d(x * 0.025, y * 0.025, seed) - 0.5) * 1.3;
-    const medium = (smoothNoise2d(x * 0.085, y * 0.085, seed + 17) - 0.5) * 0.72;
-    const fine = (smoothNoise2d(x * 0.24, y * 0.24, seed + 31) - 0.5) * 0.3;
-    if (terrain === 'desert') {
-      return broad * 0.45 + medium * 0.45 + Math.sin(x * 0.11 + y * 0.025) * 0.045 + fine * 0.35;
-    }
-    if (terrain === 'urban') {
-      return broad * 0.34 + medium * 0.42 + fine * 0.55;
-    }
-    if (terrain === 'steppe') {
-      return broad * 0.62 + medium * 0.7 + fine * 0.58;
-    }
-    return broad * 0.78 + medium + fine;
+// Periodic value noise matches heights AND derivatives at tile edges. Ordinary
+// repeat wrapping then uses one consistent tangent frame for every material map.
+function noiseLayer(cells, random) {
+  const grid = Float32Array.from({ length: cells * cells }, random);
+  // The lattice indices and smooth weights repeat for every row/column.
+  // Compute them once, instead of millions of floor/modulo operations while
+  // generating the 1K sheet. Float64 keeps the authored interpolation exact.
+  const lower = new Uint16Array(COLOR_SIZE);
+  const upper = new Uint16Array(COLOR_SIZE);
+  const weights = new Float64Array(COLOR_SIZE);
+  for (let x = 0; x < COLOR_SIZE; x++) {
+    const gx = x * cells / COLOR_SIZE;
+    const ix = Math.floor(gx);
+    const fraction = gx - ix;
+    lower[x] = ix % cells;
+    upper[x] = (ix + 1) % cells;
+    weights[x] = fraction * fraction * (3 - 2 * fraction);
+  }
+  return (x, y) => {
+    const sx = weights[x];
+    const sy = weights[y];
+    const y0 = lower[y] * cells;
+    const y1 = upper[y] * cells;
+    const top = grid[y0 + lower[x]] * (1 - sx) + grid[y0 + upper[x]] * sx;
+    const bottom = grid[y1 + lower[x]] * (1 - sx) + grid[y1 + upper[x]] * sx;
+    return top * (1 - sy) + bottom * sy;
   };
-
-  const strength = terrain === 'desert' ? 1.35 : terrain === 'urban' ? 1.25 : terrain === 'steppe' ? 1.6 : 1.85;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * strength;
-      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * strength;
-      const inv = 1 / Math.hypot(dx, dy, 1);
-      const i = (y * size + x) * 4;
-      img.data[i] = Math.round((dx * inv * 0.5 + 0.5) * 255);
-      img.data[i + 1] = Math.round((dy * inv * 0.5 + 0.5) * 255);
-      img.data[i + 2] = Math.round((inv * 0.5 + 0.5) * 255);
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  // This normal map is generated at sufficient density for the whole map.
-  // Stretching it once avoids mirrored tangent discontinuities at tile seams.
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.repeat.set(1, 1);
-  return tex;
 }
 
-export function createAOMap(mapDef) {
-  const size = 512;
+function imageCanvas(size) {
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(size, size);
-  const seed = (mapDef?.id?.length ?? 1) * 11;
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d');
+  return { canvas, context, image: context.createImageData(size, size) };
+}
 
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      const macro = noise2d(x * 0.05, y * 0.05, seed);
-      const micro = noise2d(x * 0.2, y * 0.2, seed + 5);
-      const v = Math.min(255, Math.max(80, 200 - macro * 90 - micro * 50));
-      img.data[i] = v;
-      img.data[i + 1] = v;
-      img.data[i + 2] = v;
-      img.data[i + 3] = 255;
+// Stones, thatch and leaf litter affect the same albedo, relief and roughness.
+// Wrapping every stamp also keeps those details seamless at the tile edges.
+function stampDetail(field, color, roughness, x, y, rx, ry, angle, tint, height, finish, opacity) {
+  const radius = Math.ceil(Math.max(rx, ry));
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const cx = Math.floor(x);
+  const cy = Math.floor(y);
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const sx = (dx * cos + dy * sin) / rx;
+      const sy = (-dx * sin + dy * cos) / ry;
+      const distance = sx * sx + sy * sy;
+      if (distance >= 1) continue;
+      const coverage = Math.min(1, (1 - distance) * 3);
+      const mix = coverage * opacity;
+      const px = (cx + dx + COLOR_SIZE) % COLOR_SIZE;
+      const py = (cy + dy + COLOR_SIZE) % COLOR_SIZE;
+      const index = py * COLOR_SIZE + px;
+      field[index] += Math.sqrt(1 - distance) * height;
+      roughness[index] += (finish - roughness[index]) * mix;
+      for (let c = 0; c < 3; c++) color[index * 4 + c] += (tint[c] - color[index * 4 + c]) * mix;
     }
   }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
-  const repeats = mapDef?.terrain === 'desert' ? 3.2 : mapDef?.terrain === 'urban' ? 4.2 : 5.5;
-  tex.repeat.set(repeats, repeats);
-  return tex;
+}
+
+function buildSurfaceSources(mapDef, profile) {
+  const terrain = mapDef.terrain ?? 'bocage';
+  const random = seededRandom(stringSeed(`${mapDef.id ?? terrain}:ground-surface`));
+  const broadNoise = noiseLayer(7, random);
+  const soilNoise = noiseLayer(23, random);
+  const fineNoise = noiseLayer(109, random);
+  const color = imageCanvas(COLOR_SIZE);
+  const normal = imageCanvas(DETAIL_SIZE);
+  const surface = imageCanvas(DETAIL_SIZE);
+  const heights = new Float32Array(COLOR_SIZE * COLOR_SIZE);
+  const roughness = new Float32Array(heights.length);
+  const base = rgb(mapDef.groundColor ?? 0x4a6b3a);
+  const secondary = rgb(mapDef.groundColor2 ?? mapDef.groundColor ?? 0x3d5a32);
+  const earth = rgb(profile.soil);
+  if (terrain !== 'desert' && terrain !== 'urban') {
+    for (let c = 0; c < 3; c++) {
+      base[c] = base[c] * 0.85 + earth[c] * 0.15;
+      secondary[c] = secondary[c] * 0.85 + earth[c] * 0.15;
+    }
+  }
+
+  for (let y = 0; y < COLOR_SIZE; y++) {
+    for (let x = 0; x < COLOR_SIZE; x++) {
+      const index = y * COLOR_SIZE + x;
+      const broad = broadNoise(x, y);
+      const soil = soilNoise(x, y);
+      const fine = fineNoise(x, y);
+      const grain = random() - 0.5;
+      const bare = smoothstep(0.28, 0.7, broad * 0.55 + soil * 0.45) * profile.soilAmount;
+      const pigment = 0.22 + soil * 0.42;
+      const brightness = 0.94 + broad * 0.12 + (fine - 0.5) * 0.1;
+      let height = ((soil - 0.5) * 0.018 + (fine - 0.5) * 0.014 + grain * 0.0015) * profile.relief;
+      let ripple = 0;
+      if (terrain === 'desert') {
+        ripple = Math.sin(TAU * (x * 52 + y * 7) / COLOR_SIZE + (soil - 0.5) * 2.8);
+        height += ripple * 0.009 * (0.35 + soil * 0.65);
+      }
+      // Damp jungle earth has a softer highlight; dry aggregate and sand stay
+      // matte. These maps contain material response without painted lighting.
+      roughness[index] = profile.roughness - (terrain === 'jungle' ? bare * 0.15 : bare * 0.025) + grain * 0.028;
+      heights[index] = height;
+      for (let c = 0; c < 3; c++) {
+        const vegetation = base[c] * (1 - pigment) + secondary[c] * pigment;
+        color.image.data[index * 4 + c] = (vegetation * (1 - bare) + earth[c] * bare) * brightness + grain * 7 + ripple * 1.7;
+      }
+      color.image.data[index * 4 + 3] = 255;
+    }
+  }
+
+  const stone = rgb(profile.stone);
+  for (let i = 0; i < profile.stones; i++) {
+    const scale = 0.75 + random() * 2.6;
+    const shade = 0.65 + random() * 0.42;
+    const tint = stone.map((value, channel) => value * shade * 0.65 + earth[channel] * 0.35);
+    if (terrain === 'urban' && i % 7 === 0) { tint[0] *= 1.13; tint[1] *= 0.78; tint[2] *= 0.7; }
+    stampDetail(heights, color.image.data, roughness, random() * COLOR_SIZE, random() * COLOR_SIZE,
+      scale, scale * (0.4 + random() * 0.45), random() * TAU, tint,
+      (0.004 + random() * 0.012) * profile.relief, 0.88 + random() * 0.1, 0.36 + random() * 0.22);
+  }
+  const stem = rgb(profile.stem);
+  for (let i = 0; i < profile.stems; i++) {
+    const living = i % 4 !== 0;
+    const shade = 0.84 + random() * 0.34;
+    const tint = (living ? base : stem).map((value, channel) => value * shade * 0.74 + earth[channel] * 0.26);
+    stampDetail(heights, color.image.data, roughness, random() * COLOR_SIZE, random() * COLOR_SIZE,
+      1.4 + random() * 3.3, 0.5 + random() * 0.35, random() * TAU, tint,
+      0.0015 + random() * 0.002, 0.93, 0.24 + random() * 0.28);
+  }
+  if (terrain === 'jungle') {
+    for (let i = 0; i < 1600; i++) {
+      const shade = 0.65 + random() * 0.48;
+      stampDetail(heights, color.image.data, roughness, random() * COLOR_SIZE, random() * COLOR_SIZE,
+        2 + random() * 4, 0.9 + random() * 1.6, random() * TAU, stem.map((value) => value * shade),
+        0.003, 0.86, 0.45);
+    }
+  }
+
+  const heightAt = (x, y) => heights[((y + COLOR_SIZE) % COLOR_SIZE) * COLOR_SIZE + (x + COLOR_SIZE) % COLOR_SIZE];
+  const texelMeters = profile.tileMeters / COLOR_SIZE;
+  for (let y = 0; y < DETAIL_SIZE; y++) {
+    for (let x = 0; x < DETAIL_SIZE; x++) {
+      const sx = x * 2;
+      const sy = y * 2;
+      const index = sy * COLOR_SIZE + sx;
+      const pixel = (y * DETAIL_SIZE + x) * 4;
+      // Average neighbouring rows/columns so tiny grains remain stable when the
+      // RTS camera pulls back and the normal map enters its mip chain.
+      const dx = (heightAt(sx + 2, sy) + heightAt(sx + 2, sy + 1) - heightAt(sx - 2, sy) - heightAt(sx - 2, sy + 1)) / (8 * texelMeters);
+      const dy = (heightAt(sx, sy + 2) + heightAt(sx + 1, sy + 2) - heightAt(sx, sy - 2) - heightAt(sx + 1, sy - 2)) / (8 * texelMeters);
+      const inv = 1 / Math.hypot(dx, dy, 1);
+      normal.image.data[pixel] = (-dx * inv * 0.5 + 0.5) * 255;
+      normal.image.data[pixel + 1] = (dy * inv * 0.5 + 0.5) * 255;
+      normal.image.data[pixel + 2] = (inv * 0.5 + 0.5) * 255;
+      normal.image.data[pixel + 3] = 255;
+      const surrounding = (heightAt(sx - 4, sy) + heightAt(sx + 4, sy) + heightAt(sx, sy - 4) + heightAt(sx, sy + 4)) * 0.25;
+      const cavity = Math.min(0.13, Math.max(0, surrounding - heights[index]) * 12);
+      surface.image.data[pixel] = (1 - cavity) * 255;
+      surface.image.data[pixel + 1] = roughness[index] * 255;
+      surface.image.data[pixel + 2] = 0;
+      surface.image.data[pixel + 3] = 255;
+    }
+  }
+  for (const source of [color, normal, surface]) source.context.putImageData(source.image, 0, 0);
+  return { color: color.canvas, normal: normal.canvas, surface: surface.canvas };
+}
+
+/** Albedo, normal, and packed occlusion/roughness from one physical surface. */
+export function createGroundMaterialMaps(mapDef = {}) {
+  const profile = SURFACES[mapDef.terrain] ?? SURFACES.bocage;
+  const key = `${mapDef.id}:${mapDef.terrain}:${mapDef.groundColor}:${mapDef.groundColor2}`;
+  let sources = surfaceSources.get(key);
+  if (!sources) {
+    sources = buildSurfaceSources(mapDef, profile);
+    if (surfaceSources.size >= MAX_CACHED_SURFACES) surfaceSources.delete(surfaceSources.keys().next().value);
+  } else {
+    surfaceSources.delete(key);
+  }
+  surfaceSources.set(key, sources);
+  const maps = {};
+  for (const [name, canvas] of Object.entries(sources)) {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.name = `terrain-${mapDef.terrain ?? 'bocage'}-${name}`;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    const repeats = (mapDef.size ?? 120) / profile.tileMeters;
+    texture.repeat.set(repeats, repeats);
+    texture.anisotropy = 16;
+    if (name === 'color') texture.colorSpace = THREE.SRGBColorSpace;
+    maps[name] = texture;
+  }
+  return maps;
 }

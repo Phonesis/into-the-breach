@@ -1033,7 +1033,7 @@ export class Game {
       // The IBL is a generated render target with no CPU-side pixels to
       // re-upload after a GPU reset; regenerate it before rebuilding materials.
       disposeEnvironment(this.scene);
-      applySceneEnvironment(this.scene, this.renderer);
+      applySceneEnvironment(this.scene, this.renderer, this.mapDef);
 
       // Context restoration rebuilds Three.js' program/texture caches. Mark
       // live materials for a clean recompile so a stale shadow/light variant
@@ -1046,7 +1046,7 @@ export class Game {
             : [];
         for (const material of materials) {
           material.needsUpdate = true;
-          for (const key of ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'bumpMap']) {
+          for (const key of ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'bumpMap', 'aoMap', 'emissiveMap']) {
             if (material[key]) material[key].needsUpdate = true;
           }
         }

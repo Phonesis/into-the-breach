@@ -1,10 +1,11 @@
 import * as THREE from 'three';
+import { getBattlefieldLighting, getBattlefieldSunDirection } from './BattlefieldLighting.js';
+import { applySceneEnvironment } from './EnvironmentMap.js';
 
 const SKY_VERT = `
-varying vec3 vWorld;
+varying vec3 vSkyDirection;
 void main() {
-  vec4 w = modelMatrix * vec4(position, 1.0);
-  vWorld = w.xyz;
+  vSkyDirection = position;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -15,9 +16,9 @@ uniform vec3 uHorizon;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform float uSunPower;
-varying vec3 vWorld;
+varying vec3 vSkyDirection;
 void main() {
-  vec3 dir = normalize(vWorld);
+  vec3 dir = normalize(vSkyDirection);
   float h = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
   vec3 sky = mix(uHorizon, uTop, pow(h, 0.72));
   float sunDot = max(dot(dir, uSunDir), 0.0);
@@ -27,6 +28,8 @@ void main() {
   float horizonGlow = exp(-abs(dir.y) * 6.0) * 0.12;
   col += uHorizon * horizonGlow;
   gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }
 `;
 
@@ -43,7 +46,8 @@ function skyRadiusForMap(mapSize) {
 }
 
 export function setupSceneEnvironment(scene, mapDef, renderer) {
-  const sky = new THREE.Color(mapDef.skyColor ?? 0x6b7d8f);
+  const profile = getBattlefieldLighting(mapDef);
+  const sky = new THREE.Color(mapDef.skyColor ?? 0x6b7d8f).lerp(new THREE.Color(profile.sky), 0.2);
   const fog = new THREE.Color(mapDef.fogColor ?? 0x8a9aaa);
   const horizon = sky.clone().lerp(fog, 0.55);
   const top = sky.clone().lerp(new THREE.Color(0x4a6a9a), 0.35);
@@ -57,7 +61,8 @@ export function setupSceneEnvironment(scene, mapDef, renderer) {
 
   disposeSceneEnvironment(scene);
 
-  const skyGroup = createSkyDome(top, horizon, skyRadius);
+  if (renderer) applySceneEnvironment(scene, renderer, mapDef);
+  const skyGroup = createSkyDome(top, horizon, skyRadius, profile);
   skyGroup.name = 'sky';
   skyGroup.userData.skyRadius = skyRadius;
   scene.add(skyGroup);
@@ -65,7 +70,7 @@ export function setupSceneEnvironment(scene, mapDef, renderer) {
 
   addMapSkyBorder(scene, horizon, fog, sky, mapDef.groundColor ?? fog.getHex(), mapSize);
 
-  return { skyGroup, fogColor: fog, sunDir: new THREE.Vector3(-0.55, 0.62, 0.42).normalize() };
+  return { skyGroup, fogColor: fog, sunDir: getBattlefieldSunDirection() };
 }
 
 /** Keep the sky dome centered on the camera so edges of large maps still show sky. */
@@ -88,15 +93,17 @@ export function disposeSceneEnvironment(scene) {
   }
 }
 
-function createSkyDome(topColor, horizonColor, radius) {
+function createSkyDome(topColor, horizonColor, radius, profile) {
   const group = new THREE.Group();
-  const geo = new THREE.SphereGeometry(radius, 64, 32, 0, Math.PI * 2, 0, Math.PI * 0.56);
+  // A full dome covers low camera angles too; a cut hemisphere exposed a
+  // straight band of the clear color below its rim.
+  const geo = new THREE.SphereGeometry(radius, 64, 32);
   const uniforms = {
     uTop: { value: topColor },
     uHorizon: { value: horizonColor },
-    uSunDir: { value: new THREE.Vector3(-0.55, 0.62, 0.42).normalize() },
-    uSunColor: { value: new THREE.Color(0xfff0d0) },
-    uSunPower: { value: 128 },
+    uSunDir: { value: getBattlefieldSunDirection() },
+    uSunColor: { value: new THREE.Color(profile.sun).multiplyScalar(1 - profile.haze * 0.55) },
+    uSunPower: { value: 1600 },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -109,21 +116,6 @@ function createSkyDome(topColor, horizonColor, radius) {
   const dome = new THREE.Mesh(geo, mat);
   dome.renderOrder = -3;
   group.add(dome);
-
-  const sunScale = radius / 280;
-  const sunCore = new THREE.Mesh(
-    new THREE.SphereGeometry(10 * sunScale, 24, 24),
-    new THREE.MeshBasicMaterial({ color: 0xfff6e8, transparent: true, opacity: 0.55, fog: false })
-  );
-  sunCore.position.set(-72 * sunScale, 68 * sunScale, 48 * sunScale);
-  group.add(sunCore);
-
-  const sunHalo = new THREE.Mesh(
-    new THREE.SphereGeometry(22 * sunScale, 20, 20),
-    new THREE.MeshBasicMaterial({ color: 0xffe4b8, transparent: true, opacity: 0.14, fog: false })
-  );
-  sunHalo.position.copy(sunCore.position);
-  group.add(sunHalo);
 
   group.userData.skyUniforms = uniforms;
   return group;
@@ -174,7 +166,11 @@ function addMapSkyBorder(scene, horizonColor, fogColor, skyColor, groundHex, map
         vec3 midCol = mix(nearCol, uHorizon, smoothstep(0.0, 0.42, t));
         vec3 col = mix(midCol, uSky, smoothstep(0.38, 1.0, pow(t, 0.82)));
         float edgeSoft = smoothstep(uInner, uInner + 6.0, r);
-        gl_FragColor = vec4(col, edgeSoft);
+        // Fade the far edge into the actual sky, avoiding an opaque
+        // horizontal seam where the finite backdrop ring ends.
+        gl_FragColor = vec4(col, edgeSoft * (1.0 - smoothstep(0.72, 1.0, t)));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
@@ -192,13 +188,14 @@ function addMapSkyBorder(scene, horizonColor, fogColor, skyColor, groundHex, map
 }
 
 export function setupLighting(scene, mapDef = null) {
-  const hemi = new THREE.HemisphereLight(0xb8d4ff, 0x3d5230, 0.55);
+  const profile = getBattlefieldLighting(mapDef);
+  const hemi = new THREE.HemisphereLight(profile.sky, profile.ground, profile.skyIntensity + 0.18);
   scene.add(hemi);
 
-  const amb = new THREE.AmbientLight(0x8a9ab8, 0.22);
+  const amb = new THREE.AmbientLight(profile.sky, 0.08);
   scene.add(amb);
 
-  const sun = new THREE.DirectionalLight(0xfff0dc, 1.85);
+  const sun = new THREE.DirectionalLight(profile.sun, profile.sunIntensity);
   sun.position.set(-58, 82, 44);
   sun.userData.shadowOffset = sun.position.clone();
   sun.castShadow = true;
@@ -222,19 +219,11 @@ export function setupLighting(scene, mapDef = null) {
   scene.add(sun.target);
   sun.target.position.set(0, 0, 0);
 
-  const fill = new THREE.DirectionalLight(0x7098c8, 0.48);
-  fill.position.set(52, 38, -58);
-  scene.add(fill);
+  // The hemispherical sky and outdoor environment already supply diffuse
+  // fill and reflected light. Extra studio-style rim/bounce directionals made
+  // foliage look plastic and evaluated three additional PBR lights per pixel.
+  return { sun, hemi };
 
-  const rim = new THREE.DirectionalLight(0xffc890, 0.28);
-  rim.position.set(35, 28, 65);
-  scene.add(rim);
-
-  const bounce = new THREE.DirectionalLight(0x6a8a5a, 0.15);
-  bounce.position.set(0, 12, -40);
-  scene.add(bounce);
-
-  return { sun, hemi, fill, rim, bounce };
 }
 
 /** Keep shadow focus on the active battlefield (console-style cascaded feel). */

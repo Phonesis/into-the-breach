@@ -1,12 +1,7 @@
 import * as THREE from 'three';
 import { canUseTacticalReverse, getMoveReachConfig, isTankType, isTruckType, isVehicleUnit, isWheeledVehicle } from '../units/VehicleTypes.js';
 import { faceUnitTowardMovement } from '../units/VehicleRotation.js';
-import {
-  createAOMap,
-  createGroundTexture,
-  createNormalMap,
-  createRoughnessMap,
-} from './proceduralTextures.js';
+import { createGroundMaterialMaps } from './proceduralTextures.js';
 import { createMapRandom } from './MapRandom.js';
 import {
   addUrbanDistrict,
@@ -35,38 +30,42 @@ export function buildTerrain(mapDef, scene, scenery = null) {
   const pos = geo.attributes.position;
   const colors = [];
   const seed = mapDef.id.length * 17;
-  const cBase = new THREE.Color(mapDef.groundColor);
-  const cVar = new THREE.Color(mapDef.groundColor2 ?? mapDef.groundColor);
-
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    let h = heightAt(x, z, mapDef, seed);
-    pos.setY(i, h);
-
-    const slope = Math.min(1, Math.abs(h) / 6);
-    const tint = 0.82 + noise2(x, z, seed + 3) * 0.18 - slope * 0.08;
-    const c = cBase.clone().lerp(cVar, (h + 3) / 12);
-    c.multiplyScalar(tint);
-    colors.push(c.r, c.g, c.b);
+    pos.setY(i, heightAt(x, z, mapDef, seed));
   }
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
-  const colorTex = createGroundTexture(mapDef);
-  const normalTex = createNormalMap(mapDef);
-  const roughTex = createRoughnessMap(mapDef);
-  const aoTex = createAOMap(mapDef);
+  const normals = geo.attributes.normal;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    // Albedo already contains the theater's pigment. Multiplying it by that
+    // same green/brown again crushed the terrain into dark saturated patches.
+    // Neutral, world-space variation now breaks up repetition independently of
+    // tile size; actual surface slope subtly exposes drier, lighter ground.
+    const broad = terrainTintNoise(x * 0.034, z * 0.034, seed);
+    const damp = terrainTintNoise(x * 0.073 + 18, z * 0.073 - 7, seed + 41);
+    const slope = THREE.MathUtils.clamp((1 - normals.getY(i)) * 2.8, 0, 1);
+    const exposure = slope * (mapDef.terrain === 'hills' ? 0.19 : 0.09);
+    const tint = 0.87 + broad * 0.2 - damp * 0.045 + exposure;
+    const dry = broad * 0.04 + exposure * 0.24;
+    colors.push(tint * (1 + dry), tint, tint * (1 - dry * 0.55));
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  const surface = createGroundMaterialMaps(mapDef);
 
   const groundMat = new THREE.MeshStandardMaterial({
-    map: colorTex,
-    normalMap: normalTex,
-    roughnessMap: roughTex,
-    aoMap: aoTex,
-    aoMapIntensity: 0.92,
-    normalScale: new THREE.Vector2(0.92, 0.92),
+    map: surface.color,
+    normalMap: surface.normal,
+    roughnessMap: surface.surface,
+    aoMap: surface.surface,
+    aoMapIntensity: 0.7,
+    normalScale: new THREE.Vector2(0.85, 0.85),
     vertexColors: true,
-    roughness: 0.9,
+    roughness: 1,
     metalness: 0,
     envMapIntensity: 0.48,
   });
@@ -87,6 +86,22 @@ export function buildTerrain(mapDef, scene, scenery = null) {
   }
 
   return { ground, size };
+}
+
+function terrainTintNoise(x, z, seed) {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sz = fz * fz * (3 - 2 * fz);
+  const sample = (gx, gz) => {
+    const value = Math.sin(gx * 127.1 + gz * 311.7 + seed * 7.13) * 43758.5453;
+    return value - Math.floor(value);
+  };
+  const top = sample(ix, iz) * (1 - sx) + sample(ix + 1, iz) * sx;
+  const bottom = sample(ix, iz + 1) * (1 - sx) + sample(ix + 1, iz + 1) * sx;
+  return top * (1 - sz) + bottom * sz;
 }
 
 function heightAt(x, z, mapDef, seed) {
@@ -138,9 +153,9 @@ function terrainDecorationPalette(terrain) {
     return { trunk: 0x4b362a, leaf: 0x425c32, leafDark: 0x293f27, leafLight: 0x68764a, bush: 0x526c3a, dry: 0x756a40, rock: 0x737066, earth: 0x5c513b };
   }
   if (terrain === 'jungle') {
-    return { trunk: 0x463426, leaf: 0x28532b, leafDark: 0x173a24, leafLight: 0x4f743c, bush: 0x315f32, dry: 0x796a3f, rock: 0x555b50, earth: 0x4d3e2d };
+    return { trunk: 0x463b2e, leaf: 0x3a5135, leafDark: 0x263b2b, leafLight: 0x63724c, bush: 0x465e3b, dry: 0x796a3f, rock: 0x555b50, earth: 0x4d3e2d };
   }
-  return { trunk: 0x4a3425, leaf: 0x315b2a, leafDark: 0x1f4120, leafLight: 0x52723a, bush: 0x3f6b32, dry: 0x6d653a, rock: 0x69675d, earth: 0x55462f };
+  return { trunk: 0x4a3e30, leaf: 0x465a36, leafDark: 0x303e2c, leafLight: 0x697749, bush: 0x536540, dry: 0x6d653a, rock: 0x69675d, earth: 0x55462f };
 }
 
 let vegetationDetailTextures = null;
@@ -178,16 +193,24 @@ function getVegetationDetailTextures() {
   leafCanvas.width = 128;
   leafCanvas.height = 128;
   const leafCtx = leafCanvas.getContext('2d');
-  leafCtx.fillStyle = '#f2f2ed';
+  leafCtx.fillStyle = '#bfc3b3';
   leafCtx.fillRect(0, 0, 128, 128);
   for (let i = 0; i < 190; i++) {
     const x = (i * 61) % 128;
     const y = (i * 43 + Math.floor(i / 7) * 19) % 128;
     const r = 1.4 + (i % 5) * 0.55;
-    leafCtx.fillStyle = i % 4 === 0 ? 'rgba(105,112,91,0.24)' : 'rgba(151,158,132,0.2)';
+    leafCtx.fillStyle = i % 4 === 0 ? 'rgba(65,78,52,0.32)' : 'rgba(224,228,200,0.45)';
     leafCtx.beginPath();
     leafCtx.ellipse(x, y, r * 1.55, r, (i % 9) * 0.35, 0, Math.PI * 2);
     leafCtx.fill();
+    // Fine veins belong in the shared colour map, avoiding per-fragment bump
+    // derivatives over the many overlapping leaf surfaces.
+    leafCtx.strokeStyle = 'rgba(68,79,50,0.18)';
+    leafCtx.lineWidth = 0.45;
+    leafCtx.beginPath();
+    leafCtx.moveTo(x - r, y);
+    leafCtx.lineTo(x + r, y);
+    leafCtx.stroke();
   }
 
   const bark = new THREE.CanvasTexture(barkCanvas);
@@ -231,11 +254,12 @@ function applyGeometryTint(geometry, color) {
   const count = geometry.getAttribute('position')?.count ?? 0;
   if (!count || !color) return;
   const colors = new Float32Array(count * 3);
+  const shading = geometry.getAttribute('color');
   for (let i = 0; i < count; i++) {
     const offset = i * 3;
-    colors[offset] = color.r;
-    colors[offset + 1] = color.g;
-    colors[offset + 2] = color.b;
+    colors[offset] = color.r * (shading ? shading.getX(i) : 1);
+    colors[offset + 1] = color.g * (shading ? shading.getY(i) : 1);
+    colors[offset + 2] = color.b * (shading ? shading.getZ(i) : 1);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
@@ -318,16 +342,12 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
   const leafMat = new THREE.MeshStandardMaterial({
     color: palette.leaf,
     map: vegetationTextures.leaf,
-    bumpMap: vegetationTextures.leaf,
-    bumpScale: 0.045,
     roughness: 0.94,
     envMapIntensity: 0.28,
   });
   const lightLeafMat = new THREE.MeshStandardMaterial({
     color: palette.leafLight,
     map: vegetationTextures.leaf,
-    bumpMap: vegetationTextures.leaf,
-    bumpScale: 0.04,
     roughness: 0.92,
     envMapIntensity: 0.3,
   });
@@ -347,24 +367,18 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
   const bushMat = new THREE.MeshStandardMaterial({
     color: palette.bush,
     map: vegetationTextures.leaf,
-    bumpMap: vegetationTextures.leaf,
-    bumpScale: 0.04,
     roughness: 0.94,
     envMapIntensity: 0.28,
   });
   const darkLeafMat = new THREE.MeshStandardMaterial({
     color: palette.leafDark,
     map: vegetationTextures.leaf,
-    bumpMap: vegetationTextures.leaf,
-    bumpScale: 0.045,
     roughness: 0.96,
     envMapIntensity: 0.24,
   });
   const dryBushMat = new THREE.MeshStandardMaterial({
     color: palette.dry,
     map: vegetationTextures.leaf,
-    bumpMap: vegetationTextures.leaf,
-    bumpScale: 0.035,
     roughness: 0.97,
     envMapIntensity: 0.2,
   });
@@ -397,7 +411,7 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
     } else {
       const g =
         mapDef.terrain === 'jungle' && mapRandom() < 0.42
-          ? createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat)
+          ? createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintMat)
           : createTreeGroup(
               trunkMat,
               leafMat,
@@ -433,18 +447,38 @@ function addDecorations(mapDef, scene, size, seed, scenery) {
   }
 
   if (mapDef.terrain === 'bocage') {
+    const bankMat = earthMat.clone();
+    bankMat.color.set(0xffffff);
+    bankMat.vertexColors = true;
+    bankMat.flatShading = false;
     const hedgeMat = new THREE.MeshStandardMaterial({
-      color: 0x3a5a32,
-      roughness: 0.86,
-      envMapIntensity: 0.4,
+      color: 0x4b5b38,
+      map: vegetationTextures.leaf,
+      roughness: 0.94,
+      envMapIntensity: 0.28,
     });
     for (let i = 0; i < 32; i++) {
       const hx = (mapRandom() - 0.5) * size * 0.55;
       const hz = (mapRandom() - 0.5) * size * 0.55;
       const hy = heightAt(hx, hz, mapDef, seed);
-      const g = createHedgeGroup(hedgeMat, bushMat, darkLeafMat, trunkMat, earthMat);
+      const g = createHedgeGroup(hedgeMat, bushMat, darkLeafMat, trunkMat, bankMat, leafTintMat);
       g.position.set(hx, hy, hz);
       g.rotation.y = mapRandom() * Math.PI;
+      // Bend the baked hedge with the actual ground, including the berm's
+      // buried foot. A single centre height leaves long banks floating uphill.
+      const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y);
+      for (const mesh of g.children) {
+        if (!mesh.isMesh) continue;
+        const positions = mesh.geometry.attributes.position;
+        for (let v = 0; v < positions.count; v++) {
+          const x = positions.getX(v), z = positions.getZ(v);
+          positions.setY(v, positions.getY(v) + heightAt(hx + c*x + s*z, hz - s*x + c*z, mapDef, seed) - hy);
+        }
+        // Keep the foliage's smooth crown normals; recomputing unindexed
+        // leaf clusters here would turn every crown into a faceted solid.
+        if (mesh.material === bankMat) mesh.geometry.computeVertexNormals();
+        mesh.geometry.computeBoundingSphere();
+      }
       if (scenery) scenery.register(g, { x: hx, z: hz, kind: 'hedge', source: 'map' });
       else scene.add(g);
     }
@@ -496,21 +530,97 @@ function createOrganicTrunkGeometry(height, baseRadius, topRadius, leanX, leanZ)
   return geometry;
 }
 
-function createIrregularFoliageGeometry(radius, detail = 1) {
-  const geometry = new THREE.IcosahedronGeometry(radius, detail);
-  const position = geometry.attributes.position;
-  for (let i = 0; i < position.count; i++) {
-    const x = position.getX(i);
-    const y = position.getY(i);
-    const z = position.getZ(i);
-    const variation = 1 + Math.sin(x * 7.1 + y * 5.3) * 0.055 + Math.cos(z * 8.7 - y * 3.9) * 0.045;
-    position.setXYZ(i, x * variation, y * variation, z * variation);
+const foliageGeometryCache = new Map();
+
+/** Opaque leaf sprays: broken edges and small overlapping lobes at 80 triangles,
+ * the same budget as the former single rounded crown. No alpha-test/overdraw pass.
+ * Variants are deterministic and never consume the map placement random stream. */
+function createIrregularFoliageGeometry(radius) {
+  const variant = Math.floor(radius * 137) % 4;
+  let template = foliageGeometryCache.get(variant);
+  if (!template) {
+    const pieces = [];
+    for (let lobe = 0; lobe < 3; lobe++) {
+      const geometry = new THREE.IcosahedronGeometry(0.6, 0);
+      const angle = lobe * Math.PI * 2 / 3 + variant * 0.7;
+      const position = geometry.attributes.position;
+      const normal = geometry.attributes.normal;
+      const shades = [];
+      for (let i = 0; i < position.count; i++) {
+        const x = position.getX(i);
+        const y = position.getY(i);
+        const z = position.getZ(i);
+        const ripple = 1 + Math.sin(x * 9 + z * 7 + variant) * 0.14;
+        position.setXYZ(i,
+          x * ripple + Math.cos(angle) * 0.29,
+          y * 0.82 + Math.sin(angle * 2) * 0.1,
+          z * 0.9 + Math.sin(angle) * 0.29);
+        const normalScale = 1 / Math.hypot(x, y / 0.82, z / 0.9);
+        normal.setXYZ(i, x * normalScale, y / 0.82 * normalScale, z / 0.9 * normalScale);
+        const shade = 0.76 + (y / 0.64 + 1) * 0.11;
+        shades.push(shade, shade, shade * 0.98);
+      }
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(shades, 3));
+      pieces.push(geometry);
+    }
+
+    const vertices = [];
+    const uv = [];
+    const shades = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < 10; i++) {
+      const angle = i * 2.399963 + variant * 0.69;
+      const rise = -0.63 + (i / 9) * 1.34;
+      const reach = Math.sqrt(1 - rise * rise);
+      const direction = new THREE.Vector3(Math.cos(angle) * reach, rise * 0.74, Math.sin(angle) * reach);
+      const across = new THREE.Vector3().crossVectors(direction, up).normalize().multiplyScalar(0.095);
+      const base = direction.clone().multiplyScalar(0.68);
+      const tip = direction.clone().multiplyScalar(1.03);
+      const mid = base.clone().lerp(tip, 0.46);
+      mid.y += 0.055;
+      const left = mid.clone().add(across);
+      const right = mid.clone().sub(across);
+      // Closed two-sided leaf without a transparent material or extra draw pass.
+      const points = [left, right, tip, left, tip, right];
+      for (let n = 0; n < points.length; n++) {
+        const point = points[n];
+        vertices.push(point.x, point.y, point.z);
+        uv.push(n % 3 === 1 ? 1 : 0, n % 3 === 2 ? 1 : 0);
+        const shade = (n >= 3 ? 0.78 : 0.91) + (i % 3) * 0.035;
+        shades.push(shade, shade, shade * 0.96);
+      }
+    }
+    const sprays = new THREE.BufferGeometry();
+    sprays.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    sprays.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    sprays.setAttribute('color', new THREE.Float32BufferAttribute(shades, 3));
+    sprays.computeVertexNormals();
+    pieces.push(sprays);
+    template = mergeCompatibleGeometries(pieces);
+    pieces.forEach((piece) => piece.dispose());
+    foliageGeometryCache.set(variant, template);
   }
-  position.needsUpdate = true;
-  geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
+  return template.clone().scale(radius, radius, radius);
+}
+
+/** A curved, pointed palm leaflet; eight faces replace each twelve-face box. */
+function createPalmLeafletGeometry(length, width, side) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = [
+    0, 0, 0,
+    length * 0.29, -0.025, side * width * 0.13,
+    length * 0.51, 0.015, side * width * 0.51,
+    length * 0.11, -0.028, side * width * 0.6,
+    length * 0.43, -0.16, side * width,
+  ];
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0.3, 0.5, 0.5, 0, 0.6, 0.5, 1], 2));
+  geometry.setIndex([0, 1, 2, 0, 2, 3, 1, 4, 2, 2, 4, 3, 0, 2, 1, 0, 3, 2, 1, 2, 4, 2, 3, 4]);
+  // Separate front/back normals so the two thin surfaces light consistently.
+  const leaf = geometry.toNonIndexed();
+  geometry.dispose();
+  leaf.computeVertexNormals();
+  return leaf;
 }
 
 function addWoodyLimb(group, material, start, end, baseRadius, tipRadius, radialSegments = 7) {
@@ -602,7 +712,7 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintM
   for (let i = 0; i < crownCount; i++) {
     const material = i % 6 === 0 ? lightLeafMat : i % 3 === 0 ? darkLeafMat : leafMat;
     const size = (isOlive ? 0.38 : 0.42) + mapRandom() * (isOlive ? 0.28 : 0.32);
-    const crown = new THREE.Mesh(createIrregularFoliageGeometry(size, 1), material);
+    const crown = new THREE.Mesh(createIrregularFoliageGeometry(size), material);
     const angle = i * 2.39996 + mapRandom() * 0.42;
     const radial = Math.sqrt((i + 0.5) / crownCount) * (isOlive ? 1.22 : 0.98);
     const vertical = (mapRandom() - 0.46) * (isOlive ? 0.88 : 1.18);
@@ -625,7 +735,7 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintM
   for (let i = 0; i < branchEnds.length; i += 2) {
     const end = branchEnds[i];
     const outer = new THREE.Mesh(
-      createIrregularFoliageGeometry(0.28 + mapRandom() * 0.18, 1),
+      createIrregularFoliageGeometry(0.28 + mapRandom() * 0.18),
       i % 4 === 0 ? lightLeafMat : leafMat
     );
     outer.position.copy(end).add(new THREE.Vector3(0, 0.08 + mapRandom() * 0.2, 0));
@@ -646,7 +756,7 @@ function createTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintM
   );
 }
 
-function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
+function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat, leafTintMat) {
   const g = new THREE.Group();
   g.name = 'vegetationPalm';
   g.userData.vegetationKind = 'tree';
@@ -703,11 +813,11 @@ function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
       for (let j = 0; j < leafletCount; j++) {
         const t = (j + 1) / (leafletCount + 1);
         const leaflet = new THREE.Mesh(
-          new THREE.BoxGeometry(length * 0.2 * (1 - t * 0.35), 0.018, 0.19),
+          createPalmLeafletGeometry(length * 0.4, length * 0.43 * Math.sin(t * Math.PI) + 0.07, side),
           (i + j) % 5 === 0 ? darkLeafMat : leafMat
         );
-        leaflet.position.set(length * t, -0.04 - t * 0.12, side * 0.1);
-        leaflet.rotation.y = side * (0.48 + t * 0.22);
+        leaflet.position.set(length * t, -0.04 - t * t * 0.32, side * 0.025);
+        leaflet.rotation.y = side * (0.12 + t * 0.18);
         leaflet.rotation.z = -0.16 - t * 0.16;
         leaflet.castShadow = true;
         frond.add(leaflet);
@@ -727,7 +837,11 @@ function createPalmTreeGroup(trunkMat, leafMat, darkLeafMat, lightLeafMat) {
     coconut.castShadow = true;
     crown.add(coconut);
   }
-  return consolidateGroupMeshes(g, true);
+  return consolidateGroupMeshes(g, true, new Map([
+    [leafMat, leafTintMat],
+    [darkLeafMat, leafTintMat],
+    [lightLeafMat, leafTintMat],
+  ]));
 }
 
 function createBushGroup(bushMat, accentMat, twigMat, leafTintMat, terrain) {
@@ -758,7 +872,7 @@ function createBushGroup(bushMat, accentMat, twigMat, leafTintMat, terrain) {
   const count = sparse ? 7 + Math.floor(mapRandom() * 3) : 11 + Math.floor(mapRandom() * 4);
   for (let i = 0; i < count; i++) {
     const bush = new THREE.Mesh(
-      createIrregularFoliageGeometry(0.2 + mapRandom() * (sparse ? 0.22 : 0.27), 1),
+      createIrregularFoliageGeometry(0.2 + mapRandom() * (sparse ? 0.22 : 0.27)),
       i % 5 === 0 ? accentMat : bushMat
     );
     const stemEnd = stemEnds[i % stemEnds.length];
@@ -776,7 +890,7 @@ function createBushGroup(bushMat, accentMat, twigMat, leafTintMat, terrain) {
     g.add(bush);
   }
   const baseCluster = new THREE.Mesh(
-    createIrregularFoliageGeometry(sparse ? 0.38 : 0.5, 1),
+    createIrregularFoliageGeometry(sparse ? 0.38 : 0.5),
     bushMat
   );
   baseCluster.position.y = sparse ? 0.24 : 0.32;
@@ -813,24 +927,70 @@ function createRockCluster(rockMat, scale = 1) {
 function createHedgeBankGeometry(length) {
   const geo = new THREE.BoxGeometry(length * 0.96, 0.52, 1.05, 8, 2, 3);
   const pos = geo.attributes.position;
+  const colors = [];
+  const soil = new THREE.Color(0x62553c), moss = new THREE.Color(0x536044);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
     const z = pos.getZ(i);
-    const edgeFade = Math.max(0.2, 1 - Math.abs(x) / Math.max(0.1, length * 0.5));
-    const top = y > 0.2;
+    // Keep the seeded placement stream stable, but deform coincident vertices
+    // identically so the bank has no cracks along the box's face seams.
+    mapRandom(); mapRandom(); mapRandom();
+    const end = Math.min(1, (length * 0.48 - Math.abs(x)) / 0.85);
+    const level = (y + 0.26) / 0.52;
+    const wave = Math.sin(x * 2.3 + z * 3.1) * 0.035 + Math.cos(x * 4.7 - z) * 0.023;
+    const crest = 0.29 + 0.09 * Math.sin(x * 1.7) + 0.05 * Math.cos(x * 3.2);
+    const tint = soil.clone().lerp(moss, 0.3 + 0.3 * Math.sin(x * 2.1 + z * 5)).multiplyScalar(0.9 + wave * 2);
+    colors.push(tint.r, tint.g, tint.b);
     pos.setXYZ(
       i,
-      x + (mapRandom() - 0.5) * 0.16,
-      y + (top ? mapRandom() * 0.16 * edgeFade : (mapRandom() - 0.5) * 0.035),
-      z + (mapRandom() - 0.5) * 0.18 * edgeFade
+      x + Math.sin(x * 3.1 + z * 2) * 0.035,
+      -0.29 + level * (crest + 0.29) * (0.15 + end * 0.85) + wave * level,
+      z * (1.25 - level * 0.72) * (0.45 + end * 0.55) + Math.sin(x * 1.8) * 0.075
     );
   }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.computeVertexNormals();
   return geo;
 }
 
-function createHedgeGroup(hedgeMat, bushMat, darkLeafMat, twigMat, earthMat) {
+function createHedgeFoliageGeometry(radius) {
+  // Small interlocking crowns and folded opaque leaves. Baked once into each
+  // hedge's existing foliage batch; no alpha sorting or per-leaf draw calls.
+  const pieces = [];
+  for (let i = 0; i < 5; i++) {
+    const angle = i * 2.39996;
+    const crown = new THREE.IcosahedronGeometry(radius * 0.43, 0);
+    crown.scale(1.1, 0.85, 1);
+    const vertices = crown.attributes.position, normals = crown.attributes.normal;
+    for (let v = 0; v < vertices.count; v++) {
+      const x = vertices.getX(v) / 1.21, y = vertices.getY(v) / 0.7225, z = vertices.getZ(v);
+      const length = Math.hypot(x, y, z);
+      normals.setXYZ(v, x / length, y / length, z / length);
+    }
+    crown.translate(Math.cos(angle) * radius * 0.35, (i / 4 - 0.5) * radius, Math.sin(angle) * radius * 0.35);
+    pieces.push(crown);
+  }
+  const leaves = [];
+  for (let i = 0; i < 30; i++) {
+    const a = i * 2.39996, y = ((i * 7 % 29) / 29 - 0.5) * radius * 1.35;
+    const r = radius * (0.48 + (i % 3) * 0.06);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const dx = Math.cos(a) * radius * 0.25, dz = Math.sin(a) * radius * 0.25;
+    const wx = -Math.sin(a) * radius * 0.1, wz = Math.cos(a) * radius * 0.1;
+    leaves.push(x,y,z, x+dx*.45+wx,y+.07,z+dz*.45+wz, x+dx,y+.025,z+dz,
+      x,y,z, x+dx,y+.025,z+dz, x+dx*.45-wx,y+.07,z+dz*.45-wz);
+  }
+  const leaf = new THREE.BufferGeometry();
+  leaf.setAttribute('position', new THREE.Float32BufferAttribute(leaves, 3));
+  leaf.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(leaves.length / 3 * 2), 2));
+  leaf.computeVertexNormals(); pieces.push(leaf);
+  const merged = mergeCompatibleGeometries(pieces);
+  pieces.forEach(piece => piece.dispose());
+  return merged;
+}
+
+function createHedgeGroup(hedgeMat, bushMat, darkLeafMat, twigMat, earthMat, leafTintMat) {
   const g = new THREE.Group();
   const len = 6 + mapRandom() * 5;
   const bank = new THREE.Mesh(createHedgeBankGeometry(len), earthMat);
@@ -844,12 +1004,12 @@ function createHedgeGroup(hedgeMat, bushMat, darkLeafMat, twigMat, earthMat) {
   const lumps = 9 + Math.floor(mapRandom() * 4);
   for (let i = 0; i < lumps; i++) {
     const hedge = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.5 + mapRandom() * 0.24, 1),
+      createHedgeFoliageGeometry(0.7 + mapRandom() * 0.3),
       i % 5 === 0 ? darkLeafMat : i % 3 === 0 ? bushMat : hedgeMat
     );
     const t = lumps <= 1 ? 0 : i / (lumps - 1);
-    hedge.position.set((t - 0.5) * len, 0.72 + mapRandom() * 0.22, (mapRandom() - 0.5) * 0.58);
-    hedge.scale.set(1.15 + mapRandom() * 0.45, 0.72 + mapRandom() * 0.3, 0.75 + mapRandom() * 0.28);
+    hedge.position.set((t - 0.5) * len * 0.95, 0.93 + mapRandom() * 0.3, (mapRandom() - 0.5) * 0.58);
+    hedge.scale.set(1.3 + mapRandom() * 0.45, 1.65 + mapRandom() * 0.5, 1.15 + mapRandom() * 0.35);
     hedge.rotation.set(mapRandom() * 0.28, mapRandom() * Math.PI, mapRandom() * 0.18);
     hedge.castShadow = true;
     hedge.receiveShadow = true;
@@ -864,34 +1024,46 @@ function createHedgeGroup(hedgeMat, bushMat, darkLeafMat, twigMat, earthMat) {
     stem.castShadow = true;
     g.add(stem);
   }
-  return consolidateGroupMeshes(g);
+  return consolidateGroupMeshes(g, false, new Map([
+    [hedgeMat, leafTintMat],
+    [bushMat, leafTintMat],
+    [darkLeafMat, leafTintMat],
+  ]));
 }
 
 function createGrassClumpGeometry() {
   const vertices = [];
+  const colors = [];
   const bladeCount = 7;
   for (let i = 0; i < bladeCount; i++) {
-    const ang = (i / bladeCount) * Math.PI * 2;
+    const angle = i * 2.399963;
     const radius = i === 0 ? 0 : 0.08 + (i % 3) * 0.025;
-    const cx = Math.cos(ang) * radius;
-    const cz = Math.sin(ang) * radius;
-    const width = 0.045 + (i % 2) * 0.018;
+    const cx = Math.cos(angle) * radius;
+    const cz = Math.sin(angle) * radius;
+    const width = 0.012 + (i % 2) * 0.007;
     const height = 0.34 + (i % 4) * 0.09;
-    const dx = Math.cos(ang) * width;
-    const dz = Math.sin(ang) * width;
-    const bendX = Math.sin(ang) * 0.07;
-    const bendZ = Math.cos(ang) * 0.07;
-    vertices.push(
-      cx - dx, 0, cz - dz,
-      cx + dx, 0, cz + dz,
-      cx + bendX, height, cz + bendZ
-    );
+    const dx = Math.cos(angle) * width;
+    const dz = Math.sin(angle) * width;
+    const bendX = Math.sin(angle + 0.5) * 0.14;
+    const bendZ = Math.cos(angle + 0.5) * 0.14;
+    const baseLeft = [cx - dx, 0, cz - dz];
+    const baseRight = [cx + dx, 0, cz + dz];
+    const midLeft = [cx + bendX * 0.2 - dx * 0.6, height * 0.62, cz + bendZ * 0.2 - dz * 0.6];
+    const midRight = [cx + bendX * 0.2 + dx * 0.6, height * 0.62, cz + bendZ * 0.2 + dz * 0.6];
+    const tip = [cx + bendX, height, cz + bendZ];
+    for (const vertex of [baseLeft, baseRight, midRight, baseLeft, midRight, midLeft, midLeft, midRight, tip]) {
+      vertices.push(...vertex);
+      const light = 0.66 + (vertex[1] / height) * 0.34;
+      colors.push(light, light, light * 0.94);
+    }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.computeVertexNormals();
   return geo;
 }
+
 
 function addGroundCover(mapDef, scene, size, seed, palette) {
   const terrain = mapDef.terrain;
@@ -914,7 +1086,7 @@ function addGroundCover(mapDef, scene, size, seed, palette) {
     metalness: 0,
     side: THREE.DoubleSide,
     envMapIntensity: 0.15,
-    vertexColors: false,
+    vertexColors: true,
   });
   const grass = new THREE.InstancedMesh(grassGeo, grassMat, grassCount);
   grass.name = 'groundCoverGrass';

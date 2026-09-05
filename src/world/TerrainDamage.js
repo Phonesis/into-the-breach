@@ -7,10 +7,6 @@ const pendingTextureKeys = new Set();
 const craterTextureWarmQueue = [];
 let craterTextureWarmScheduled = false;
 let craterTextureGeneration = 0;
-const _pit = new THREE.Color();
-const _rim = new THREE.Color();
-const _outer = new THREE.Color();
-const _vertex = new THREE.Color();
 
 let lastCraterAt = 0;
 const terrainNormalsDirty = new WeakMap();
@@ -55,8 +51,8 @@ function craterStyle(mapDef) {
   if (kind === 'urban') {
     return {
       kind,
-      pit: '#171817',
-      wall: '#292824',
+      pit: '#57524a',
+      wall: '#736b5e',
       rim: '#706b61',
       outer: '#393a36',
       grass: null,
@@ -66,8 +62,8 @@ function craterStyle(mapDef) {
   if (kind === 'desert') {
     return {
       kind,
-      pit: '#6e4e32',
-      wall: '#8a6644',
+      pit: '#8c6846',
+      wall: '#ad875b',
       rim: '#c9a66e',
       outer: '#b08a5c',
       grass: null,
@@ -77,8 +73,8 @@ function craterStyle(mapDef) {
   if (kind === 'steppe') {
     return {
       kind,
-      pit: '#4a3a28',
-      wall: '#5c4a34',
+      pit: '#66523b',
+      wall: '#806a4b',
       rim: '#8a7450',
       outer: '#6a7a48',
       grass: '#5a6a3a',
@@ -87,9 +83,9 @@ function craterStyle(mapDef) {
   }
   return {
     kind: 'grass',
-    pit: '#3a2e1e',
-    wall: '#4a3c28',
-    rim: '#6f5a3a',
+    pit: '#64513d',
+    wall: '#80674b',
+    rim: '#9a805b',
     outer: '#4a5a32',
     grass: '#4d6b38',
     streak: '#5a4a30',
@@ -98,6 +94,9 @@ function craterStyle(mapDef) {
 
 function colorBytes(value) {
   const color = new THREE.Color(value);
+  // Canvas bytes are sRGB. Color parses CSS into linear values; writing those
+  // directly and tagging the texture sRGB decoded them twice into near-black.
+  color.convertLinearToSRGB();
   return [color.r * 255, color.g * 255, color.b * 255];
 }
 
@@ -137,7 +136,8 @@ function paintCraterTexture(mapDef, seed, heavy) {
             Math.sin(angle * 7 + seed * 0.17) * 0.055 +
             Math.sin(angle * 13 - seed * 0.11) * 0.035 +
             (noise2(Math.cos(angle) * 5, Math.sin(angle) * 5, seed + 29) - 0.5) * 0.08
-          : 1;
+          : 0.95 + Math.sin(angle * 7 + seed * 0.13) * 0.025 +
+            Math.sin(angle * 11 - seed * 0.07) * 0.02;
       const dist = radialDistance / urbanEdge;
       if (dist > 1.02) continue;
 
@@ -200,6 +200,15 @@ function paintCraterTexture(mapDef, seed, heavy) {
       let green = colorA[1] + (colorB[1] - colorA[1]) * colorMix;
       let blue = colorA[2] + (colorB[2] - colorA[2]) * colorMix;
 
+      // Broken earth remains readable inside the bowl, not just at its rim.
+      // Bake broad soil clods and finer grit into the existing cached albedo.
+      const clods = Math.sin(dx * 19 + Math.sin(dy * 11 + seed) * 1.7 + seed) *
+        Math.cos(dy * 23 - Math.sin(dx * 9 - seed) * 1.2);
+      const soilDetail = 0.97 + clods * 0.14 + (n2 - 0.5) * 0.18;
+      red *= soilDetail;
+      green *= soilDetail;
+      blue *= soilDetail;
+
       if (style.grass && dist > 0.48 && dist < 0.9 && n2 > 0.62) {
         red += (palette.grass[0] - red) * 0.35;
         green += (palette.grass[1] - green) * 0.35;
@@ -222,6 +231,31 @@ function paintCraterTexture(mapDef, seed, heavy) {
     }
   }
   ctx.putImageData(image, 0, 0);
+
+  // Angular chunks, their exposed faces and small contact shadows give the
+  // floor and ejecta apron scale. All detail is painted once, not extra meshes.
+  for (let i = 0; i < (heavy ? 135 : 95); i++) {
+    const angle = seededCraterNoise(i, seed, 31) * Math.PI * 2;
+    const radius = Math.sqrt(seededCraterNoise(i, seed, 32)) * size * 0.38;
+    const px = cx + Math.cos(angle) * radius;
+    const py = cy + Math.sin(angle) * radius;
+    const width = 0.7 + seededCraterNoise(i, seed, 33) * 2.4;
+    const height = width * (0.5 + seededCraterNoise(i, seed, 34) * 0.5);
+    const tint = i % 3 === 0 ? palette.wall : palette.rim;
+    ctx.fillStyle = 'rgba(35,29,21,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(px + 0.7, py + 0.8, width, height, angle, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(${Math.round(tint[0])},${Math.round(tint[1])},${Math.round(tint[2])},0.78)`;
+    ctx.beginPath();
+    ctx.moveTo(px - width, py);
+    ctx.lineTo(px - width * 0.25, py - height);
+    ctx.lineTo(px + width * 0.8, py - height * 0.45);
+    ctx.lineTo(px + width, py + height * 0.5);
+    ctx.lineTo(px - width * 0.4, py + height * 0.7);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   if (style.kind === 'urban') {
     // Fractured asphalt/cobbles: radial cracks and pale angular road fragments
@@ -538,8 +572,7 @@ function deformVertexAt(
   z,
   r,
   r2,
-  depth,
-  style
+  depth
 ) {
   const vx = pos.getX(i);
   const vz = pos.getZ(i);
@@ -557,15 +590,14 @@ function deformVertexAt(
   pos.setY(i, baseY[i] + trenchOffsets[i] + mergedOffset);
 
   if (colors) {
-    _vertex.setRGB(colors.getX(i), colors.getY(i), colors.getZ(i));
-    if (f < 0.35) {
-      _vertex.lerp(_pit.set(style.pit), 0.55 * (1 - f / 0.35));
-    } else if (f < 0.62) {
-      _vertex.lerp(_rim.set(style.rim), 0.28 * (1 - (f - 0.35) / 0.27));
-    } else if (f < 0.9 && style.kind !== 'desert') {
-      _vertex.lerp(_outer.set(style.grass ?? style.outer), 0.12 * (1 - (f - 0.62) / 0.28));
-    }
-    colors.setXYZ(i, _vertex.r, _vertex.g, _vertex.b);
+    // Ground vertices now modulate an albedo texture rather than supply its
+    // pigment. Avoid multiplying soil colour into soil again, or progressively
+    // blackening the same vertices during overlapping barrages.
+    const tint = 0.84 + Math.min(1, f / 0.7) * 0.12;
+    colors.setXYZ(i,
+      Math.min(colors.getX(i), tint),
+      Math.min(colors.getY(i), tint),
+      Math.min(colors.getZ(i), tint));
   }
 
   return true;
@@ -641,7 +673,6 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
   const colors = geo.attributes.color;
   const r = radius * 1.05;
   const r2 = r * r;
-  const style = craterStyle(mapDef);
   const { baseY, offsets, trenchOffsets } = getCraterDeformationState(geo, pos);
   let changed = false;
 
@@ -674,8 +705,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
             z,
             r,
             r2,
-            depth,
-            style
+            depth
           )
         ) {
           changed = true;
@@ -713,8 +743,7 @@ function deformTerrainAt(terrainMesh, mapDef, x, z, radius, depth) {
           z,
           r,
           r2,
-          depth,
-          style
+          depth
         )
       ) {
         changed = true;

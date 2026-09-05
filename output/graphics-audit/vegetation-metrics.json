@@ -1,0 +1,228 @@
+[
+  {
+    "terrain": "bocage",
+    "kind": "tree",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 2368,
+        "meshes": 2,
+        "randomDraws": 229
+      },
+      {
+        "label": "after",
+        "triangles": 2368,
+        "meshes": 2,
+        "randomDraws": 229
+      }
+    ]
+  },
+  {
+    "terrain": "bocage",
+    "kind": "bush",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1540,
+        "meshes": 2,
+        "randomDraws": 182
+      },
+      {
+        "label": "after",
+        "triangles": 1540,
+        "meshes": 2,
+        "randomDraws": 182
+      }
+    ]
+  },
+  {
+    "terrain": "bocage",
+    "kind": "hedge",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1064,
+        "meshes": 5,
+        "randomDraws": 575
+      },
+      {
+        "label": "after",
+        "triangles": 1064,
+        "meshes": 3,
+        "randomDraws": 575
+      }
+    ]
+  },
+  {
+    "terrain": "desert",
+    "kind": "tree",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 2368,
+        "meshes": 2,
+        "randomDraws": 229
+      },
+      {
+        "label": "after",
+        "triangles": 2368,
+        "meshes": 2,
+        "randomDraws": 229
+      }
+    ]
+  },
+  {
+    "terrain": "desert",
+    "kind": "bush",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1050,
+        "meshes": 2,
+        "randomDraws": 121
+      },
+      {
+        "label": "after",
+        "triangles": 1050,
+        "meshes": 2,
+        "randomDraws": 121
+      }
+    ]
+  },
+  {
+    "terrain": "steppe",
+    "kind": "tree",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1970,
+        "meshes": 2,
+        "randomDraws": 188
+      },
+      {
+        "label": "after",
+        "triangles": 1970,
+        "meshes": 2,
+        "randomDraws": 188
+      }
+    ]
+  },
+  {
+    "terrain": "steppe",
+    "kind": "bush",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1050,
+        "meshes": 2,
+        "randomDraws": 121
+      },
+      {
+        "label": "after",
+        "triangles": 1050,
+        "meshes": 2,
+        "randomDraws": 121
+      }
+    ]
+  },
+  {
+    "terrain": "hills",
+    "kind": "tree",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 2642,
+        "meshes": 2,
+        "randomDraws": 254
+      },
+      {
+        "label": "after",
+        "triangles": 2642,
+        "meshes": 2,
+        "randomDraws": 254
+      }
+    ]
+  },
+  {
+    "terrain": "hills",
+    "kind": "bush",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1380,
+        "meshes": 2,
+        "randomDraws": 162
+      },
+      {
+        "label": "after",
+        "triangles": 1380,
+        "meshes": 2,
+        "randomDraws": 162
+      }
+    ]
+  },
+  {
+    "terrain": "jungle",
+    "kind": "tree",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 2210,
+        "meshes": 2,
+        "randomDraws": 215
+      },
+      {
+        "label": "after",
+        "triangles": 2210,
+        "meshes": 2,
+        "randomDraws": 215
+      }
+    ]
+  },
+  {
+    "terrain": "jungle",
+    "kind": "bush",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 1380,
+        "meshes": 2,
+        "randomDraws": 162
+      },
+      {
+        "label": "after",
+        "triangles": 1380,
+        "meshes": 2,
+        "randomDraws": 162
+      }
+    ]
+  },
+  {
+    "terrain": "jungle",
+    "kind": "palm",
+    "samples": [
+      {
+        "label": "before",
+        "triangles": 3700,
+        "meshes": 5,
+        "randomDraws": 50
+      },
+      {
+        "label": "after",
+        "triangles": 2972,
+        "meshes": 3,
+        "randomDraws": 50
+      }
+    ]
+  },
+  {
+    "path": ".tmp-graphics-perf-baseline/src/world/Terrain.js",
+    "kind": "grass",
+    "triangles": 7
+  },
+  {
+    "path": "src/world/Terrain.js",
+    "kind": "grass",
+    "triangles": 21
+  }
+]

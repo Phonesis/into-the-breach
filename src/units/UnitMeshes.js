@@ -29,6 +29,8 @@ import { applyInfantryShadowPolicy } from './InfantryVisuals.js';
 import { sampleTerrainHeight } from '../world/Terrain.js';
 import { SQUAD_SIZES, livingPersonnelForHp } from '../data/squadSizes.js';
 import { getBlastCaliberScale, getBlastProfile } from '../game/BlastProfile.js';
+import { batchVehicleParts } from './VehicleBatching.js';
+import { disposeObject3D } from '../world/SceneDispose.js';
 
 export { mat };
 
@@ -184,17 +186,21 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
   const detail = mat(teamColor, { metal: 0.32, rough: 0.65, map: bodyTex ?? undefined });
   const dark = mat(0x1a1a1a, { metal: 0.5 });
 
-  if (bodyTex && !INFANTRY_TYPES.has(type)) {
+  if (!INFANTRY_TYPES.has(type)) {
     const steelBump = getVehicleSurfaceBumpMap();
     const steelRoughness = getVehicleSurfaceRoughnessMap();
     body.bumpMap = steelBump;
-    body.bumpScale = 0.026;
+    body.bumpScale = 0.014;
     body.roughnessMap = steelRoughness;
-    body.roughness = 0.76;
+    body.roughness = 0.82;
+    body.metalness = 0.08;
     detail.bumpMap = steelBump;
-    detail.bumpScale = 0.019;
+    detail.bumpScale = 0.01;
     detail.roughnessMap = steelRoughness;
-    detail.roughness = 0.68;
+    detail.roughness = 0.69;
+    detail.metalness = 0.3;
+    // Fittings should remain distinct from adjacent painted armour.
+    if (bodyTex) detail.color.setHex(0xb0b5a5);
   }
 
   let built = false;
@@ -262,6 +268,7 @@ export function createUnitMesh(type, teamColor, accentColor, factionId = 'german
         c.receiveShadow = true;
       }
     });
+    batchVehicleParts(group);
   }
 
   const hitRadii = {
@@ -445,14 +452,7 @@ function createBloodPoolMesh(radius, { color = 0x5c1212, opacity = 0.46, lobes =
 }
 
 function disposeMeshObject(obj) {
-  if (!obj) return;
-  obj.traverse?.((child) => {
-    if (child.geometry) child.geometry.dispose();
-    if (child.material) {
-      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-      else child.material.dispose();
-    }
-  });
+  disposeObject3D(obj);
 }
 
 function addBloodPoolAt(parent, x, z, radius, squadIndex = null) {

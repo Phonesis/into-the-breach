@@ -8,6 +8,13 @@ import {
 
 const POSE_YAW = [0, 0.18, -0.14, 0.24, -0.2, 0.1, -0.26, 0.16];
 const POSE_LEAN = [0, 0.04, -0.03, 0.05, -0.04, 0.02, -0.05, 0.03];
+// Golden-angle spacing so a 5-man squad is not clustered on one footfall.
+const WALK_PHASE_STEP = 2.399963;
+const WALK_CADENCE = [0.91, 1.09, 0.86, 1.15, 0.97, 1.04, 0.88, 1.12];
+const WALK_STRIDE = [1.04, 0.9, 1.12, 0.86, 0.98, 1.08, 0.93, 1.16];
+const WALK_BOUNCE = [0.92, 1.18, 0.8, 1.08, 1.24, 0.86, 1.02, 1.14];
+const WALK_TWIST = [1.06, 0.84, 1.22, 0.92, 1.14, 0.78, 1.08, 0.96];
+const TORSO_EQUIPMENT_SKIP = new Set(['sniperConcealment', 'spotterBinoculars']);
 
 const INFANTRY_WALK_TYPES = new Set([
   'radioOperator',
@@ -266,6 +273,46 @@ function mergeGeometryAttributes(geometries) {
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   return merged;
+}
+
+function createWalkStyle(squadIndex = 0) {
+  const i = Math.max(0, squadIndex | 0);
+  const slot = i % 8;
+  return {
+    phaseOffset: (i * WALK_PHASE_STEP + 0.37) % (Math.PI * 2),
+    cadence: WALK_CADENCE[slot],
+    stride: WALK_STRIDE[slot],
+    bounce: WALK_BOUNCE[slot],
+    twist: WALK_TWIST[slot],
+    hunch: (slot % 5) * 0.018,
+    sway: 0.82 + (slot % 4) * 0.09,
+    asymmetry: ((slot % 5) - 2) * 0.05,
+    glancePhase: (i * 1.973 + 0.6) % (Math.PI * 2),
+    glanceAmp: 0.05 + (slot % 4) * 0.018,
+    weaponLag: 0.22 + (slot % 5) * 0.07,
+  };
+}
+
+function getWalkStyle(soldier) {
+  return (soldier.userData.walkStyle ??= createWalkStyle(soldier.userData.squadIndex ?? 0));
+}
+
+function soldierGaitPhase(soldier, phase) {
+  const style = getWalkStyle(soldier);
+  return phase * style.cadence + style.phaseOffset;
+}
+
+/** Packs, webbing and radios are rigid to the chest, so torso motion carries them. */
+function attachTorsoEquipment(soldier, torso) {
+  if (!soldier || !torso) return;
+  soldier.updateWorldMatrix(true, true);
+  const moving = [];
+  for (const child of soldier.children) {
+    if (child === torso || child.userData?.infantryPart) continue;
+    if (TORSO_EQUIPMENT_SKIP.has(child.name)) continue;
+    moving.push(child);
+  }
+  for (const child of moving) torso.attach(child);
 }
 
 /**
@@ -1382,20 +1429,22 @@ function applyMarchingWeaponSway(soldier, phase, blend, runBlend) {
 
   const { gunner = false, crouching = false } = soldier.userData.walkPose ?? {};
   const compact = gunner || crouching;
-  const scale = (compact ? 0.45 : 1) * blend;
-  const offset = (soldier.userData.squadIndex ?? 0) * 0.82;
-  const sway = Math.sin(phase + offset + Math.PI * 0.35);
-  const bob = 0.5 - Math.cos(phase * 2 + offset * 0.5) * 0.5;
-  const carry = 0.7 + runBlend * 0.3;
+  const style = getWalkStyle(soldier);
+  const gaitPhase = soldierGaitPhase(soldier, phase);
+  const scale = (compact ? 0.45 : 1) * blend * style.sway;
+  const sway = Math.sin(gaitPhase + Math.PI * 0.35 + style.weaponLag);
+  const counter = Math.sin(gaitPhase + Math.PI * 1.05);
+  const bob = 0.5 - Math.cos(gaitPhase * 2) * 0.5;
+  const carry = 0.75 + runBlend * 0.45;
 
-  // A rifle carried at port arms follows the shoulders, but lags slightly on
-  // each footfall. This is intentionally applied after aim/prone posing so a
-  // moving soldier never snaps back to the firing pose for one frame.
-  weapon.position.x += sway * 0.012 * scale * carry;
-  weapon.position.y += (bob - 0.5) * 0.014 * scale;
-  weapon.position.z += sway * 0.018 * scale * carry;
-  weapon.rotation.x += sway * 0.045 * scale;
-  weapon.rotation.z -= sway * 0.035 * scale;
+  // Port-arms follow the twisting shoulders and lag a little on each footfall.
+  // Applied after aim/prone posing so a moving soldier never snaps back to fire.
+  weapon.position.x += sway * 0.028 * scale * carry;
+  weapon.position.y += (bob - 0.5) * (0.02 + runBlend * 0.012) * scale;
+  weapon.position.z += counter * 0.03 * scale * carry;
+  weapon.rotation.x += sway * (0.1 + runBlend * 0.06) * scale;
+  weapon.rotation.y += counter * 0.05 * scale;
+  weapon.rotation.z -= sway * (0.08 + runBlend * 0.04) * scale;
   if (soldier.userData.weaponAim) {
     updateWeaponArmPose(soldier, weapon, soldier.userData.proneBlend ?? 0);
   }
@@ -1845,6 +1894,7 @@ export function buildSquadSoldier(parentGroup, opts) {
   const specialWeapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
   if (specialWeapon) addWeaponHands(specialWeapon, mats);
   consolidateRigidSoldierEquipment(soldier);
+  attachTorsoEquipment(soldier, torso);
 
   const yaw = POSE_YAW[squadIndex % POSE_YAW.length];
   const lean = POSE_LEAN[squadIndex % POSE_LEAN.length];
@@ -1853,6 +1903,7 @@ export function buildSquadSoldier(parentGroup, opts) {
   soldier.name = 'squadMember';
   soldier.userData.squadIndex = squadIndex;
   soldier.userData.walkPose = { gunner, crouching };
+  soldier.userData.walkStyle = createWalkStyle(squadIndex);
   soldier.userData.weaponAimBlend = 0;
   soldier.userData.proneBlend = 0;
   finalizeSoldierVisuals(soldier, { torso, head, helmet, ...legs }, soldier.position);
@@ -2028,23 +2079,27 @@ function animateSoldierWalk(soldier, phase, blend, runBlend = 0) {
   const { gunner = false, crouching = false } = soldier.userData.walkPose ?? {};
   const compact = gunner || crouching;
   const compactScale = compact ? 0.56 : 1;
-  const squadIndex = soldier.userData.squadIndex ?? 0;
-  const offset = squadIndex * 0.82;
-  const legPhase = phase + offset;
-  const leftStride = Math.sin(legPhase);
-  const rightStride = Math.sin(legPhase + Math.PI);
-  const leftLift = Math.pow(Math.max(0, leftStride), 1.35);
-  const rightLift = Math.pow(Math.max(0, rightStride), 1.35);
-  const bob = 0.5 - Math.cos(legPhase * 2) * 0.5;
-  const weightShift = Math.sin(legPhase + Math.PI * 0.5);
-  const hipSwing = (0.38 + runBlend * 0.2) * compactScale;
-  const kneeBend = (0.24 + runBlend * 0.18) * compactScale;
-  const strideBlend = blend * (0.84 + runBlend * 0.16);
+  const style = getWalkStyle(soldier);
+  const gaitPhase = soldierGaitPhase(soldier, phase);
+  const leftStride = Math.sin(gaitPhase);
+  const rightStride = Math.sin(gaitPhase + Math.PI) * (1 + style.asymmetry);
+  const leftLift = Math.pow(Math.max(0, leftStride), 1.28);
+  const rightLift = Math.pow(Math.max(0, rightStride), 1.28);
+  const bob = 0.5 - Math.cos(gaitPhase * 2) * 0.5;
+  const weightShift = Math.sin(gaitPhase + Math.PI * 0.5);
+  const hipLead = Math.sin(gaitPhase);
+  const strideAmt = style.stride * compactScale;
+  const twistAmt = style.twist * compactScale;
+  const hipSwing = (0.48 + runBlend * 0.22) * strideAmt;
+  const kneeBend = (0.34 + runBlend * 0.22) * compactScale;
+  const strideBlend = blend * (0.86 + runBlend * 0.18);
+  const bounceAmt = (compact ? 0.012 : 0.026 + runBlend * 0.016) * style.bounce;
+  const lunge = Math.max(leftLift, rightLift) * 0.016 * strideBlend;
 
   soldier.position.set(
-    rest.group.x + weightShift * 0.014 * strideBlend,
-    rest.group.y + bob * (compact ? 0.006 : 0.011 + runBlend * 0.004) * blend,
-    rest.group.z + weightShift * 0.008 * strideBlend
+    rest.group.x + weightShift * 0.024 * strideBlend * style.sway,
+    rest.group.y + bob * bounceAmt * blend,
+    rest.group.z + lunge
   );
 
   const torso = soldier.children.find((c) => c.userData.infantryPart === 'torso');
@@ -2054,31 +2109,43 @@ function animateSoldierWalk(soldier, phase, blend, runBlend = 0) {
   const legR = soldier.children.find((c) => c.userData.infantryPart === 'legR');
   const weapon = soldier.children.find((c) => c.userData.infantryPart === 'weapon');
 
+  const torsoPitch =
+    (-0.1 - style.hunch - runBlend * 0.09) * strideBlend +
+    (bob - 0.5) * 0.07 * blend * style.bounce;
+  const torsoYaw = -hipLead * 0.18 * strideBlend * twistAmt;
+  const torsoRoll = -weightShift * (0.1 + runBlend * 0.04) * strideBlend * style.sway;
+
   applyPartAnim(torso, rest.torso, {
-    position: { x: 0, y: bob * 0.012 * blend, z: 0 },
-    rotation: {
-      x: (-0.025 - runBlend * 0.025) * strideBlend,
-      y: -weightShift * 0.018 * strideBlend,
-      z: -weightShift * (0.035 + runBlend * 0.015) * strideBlend,
+    position: {
+      x: weightShift * 0.01 * strideBlend,
+      y: bob * 0.018 * blend * style.bounce,
+      z: (bob - 0.5) * 0.012 * blend,
     },
+    rotation: { x: torsoPitch, y: torsoYaw, z: torsoRoll },
   });
+
+  const glance = Math.sin(gaitPhase * 0.23 + style.glancePhase) * style.glanceAmp * blend;
+  const headPitch = torsoPitch * 0.58 + (bob - 0.5) * 0.08 * blend;
+  const headYaw = -torsoYaw * 0.42 + glance;
+  const headRoll = -torsoRoll * 0.35;
   applyPartAnim(head, rest.head, {
-    position: { x: 0, y: bob * 0.007 * blend, z: 0 },
-    rotation: {
-      x: -bob * 0.016 * blend,
-      y: weightShift * 0.012 * strideBlend,
-      z: weightShift * 0.018 * strideBlend,
-    },
+    position: { x: 0, y: bob * 0.012 * blend, z: torsoPitch * 0.04 },
+    rotation: { x: headPitch, y: headYaw, z: headRoll },
   });
   applyPartAnim(helmet, rest.helmet, {
-    position: { x: 0, y: bob * 0.007 * blend, z: 0 },
+    position: { x: 0, y: bob * 0.012 * blend, z: torsoPitch * 0.045 },
+    rotation: { x: headPitch * 1.05, y: headYaw, z: headRoll },
   });
 
   const animateLeg = (leg, legRest, stride, lift) => {
     if (!leg || !legRest) return;
     applyPartAnim(leg, legRest, {
-      position: { x: 0, y: 0, z: stride * 0.012 * strideBlend },
-      rotation: { x: stride * hipSwing * strideBlend, y: 0, z: 0 },
+      position: { x: 0, y: lift * 0.01 * blend, z: stride * 0.02 * strideBlend },
+      rotation: {
+        x: stride * hipSwing * strideBlend,
+        y: 0,
+        z: -weightShift * 0.03 * strideBlend,
+      },
     });
 
     const knee = leg.userData.kneePivot;
@@ -2094,7 +2161,7 @@ function animateSoldierWalk(soldier, phase, blend, runBlend = 0) {
     if (boot && bootRest) {
       boot.position.copy(bootRest.position);
       boot.rotation.copy(bootRest.rotation);
-      boot.rotation.x -= lift * 0.14 * blend;
+      boot.rotation.x -= lift * 0.22 * blend;
     }
   };
 

@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="icon" href="data:,">
+  <title>Tank track preview</title>
+  <style>
+    body { margin: 0; background: #1b221c; color: #ddd; font: 13px monospace; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { createUnitMesh } from '/src/units/UnitMeshes.js';
+import { preloadUnitTextures, setActiveVehicleTheatre } from '/src/units/UnitTextures.js';
+import { updateTrackedVehicleAnimation } from '/src/units/TrackAnimation.js';
+import { FACTIONS } from '/src/data/factions.js';
+
+await preloadUnitTextures();
+setActiveVehicleTheatre('normandy');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(1280, 720);
+renderer.shadowMap.enabled = true;
+document.body.append(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6f7d6a);
+const hemi = new THREE.HemisphereLight(0xc9d6c4, 0x3a3224, 1.1);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1d0, 2.2);
+sun.position.set(8, 14, 6);
+sun.castShadow = true;
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x5a6148, roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const usa = FACTIONS.usa;
+const germany = FACTIONS.germany;
+const sherman = createUnitMesh('tank', usa.color, usa.accent, 'usa');
+const panzer = createUnitMesh('tank', germany.color, germany.accent, 'germany');
+sherman.position.set(-4, 0, 0);
+panzer.position.set(4.2, 0, 0);
+scene.add(sherman, panzer);
+
+const units = [
+  { mesh: sherman, position: sherman.position, def: { type: 'tank' }, dead: false },
+  { mesh: panzer, position: panzer.position, def: { type: 'tank' }, dead: false },
+];
+for (const unit of units) updateTrackedVehicleAnimation(unit);
+
+const camera = new THREE.PerspectiveCamera(38, 1280 / 720, 0.1, 100);
+const sideView = { x: -7.4, y: 0.72, z: 0 };
+camera.position.set(sideView.x, sideView.y, sideView.z);
+camera.lookAt(-4, 0.48, 0);
+
+let frames = 0;
+function tick(now) {
+  const dt = Math.min(0.05, (tick.prev ? now - tick.prev : 16) / 1000);
+  tick.prev = now;
+  const speed = 2.4;
+  for (const unit of units) {
+    unit.position.z += speed * dt;
+    updateTrackedVehicleAnimation(unit);
+  }
+  camera.position.set(sideView.x, sideView.y, sherman.position.z);
+  camera.lookAt(sherman.position.x, 0.48, sherman.position.z);
+  renderer.render(scene, camera);
+  frames++;
+  window.trackPreview = {
+    frames,
+    shermanZ: sherman.position.z,
+    shoeDistance: sherman.userData.trackAnimation.runs[0].distance,
+    wheelSpin: sherman.userData.trackAnimation.runs[0].wheels[0].mesh.rotation.x,
+  };
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+window.trackCamera = camera;
+</script>
+</body>
+</html>
